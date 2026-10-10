@@ -9,6 +9,8 @@
 #include "testkit.h"
 
 #include "../src/filetypes.h"
+#include "../src/imagesource.h"
+#include "../src/lostfs.h"
 #include "../src/lostscan.h"
 #include "../src/lostsource.h"
 
@@ -20,6 +22,7 @@
 #include <QPainter>
 #include <QRandomGenerator>
 #include <QTemporaryDir>
+#include <QtEndian>
 
 #include <archive.h>
 #include <archive_entry.h>
@@ -448,6 +451,194 @@ void fuzz()
 
 } // namespace
 
+QByteArray unpack(const QString &path)
+{
+    QString error;
+    const std::unique_ptr<ImageSource> image = ImageSource::open(path, &error);
+    QByteArray out;
+    if (!image)
+        return out;
+    QByteArray buffer(kMiB, Qt::Uninitialized);
+    for (qint64 n; (n = image->read(buffer.data(), buffer.size())) > 0;)
+        out += buffer.left(n);
+    return out;
+}
+
+// Runs a quick scan to the end on this thread and collects what it found.
+QVector<lost::Found> quickScan(const std::shared_ptr<lost::Source> &source, QVector<lost::Volume> *volumes = nullptr)
+{
+    lost::QuickScan scan(source);
+    QVector<lost::Found> all;
+    QObject::connect(&scan, &lost::QuickScan::found, [&all](const QVector<lost::Found> &files) { all += files; });
+    scan.run();
+    if (volumes)
+        *volumes = scan.volumes();
+    return all;
+}
+
+// FAT12, FAT16, FAT32 and exFAT images that Linux put files on and deleted some of them from
+// (tests/data/lostfs/make.sh): every file comes back with its name, folder and contents.
+void fileSystems(const QString &dir)
+{
+    const QString data = QStringLiteral(SOURCE_DIR "/tests/data/lostfs/");
+    QFile list(data + QStringLiteral("expected.txt"));
+    report(list.open(QIODevice::ReadOnly), QStringLiteral("file systems: the list of what's on the test images"));
+    struct Expected {
+        QString path;
+        bool deleted;
+        quint64 size;
+        QByteArray sha256;
+    };
+    QHash<QString, QVector<Expected>> expected;
+    for (const QByteArray &line : list.readAll().split('\n')) {
+        const QList<QByteArray> f = line.split('|');
+        if (f.size() == 5)
+            expected[QString::fromUtf8(f[0])].push_back({QString::fromUtf8(f[1]), f[2] == "yes", f[3].toULongLong(), f[4]});
+    }
+    const QHash<QString, QString> labels = {{QStringLiteral("fat12"), QStringLiteral("TESTFAT12")}, {QStringLiteral("fat16"), QStringLiteral("TESTFAT16")},
+                                            {QStringLiteral("fat32"), QStringLiteral("TESTFAT32")}, {QStringLiteral("exfat"), QStringLiteral("TESTEXFAT")}};
+    for (const QString &name : {QStringLiteral("fat12"), QStringLiteral("fat16"), QStringLiteral("fat32"), QStringLiteral("exfat")}) {
+        const QByteArray image = unpack(data + name + QStringLiteral(".img.zst"));
+        report(!image.isEmpty(), QStringLiteral("%1: the test image unpacks").arg(name));
+        auto source = lost::Source::fromMemory(image);
+        QVector<lost::Volume> volumes;
+        const QVector<lost::Found> found = quickScan(source, &volumes);
+        report(volumes.size() == 1 && volumes.value(0).label == labels[name] && volumes.value(0).type == (name == QLatin1String("exfat") ? QLatin1String("exfat") : QLatin1String("vfat")),
+               QStringLiteral("%1: the file system and its label are found").arg(name),
+               volumes.isEmpty() ? QStringLiteral("none") : volumes[0].type + QLatin1Char(' ') + volumes[0].label);
+
+        for (const Expected &e : expected.value(name)) {
+            const QString folder = labels[name] + (e.path.contains(QLatin1Char('/')) ? QLatin1Char('/') + e.path.section(QLatin1Char('/'), 0, -2) : QString());
+            const QString file = e.path.section(QLatin1Char('/'), -1);
+            const lost::Found *match = nullptr;
+            for (const lost::Found &f : found) {
+                // FAT forgets the first letter of a deleted short name like notes.txt.
+                const bool sameName = f.name == file || (f.nameGuessed && f.name.mid(1) == file.mid(1));
+                if (sameName && f.folder == folder)
+                    match = &f;
+            }
+            const QString what = QStringLiteral("%1: %2").arg(name, e.path);
+            report(match != nullptr, what + QStringLiteral(" is listed"),
+                   [&] {
+                       QStringList all;
+                       for (const lost::Found &f : found)
+                           all << f.folder + QLatin1Char('/') + f.name;
+                       return all.join(QStringLiteral(", "));
+                   }());
+            if (!match)
+                continue;
+            report(match->deleted == e.deleted && match->size == e.size && match->origin == lost::Origin::FileSystem,
+                   what + QStringLiteral(" is listed as it was"),
+                   QStringLiteral("deleted %1, size %2").arg(match->deleted).arg(match->size));
+            lost::FileReader reader(source, *match);
+            const QByteArray bytes = reader.head(qint64(match->size));
+            report(QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex() == e.sha256, what + QStringLiteral(" comes back whole"));
+            const bool picture = file.endsWith(QLatin1String(".jpg")) || file.endsWith(QLatin1String(".png"));
+            if (e.deleted && picture)
+                report(match->checked && match->condition == lost::Condition::Good, what + QStringLiteral(" is checked and looks whole"),
+                       QStringLiteral("checked %1, condition %2").arg(match->checked).arg(int(match->condition)));
+            // A short name with no long one loses its first letter for good on FAT; a long name
+            // gives it back.
+            if (e.deleted && file == QLatin1String("README.TXT") && name != QLatin1String("exfat"))
+                report(match->nameGuessed && match->name == QLatin1String("_EADME.TXT"), what + QStringLiteral(": the lost first letter is said to be a guess"),
+                       match->name);
+            if (e.deleted && file == QLatin1String("notes.txt"))
+                report(!match->nameGuessed && match->name == file, what + QStringLiteral(": its whole name comes back"), match->name);
+        }
+
+        // Saving keeps the folders the files were in.
+        QVector<lost::Found> deleted;
+        for (const lost::Found &f : found) {
+            if (f.deleted)
+                deleted << f;
+        }
+        lost::Saver saver(source, deleted, dir);
+        QString base;
+        QObject::connect(&saver, &lost::Saver::finished, [&base](int, int, const QString &folder, const QString &) { base = folder; });
+        saver.run();
+        const QString saved = base + QLatin1Char('/') + labels[name] + QStringLiteral("/Old stuff/scan.png");
+        QFile back(saved);
+        report(back.open(QIODevice::ReadOnly) && QCryptographicHash::hash(back.readAll(), QCryptographicHash::Sha256).toHex()
+                   == expected.value(name).value(7).sha256,
+               QStringLiteral("%1: a file from a deleted folder is saved into that folder").arg(name), saved);
+        QDir(base).removeRecursively();
+
+        // The deep scan doesn't list the pictures a second time.
+        lost::QuickScan quick(source);
+        quick.run();
+        lost::DeepScan deep(source);
+        deep.skip(quick.knownRanges(), quick.knownStarts());
+        int carved = 0;
+        QObject::connect(&deep, &lost::DeepScan::found, [&carved](const QVector<lost::Found> &files) { carved += int(files.size()); });
+        deep.run();
+        report(carved == 0, QStringLiteral("%1: the deep scan doesn't find them again").arg(name), QString::number(carved));
+    }
+
+    // Partition tables: the same file system inside an MBR and a GPT drive.
+    const QByteArray fat16 = unpack(data + QStringLiteral("fat16.img.zst"));
+    for (const bool gpt : {false, true}) {
+        QByteArray drive(qsizetype(32 * kMiB), '\0');
+        const qsizetype at = kMiB;
+        drive.replace(at, fat16.size(), fat16);
+        uchar *d = reinterpret_cast<uchar *>(drive.data());
+        auto put32 = [](uchar *p, quint32 v) { qToLittleEndian(v, p); };
+        auto put64 = [](uchar *p, quint64 v) { qToLittleEndian(v, p); };
+        d[510] = 0x55;
+        d[511] = 0xAA;
+        if (!gpt) {
+            d[446 + 4] = 0x06;
+            put32(d + 446 + 8, quint32(at / 512));
+            put32(d + 446 + 12, quint32(fat16.size() / 512));
+        } else {
+            d[446 + 4] = 0xEE;
+            put32(d + 446 + 8, 1);
+            put32(d + 446 + 12, quint32(drive.size() / 512 - 1));
+            uchar *h = d + 512;
+            memcpy(h, "EFI PART", 8);
+            put64(h + 72, 2);
+            put32(h + 80, 128);
+            put32(h + 84, 128);
+            uchar *e = d + 1024;
+            const quint8 basicData[16] = {0xa2, 0xa0, 0xd0, 0xeb, 0xe5, 0xb9, 0x33, 0x44, 0x87, 0xc0, 0x68, 0xb6, 0xb7, 0x26, 0x99, 0xc7};
+            memcpy(e, basicData, 16);
+            e[16] = 1;
+            put64(e + 32, quint64(at / 512));
+            put64(e + 40, quint64((at + fat16.size()) / 512 - 1));
+        }
+        QVector<lost::Volume> volumes;
+        const QVector<lost::Found> found = quickScan(lost::Source::fromMemory(drive), &volumes);
+        report(volumes.size() == 1 && volumes[0].where.start == quint64(at) && found.size() == expected.value(QStringLiteral("fat16")).size(),
+               QStringLiteral("file systems: found inside %1 partition table").arg(gpt ? QStringLiteral("a GPT") : QStringLiteral("an MBR")),
+               QStringLiteral("%1 file systems, %2 files").arg(volumes.size()).arg(found.size()));
+    }
+}
+
+// Damaged file systems: every byte of the tables and folders flipped at random, many times
+// over. It must never crash or loop, whatever it lists.
+void fileSystemFuzz()
+{
+    const QString data = QStringLiteral(SOURCE_DIR "/tests/data/lostfs/");
+    QRandomGenerator rnd(20261010);
+    // DISKFORGE_FUZZ_ROUNDS=1000 for a longer run by hand.
+    const int rounds = qEnvironmentVariableIsSet("DISKFORGE_FUZZ_ROUNDS") ? qEnvironmentVariableIntValue("DISKFORGE_FUZZ_ROUNDS") : 60;
+    int runs = 0;
+    for (const QString &name : {QStringLiteral("fat12"), QStringLiteral("fat32"), QStringLiteral("exfat")}) {
+        const QByteArray clean = unpack(data + name + QStringLiteral(".img.zst"));
+        // Where the boot sector, the tables and the folders are: the first few hundred KiB.
+        const qsizetype hot = std::min<qsizetype>(clean.size(), 640 * 1024);
+        for (int round = 0; round < rounds; ++round) {
+            QByteArray broken = clean;
+            for (int k = 0; k < 400; ++k)
+                broken[rnd.bounded(int(hot))] = char(rnd.bounded(256));
+            if (round % 3 == 0) // and sometimes the boot sector itself
+                broken[rnd.bounded(512)] = char(rnd.bounded(256));
+            quickScan(lost::Source::fromMemory(broken));
+            ++runs;
+        }
+    }
+    report(runs == 3 * rounds, QStringLiteral("file systems: %1 damaged images read without a crash").arg(3 * rounds));
+}
+
 void lostFilesTests()
 {
     QTemporaryDir dir;
@@ -455,4 +646,6 @@ void lostFilesTests()
     damage();
     names();
     fuzz();
+    fileSystems(dir.path());
+    fileSystemFuzz();
 }

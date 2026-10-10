@@ -15,6 +15,7 @@
 #include "../src/diskmap.h"
 #include "../src/homewindow.h"
 #include "../src/blockio.h"
+#include "../src/imagesource.h"
 #include "../src/lostfilesdialog.h"
 #include "../src/inspectdialog.h"
 #include "../src/isomode.h"
@@ -46,6 +47,8 @@
 #include <QBuffer>
 #include <QPainter>
 #include <QListView>
+#include <QTreeWidget>
+#include <QTreeWidgetItemIterator>
 #include <QDirIterator>
 #include <QFileDialog>
 #include <QKeyEvent>
@@ -2154,6 +2157,70 @@ void homeScreen()
 // Find Lost Files through its window: a disk image with pictures hidden in random bytes, looked
 // through, a picture previewed, everything ticked and saved, and the saved files compared. Then
 // saving onto the drive being looked through is refused.
+// A FAT32 image with deleted files (tests/data/lostfs): they show with their names, under their
+// folders, and the deleted folder's files are found by picking it in the tree.
+void lostFilesFromFileSystem()
+{
+    QTemporaryDir dir;
+    QString error;
+    const auto image = ImageSource::open(QStringLiteral(SOURCE_DIR "/tests/data/lostfs/fat32.img.zst"), &error);
+    const QString path = dir.filePath(QStringLiteral("stick.img"));
+    QFile out(path);
+    if (!image || !out.open(QIODevice::WriteOnly)) {
+        report(false, QStringLiteral("unpack the FAT32 test image"), error);
+        return;
+    }
+    QByteArray buffer(1024 * 1024, Qt::Uninitialized);
+    for (qint64 n; (n = image->read(buffer.data(), buffer.size())) > 0;)
+        out.write(buffer.constData(), n);
+    out.close();
+
+    UDisks udisks;
+    LostFilesDialog dialog(&udisks, QString());
+    dialog.show();
+    dialog.scanImage(path);
+    auto *status = dialog.findChild<QLabel *>(QStringLiteral("status"));
+    waitUntil([&] { return status->text().startsWith(QLatin1String("Done")); }, 60000);
+    auto *view = dialog.findChild<QListView *>(QStringLiteral("files"));
+    report(status->text().contains(QLatin1String("found 6 deleted files")) && status->text().contains(QLatin1String("2 that weren't deleted"))
+               && view->model()->rowCount() == 6,
+           QStringLiteral("Find Lost Files: a FAT32 stick's deleted files are listed by name"), status->text());
+
+    auto *folders = dialog.findChild<QTreeWidget *>(QStringLiteral("folders"));
+    QTreeWidgetItem *oldStuff = nullptr;
+    for (QTreeWidgetItemIterator it(folders); *it; ++it) {
+        if ((*it)->data(0, Qt::UserRole).toString() == QLatin1String("TESTFAT32/Old stuff"))
+            oldStuff = *it;
+    }
+    report(oldStuff && oldStuff->text(0) == QLatin1String("Old stuff (2)"), QStringLiteral("the deleted folder is in the folder tree"),
+           oldStuff ? oldStuff->text(0) : QStringLiteral("missing"));
+    if (!oldStuff)
+        return;
+    folders->setCurrentItem(oldStuff);
+    QStringList names;
+    for (int r = 0; r < view->model()->rowCount(); ++r)
+        names << view->model()->index(r, 0).data().toString();
+    names.sort();
+    report(names == QStringList{QStringLiteral("letter.pdf"), QStringLiteral("scan.png")}, QStringLiteral("picking it shows what was in it"),
+           names.join(QStringLiteral(", ")));
+
+    view->setCurrentIndex(view->model()->index(names.indexOf(QStringLiteral("scan.png")) == 0 ? 0 : 1, 0));
+    for (int r = 0; r < view->model()->rowCount(); ++r) {
+        if (view->model()->index(r, 0).data().toString() == QLatin1String("scan.png"))
+            view->setCurrentIndex(view->model()->index(r, 0));
+    }
+    auto *details = dialog.findChild<QLabel *>(QStringLiteral("details"));
+    report(details->text().contains(QLatin1String("Was in TESTFAT32/Old stuff")) && details->text().contains(QLatin1String("should open fine")),
+           QStringLiteral("its details say where it was and that it's whole"), details->text().left(160));
+
+    // Unticking "Only deleted files" shows the two that are still there too.
+    auto *deletedOnly = dialog.findChild<QCheckBox *>(QStringLiteral("deletedOnly"));
+    folders->setCurrentItem(folders->topLevelItem(0));
+    deletedOnly->setChecked(false);
+    report(view->model()->rowCount() == 8, QStringLiteral("and the files that weren't deleted show when asked"),
+           QString::number(view->model()->rowCount()));
+}
+
 void lostFilesThroughWindow()
 {
     QTemporaryDir dir;
@@ -2413,6 +2480,7 @@ int userScenarios()
     enterKey();
     homeScreen();
     lostFilesThroughWindow();
+    lostFilesFromFileSystem();
     out << (failures ? QStringLiteral("%1 step(s) failed").arg(failures) : QStringLiteral("All steps passed")) << Qt::endl;
     return failures ? 1 : 0;
 }

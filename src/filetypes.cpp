@@ -96,13 +96,23 @@ public:
     {
         const int overlap = int(needle.size()) - 1;
         for (quint64 pos = from; pos < m_limit;) {
-            const int n = int(std::min<quint64>(kWindow, m_limit - pos));
-            if (n < needle.size() || !peek(pos, n))
+            qint64 n = qint64(std::min<quint64>(kWindow, m_limit - pos));
+            if (n < needle.size())
                 return ~quint64(0);
+            const bool whole = peek(pos, int(n)) != nullptr;
+            // Near the end of the data there's less than a window left: that much is looked
+            // through (a failed peek has just read what there is from pos on).
+            if (!whole) {
+                if (m_start != pos || m_have < needle.size())
+                    return ~quint64(0);
+                n = m_have;
+            }
             const QByteArray chunk = QByteArray::fromRawData(m_buffer.constData() + (pos - m_start), n);
             const qsizetype at = chunk.indexOf(needle);
             if (at >= 0)
                 return pos + quint64(at);
+            if (!whole)
+                return ~quint64(0);
             pos += quint64(n - overlap);
         }
         return ~quint64(0);
@@ -722,6 +732,57 @@ int filetypes::typeNumber(const QString &id)
             return i;
     }
     return -1;
+}
+
+int filetypes::typeForName(const QString &fileName)
+{
+    const qsizetype dot = fileName.lastIndexOf(QLatin1Char('.'));
+    if (dot < 0)
+        return -1;
+    const QString ext = fileName.mid(dot + 1).toLower();
+    static const QHash<QString, QString> also = {
+        {QStringLiteral("jpeg"), QStringLiteral("jpg")}, {QStringLiteral("jpe"), QStringLiteral("jpg")},
+        {QStringLiteral("jfif"), QStringLiteral("jpg")}, {QStringLiteral("heif"), QStringLiteral("heic")},
+        {QStringLiteral("m4v"), QStringLiteral("mp4")},  {QStringLiteral("qt"), QStringLiteral("mov")},
+        {QStringLiteral("oga"), QStringLiteral("ogg")},
+    };
+    return typeNumber(also.value(ext, ext));
+}
+
+int filetypes::startType(int type)
+{
+    switch (type) {
+    case Docx:
+    case Xlsx:
+    case Pptx:
+    case Odt:
+    case Ods:
+    case Odp:
+    case Epub:
+    case Jar:
+    case Apk:
+        return Zip;
+    case Heic:
+    case Avif:
+    case Cr3:
+    case Mov:
+    case ThreeGp:
+    case M4a:
+        return Mp4;
+    case Webp:
+    case Wav:
+        return Avi;
+    case Ogv:
+    case Opus:
+        return Ogg;
+    default:
+        return type;
+    }
+}
+
+bool filetypes::alwaysRecognised(int type)
+{
+    return type >= 0 && type != Mp3 && type != Mov;
 }
 
 QString filetypes::categoryName(Category category)

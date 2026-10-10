@@ -10,10 +10,12 @@
 #include "format.h"
 #include "gpt.h"
 #include "health.h"
+#include "lostfs.h"
 #include "udisks.h"
 
 #include <QBuffer>
 #include <QCheckBox>
+#include <QDateTime>
 #include <QDesktopServices>
 #include <QDialogButtonBox>
 #include <QFileDialog>
@@ -27,6 +29,7 @@
 #include <QLineEdit>
 #include <QListView>
 #include <QListWidget>
+#include <QLocale>
 #include <QMessageBox>
 #include <QMutex>
 #include <QPlainTextEdit>
@@ -93,6 +96,21 @@ QString conditionWords(lost::Condition condition)
         break;
     }
     return QObject::tr("Part of it is on spots the drive couldn't read. Those parts come back blank.");
+}
+
+// What's known about how whole a file is, in plain words.
+QString conditionWords(const lost::Found &f)
+{
+    if (f.origin == lost::Origin::FileSystem && !f.deleted && f.condition == lost::Condition::Good)
+        return QObject::tr("It wasn't deleted: the file system still lists it, so it should be whole.");
+    if (f.origin == lost::Origin::FileSystem && f.condition == lost::Condition::Good && !f.checked) {
+        return f.type >= 0 && f.size > lost::kFullCheckLimit
+                   ? QObject::tr("It starts the way it should, and its space hasn't been used for anything else since it was "
+                                 "deleted. It's too big to check all of here.")
+                   : QObject::tr("Its space hasn't been used for anything else since it was deleted. What's in it can't be "
+                                 "checked for this kind of file.");
+    }
+    return conditionWords(f.condition);
 }
 
 } // namespace
@@ -189,11 +207,21 @@ LostFilesModel::LostFilesModel(QObject *parent)
 
 bool LostFilesModel::passes(const lost::Found &f) const
 {
-    if (m_category >= 0 && (f.type < 0 || int(filetypes::types()[f.type].category) != m_category))
+    const LostFilter &w = m_filter;
+    if (w.category >= 0 && (f.type < 0 || int(filetypes::types()[f.type].category) != w.category))
         return false;
-    if (m_hideDamaged && f.condition != lost::Condition::Good)
+    if (w.hideDamaged && f.condition != lost::Condition::Good)
         return false;
-    return m_text.isEmpty() || f.name.contains(m_text, Qt::CaseInsensitive) || f.folder.contains(m_text, Qt::CaseInsensitive);
+    if (w.deletedOnly && !f.deleted)
+        return false;
+    if (w.folder == LostFilter::kFoundByContents) {
+        if (f.origin != lost::Origin::Contents)
+            return false;
+    } else if (!w.folder.isEmpty()) {
+        if (f.origin != lost::Origin::FileSystem || (f.folder != w.folder && !f.folder.startsWith(w.folder + QLatin1Char('/'))))
+            return false;
+    }
+    return w.text.isEmpty() || f.name.contains(w.text, Qt::CaseInsensitive) || f.folder.contains(w.text, Qt::CaseInsensitive);
 }
 
 void LostFilesModel::append(const QVector<lost::Found> &files)
@@ -223,12 +251,11 @@ void LostFilesModel::clear()
     Q_EMIT tickedChanged();
 }
 
-void LostFilesModel::setFilter(int category, bool hideDamaged, const QString &text)
+void LostFilesModel::setFilter(const LostFilter &filter)
 {
     beginResetModel();
-    m_category = category;
-    m_hideDamaged = hideDamaged;
-    m_text = text.trimmed();
+    m_filter = filter;
+    m_filter.text = filter.text.trimmed();
     m_shown.clear();
     for (int i = 0; i < m_files.size(); ++i) {
         if (passes(m_files[i]))
@@ -358,8 +385,10 @@ LostFilesDialog::LostFilesDialog(UDisks *udisks, const QString &preferredPath, Q
     , m_meter(m_bar, m_phase)
     , m_stop(new QPushButton(tr("Stop")))
     , m_categories(new QListWidget)
+    , m_folders(new QTreeWidget)
     , m_search(new QLineEdit)
     , m_hideDamaged(new QCheckBox(tr("Hide files that may be damaged")))
+    , m_deletedOnly(new QCheckBox(tr("Only deleted files")))
     , m_grid(new QPushButton(tr("Show as a List")))
     , m_view(new QListView)
     , m_previewImage(new QLabel)
@@ -418,9 +447,17 @@ LostFilesDialog::LostFilesDialog(UDisks *udisks, const QString &preferredPath, Q
     resultsLayout->addWidget(m_phase);
 
     auto *split = new QSplitter;
+    // On the left: kinds of file, and below them the folders the file systems still name.
+    auto *left = new QSplitter(Qt::Vertical);
     m_categories->setObjectName(QStringLiteral("categories"));
-    m_categories->setMaximumWidth(200);
-    split->addWidget(m_categories);
+    left->addWidget(m_categories);
+    m_folders->setObjectName(QStringLiteral("folders"));
+    m_folders->setHeaderLabel(tr("Folders"));
+    m_folders->setRootIsDecorated(true);
+    m_folders->setUniformRowHeights(true);
+    left->addWidget(m_folders);
+    left->setMaximumWidth(260);
+    split->addWidget(left);
     auto *middle = new QWidget;
     auto *middleLayout = new QVBoxLayout(middle);
     middleLayout->setContentsMargins(0, 0, 0, 0);
@@ -428,6 +465,11 @@ LostFilesDialog::LostFilesDialog(UDisks *udisks, const QString &preferredPath, Q
     m_search->setPlaceholderText(tr("Search the names"));
     m_search->setClearButtonEnabled(true);
     filters->addWidget(m_search, 1);
+    m_deletedOnly->setObjectName(QStringLiteral("deletedOnly"));
+    m_deletedOnly->setChecked(true);
+    m_deletedOnly->setToolTip(tr("Files that weren't deleted are listed too, for a drive whose file system won't open. "
+                                 "Untick this to see them."));
+    filters->addWidget(m_deletedOnly);
     filters->addWidget(m_hideDamaged);
     m_grid->setAutoDefault(false);
     filters->addWidget(m_grid);
@@ -509,13 +551,20 @@ LostFilesDialog::LostFilesDialog(UDisks *udisks, const QString &preferredPath, Q
     connect(m_look, &QPushButton::clicked, this, &LostFilesDialog::start);
     connect(image, &QPushButton::clicked, this, &LostFilesDialog::chooseImage);
     connect(m_stop, &QPushButton::clicked, this, [this] {
+        if (m_quick)
+            m_quick->cancel();
         if (m_scan)
             m_scan->cancel();
         m_stop->setEnabled(false);
     });
     connect(m_categories, &QListWidget::currentRowChanged, this, &LostFilesDialog::filterChanged);
+    connect(m_folders, &QTreeWidget::currentItemChanged, this, &LostFilesDialog::filterChanged);
     connect(m_search, &QLineEdit::textChanged, this, &LostFilesDialog::filterChanged);
     connect(m_hideDamaged, &QCheckBox::toggled, this, &LostFilesDialog::filterChanged);
+    connect(m_deletedOnly, &QCheckBox::toggled, this, [this] {
+        refreshFolderCounts();
+        filterChanged();
+    });
     connect(m_grid, &QPushButton::clicked, this, [this] {
         const bool toList = m_view->viewMode() == QListView::IconMode;
         m_view->setViewMode(toList ? QListView::ListMode : QListView::IconMode);
@@ -547,22 +596,25 @@ LostFilesDialog::~LostFilesDialog()
 
 void LostFilesDialog::stopWorkers()
 {
+    if (m_quick)
+        m_quick->cancel();
     if (m_scan)
         m_scan->cancel();
     if (m_saver)
         m_saver->cancel();
     if (m_thumbs)
         m_thumbs->stop();
-    for (QThread *t : {m_scanThread, m_saveThread, m_thumbThread}) {
+    for (QThread *t : {m_quickThread, m_scanThread, m_saveThread, m_thumbThread}) {
         if (t) {
             t->quit();
             t->wait();
         }
     }
+    m_quick = nullptr;
     m_scan = nullptr;
     m_saver = nullptr;
     m_thumbs = nullptr;
-    m_scanThread = m_saveThread = m_thumbThread = nullptr;
+    m_quickThread = m_scanThread = m_saveThread = m_thumbThread = nullptr;
 }
 
 void LostFilesDialog::fillDrives(const QString &preferredPath)
@@ -684,8 +736,20 @@ void LostFilesDialog::scanSource(std::shared_ptr<lost::Source> source, const QSt
     m_stop->show();
     m_bar->show();
     m_phase->show();
-    m_status->setText(tr("Looking through %1 for files by what's inside them…").arg(title));
+    m_status->setText(tr("Reading the file systems on %1…").arg(title));
     qCInfo(lcOps).noquote() << "Find Lost Files: looking through" << title;
+    m_volumes.clear();
+    m_folders->clear();
+    m_folderItems.clear();
+    m_inFolder.clear();
+    m_deletedInFolder.clear();
+    m_contentsItem = nullptr;
+    {
+        const QSignalBlocker block(m_folders);
+        auto *everywhere = new QTreeWidgetItem(m_folders, {tr("Everywhere")});
+        everywhere->setIcon(0, QIcon::fromTheme(QStringLiteral("drive-harddisk")));
+        m_folders->setCurrentItem(everywhere);
+    }
 
     m_thumbs = new ThumbnailLoader(m_source);
     connect(m_thumbs, &ThumbnailLoader::ready, this, [this](int index, int size, const QImage &image) {
@@ -700,30 +764,137 @@ void LostFilesDialog::scanSource(std::shared_ptr<lost::Source> source, const QSt
     });
     m_thumbThread = startOnThread(this, m_thumbs);
 
+    // First what the file systems still know (quick, and with the real names), then every
+    // sector for files by their contents.
+    m_quick = new lost::QuickScan(m_source);
+    connect(m_quick, &lost::QuickScan::found, this, [this](const QVector<lost::Found> &files) {
+        m_model->append(files);
+        addFolders(files);
+        refreshCategories();
+    });
+    connect(m_quick, &lost::QuickScan::progress, this, [this](quint64 done, quint64 total) {
+        m_meter.update(tr("Checking what's in the deleted files"), done, total);
+    });
+    connect(m_quick, &lost::QuickScan::finished, this, [this](bool stopped) {
+        // The scan's thread is idle now: what it found is safe to read until it's let go.
+        const QVector<lost::Extent> ranges = m_quick->knownRanges();
+        const QVector<quint64> starts = m_quick->knownStarts();
+        m_volumes = m_quick->volumes();
+        m_quick = nullptr;
+        if (m_quickThread)
+            m_quickThread->quit();
+        if (stopped)
+            return scanDone(true);
+        startDeepScan(ranges, starts);
+    });
+    m_quickThread = startOnThread(this, m_quick);
+    refreshCategories();
+    filterChanged();
+    updateTicked();
+}
+
+void LostFilesDialog::startDeepScan(const QVector<lost::Extent> &knownRanges, const QVector<quint64> &knownStarts)
+{
+    QStringList read;
+    for (const lost::Volume &v : std::as_const(m_volumes))
+        read << v.label;
+    m_status->setText(read.isEmpty() ? tr("Looking through %1 for files by what's inside them…").arg(m_title)
+                                     : tr("Read %1. Now looking through all of %2 for files by what's inside them…")
+                                           .arg(read.join(QStringLiteral(", ")), m_title));
     m_scan = new lost::DeepScan(m_source);
+    m_scan->skip(knownRanges, knownStarts);
     connect(m_scan, &lost::DeepScan::found, this, [this](const QVector<lost::Found> &files) {
         m_model->append(files);
+        addFolders(files);
         refreshCategories();
     });
     connect(m_scan, &lost::DeepScan::progress, this, [this](quint64 done, quint64 total) {
         m_meter.update(tr("Looking through the drive"), done, total);
     });
     connect(m_scan, &lost::DeepScan::finished, this, [this](bool stopped) {
-        m_scanning = false;
         if (m_scanThread)
             m_scanThread->quit();
         m_scan = nullptr;
-        m_stop->hide();
-        const int found = m_model->fileCount();
-        m_status->setText(stopped ? tr("Stopped. Found %1 files before that.").arg(found)
-                          : found ? tr("Done: found %1 files on %2.").arg(found).arg(m_title)
-                                  : tr("Done. Nothing was found on %1.").arg(m_title));
-        updateTicked();
+        scanDone(stopped);
     });
     m_scanThread = startOnThread(this, m_scan);
-    refreshCategories();
-    filterChanged();
+}
+
+void LostFilesDialog::scanDone(bool stopped)
+{
+    m_scanning = false;
+    m_stop->hide();
+    int deleted = 0;
+    for (int i = 0; i < m_model->fileCount(); ++i)
+        deleted += m_model->file(i).deleted;
+    const int kept = m_model->fileCount() - deleted;
+    QString text;
+    if (stopped)
+        text = tr("Stopped. Found %1 files before that.").arg(deleted);
+    else if (deleted == 0 && kept == 0)
+        text = tr("Done. Nothing was found on %1.").arg(m_title);
+    else if (kept == 0)
+        text = tr("Done: found %1 files on %2.").arg(deleted).arg(m_title);
+    else
+        text = tr("Done: found %1 deleted files on %2, and %3 that weren't deleted.").arg(deleted).arg(m_title).arg(kept);
+    m_status->setText(text);
+    refreshFolderCounts();
     updateTicked();
+}
+
+void LostFilesDialog::addFolders(const QVector<lost::Found> &files)
+{
+    QSet<QString> changed;
+    for (const lost::Found &f : files) {
+        if (f.origin == lost::Origin::Contents) {
+            if (!m_contentsItem) {
+                m_contentsItem = new QTreeWidgetItem(m_folders);
+                m_contentsItem->setData(0, Qt::UserRole, LostFilter::kFoundByContents);
+                m_contentsItem->setIcon(0, QIcon::fromTheme(QStringLiteral("edit-find")));
+                m_contentsItem->setToolTip(0, tr("Files found by what's inside them, without a name or a folder"));
+            }
+            m_inFolder[LostFilter::kFoundByContents] += 1;
+            m_deletedInFolder[LostFilter::kFoundByContents] += f.deleted;
+            changed.insert(LostFilter::kFoundByContents);
+            continue;
+        }
+        // The folder and every one above it, made as needed; each counts the file.
+        QString path;
+        QTreeWidgetItem *parent = nullptr;
+        for (const QString &part : f.folder.split(QLatin1Char('/'), Qt::SkipEmptyParts)) {
+            path = path.isEmpty() ? part : path + QLatin1Char('/') + part;
+            QTreeWidgetItem *&item = m_folderItems[path];
+            if (!item) {
+                item = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(m_folders);
+                item->setData(0, Qt::UserRole, path);
+                item->setData(0, Qt::UserRole + 1, part);
+                item->setIcon(0, QIcon::fromTheme(parent ? QStringLiteral("folder") : QStringLiteral("drive-removable-media")));
+                if (!parent)
+                    item->setExpanded(true);
+            }
+            m_inFolder[path] += 1;
+            m_deletedInFolder[path] += f.deleted;
+            changed.insert(path);
+            parent = item;
+        }
+    }
+    if (!changed.isEmpty())
+        refreshFolderCounts();
+}
+
+void LostFilesDialog::refreshFolderCounts()
+{
+    const bool deletedOnly = m_deletedOnly->isChecked();
+    auto label = [&](QTreeWidgetItem *item, const QString &name, const QString &key) {
+        const int n = deletedOnly ? m_deletedInFolder.value(key) : m_inFolder.value(key);
+        item->setText(0, QStringLiteral("%1 (%2)").arg(name).arg(n));
+        // A folder with nothing deleted in it is greyed out while only deleted files show.
+        item->setForeground(0, n == 0 ? palette().brush(QPalette::Disabled, QPalette::Text) : palette().brush(QPalette::Text));
+    };
+    for (auto it = m_folderItems.cbegin(); it != m_folderItems.cend(); ++it)
+        label(it.value(), it.value()->data(0, Qt::UserRole + 1).toString(), it.key());
+    if (m_contentsItem)
+        label(m_contentsItem, tr("Found by what's inside them"), LostFilter::kFoundByContents);
 }
 
 int LostFilesDialog::chosenCategory() const
@@ -734,7 +905,14 @@ int LostFilesDialog::chosenCategory() const
 
 void LostFilesDialog::filterChanged()
 {
-    m_model->setFilter(chosenCategory(), m_hideDamaged->isChecked(), m_search->text());
+    LostFilter filter;
+    filter.category = chosenCategory();
+    filter.hideDamaged = m_hideDamaged->isChecked();
+    filter.deletedOnly = m_deletedOnly->isChecked();
+    filter.text = m_search->text();
+    if (const QTreeWidgetItem *folder = m_folders->currentItem())
+        filter.folder = folder->data(0, Qt::UserRole).toString();
+    m_model->setFilter(filter);
 }
 
 // The list of kinds, with how many of each, keeping the one that's chosen. New finds are added
@@ -779,11 +957,20 @@ void LostFilesDialog::showPreview()
                                                                       : QColor(0xff, 0x33, 0x55);
     const quint64 where = f.extents.isEmpty() ? 0 : f.extents.first().start;
     QString html = QStringLiteral("<b>%1</b><br>%2, %3<br>").arg(f.name.toHtmlEscaped(), type.name.toHtmlEscaped(), formatSize(f.size));
-    html += f.origin == lost::Origin::Contents
-                ? tr("Found by what's inside it, %1 into the drive. Its real name and folder aren't known, so it has a made-up name.")
-                      .arg(formatSize(where))
-                : tr("Was in %1").arg(f.folder.toHtmlEscaped());
-    html += QStringLiteral("<br><br><span style=\"color:%1\">●</span> %2").arg(colour.name(), conditionWords(f.condition).toHtmlEscaped());
+    if (f.origin == lost::Origin::Contents) {
+        html += tr("Found by what's inside it, %1 into the drive. Its real name and folder aren't known, so it has a made-up name.")
+                    .arg(formatSize(where));
+    } else {
+        html += (f.deleted ? tr("Was in %1") : tr("In %1")).arg(f.folder.toHtmlEscaped());
+        if (f.modified > 0)
+            html += QStringLiteral("<br>") + tr("Last changed %1").arg(QLocale().toString(QDateTime::fromMSecsSinceEpoch(f.modified), QLocale::ShortFormat));
+        if (f.nameGuessed)
+            html += QStringLiteral("<br>") + tr("Deleting it took away the first letter of its name; _ stands in for it.");
+        if (f.piecesGuessed)
+            html += QStringLiteral("<br>") + tr("The file system doesn't say where all of it is anymore, so it's taken to follow on "
+                                                 "from where it started. That's right for most files.");
+    }
+    html += QStringLiteral("<br><br><span style=\"color:%1\">●</span> %2").arg(colour.name(), conditionWords(f).toHtmlEscaped());
     m_details->setText(html);
     if (type.category == filetypes::Category::Picture && !readerFormat(type.id).isEmpty()) {
         m_previewImage->setText(tr("Loading the picture…"));

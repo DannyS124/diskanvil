@@ -25,11 +25,23 @@ class QPushButton;
 class QStackedWidget;
 class QThread;
 class QTreeWidget;
+class QTreeWidgetItem;
 class ThumbnailLoader;
 class UDisks;
 
-// What Find Lost Files found, filtered by kind and by what's typed, with a tick box each and a
-// thumbnail for pictures (asked for only when a picture is on screen).
+// Which of the found files are shown.
+struct LostFilter {
+    int category = -1;       // a filetypes::Category, -1: every kind
+    bool hideDamaged = false;
+    bool deletedOnly = false;
+    QString folder;          // and what's in it, or kFoundByContents; empty: everywhere
+    QString text;
+
+    static inline const QString kFoundByContents = QStringLiteral("\x01contents");
+};
+
+// What Find Lost Files found, filtered by kind, folder and what's typed, with a tick box each and
+// a thumbnail for pictures (asked for only when a picture is on screen).
 class LostFilesModel : public QAbstractListModel
 {
     Q_OBJECT
@@ -38,7 +50,7 @@ public:
 
     void append(const QVector<lost::Found> &files);
     void clear();
-    void setFilter(int category, bool hideDamaged, const QString &text); // category -1: all
+    void setFilter(const LostFilter &filter);
     const lost::Found &file(int index) const { return m_files[index]; }
     int fileCount() const { return int(m_files.size()); }
     int fileIndex(int row) const { return m_shown.value(row, -1); }
@@ -66,9 +78,7 @@ private:
     QSet<int> m_ticked;
     QHash<int, QPixmap> m_thumbnails;
     mutable QSet<int> m_asked;
-    int m_category = -1;
-    bool m_hideDamaged = false;
-    QString m_text;
+    LostFilter m_filter;
 };
 
 // Find Lost Files: pick a drive, a partition or a disk image, look through it for files that
@@ -100,7 +110,12 @@ private:
     void chooseImage();
     void filterChanged();
     void refreshCategories();
+    // Adds the folders of new finds to the tree, with how many files are in each.
+    void addFolders(const QVector<lost::Found> &files);
+    void refreshFolderCounts();
     int chosenCategory() const;
+    void startDeepScan(const QVector<lost::Extent> &knownRanges, const QVector<quint64> &knownStarts);
+    void scanDone(bool stopped);
     void showPreview();
     void updateTicked();
     void saveTicked();
@@ -119,8 +134,10 @@ private:
     PhaseProgress m_meter;
     QPushButton *m_stop;
     QListWidget *m_categories;
+    QTreeWidget *m_folders;
     QLineEdit *m_search;
     QCheckBox *m_hideDamaged;
+    QCheckBox *m_deletedOnly;
     QPushButton *m_grid;
     QListView *m_view;
     QLabel *m_previewImage;
@@ -141,8 +158,15 @@ private:
     std::shared_ptr<lost::Source> m_source;
     QString m_diskDevice;
     QString m_title;
+    lost::QuickScan *m_quick = nullptr;
+    QThread *m_quickThread = nullptr;
     lost::DeepScan *m_scan = nullptr;
     QThread *m_scanThread = nullptr;
+    QVector<lost::Volume> m_volumes;
+    // Folder tree: an item per folder path, and how many files (and deleted ones) are in each.
+    QHash<QString, QTreeWidgetItem *> m_folderItems;
+    QHash<QString, int> m_inFolder, m_deletedInFolder;
+    QTreeWidgetItem *m_contentsItem = nullptr;
     lost::Saver *m_saver = nullptr;
     QThread *m_saveThread = nullptr;
     ThumbnailLoader *m_thumbs = nullptr;

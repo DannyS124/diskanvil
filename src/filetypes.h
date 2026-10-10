@@ -28,6 +28,13 @@ struct Type {
 // Every type there is. A type's number is its place in this list.
 const QVector<Type> &types();
 int typeNumber(const QString &id); // -1 for an unknown one
+// The type a file's name says it is, from its extension (".jpeg" too). -1 when it's none of these.
+int typeForName(const QString &fileName);
+// What candidates() calls a file of this type by its start: ZIP for a .docx, MP4 for a .heic.
+int startType(int type);
+// Whether a file of this type always starts in a way candidates() knows. An MP3 without a
+// tag or an old QuickTime film doesn't, so a start that's not recognised proves nothing.
+bool alwaysRecognised(int type);
 QString categoryName(Category category);
 
 // Reads a candidate file's bytes: `at` counts from its first byte. Returns how many it got,

@@ -6,6 +6,7 @@
 #include "applog.h"
 #include "blockio.h"
 #include "filetypes.h"
+#include "lostfs.h"
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -86,11 +87,92 @@ QByteArray lost::FileReader::head(qint64 len)
     return data;
 }
 
+lost::QuickScan::QuickScan(std::shared_ptr<Source> source)
+    : m_source(std::move(source))
+{
+}
+
+void lost::QuickScan::run()
+{
+    qCInfo(lcOps).noquote() << "Find Lost Files: reading the file systems";
+    QVector<Found> deleted;
+    for (const Extent &where : partitionsOf(*m_source)) {
+        if (m_cancel)
+            break;
+        Volume volume;
+        const bool read = readFileSystem(*m_source, where, [&](QVector<Found> &&batch) {
+            QVector<Found> shown;
+            for (Found &f : batch) {
+                if (!f.extents.isEmpty())
+                    m_starts.push_back(f.extents.first().start);
+                // What's still in use is there for sure; what's deleted waits for its check.
+                if (f.deleted) {
+                    deleted.push_back(std::move(f));
+                } else {
+                    m_ranges += f.extents;
+                    shown.push_back(std::move(f));
+                }
+            }
+            if (!shown.isEmpty())
+                Q_EMIT found(shown);
+        }, m_cancel, &volume);
+        if (read) {
+            qCInfo(lcOps).noquote() << "Find Lost Files:" << volume.type << volume.label << "at" << where.start << "has"
+                                    << volume.files << "files," << volume.deleted << "deleted";
+            m_volumes.push_back(volume);
+        }
+    }
+
+    // What's in the deleted files: the start of each, and the whole of as many as the budget
+    // takes, smallest first (most files for the reading).
+    std::stable_sort(deleted.begin(), deleted.end(), [](const Found &a, const Found &b) { return a.size < b.size; });
+    quint64 budget = kFullCheckBudget;
+    QVector<Found> batch;
+    QElapsedTimer sinceBatch;
+    sinceBatch.start();
+    for (qsizetype i = 0; i < deleted.size() && !m_cancel; ++i) {
+        Found &f = deleted[i];
+        const bool full = f.size <= kFullCheckLimit && f.size <= budget;
+        if (full)
+            budget -= f.size;
+        checkContents(m_source, f, full);
+        if (f.checked && f.condition == Condition::Good)
+            m_ranges += f.extents;
+        batch.push_back(std::move(f));
+        if (sinceBatch.elapsed() > 250) {
+            Q_EMIT found(std::exchange(batch, {}));
+            sinceBatch.restart();
+        }
+        Q_EMIT progress(quint64(i + 1), quint64(deleted.size()));
+    }
+    if (!batch.isEmpty())
+        Q_EMIT found(batch);
+
+    // Sorted and joined, for the deep scan to walk along.
+    std::sort(m_ranges.begin(), m_ranges.end(), [](const Extent &a, const Extent &b) { return a.start < b.start; });
+    QVector<Extent> joined;
+    for (const Extent &e : std::as_const(m_ranges)) {
+        if (!joined.isEmpty() && e.start <= joined.last().end())
+            joined.last().length = std::max(joined.last().end(), e.end()) - joined.last().start;
+        else
+            joined.push_back(e);
+    }
+    m_ranges = joined;
+    qCInfo(lcOps).noquote() << "Find Lost Files: file systems" << (m_cancel ? "stopped" : "done");
+    Q_EMIT finished(m_cancel);
+}
+
 lost::DeepScan::DeepScan(std::shared_ptr<Source> source, quint64 start, quint64 end)
     : m_source(std::move(source))
     , m_start(start / kSector * kSector)
     , m_end(end == 0 || end > m_source->size() ? m_source->size() : end)
 {
+}
+
+void lost::DeepScan::skip(QVector<Extent> ranges, QVector<quint64> starts)
+{
+    m_skipRanges = std::move(ranges);
+    m_skipStarts = QSet<quint64>(starts.cbegin(), starts.cend());
 }
 
 void lost::DeepScan::run()
@@ -107,17 +189,29 @@ void lost::DeepScan::run()
     const quint64 total = m_end - m_start;
     qCInfo(lcOps).noquote() << "Find Lost Files: deep scan of" << total << "bytes";
 
+    qsizetype range = 0; // the first known range that doesn't end before pos
+    auto known = [this, &range](quint64 at) {
+        while (range < m_skipRanges.size() && m_skipRanges[range].end() <= at)
+            ++range;
+        return range < m_skipRanges.size() && m_skipRanges[range].start <= at;
+    };
     for (quint64 pos = m_start; pos < m_end && !m_cancel;) {
         // Inside a file that was just found whole: no need to read it again.
         if (skipUntil > pos) {
             pos = std::min(skipUntil / kSector * kSector, m_end);
             continue;
         }
+        // Inside files the file system listed already, the same.
+        if (known(pos)) {
+            skipUntil = std::max(skipUntil, (m_skipRanges[range].end() + kSector - 1) / kSector * kSector);
+            Q_EMIT progress(std::min(skipUntil, m_end) - m_start, total);
+            continue;
+        }
         const quint64 n = std::min(kChunk, m_end - pos);
         m_source->read(pos, chunk.data(), n);
         for (quint64 off = 0; off + 32 <= n && !m_cancel; off += kSector) {
             const quint64 at = pos + off;
-            if (at < skipUntil)
+            if (at < skipUntil || m_skipStarts.contains(at) || known(at))
                 continue;
             const QVector<int> candidates = filetypes::candidates(reinterpret_cast<const uchar *>(chunk.constData()) + off, int(std::min(kSector, n - off)));
             for (int type : candidates) {
@@ -227,7 +321,7 @@ void lost::Saver::run()
             blockio::setFileTime(fd, f.modified);
         ::close(fd);
         if (!ok || m_cancel) {
-            ::unlink(QFile::encodeName(path).constData());
+            QFile::remove(path);
             if (!m_cancel) {
                 ++failed;
                 problems << tr("%1: couldn't be written (is the drive full?)").arg(name);
