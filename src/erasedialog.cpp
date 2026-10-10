@@ -11,9 +11,14 @@
 #include "theme.h"
 
 #include <QClipboard>
+#ifdef Q_OS_WIN
+#include <windows.h>
+#include <powrprof.h>
+#else
 #include <QDBusConnection>
 #include <QDBusMessage>
 #include <QDBusPendingCall>
+#endif
 #include <QDialogButtonBox>
 #include <QFontDatabase>
 #include <QFrame>
@@ -168,10 +173,14 @@ SecureEraseDialog::SecureEraseDialog(UDisks *udisks, const QString &blockPath, i
             if (box.exec() == QMessageBox::Cancel)
                 return;
         }
+#ifdef Q_OS_WIN
+        SetSuspendState(FALSE, FALSE, FALSE);
+#else
         QDBusMessage sleep = QDBusMessage::createMethodCall(QStringLiteral("org.freedesktop.login1"), QStringLiteral("/org/freedesktop/login1"),
                                                             QStringLiteral("org.freedesktop.login1.Manager"), QStringLiteral("Suspend"));
         sleep << true; // let polkit ask if it needs to
         QDBusConnection::systemBus().asyncCall(sleep);
+#endif
     });
     // The frozen flag is read when the drive is probed; re-reading the drive refreshes it.
     connect(m_checkAgain, &QPushButton::clicked, this, [this] {

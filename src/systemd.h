@@ -58,8 +58,10 @@ public:
     // "/run/media/x" is "run-media-x", and anything unusual is \xNN.
     static QString escapePath(const QString &path);
 
+#ifndef Q_OS_WIN
 private slots:
     void onJobRemoved(uint id, const QDBusObjectPath &job, const QString &unit, const QString &result);
+#endif
 
 private:
     void callThen(const QString &method, const QVariantList &args, const Done &failed,

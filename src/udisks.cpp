@@ -133,27 +133,6 @@ Volume makeVolume(const QString &path, const InterfaceMap &ifaces)
 
 } // namespace
 
-QVector<Span> diskSpans(const Disk &disk)
-{
-    // skip alignment gaps
-    constexpr quint64 kMinFree = 2ull * 1024 * 1024;
-
-    QVector<Span> spans;
-    quint64 cursor = 0;
-    for (int i = 0; i < disk.volumes.size(); ++i) {
-        const Volume &v = disk.volumes[i];
-        if (v.isContainer)
-            continue; // logicals are drawn instead
-        if (v.offset > cursor && v.offset - cursor >= kMinFree)
-            spans.push_back({-1, cursor, v.offset - cursor});
-        spans.push_back({i, v.offset, v.size});
-        cursor = std::max(cursor, v.offset + v.size);
-    }
-    if (disk.size > cursor && disk.size - cursor >= kMinFree)
-        spans.push_back({-1, cursor, disk.size - cursor});
-    return spans;
-}
-
 UDisks::UDisks(QObject *parent)
     : QObject(parent)
 {
@@ -558,36 +537,11 @@ void UDisks::refresh()
     emit changed();
 }
 
-const Disk *UDisks::diskOf(const Volume &volume) const
-{
-    for (const Disk &d : m_disks) {
-        for (const Volume &v : d.volumes) {
-            if (v.objectPath == volume.objectPath)
-                return &d;
-        }
-    }
-    return nullptr;
-}
-
 QVariantMap UDisks::options(QVariantMap extra) const
 {
     if (!m_interactive)
         extra.insert(QStringLiteral("auth.no_user_interaction"), true);
     return extra;
-}
-
-bool UDisks::refuseSystem(const Disk *disk, const QString &failure)
-{
-    // Dialogs keep copies of a disk; what counts is the disk as it is right now.
-    if (disk) {
-        if (const Disk *current = diskByPath(disk->blockPath))
-            disk = current;
-    }
-    if (disk && !disk->isSystem)
-        return false;
-    emit operationFinished(false, failure + QStringLiteral(": ")
-                                      + (disk ? tr("%1 holds the running system").arg(disk->device) : tr("disk not found")));
-    return true;
 }
 
 void UDisks::callThen(const QString &path, const QString &interface, const QString &method, const QVariantList &args,
@@ -902,15 +856,6 @@ void UDisks::detectFilesystems()
             fs.resizeModes = int(modes);
         }
     }
-}
-
-const FsType *UDisks::filesystem(const QString &id) const
-{
-    for (const FsType &fs : m_filesystems) {
-        if (fs.id == id)
-            return &fs;
-    }
-    return nullptr;
 }
 
 ResizeLimits UDisks::resizeLimits(const Volume &v) const

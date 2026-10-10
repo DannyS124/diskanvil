@@ -12,12 +12,18 @@
 
 #include <cerrno>
 #include <cstring>
+#ifdef Q_OS_WIN
+#include "win/winutil.h"
+#else
 #include <dirent.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#endif
 
 namespace cleanup {
+
+#ifndef Q_OS_WIN
 
 namespace {
 
@@ -137,6 +143,111 @@ QStringList trashFolders(const QStringList &mountPoints)
     }
     return folders;
 }
+
+#else
+
+// On Windows: sizes as the files say (no clusters counted, Disk Cleanup only needs an idea),
+// and links (junctions, symlinks) are removed themselves, never what they point to.
+
+namespace {
+
+template <typename Visit>
+void forEntries(const QString &folder, const Visit &visit)
+{
+    WIN32_FIND_DATAW data {};
+    const std::wstring pattern = win::wide(QDir::toNativeSeparators(folder) + QStringLiteral("\\*"));
+    HANDLE find = FindFirstFileExW(pattern.c_str(), FindExInfoBasic, &data, FindExSearchNameMatch, nullptr, FIND_FIRST_EX_LARGE_FETCH);
+    if (find == INVALID_HANDLE_VALUE)
+        return;
+    do {
+        const QString name = win::fromWide(data.cFileName);
+        if (name != QLatin1String(".") && name != QLatin1String("..") && !visit(name, data))
+            break;
+    } while (FindNextFileW(find, &data));
+    FindClose(find);
+}
+
+quint64 sizeOf(const WIN32_FIND_DATAW &data)
+{
+    return quint64(data.nFileSizeHigh) << 32 | data.nFileSizeLow;
+}
+
+quint64 sizeAt(const QString &folder, int depth)
+{
+    quint64 total = 0;
+    forEntries(folder, [&](const QString &name, const WIN32_FIND_DATAW &data) {
+        if (data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
+            return true;
+        if (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            if (depth < 400)
+                total += sizeAt(folder + QLatin1Char('/') + name, depth + 1);
+        } else {
+            total += sizeOf(data);
+        }
+        return true;
+    });
+    return total;
+}
+
+void fail(Result &r, const QString &name)
+{
+    if (r.firstError.isEmpty())
+        r.firstError = QStringLiteral("%1: %2").arg(name, win::lastErrorText());
+    ++r.failed;
+}
+
+void removeAt(const QString &folder, Result &r, const std::atomic<bool> *cancel, int depth)
+{
+    forEntries(folder, [&](const QString &name, const WIN32_FIND_DATAW &data) {
+        if (cancel && *cancel)
+            return false;
+        const QString path = folder + QLatin1Char('/') + name;
+        const std::wstring native = win::wide(QDir::toNativeSeparators(path));
+        if (data.dwFileAttributes & FILE_ATTRIBUTE_READONLY)
+            SetFileAttributesW(native.c_str(), data.dwFileAttributes & ~DWORD(FILE_ATTRIBUTE_READONLY));
+        if ((data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && !(data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
+            if (depth >= 400)
+                return true;
+            removeAt(path, r, cancel, depth + 1);
+            if (!RemoveDirectoryW(native.c_str()) && GetLastError() != ERROR_DIR_NOT_EMPTY)
+                fail(r, name);
+        } else if (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY ? RemoveDirectoryW(native.c_str()) : DeleteFileW(native.c_str())) {
+            if (!(data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT))
+                r.freed += sizeOf(data);
+        } else {
+            // Files a running program holds open stay; that's normal for temp folders.
+            if (GetLastError() != ERROR_SHARING_VIOLATION)
+                fail(r, name);
+            else
+                ++r.failed;
+        }
+        return true;
+    });
+}
+
+} // namespace
+
+quint64 folderSize(const QString &folder)
+{
+    return sizeAt(QDir::fromNativeSeparators(folder), 0);
+}
+
+Result removeContents(const QString &folder, const std::atomic<bool> *cancel)
+{
+    Result r;
+    const QFileInfo info(folder);
+    if (!info.exists() || info.isSymLink() || info.isJunction())
+        return r;
+    removeAt(QDir::fromNativeSeparators(folder), r, cancel, 0);
+    return r;
+}
+
+QStringList trashFolders(const QStringList &)
+{
+    return {}; // the Recycle Bin is emptied through Windows itself
+}
+
+#endif
 
 Result emptyTrash(const QString &trashFolder)
 {

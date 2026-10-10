@@ -130,9 +130,9 @@ QString diskKind(const Disk &d)
         return tr("Disk image");
     if (d.bus == QLatin1String("usb"))
         return tr("USB");
-    if (d.device.startsWith(QLatin1String("/dev/nvme")))
+    if (d.bus == QLatin1String("nvme") || d.device.startsWith(QLatin1String("/dev/nvme")))
         return tr("NVMe SSD");
-    if (d.device.startsWith(QLatin1String("/dev/mmcblk")))
+    if (d.bus == QLatin1String("sd") || d.device.startsWith(QLatin1String("/dev/mmcblk")))
         return tr("SD card");
     if (d.rotationRate > 0)
         return tr("HDD");

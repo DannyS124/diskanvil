@@ -105,8 +105,12 @@ int main(int argc, char *argv[])
 
     UDisks udisks;
     if (!udisks.isAvailable()) {
+#ifdef Q_OS_WIN
+        const QString message = udisks.lastError();
+#else
         const QString message = QStringLiteral("Can't reach UDisks2: %1\nIs udisks2 installed and running?")
                                     .arg(udisks.lastError());
+#endif
         qCCritical(lcOps).noquote() << message;
         if (parser.isSet(dumpOption)) {
             QTextStream(stderr) << message << "\n";

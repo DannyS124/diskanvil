@@ -23,6 +23,11 @@
 
 #include <signal.h>
 
+#ifdef Q_OS_WIN
+// Windows has no process groups to signal; Stop ends the program itself.
+#define SIGKILL 9
+#endif
+
 namespace {
 
 constexpr int kMaxLines = 10000;   // older lines scroll off the top
@@ -76,11 +81,13 @@ AddonOutputWindow::AddonOutputWindow(const QString &title, const QStringList &co
     m_kill.setSingleShot(true);
     connect(&m_kill, &QTimer::timeout, this, [this] { signalGroup(SIGKILL); });
 
+#ifndef Q_OS_WIN
     // Its own session, so Stop reaches everything it starts; only its output is inherited.
     QProcess::UnixProcessParameters params;
     params.flags = QProcess::UnixProcessFlag::CreateNewSession | QProcess::UnixProcessFlag::CloseFileDescriptors
         | QProcess::UnixProcessFlag::ResetSignalHandlers;
     m_process.setUnixProcessParameters(params);
+#endif
     m_process.setProcessChannelMode(QProcess::MergedChannels);
     m_process.setStandardInputFile(QProcess::nullDevice());
     connect(&m_process, &QProcess::readyRead, this, &AddonOutputWindow::readOutput);
@@ -107,9 +114,14 @@ AddonOutputWindow::~AddonOutputWindow()
 
 void AddonOutputWindow::signalGroup(int signal)
 {
+#ifdef Q_OS_WIN
+    Q_UNUSED(signal)
+    m_process.kill();
+#else
     const qint64 pid = m_process.processId();
     if (pid > 0)
         ::kill(-pid_t(pid), signal); // the whole session: CreateNewSession made it the group leader
+#endif
 }
 
 void AddonOutputWindow::stop()

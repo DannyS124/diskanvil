@@ -6,6 +6,10 @@
 // Wrapper around the UDisks2 D-Bus API. All writes go through UDisks2/polkit,
 // nothing here opens block devices directly (raw access goes through UDisks2's
 // OpenDevice/OpenForBenchmark, which also ask polkit).
+//
+// On Windows the same class is built from src/win/udisks_win.cpp, on Windows' own disk API:
+// drives are \\.\PhysicalDriveN, partitions \\?\GLOBALROOT\Device\HarddiskN\PartitionM,
+// and `device` is what people know them by there ("Disk 1", "E:").
 
 #include <QObject>
 #include <QString>
@@ -15,6 +19,7 @@
 #include <QVector>
 
 #include <functional>
+#include <memory>
 
 class QDBusMessage;
 
@@ -104,7 +109,7 @@ struct Disk {
     QString model;
     QString serial;
     QString revision; // firmware version
-    QString bus; // "usb" or empty
+    QString bus; // "usb" or empty; on Windows also "nvme" and "sd"
     QString tableType; // "gpt", "dos" or empty
     quint64 size = 0;
     int rotationRate = -1; // 0 = SSD, -1 = unknown
@@ -326,10 +331,19 @@ signals:
     void imageOpened(const QString &loopBlockPath);
     void deviceOpened(const QString &blockPath, int fd); // fd = -1 on failure (reported via operationFinished)
 
+#ifndef Q_OS_WIN
 private slots:
     void onDBusSignal(const QDBusMessage &message);
+#endif
 
 private:
+    bool refuseSystem(const Disk *disk, const QString &failure);
+    // Unmounts (and with lockEncrypted, locks) the given volumes one at a time, then runs `then`,
+    // or `failed` when one of them can't be.
+    void unmountThen(const QVector<Volume> &volumes, const QString &failure, const std::function<void()> &then,
+                     bool lockEncrypted = false, const std::function<void()> &failed = {});
+    void detectFilesystems();
+#ifndef Q_OS_WIN
     using SuccessText = std::function<QString(const QDBusMessage &reply)>;
     // What a failure means in plain words, added under UDisks' own message (empty: nothing to add).
     using Explain = std::function<QString(const QString &error)>;
@@ -340,15 +354,16 @@ private:
     void callThen(const QString &path, const QString &interface, const QString &method, const QVariantList &args,
                   const QString &failure, const std::function<void(const QDBusMessage &reply)> &next,
                   const std::function<void()> &failed = {}, const Explain &explain = {});
-
-    bool refuseSystem(const Disk *disk, const QString &failure);
-    // Unmounts (and with lockEncrypted, locks) the given volumes one at a time, then runs `then`,
-    // or `failed` when one of them can't be.
-    void unmountThen(const QVector<Volume> &volumes, const QString &failure, const std::function<void()> &then,
-                     bool lockEncrypted = false, const std::function<void()> &failed = {});
     QVariantMap options(QVariantMap extra = {}) const;
-    void detectFilesystems();
     Health readHealth(const QString &drivePath, const QVariantMap &drive, const QVariantMap &ata, const QVariantMap &nvme);
+#else
+    // Windows' side of things: device notifications, drive letters and running jobs
+    // (src/win/udisks_win.cpp).
+    struct Windows;
+    std::shared_ptr<Windows> m_windows;
+    // Reports, a moment later, that something isn't in the Windows version yet.
+    void notOnWindows(const QString &failure);
+#endif
 
     QVector<Disk> m_disks;
     QVector<Job> m_jobs;
@@ -365,7 +380,9 @@ private:
     };
     QMap<QString, HealthCache> m_healthCache;
     QMap<QString, Health> m_testHealth;
+#ifndef Q_OS_WIN
     bool m_lvmAsked = false; // asked UDisks to load its lvm2 module
+#endif
     QVector<Job> m_testJobs;
     QStringList m_stopMessages; // for jobs asked to stop, in order
     bool m_stopped = false;

@@ -100,15 +100,6 @@ QByteArray byteString(const QString &s)
 
 } // namespace
 
-const Disk *UDisks::diskByPath(const QString &blockPath) const
-{
-    for (const Disk &d : m_disks) {
-        if (d.blockPath == blockPath)
-            return &d;
-    }
-    return nullptr;
-}
-
 Health UDisks::readHealth(const QString &drivePath, const QVariantMap &drive, const QVariantMap &ata, const QVariantMap &nvme)
 {
     Health h;
@@ -595,21 +586,6 @@ void UDisks::secureErase(const Disk &disk, EraseMethod method)
     }, true);
 }
 
-QString UDisks::secureEraseRefused(const QString &error, bool usb)
-{
-    // "error=0x04" is the drive's own answer: it aborted the command. UDisks sets its password
-    // first and takes it off again when a later step fails.
-    if (!error.contains(QLatin1String("SECURITY")) || !error.contains(QLatin1String("error=0x04")))
-        return {};
-    const QString why = usb ? tr("The drive refused it. It's connected through USB, and most USB adapters don't pass Secure Erase "
-                                 "through to the drive. Connect it to a SATA port inside a PC and try again, or use Wipe Disk, "
-                                 "which works through any adapter.")
-                            : tr("The drive refused it. Turn the drive off and on once (shut the PC down fully, a restart isn't "
-                                 "enough) and try again. If it keeps refusing, use Wipe Disk instead.");
-    return why + QStringLiteral(" ")
-         + tr("If the drive shows up locked after it's been off, it kept the temporary password xxxx: Help has how to unlock it.");
-}
-
 void UDisks::prepareUnplug(const Disk &disk, const std::function<void(bool)> &done)
 {
     const QString failure = tr("Couldn't get %1 ready to unplug").arg(shortDevice(disk.device));
@@ -629,28 +605,6 @@ void UDisks::prepareUnplug(const Disk &disk, const std::function<void(bool)> &do
             done(true);
         });
     }, true, [done] { done(false); });
-}
-
-int UDisks::findDrive(const QVector<Disk> &disks, const QString &serial, const QString &model, quint64 size)
-{
-    for (int i = 0; i < disks.size(); ++i) {
-        const Disk &d = disks[i];
-        if (d.isLoop)
-            continue;
-        if (!serial.isEmpty() ? d.serial == serial : (!model.isEmpty() && d.model == model && d.size == size))
-            return i;
-    }
-    return -1;
-}
-
-void UDisks::openDevice(const Disk &disk, bool writable, bool forBenchmark, bool direct)
-{
-    OpenMode mode = OpenMode::Read;
-    if (forBenchmark)
-        mode = writable ? OpenMode::BenchmarkWritable : OpenMode::Benchmark;
-    else if (writable)
-        mode = direct ? OpenMode::ReadWriteDirect : OpenMode::ReadWrite;
-    openBlock(disk.blockPath, mode);
 }
 
 void UDisks::openBlock(const QString &objectPath, OpenMode mode)

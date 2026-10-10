@@ -16,11 +16,18 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-find_package(Qt6 6.8 REQUIRED COMPONENTS Widgets DBus Network LinguistTools)
+# Windows builds are cross-compiled with MinGW-w64; see packaging/windows/build.sh.
+if(WIN32)
+    find_package(Qt6 6.8 REQUIRED COMPONENTS Widgets Network LinguistTools)
+else()
+    find_package(Qt6 6.8 REQUIRED COMPONENTS Widgets DBus Network LinguistTools)
+endif()
 qt_standard_project_setup(I18N_SOURCE_LANGUAGE en)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(ZSTD REQUIRED IMPORTED_TARGET libzstd)
-pkg_check_modules(BLKID REQUIRED IMPORTED_TARGET blkid) # util-linux, finds file systems for Recover Partitions
+if(NOT WIN32)
+    pkg_check_modules(BLKID REQUIRED IMPORTED_TARGET blkid) # util-linux, finds file systems for Recover Partitions
+endif()
 pkg_check_modules(ARCHIVE REQUIRED IMPORTED_TARGET libarchive) # unpacks compressed disk images (.xz, .gz, .zip...)
 # Ed25519, for the signature on the online add-on list
 find_package(OpenSSL 1.1.1 REQUIRED COMPONENTS Crypto)
@@ -39,13 +46,14 @@ set(APP_DEFINITIONS
     APP_AUTHOR_URL="${APP_AUTHOR_URL}"
     APP_HOMEPAGE="${PROJECT_HOMEPAGE_URL}")
 
-# Everything that talks to UDisks2 or touches devices, shared with the test tools.
+# Everything that talks to UDisks2 (or Windows' disk API) or touches devices, shared with the
+# test tools.
 add_library(diskforge-core STATIC
-    src/udisks.cpp src/udisks.h
-    src/operations.cpp src/dbusnames.h
+    src/udisks.h src/udisks_common.cpp
+    src/fsprobe.cpp src/fsprobe.h
     src/format.cpp src/format.h
     src/blockio.cpp src/blockio.h
-    src/systemd.cpp src/systemd.h
+    src/systemd.h
     src/imagewriter.cpp src/imagewriter.h
     src/imagesource.cpp src/imagesource.h
     src/lostsource.cpp src/lostsource.h
@@ -63,15 +71,15 @@ add_library(diskforge-core STATIC
     src/imagebackup.cpp src/imagebackup.h
     src/rescuecopy.cpp src/rescuecopy.h
     src/cleanup.cpp src/cleanup.h
-    src/snapper.cpp src/snapper.h
+    src/snapper.h
     src/signature.cpp src/signature.h
     src/outputfilter.cpp src/outputfilter.h
     src/health.cpp src/health.h
-    src/firmware.cpp src/firmware.h
+    src/firmware.h
     src/btrfscheck.cpp src/btrfscheck.h
     src/drivepower.cpp src/drivepower.h
     src/partrecover.cpp src/partrecover.h
-    src/partscan.cpp src/partscan.h
+    src/partscan.h
     src/applog.cpp src/applog.h
     src/isofs.cpp src/isofs.h
     src/filecopy.cpp src/filecopy.h
@@ -81,7 +89,22 @@ add_library(diskforge-core STATIC
     src/rescuestick.cpp src/rescuestick.h
     src/stickcheck.cpp src/stickcheck.h
 )
-target_link_libraries(diskforge-core PUBLIC Qt6::Core Qt6::DBus PRIVATE PkgConfig::ZSTD PkgConfig::BLKID PkgConfig::ARCHIVE OpenSSL::Crypto)
+if(WIN32)
+    target_sources(diskforge-core PRIVATE
+        src/win/blockio_win.cpp
+        src/win/udisks_win.cpp
+        src/win/winutil.cpp src/win/winutil.h
+        src/win/unavailable.cpp)
+    target_link_libraries(diskforge-core PUBLIC Qt6::Core PRIVATE PkgConfig::ZSTD PkgConfig::ARCHIVE OpenSSL::Crypto
+        setupapi cfgmgr32 ole32 oleaut32 wbemuuid uuid virtdisk)
+    # Large files and the Windows 10 API (CM_Register_Notification, storage queries).
+    target_compile_definitions(diskforge-core PUBLIC _FILE_OFFSET_BITS=64 _WIN32_WINNT=0x0A00 WINVER=0x0A00 UNICODE _UNICODE NOMINMAX)
+else()
+    target_sources(diskforge-core PRIVATE
+        src/udisks.cpp src/operations.cpp src/dbusnames.h
+        src/systemd.cpp src/snapper.cpp src/firmware.cpp src/partscan.cpp)
+    target_link_libraries(diskforge-core PUBLIC Qt6::Core Qt6::DBus PRIVATE PkgConfig::ZSTD PkgConfig::BLKID PkgConfig::ARCHIVE OpenSSL::Crypto)
+endif()
 target_include_directories(diskforge-core PUBLIC src)
 target_compile_definitions(diskforge-core PUBLIC ${APP_DEFINITIONS})
 target_compile_options(diskforge-core PRIVATE -Wall -Wextra)
@@ -126,6 +149,9 @@ add_library(diskforge-ui STATIC
     src/thememaker.cpp src/thememaker.h
 )
 target_link_libraries(diskforge-ui PUBLIC diskforge-core Qt6::Widgets Qt6::Network)
+if(WIN32)
+    target_link_libraries(diskforge-ui PRIVATE powrprof)
+endif()
 target_compile_options(diskforge-ui PRIVATE -Wall -Wextra)
 
 # Help page, icon and license text, built into each program that shows them.
@@ -137,12 +163,22 @@ endfunction()
 
 qt_add_executable(diskforge src/main.cpp)
 diskforge_add_data(diskforge)
+if(WIN32)
+    # Its own window (no console), the icon and version details, and it asks to run as administrator.
+    set_target_properties(diskforge PROPERTIES WIN32_EXECUTABLE ON)
+    configure_file(data/windows/diskforge.rc.in diskforge.rc @ONLY)
+    target_sources(diskforge PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/diskforge.rc)
+endif()
 target_link_libraries(diskforge PRIVATE diskforge-ui)
 target_compile_options(diskforge PRIVATE -Wall -Wextra)
 
 
 # dev tools, not installed
-option(DISKFORGE_SELFTEST "Build the loop-device self-test" ON)
+if(WIN32)
+    option(DISKFORGE_SELFTEST "Build the loop-device self-test" OFF)
+else()
+    option(DISKFORGE_SELFTEST "Build the loop-device self-test" ON)
+endif()
 if(DISKFORGE_SELFTEST)
     qt_add_executable(diskforge-selftest tests/selftest.cpp tests/testkit.cpp tests/testkit.h
         tests/test_gpt.cpp tests/test_copy.cpp tests/test_blockmap.cpp
@@ -176,6 +212,11 @@ qt_add_translations(TARGETS ${TRANSLATED_TARGETS}
     RESOURCE_PREFIX /i18n)
 
 include(GNUInstallDirs)
+if(WIN32)
+    # The rest (DLLs, Qt plugins) is put next to it by packaging/windows/deploy.sh.
+    install(TARGETS diskforge RUNTIME DESTINATION .)
+    return()
+endif()
 configure_file(data/${APP_ID}.desktop.in ${APP_ID}.desktop @ONLY)
 configure_file(data/${APP_ID}.metainfo.xml.in ${APP_ID}.metainfo.xml @ONLY)
 configure_file(data/diskforge.1.in diskforge.1 @ONLY)
