@@ -374,9 +374,16 @@ void MainWindow::createActions()
             return;
         const QString path = v->objectPath;
         bool ok = false;
-        // The label comes from the drive: shown as plain text.
-        const QString pass = QInputDialog::getText(this, tr("Unlock %1").arg(shortDevice(v->device)),
-                                                   Qt::convertFromPlainText(tr("Passphrase for %1:").arg(volumeTitle(*v))), QLineEdit::Password, {}, &ok);
+        // The label comes from the drive: shown as plain text. BitLocker takes its password or its
+        // recovery key, which people rarely know where to find.
+        const QString prompt = v->fsType == QLatin1String("BitLocker")
+                                   ? tr("%1 is locked with BitLocker. Its password, or its recovery key: 48 digits in eight groups, "
+                                        "kept in the Microsoft account of whoever set up the PC (aka.ms/myrecoverykey), or on a "
+                                        "printout or USB stick from back then. A company PC's IT department has it.")
+                                         .arg(volumeTitle(*v))
+                                   : tr("Passphrase for %1:").arg(volumeTitle(*v));
+        const QString pass = QInputDialog::getText(this, tr("Unlock %1").arg(shortDevice(v->device)), Qt::convertFromPlainText(prompt),
+                                                   QLineEdit::Password, {}, &ok);
         if (!ok || pass.isEmpty())
             return;
         if (const Volume *fresh = volumeByPath(path))
@@ -741,7 +748,7 @@ void MainWindow::createActions()
 #ifdef Q_OS_WIN
     // Linux's own things (LUKS, fstab, RAID, Btrfs), and what the Windows version can't do yet:
     // so far it reads drives, but doesn't write to them.
-    for (QAction *a : {m_unlock, m_lock, m_changePass, m_startup, m_raidCheck, m_snapshots, m_newPartition, m_format, m_resize,
+    for (QAction *a : {m_lock, m_changePass, m_startup, m_raidCheck, m_snapshots, m_newPartition, m_format, m_resize,
                        m_typeFlags, m_check, m_delete, m_newTable, m_recover, m_wipe, m_secureErase, m_openImage, m_detachImage,
                        m_writeImage, m_windowsUsb, m_rescueUsb, m_restore, m_clone, m_badSectors, m_checkStick, m_safelyRemove,
                        m_cleanup, m_optimize})
@@ -1434,7 +1441,9 @@ void MainWindow::showProperties()
         if (!v->fstab.isEmpty())
             add(tr("Mounts at startup"), QString::fromLocal8Bit(v->fstab.value(QStringLiteral("dir")).toByteArray()).remove(QChar(0)));
         if (v->encrypted)
-            add(tr("Encryption"), v->cleartextPath.isEmpty() ? tr("LUKS, locked") : tr("LUKS, unlocked (%1 inside)").arg(v->cleartextFsType));
+            add(tr("Encryption"), v->fsType == QLatin1String("BitLocker")
+                                      ? (v->cleartextPath.isEmpty() ? tr("BitLocker, locked") : tr("BitLocker, unlocked (%1 inside)").arg(v->cleartextFsType))
+                                      : (v->cleartextPath.isEmpty() ? tr("LUKS, locked") : tr("LUKS, unlocked (%1 inside)").arg(v->cleartextFsType)));
         add(tr("Disk"), d->device);
 #ifdef Q_OS_WIN
         add(tr("Windows path"), v->objectPath);
@@ -1515,8 +1524,9 @@ void MainWindow::showProperties()
     layout->addWidget(tree);
     // The hidden area (HPA): the end of an ATA drive its own settings hide, where malware and
     // some makers' recovery tools keep things. Only hdparm sees it, so only DiskForge Live.
-    const bool ataDrive = !v && sel.kind != DiskMap::Selection::Kind::Free && !d->isLoop && !d->nvmeNamespace && !d->isRaid
-                       && d->bus != QLatin1String("usb") && (d->ataPm || d->ataApm || d->ataWriteCache || d->ataLookahead);
+    // hdparm asks the drive itself, whatever UDisks made of it; USB bridges rarely pass this on.
+    const bool ataDrive = !v && sel.kind != DiskMap::Selection::Kind::Free && !d->isLoop && !d->nvmeNamespace && !d->isRaid && !d->isLvm
+                       && d->bus != QLatin1String("usb") && d->device.startsWith(QLatin1String("/dev/sd"));
     if (ataDrive) {
         drivepower::HiddenArea hidden;
         if (rescue::runningInRescue()) {

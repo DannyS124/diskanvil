@@ -16,6 +16,7 @@
 #include <QStandardPaths>
 #include <QTemporaryFile>
 #include <QVersionNumber>
+#include <QtEndian>
 
 namespace virus {
 
@@ -200,6 +201,65 @@ bool quickScanWants(const QString &fileName)
     return dot < 0 ? true : kinds.contains(fileName.mid(dot + 1).toLower());
 }
 
+namespace {
+
+const QSet<QString> &programEnds()
+{
+    static const QSet<QString> ends = {QStringLiteral("exe"), QStringLiteral("scr"), QStringLiteral("com"), QStringLiteral("pif"),
+                                       QStringLiteral("bat"), QStringLiteral("cmd"), QStringLiteral("js"),  QStringLiteral("jse"),
+                                       QStringLiteral("vbs"), QStringLiteral("vbe"), QStringLiteral("wsf"), QStringLiteral("hta"),
+                                       QStringLiteral("lnk"), QStringLiteral("ps1"), QStringLiteral("msi"), QStringLiteral("cpl"),
+                                       QStringLiteral("jar")};
+    return ends;
+}
+
+// What people open without a second thought.
+const QSet<QString> &harmlessEnds()
+{
+    static const QSet<QString> ends = {QStringLiteral("pdf"),  QStringLiteral("doc"),  QStringLiteral("docx"), QStringLiteral("xls"),
+                                       QStringLiteral("xlsx"), QStringLiteral("ppt"),  QStringLiteral("pptx"), QStringLiteral("txt"),
+                                       QStringLiteral("rtf"),  QStringLiteral("odt"),  QStringLiteral("jpg"),  QStringLiteral("jpeg"),
+                                       QStringLiteral("png"),  QStringLiteral("gif"),  QStringLiteral("bmp"),  QStringLiteral("webp"),
+                                       QStringLiteral("heic"), QStringLiteral("mp3"),  QStringLiteral("mp4"),  QStringLiteral("avi"),
+                                       QStringLiteral("mov"),  QStringLiteral("mkv"),  QStringLiteral("wav"),  QStringLiteral("zip"),
+                                       QStringLiteral("rar"),  QStringLiteral("7z"),   QStringLiteral("csv"),  QStringLiteral("html")};
+    return ends;
+}
+
+QString endOf(const QString &name)
+{
+    const qsizetype dot = name.lastIndexOf(QLatin1Char('.'));
+    return dot < 0 ? QString() : name.mid(dot + 1).trimmed().toLower();
+}
+
+} // namespace
+
+bool disguiseNeedsHead(const QString &fileName)
+{
+    return harmlessEnds().contains(endOf(fileName));
+}
+
+QString disguise(const QString &fileName, const QByteArray &head)
+{
+    // The right-to-left override turns the rest of the name around on screen.
+    if (fileName.contains(QChar(0x202E)))
+        return QStringLiteral("DiskForge.Disguised.RightToLeft");
+    const QString last = endOf(fileName);
+    if (programEnds().contains(last)) {
+        const QString rest = fileName.left(fileName.lastIndexOf(QLatin1Char('.')));
+        if (rest.contains(QLatin1Char('.')) && harmlessEnds().contains(endOf(rest)))
+            return QStringLiteral("DiskForge.Disguised.DoubleExtension");
+        return {};
+    }
+    // A Windows program (MZ, then "PE" where the header says) named like a picture or document.
+    if (harmlessEnds().contains(last) && head.size() >= 64 && head.startsWith("MZ")) {
+        const quint32 pe = qFromLittleEndian<quint32>(head.constData() + 0x3C);
+        if (pe >= 64 && qsizetype(pe) + 4 <= head.size() && head.mid(pe, 4) == QByteArray("PE\0\0", 4))
+            return QStringLiteral("DiskForge.Disguised.ProgramInside");
+    }
+    return {};
+}
+
 bool Scan::skipped(const QString &path)
 {
     static const QRegularExpression big(QStringLiteral("/(pagefile|hiberfil|swapfile)\\.sys$"), QRegularExpression::CaseInsensitiveOption);
@@ -235,7 +295,7 @@ void Scan::run()
         return;
     }
     Q_EMIT phase(tr("Making a list of the files"));
-    const qint64 total = listFiles(list);
+    const qint64 total = listFiles(&list);
     if (m_cancel) {
         Q_EMIT finished(false, 0, 0, tr("Stopped."));
         return;
@@ -251,7 +311,7 @@ void Scan::run()
 // inside it are left out, and so are links and Windows' junctions, which point at files that are
 // listed where they really are (and can go round in circles). A Btrfs drive's subvolumes are
 // part of it, and are walked.
-qint64 Scan::listFiles(QIODevice &list)
+qint64 Scan::listFiles(QIODevice *list)
 {
 #ifndef Q_OS_WIN
     const QSet<QString> mounted = mountPoints();
@@ -259,9 +319,9 @@ qint64 Scan::listFiles(QIODevice &list)
     qint64 count = 0;
     QSet<QString> listed;
     for (const QString &file : std::as_const(m_also)) {
-        if (!file.contains(QLatin1Char('\n')) && QFileInfo(file).isFile() && !listed.contains(file)) {
+        if (list && !file.contains(QLatin1Char('\n')) && QFileInfo(file).isFile() && !listed.contains(file)) {
             listed.insert(file);
-            list.write(QDir::toNativeSeparators(file).toUtf8() + '\n');
+            list->write(QDir::toNativeSeparators(file).toUtf8() + '\n');
             ++count;
         }
     }
@@ -284,9 +344,21 @@ qint64 Scan::listFiles(QIODevice &list)
 #endif
                     folders << path;
                 } else if ((fi.isFile() || fi.isShortcut()) && !path.contains(QLatin1Char('\n'))) {
-                    if ((m_depth == Depth::Quick && !quickScanWants(fi.fileName())) || listed.contains(path))
+                    // Dressed up as something else: by its name, or a program inside a picture.
+                    QByteArray head;
+                    if (disguiseNeedsHead(fi.fileName()) && fi.size() >= 64) {
+                        QFile f(path);
+                        if (f.open(QIODevice::ReadOnly))
+                            head = f.read(1024);
+                    }
+                    const QString dressed = disguise(fi.fileName(), head);
+                    if (!dressed.isEmpty()) {
+                        qCInfo(lcOps).noquote() << "Scan for Viruses: dressed up as something else:" << path;
+                        Q_EMIT found(Detection{path, dressed});
+                    }
+                    if (!list || (m_depth == Depth::Quick && !quickScanWants(fi.fileName())) || listed.contains(path))
                         continue;
-                    list.write(QDir::toNativeSeparators(path).toUtf8() + '\n');
+                    list->write(QDir::toNativeSeparators(path).toUtf8() + '\n');
                     ++count;
                 }
             }
@@ -368,6 +440,12 @@ void Scan::runClamAv(const QString &list, qint64 total)
 
 void Scan::runDefender()
 {
+    Q_EMIT phase(tr("Looking for files dressed up as something else"));
+    listFiles(nullptr);
+    if (m_cancel) {
+        Q_EMIT finished(false, 0, 0, tr("Stopped."));
+        return;
+    }
     Q_EMIT phase(tr("Microsoft Defender is looking through it (it doesn't say how far it's got)"));
     Q_EMIT progress(0, 0);
     int hits = 0;
@@ -491,6 +569,10 @@ QString shownName(const QString &name)
 
 int severity(const QString &name)
 {
+    if (name == QLatin1String("DiskForge.Disguised.ProgramInside"))
+        return 1;
+    if (name.startsWith(QLatin1String("DiskForge.Disguised.")))
+        return 2;
     if (has(name, {"eicar", "PUA.", "PUA:", "Adware", "Unwanted", "PUADlManager", "Test."}))
         return 0;
     if (has(name, {"Heuristics", "Heur", "Suspicious", "!ml", "Generic.Susp"}))
@@ -500,6 +582,12 @@ int severity(const QString &name)
 
 QString describe(const QString &name)
 {
+    if (name == QLatin1String("DiskForge.Disguised.DoubleExtension"))
+        return words("A program named like a document or picture: Windows hides the end of the name, so it looks harmless.");
+    if (name == QLatin1String("DiskForge.Disguised.RightToLeft"))
+        return words("Its name is turned around by a hidden character, so a program looks like something else.");
+    if (name == QLatin1String("DiskForge.Disguised.ProgramInside"))
+        return words("A program kept in a file named like a picture or document: malware hides its parts that way.");
     if (has(name, {"eicar"}))
         return words("A harmless test file: antivirus programs use it to show they work.");
     if (has(name, {"PUA", "Unwanted", "Adware"}))

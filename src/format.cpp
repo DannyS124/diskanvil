@@ -67,7 +67,7 @@ QString volumeStatus(const Volume &v, bool brief)
     else if (v.fsType == QLatin1String("swap"))
         parts << (v.swapActive ? tr("Swap, in use") : tr("Swap, not in use"));
     else if (v.encrypted) {
-        parts << tr("Encrypted");
+        parts << (v.fsType == QLatin1String("BitLocker") ? tr("BitLocker") : tr("Encrypted"));
         if (v.cleartextPath.isEmpty())
             parts << tr("Locked");
         else if (v.cleartextMountPoints.isEmpty())

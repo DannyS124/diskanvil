@@ -27,6 +27,8 @@
 #include <QHash>
 #include <QSysInfo>
 #include <QRandomGenerator>
+#include <QRegularExpression>
+#include <QProcess>
 #include <QTimer>
 
 #include <algorithm>
@@ -449,6 +451,8 @@ void UDisks::refresh()
                         v.fsUsage = r.usage;
                         v.hasFilesystem = r.usage == QLatin1String("filesystem");
                         v.label = r.label;
+                        // BitLocker that Windows can't read is locked; unlocked, it's NTFS to Windows.
+                        v.encrypted = r.type == QLatin1String("BitLocker");
                     }
                     if (v.fsType == r.type)
                         v.uuid = r.uuid;
@@ -915,9 +919,44 @@ void UDisks::detachImage(const Disk &disk)
     notOnWindows(tr("Couldn't close %1").arg(shortDevice(disk.device)));
 }
 
-void UDisks::unlock(const Volume &volume, const QString &)
+// BitLocker, through Windows' own Unlock-BitLocker. The password or recovery key goes in an
+// environment variable, never on a command line others can see.
+void UDisks::unlock(const Volume &volume, const QString &passphrase)
 {
-    notOnWindows(tr("Couldn't unlock %1").arg(shortDevice(volume.device)));
+    const QString name = shortDevice(volume.device);
+    const QString failure = tr("Couldn't unlock %1").arg(name);
+    if (volume.fsType != QLatin1String("BitLocker"))
+        return notOnWindows(failure);
+    const QString letter = volume.mountPoints.value(0).left(2);
+    if (letter.size() != 2 || letter[1] != QLatin1Char(':')) {
+        QTimer::singleShot(0, this, [this, failure] {
+            emit operationFinished(false, failure + QStringLiteral(": ") + tr("it has no drive letter; mount it first"));
+        });
+        return;
+    }
+    static const QRegularExpression recoveryKey(QStringLiteral("^\\d{6}(-\\d{6}){7}$"));
+    const bool recovery = recoveryKey.match(passphrase.trimmed()).hasMatch();
+    auto *ps = new QProcess(this);
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.insert(QStringLiteral("DF_MOUNT"), letter);
+    env.insert(QStringLiteral("DF_SECRET"), recovery ? passphrase.trimmed() : passphrase);
+    ps->setProcessEnvironment(env);
+    ps->setProcessChannelMode(QProcess::MergedChannels);
+    const QString script = recovery ? QStringLiteral("Unlock-BitLocker -MountPoint $env:DF_MOUNT -RecoveryPassword $env:DF_SECRET -ErrorAction Stop | Out-Null")
+                                    : QStringLiteral("Unlock-BitLocker -MountPoint $env:DF_MOUNT -Password (ConvertTo-SecureString $env:DF_SECRET -AsPlainText "
+                                                     "-Force) -ErrorAction Stop | Out-Null");
+    connect(ps, &QProcess::finished, this, [this, ps, name, failure](int code, QProcess::ExitStatus status) {
+        ps->deleteLater();
+        const bool ok = status == QProcess::NormalExit && code == 0;
+        const QString said = QString::fromLocal8Bit(ps->readAll()).simplified();
+        m_windows->probed.clear(); // unlocked, it reads as NTFS now
+        refresh();
+        emit operationFinished(ok, ok ? tr("Unlocked %1").arg(name)
+                                      : failure + QStringLiteral(": ") + (said.contains(QLatin1String("incorrect"), Qt::CaseInsensitive)
+                                                                              ? tr("that isn't its password or recovery key")
+                                                                              : said.right(200)));
+    });
+    ps->start(QStringLiteral("powershell.exe"), {QStringLiteral("-NoProfile"), QStringLiteral("-NonInteractive"), QStringLiteral("-Command"), script});
 }
 
 void UDisks::lock(const Volume &volume)

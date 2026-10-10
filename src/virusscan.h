@@ -54,6 +54,15 @@ struct Detection {
 enum class Depth { Quick, Everything };
 bool quickScanWants(const QString &fileName);
 
+// Files dressed up as something else, found by the scan whatever the antivirus says:
+// a program named like a document ("invoice.pdf.exe", which Windows shows as "invoice.pdf"), a
+// name turned around by an invisible right-to-left character ("gpj.exe" showing as "exe.jpg"),
+// or a program inside a file named like a picture or a document. Returns the find's name
+// ("DiskForge.Disguised..."), or nothing. `head` is the file's start, for the ones
+// disguiseNeedsHead() wants it for.
+QString disguise(const QString &fileName, const QByteArray &head = {});
+bool disguiseNeedsHead(const QString &fileName);
+
 // Scans folders: where a drive is mounted (a Btrfs drive can be in several places), or any
 // folder. Lists the files first to know how many there are, then hands them to the scanner in
 // one go and follows its output.
@@ -81,7 +90,9 @@ Q_SIGNALS:
     void finished(bool completed, int scanned, int unreadable, const QString &problem);
 
 private:
-    qint64 listFiles(QIODevice &list);
+    // The files to scan into `list` (none for Defender, which walks by itself), and on the way
+    // the ones dressed up as something else.
+    qint64 listFiles(QIODevice *list);
     void runClamAv(const QString &list, qint64 total);
     void runDefender();
 

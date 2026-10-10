@@ -15,6 +15,7 @@
 #include <QFile>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QtEndian>
 
 #include <sys/stat.h>
 #include <unistd.h>
@@ -92,6 +93,19 @@ void parsing()
     report(virus::quickScanWants(QStringLiteral("SETUP.EXE")) && virus::quickScanWants(QStringLiteral("invoice.pdf.js"))
                && !virus::quickScanWants(QStringLiteral("holiday.jpg")) && virus::quickScanWants(QStringLiteral("no extension")),
            QStringLiteral("viruses: a quick scan looks at programs, scripts and documents"));
+    QByteArray program(1024, '\0');
+    program.replace(0, 2, "MZ");
+    qToLittleEndian<quint32>(0x80, program.data() + 0x3C);
+    program.replace(0x80, 4, QByteArray("PE\0\0", 4));
+    report(virus::disguise(QStringLiteral("invoice.pdf.exe")) == QLatin1String("DiskForge.Disguised.DoubleExtension")
+               && virus::disguise(QStringLiteral("Report.DOCX      .scr")) == QLatin1String("DiskForge.Disguised.DoubleExtension")
+               && virus::disguise(QStringLiteral("photos.jpg.lnk")) == QLatin1String("DiskForge.Disguised.DoubleExtension")
+               && virus::disguise(QStringLiteral("cute") + QChar(0x202E) + QStringLiteral("gpj.exe")) == QLatin1String("DiskForge.Disguised.RightToLeft")
+               && virus::disguise(QStringLiteral("holiday.jpg"), program) == QLatin1String("DiskForge.Disguised.ProgramInside")
+               && virus::disguise(QStringLiteral("setup.exe")).isEmpty() && virus::disguise(QStringLiteral("my.app.v2.exe")).isEmpty()
+               && virus::disguise(QStringLiteral("holiday.jpg"), "\xff\xd8\xff\xe0 a real jpeg").isEmpty()
+               && virus::disguise(QStringLiteral("tool.exe"), program).isEmpty(),
+           QStringLiteral("viruses: files dressed up as something else, and ones that aren't"));
     report(virus::Scan::skipped(QStringLiteral("/mnt/win/pagefile.sys")) && virus::Scan::skipped(QStringLiteral("/mnt/win/System Volume Information/x"))
                && virus::Scan::skipped(QStringLiteral("/mnt/win/System Volume Information")) && virus::Scan::skipped(QStringLiteral("/mnt/linux/.snapshots"))
                && virus::Scan::skipped(QStringLiteral("/mnt/linux/@snapshots/12/snapshot/etc"))
@@ -168,6 +182,25 @@ void scanning(const QString &dir)
            QStringLiteral("viruses: two folders, no links or pipes, and what can't be read is counted"),
            QStringLiteral("%1 scanned, %2 found, %3 unreadable %4").arg(scanned).arg(found.size()).arg(unreadable).arg(problem));
     QFile::setPermissions(drive + QStringLiteral("/Users/a/secret.exe"), QFile::ReadOwner | QFile::WriteOwner);
+
+    // Dressed-up files are found whatever the antivirus says about them.
+    const QString dressed = dir + QStringLiteral("/dressed");
+    QByteArray program(1024, '\0');
+    program.replace(0, 2, "MZ");
+    qToLittleEndian<quint32>(0x80, program.data() + 0x3C);
+    program.replace(0x80, 4, QByteArray("PE\0\0", 4));
+    writeFile(dressed + QStringLiteral("/invoice.pdf.exe"), "not really anything");
+    writeFile(dressed + QStringLiteral("/holiday.jpg"), program);
+    writeFile(dressed + QStringLiteral("/cute") + QChar(0x202E) + QStringLiteral("gpj.exe"), "not really anything either");
+    writeFile(dressed + QStringLiteral("/report.pdf"), "%PDF-1.7 a real one");
+    found = scan(engine, {dressed}, virus::Depth::Quick, &completed, &scanned, &problem);
+    QStringList kinds;
+    for (const virus::Detection &d : std::as_const(found))
+        kinds << d.name;
+    kinds.sort();
+    report(completed && kinds == QStringList{QStringLiteral("DiskForge.Disguised.DoubleExtension"), QStringLiteral("DiskForge.Disguised.ProgramInside"),
+                                             QStringLiteral("DiskForge.Disguised.RightToLeft")},
+           QStringLiteral("viruses: a scan finds the dressed-up ones too"), kinds.join(QStringLiteral(", ")));
 
     // Stop: quickly, and it says it stopped.
     for (int i = 0; i < 3000; ++i)
