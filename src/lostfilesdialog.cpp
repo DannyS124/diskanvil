@@ -141,7 +141,19 @@ public:
         initStyleOption(&opt, index);
         QStyle *style = opt.widget ? opt.widget->style() : QApplication::style();
         p->save();
-        style->drawPrimitive(QStyle::PE_PanelItemViewItem, &opt, p, opt.widget);
+        // The selection is drawn here too: Windows 11's own is so light that the name, drawn in the
+        // selected-text colour below, vanished on it.
+        const bool selected = opt.state & QStyle::State_Selected;
+        const QPalette::ColorGroup group = opt.state & QStyle::State_Active ? QPalette::Active : QPalette::Inactive;
+        if (selected || (opt.state & QStyle::State_MouseOver)) {
+            QColor fill = opt.palette.color(group, QPalette::Highlight);
+            if (!selected)
+                fill.setAlpha(40);
+            p->setRenderHint(QPainter::Antialiasing);
+            p->setPen(Qt::NoPen);
+            p->setBrush(fill);
+            p->drawRoundedRect(QRectF(opt.rect).adjusted(1.5, 1.5, -1.5, -1.5), 4, 4);
+        }
         const int textHeight = 2 * opt.fontMetrics.height() + 4;
         const QRect area = opt.rect.adjusted(6, 6, -6, -6 - textHeight);
 
@@ -182,8 +194,7 @@ public:
         if (check.rect.isValid())
             style->drawPrimitive(QStyle::PE_IndicatorItemViewItemCheck, &check, p, opt.widget);
 
-        const bool selected = opt.state & QStyle::State_Selected;
-        p->setPen(opt.palette.color(selected ? QPalette::HighlightedText : QPalette::Text));
+        p->setPen(opt.palette.color(group, selected ? QPalette::HighlightedText : QPalette::Text));
         const QRect text(opt.rect.left() + 4, opt.rect.bottom() - textHeight, opt.rect.width() - 8, textHeight);
         // Two lines at most: what fits on the first (up to a space, when there's one), the rest
         // on the second, cut short with "…" in the middle so the extension still shows.
