@@ -1,0 +1,297 @@
+// SPDX-FileCopyrightText: 2026 Danny S
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+#include "preview.h"
+
+#include "filetypes.h"
+#include "format.h"
+#include "mediainfo.h"
+#include "officetext.h"
+
+#include <QBuffer>
+#include <QCoreApplication>
+#include <QDataStream>
+#include <QDeadlineTimer>
+#include <QFile>
+#include <QImageReader>
+#include <QProcess>
+#include <QStandardPaths>
+#include <QStringDecoder>
+#include <QTemporaryFile>
+
+#ifdef DISKFORGE_PDF
+#include <poppler-qt6.h>
+#endif
+
+#include <climits>
+#include <memory>
+
+#ifdef Q_OS_WIN
+#include <fcntl.h>
+#include <io.h>
+#else
+#include <sys/resource.h>
+#endif
+
+namespace preview {
+
+namespace {
+
+constexpr quint32 kMagic = 0x44465056; // "DFPV"
+constexpr qint64 kMostMessage = kMostData + 1024 * 1024;
+
+QString tr(const char *text)
+{
+    return QCoreApplication::translate("preview", text);
+}
+
+QByteArray readerFormat(const QString &id)
+{
+    if (id == QLatin1String("jpg"))
+        return "jpeg";
+    if (id == QLatin1String("heic"))
+        return "heif";
+    if (id == QLatin1String("png") || id == QLatin1String("gif") || id == QLatin1String("bmp") || id == QLatin1String("webp")
+        || id == QLatin1String("avif"))
+        return id.toLatin1();
+    return {};
+}
+
+// A picture from bytes, scaled down to fit `pixels`; null when it isn't one that can be shown.
+QImage picture(QByteArray data, const QByteArray &format, int pixels)
+{
+    QBuffer buffer(&data);
+    buffer.open(QIODevice::ReadOnly);
+    QImageReader reader(&buffer, format);
+    // Only the decoder for what it's said to be ever sees the bytes.
+    reader.setDecideFormatFromContent(format.isEmpty());
+    reader.setAutoDetectImageFormat(format.isEmpty());
+    reader.setAutoTransform(true);
+    const QSize full = reader.size();
+    if (full.isValid() && pixels > 0 && (full.width() > pixels || full.height() > pixels))
+        reader.setScaledSize(full.scaled(QSize(pixels, pixels), Qt::KeepAspectRatio));
+    QImage image = reader.read();
+    if (!image.isNull() && pixels > 0 && (image.width() > pixels || image.height() > pixels))
+        image = image.scaled(pixels, pixels, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    return image;
+}
+
+// A film's first frame, from ffmpeg when it's installed (never on DiskForge Live: too big).
+QImage frame(const QByteArray &data, int pixels)
+{
+    const QString ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
+    if (ffmpeg.isEmpty())
+        return {};
+    QTemporaryFile file;
+    if (!file.open() || file.write(data) != data.size())
+        return {};
+    file.flush();
+    for (const char *at : {"1", "0"}) {
+        QProcess p;
+        p.start(ffmpeg, {QStringLiteral("-v"), QStringLiteral("error"), QStringLiteral("-ss"), QString::fromLatin1(at), QStringLiteral("-i"),
+                         file.fileName(), QStringLiteral("-frames:v"), QStringLiteral("1"), QStringLiteral("-vf"),
+                         QStringLiteral("scale='min(%1,iw)':-2").arg(pixels), QStringLiteral("-f"), QStringLiteral("image2pipe"),
+                         QStringLiteral("-vcodec"), QStringLiteral("png"), QStringLiteral("-")});
+        if (!p.waitForFinished(8000)) {
+            p.kill();
+            p.waitForFinished(1000);
+            continue;
+        }
+        QImage image;
+        if (image.loadFromData(p.readAllStandardOutput(), "PNG"))
+            return image;
+    }
+    return {};
+}
+
+// Plain text, when the bytes look like it: valid UTF-8 (or Latin-1) without control characters.
+QString textOf(const QByteArray &data, int most)
+{
+    const QByteArray head = data.left(most * 2);
+    if (head.isEmpty() || head.contains('\0'))
+        return {};
+    QStringDecoder utf8(QStringDecoder::Utf8);
+    QString text = utf8(head);
+    if (utf8.hasError())
+        text = QString::fromLatin1(head);
+    int odd = 0;
+    for (const QChar c : std::as_const(text))
+        odd += c.unicode() < 0x20 && c != QLatin1Char('\n') && c != QLatin1Char('\r') && c != QLatin1Char('\t');
+    if (odd > text.size() / 50)
+        return {};
+    return text.left(most);
+}
+
+// A plain file (the helper's input) blocks in read() and says 0 only at its end; a process
+// (the window's side) says 0 when nothing has come yet, and is waited for until the deadline.
+bool readExactly(QIODevice &from, char *to, qint64 n, const QDeadlineTimer &deadline)
+{
+    while (n > 0) {
+        const qint64 got = from.read(to, n);
+        if (got < 0)
+            return false;
+        if (got == 0 && !from.waitForReadyRead(int(std::min<qint64>(deadline.remainingTime(), INT_MAX))))
+            return false;
+        to += got;
+        n -= got;
+    }
+    return true;
+}
+
+bool readMessage(QIODevice &from, QByteArray &body, int msecs)
+{
+    const QDeadlineTimer deadline(msecs < 0 ? QDeadlineTimer::Forever : QDeadlineTimer(msecs));
+    quint32 header[2];
+    if (!readExactly(from, reinterpret_cast<char *>(header), sizeof header, deadline))
+        return false;
+    if (header[0] != kMagic || header[1] > kMostMessage)
+        return false;
+    body.resize(qsizetype(header[1]));
+    return readExactly(from, body.data(), body.size(), deadline);
+}
+
+void writeMessage(QIODevice &to, const QByteArray &body)
+{
+    const quint32 header[2] = {kMagic, quint32(body.size())};
+    to.write(reinterpret_cast<const char *>(header), sizeof header);
+    to.write(body);
+}
+
+} // namespace
+
+void write(QIODevice &to, const Request &r)
+{
+    QByteArray body;
+    QDataStream s(&body, QIODevice::WriteOnly);
+    s << qint32(r.type) << r.name << r.size << qint32(r.pixels) << r.data;
+    writeMessage(to, body);
+}
+
+bool read(QIODevice &from, Request &r, int msecs)
+{
+    QByteArray body;
+    if (!readMessage(from, body, msecs))
+        return false;
+    QDataStream s(body);
+    qint32 type = -1, pixels = 0;
+    s >> type >> r.name >> r.size >> pixels >> r.data;
+    r.type = type;
+    r.pixels = std::clamp(pixels, 16, 2048);
+    return s.status() == QDataStream::Ok;
+}
+
+void write(QIODevice &to, const Result &r)
+{
+    QByteArray body;
+    QDataStream s(&body, QIODevice::WriteOnly);
+    QByteArray png;
+    if (!r.image.isNull()) {
+        QBuffer buffer(&png);
+        buffer.open(QIODevice::WriteOnly);
+        r.image.save(&buffer, "PNG");
+    }
+    s << png << r.text;
+    writeMessage(to, body);
+}
+
+bool read(QIODevice &from, Result &r, int msecs)
+{
+    QByteArray body;
+    if (!readMessage(from, body, msecs))
+        return false;
+    QDataStream s(body);
+    QByteArray png;
+    s >> png >> r.text;
+    if (!png.isEmpty())
+        r.image.loadFromData(png, "PNG");
+    return s.status() == QDataStream::Ok;
+}
+
+Result make(const Request &r)
+{
+    Result out;
+    const filetypes::Type *type = r.type >= 0 && r.type < filetypes::types().size() ? &filetypes::types()[r.type] : nullptr;
+    const QString id = type ? type->id : QString();
+    const bool partial = quint64(r.data.size()) < r.size;
+
+    if (type && type->category == filetypes::Category::Picture) {
+        out.image = picture(r.data, readerFormat(id), r.pixels);
+        return out;
+    }
+#ifdef DISKFORGE_PDF
+    if (id == QLatin1String("pdf")) {
+        std::unique_ptr<Poppler::Document> document = Poppler::Document::loadFromData(r.data);
+        if (!document || document->isLocked())
+            return out;
+        document->setRenderHint(Poppler::Document::Antialiasing);
+        document->setRenderHint(Poppler::Document::TextAntialiasing);
+        if (std::unique_ptr<Poppler::Page> page = document->page(0)) {
+            const QSizeF points = page->pageSizeF();
+            const double longest = std::max(points.width(), points.height());
+            const double dpi = longest > 0 ? std::min(150.0, r.pixels * 72.0 / longest) : 72.0;
+            out.image = page->renderToImage(dpi, dpi);
+        }
+        const QString title = document->info(QStringLiteral("Title")).simplified();
+        out.text = (title.isEmpty() ? QString() : title + QLatin1Char('\n')) + QCoreApplication::translate("preview", "%n page(s)", nullptr, document->numPages());
+        return out;
+    }
+#endif
+    if (type && type->category == filetypes::Category::Document) {
+        out.text = officetext::text(r.type, r.data);
+        if (!out.text.isEmpty() || id != QLatin1String("epub"))
+            return out;
+    }
+    if (type && (type->category == filetypes::Category::Archive || id == QLatin1String("epub"))) {
+        bool complete = false;
+        const QVector<officetext::Entry> entries = officetext::list(r.data, 300, &complete);
+        if (entries.isEmpty())
+            return out;
+        QStringList lines;
+        for (const officetext::Entry &e : entries)
+            lines << (e.folder ? e.path : QStringLiteral("%1  (%2)").arg(e.path, formatSize(e.size)));
+        out.text = tr("What's in it:") + QLatin1Char('\n') + lines.join(QLatin1Char('\n'));
+        if (!complete)
+            out.text += QLatin1Char('\n') + (partial ? tr("…and more (only its start was looked at)") : tr("…and more, or it's damaged from here on"));
+        return out;
+    }
+    if (type && (type->category == filetypes::Category::Music || type->category == filetypes::Category::Video)) {
+        const mediainfo::Info info = mediainfo::read(r.type, r.data, r.size);
+        out.text = mediainfo::describe(info);
+        if (!info.cover.isEmpty())
+            out.image = picture(info.cover, QByteArray(), r.pixels);
+        if (out.image.isNull() && type->category == filetypes::Category::Video)
+            out.image = frame(r.data, r.pixels);
+        return out;
+    }
+    if (!type)
+        out.text = textOf(r.data, 4000);
+    return out;
+}
+
+int runHelper()
+{
+#ifdef Q_OS_WIN
+    _setmode(0, _O_BINARY);
+    _setmode(1, _O_BINARY);
+#else
+    // A decoder gone wrong stops at these, not at the machine's limits.
+    const rlimit memory {2048ull * 1024 * 1024, 2048ull * 1024 * 1024};
+    setrlimit(RLIMIT_AS, &memory);
+    const rlimit files {512ull * 1024 * 1024, 512ull * 1024 * 1024};
+    setrlimit(RLIMIT_FSIZE, &files);
+    const rlimit core {0, 0};
+    setrlimit(RLIMIT_CORE, &core);
+#endif
+    QImageReader::setAllocationLimit(256);
+    QFile in, out;
+    if (!in.open(0, QIODevice::ReadOnly | QIODevice::Unbuffered) || !out.open(1, QIODevice::WriteOnly | QIODevice::Unbuffered))
+        return 1;
+    Request request;
+    while (read(in, request)) {
+        write(out, make(request));
+        out.flush();
+    }
+    return 0;
+}
+
+} // namespace preview

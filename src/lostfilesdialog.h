@@ -26,7 +26,7 @@ class QStackedWidget;
 class QThread;
 class QTreeWidget;
 class QTreeWidgetItem;
-class ThumbnailLoader;
+class PreviewLoader;
 class UDisks;
 
 // Which of the found files are shown.
@@ -117,6 +117,7 @@ private:
     void startDeepScan(const QVector<lost::Extent> &knownRanges, const QVector<quint64> &knownStarts);
     void scanDone(bool stopped);
     void showPreview();
+    void showPreviewResult(const QImage &image, const QString &text, bool failed);
     void updateTicked();
     void saveTicked();
     void stopWorkers();
@@ -169,7 +170,7 @@ private:
     QTreeWidgetItem *m_contentsItem = nullptr;
     lost::Saver *m_saver = nullptr;
     QThread *m_saveThread = nullptr;
-    ThumbnailLoader *m_thumbs = nullptr;
+    PreviewLoader *m_thumbs = nullptr;
     QThread *m_thumbThread = nullptr;
     int m_previewIndex = -1;
     bool m_scanning = false;

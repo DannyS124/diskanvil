@@ -11,8 +11,10 @@
 #include "gpt.h"
 #include "health.h"
 #include "lostfs.h"
+#include "previewloader.h"
 #include "udisks.h"
 
+#include <QApplication>
 #include <QBuffer>
 #include <QCheckBox>
 #include <QDateTime>
@@ -28,10 +30,12 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListView>
+#include <QKeyEvent>
 #include <QListWidget>
 #include <QLocale>
 #include <QMessageBox>
-#include <QMutex>
+#include <QMouseEvent>
+#include <QPainter>
 #include <QPlainTextEdit>
 #include <QProgressBar>
 #include <QPushButton>
@@ -39,29 +43,17 @@
 #include <QStackedWidget>
 #include <QStandardPaths>
 #include <QStorageInfo>
+#include <QStyledItemDelegate>
 #include <QThread>
 #include <QTreeWidget>
 #include <QUrl>
 #include <QVBoxLayout>
-#include <QWaitCondition>
 
 namespace {
 
 constexpr int kThumbnail = 128;
 constexpr int kPreview = 480;
 constexpr qint64 kMostToDecode = 64 * 1024 * 1024; // a picture bigger than this isn't shown
-
-// The format name Qt's image readers know a picture type by, or empty when it can't show it.
-QByteArray readerFormat(const QString &type)
-{
-    static const QHash<QString, QByteArray> formats = {
-        {QStringLiteral("jpg"), "jpeg"}, {QStringLiteral("png"), "png"},   {QStringLiteral("gif"), "gif"},
-        {QStringLiteral("bmp"), "bmp"},  {QStringLiteral("webp"), "webp"}, {QStringLiteral("heic"), "heif"},
-        {QStringLiteral("avif"), "avif"},
-    };
-    const QByteArray format = formats.value(type);
-    return QImageReader::supportedImageFormats().contains(format) ? format : QByteArray();
-}
 
 QString categoryIcon(filetypes::Category category)
 {
@@ -115,87 +107,116 @@ QString conditionWords(const lost::Found &f)
 
 } // namespace
 
-// Turns found pictures into thumbnails and previews, one at a time, newest wish first (what's on
-// screen now matters more than what was scrolled past).
-class ThumbnailLoader : public QObject
+// Draws a found file in the picture grid the same way whatever the system's style: its thumbnail
+// (or its icon, or a card with its extension when there's neither) above its name, with the
+// tick box in the corner. Styles draw icon grids very differently (Windows 11's puts the name
+// beside the picture and gets where to click wrong), and here they all have to work alike.
+class GridDelegate : public QStyledItemDelegate
 {
-    Q_OBJECT
 public:
-    explicit ThumbnailLoader(std::shared_ptr<lost::Source> source)
-        : m_source(std::move(source))
+    using QStyledItemDelegate::QStyledItemDelegate;
+
+    static bool grid(const QStyleOptionViewItem &option)
     {
+        const auto *view = qobject_cast<const QListView *>(option.widget);
+        return view && view->viewMode() == QListView::IconMode;
     }
 
-    void want(int index, const lost::Found &file, int size)
+    QRect checkRect(const QStyleOptionViewItem &option) const
     {
-        QMutexLocker locker(&m_lock);
-        m_queue.prepend({index, file, size});
-        // Long scrolls pile up wishes: the oldest ones aren't on screen anymore.
-        while (m_queue.size() > 300)
-            m_queue.removeLast();
-        m_wake.wakeOne();
-    }
-    void stop()
-    {
-        QMutexLocker locker(&m_lock);
-        m_stop = true;
-        m_wake.wakeOne();
+        const QStyle *style = option.widget ? option.widget->style() : QApplication::style();
+        const int size = style->pixelMetric(QStyle::PM_IndicatorWidth, &option, option.widget);
+        return QRect(option.rect.left() + 4, option.rect.top() + 4, size, size);
     }
 
-public Q_SLOTS:
-    void run()
+    void paint(QPainter *p, const QStyleOptionViewItem &option, const QModelIndex &index) const override
     {
-        for (;;) {
-            Request r;
-            {
-                QMutexLocker locker(&m_lock);
-                while (m_queue.isEmpty() && !m_stop)
-                    m_wake.wait(&m_lock);
-                if (m_stop)
-                    break;
-                r = m_queue.takeFirst();
-            }
-            Q_EMIT ready(r.index, r.size, decode(r));
+        if (!grid(option))
+            return QStyledItemDelegate::paint(p, option, index);
+        QStyleOptionViewItem opt(option);
+        initStyleOption(&opt, index);
+        QStyle *style = opt.widget ? opt.widget->style() : QApplication::style();
+        p->save();
+        style->drawPrimitive(QStyle::PE_PanelItemViewItem, &opt, p, opt.widget);
+        const int textHeight = 2 * opt.fontMetrics.height() + 4;
+        const QRect area = opt.rect.adjusted(6, 6, -6, -6 - textHeight);
+
+        const QVariant decoration = index.data(Qt::DecorationRole);
+        QPixmap picture;
+        if (decoration.canConvert<QPixmap>() && decoration.typeId() == QMetaType::QPixmap)
+            picture = decoration.value<QPixmap>();
+        else if (decoration.canConvert<QIcon>())
+            picture = decoration.value<QIcon>().pixmap(64, 64);
+        if (!picture.isNull()) {
+            const QSize fit = picture.size().scaled(area.size().boundedTo(picture.size()), Qt::KeepAspectRatio);
+            p->drawPixmap(QRect(area.center() - QPoint(fit.width() / 2, fit.height() / 2), fit), picture);
+        } else {
+            // No picture and no icon: a card with the file's extension on it.
+            const QString ext = opt.text.contains(QLatin1Char('.')) ? opt.text.section(QLatin1Char('.'), -1).toUpper().left(5) : QStringLiteral("?");
+            const QRect card(area.center() - QPoint(26, 32), QSize(52, 64));
+            p->setRenderHint(QPainter::Antialiasing);
+            p->setPen(QPen(opt.palette.color(QPalette::Mid), 1.5));
+            p->setBrush(opt.palette.color(QPalette::Base));
+            p->drawRoundedRect(card, 5, 5);
+            QFont f = opt.font;
+            f.setBold(true);
+            f.setPointSizeF(f.pointSizeF() * 0.95);
+            p->setFont(f);
+            p->setPen(opt.palette.color(QPalette::Highlight));
+            p->drawText(card, Qt::AlignCenter, ext);
+            p->setFont(opt.font);
         }
+
+        QStyleOptionViewItem check(opt);
+        check.rect = checkRect(opt);
+        check.state = check.state & ~QStyle::State_HasFocus;
+        check.state |= index.data(Qt::CheckStateRole).toInt() == Qt::Checked ? QStyle::State_On : QStyle::State_Off;
+        style->drawPrimitive(QStyle::PE_IndicatorItemViewItemCheck, &check, p, opt.widget);
+
+        const bool selected = opt.state & QStyle::State_Selected;
+        p->setPen(opt.palette.color(selected ? QPalette::HighlightedText : QPalette::Text));
+        const QRect text(opt.rect.left() + 4, opt.rect.bottom() - textHeight, opt.rect.width() - 8, textHeight);
+        // Two lines at most: what fits on the first (up to a space, when there's one), the rest
+        // on the second, cut short with "…" in the middle so the extension still shows.
+        const QString name = opt.text;
+        qsizetype cut = name.size();
+        while (cut > 0 && opt.fontMetrics.horizontalAdvance(name.left(cut)) > text.width())
+            --cut;
+        const qsizetype space = name.lastIndexOf(QLatin1Char(' '), cut);
+        if (cut < name.size() && space > cut / 2)
+            cut = space + 1;
+        QStringList lines = {name.left(cut).trimmed()};
+        if (cut < name.size())
+            lines << opt.fontMetrics.elidedText(name.mid(cut), Qt::ElideMiddle, text.width());
+        p->drawText(text, Qt::AlignHCenter | Qt::AlignTop, lines.join(QLatin1Char('\n')));
+        p->restore();
     }
 
-Q_SIGNALS:
-    void ready(int index, int size, const QImage &image);
-
-private:
-    struct Request {
-        int index = -1;
-        lost::Found file;
-        int size = 0;
-    };
-
-    QImage decode(const Request &r)
+    QSize sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const override
     {
-        if (r.file.type < 0 || r.file.size > quint64(kMostToDecode))
-            return {};
-        const QByteArray format = readerFormat(filetypes::types()[r.file.type].id);
-        if (format.isEmpty())
-            return {};
-        lost::FileReader reader(m_source, r.file);
-        QByteArray data = reader.head(qint64(r.file.size));
-        QBuffer buffer(&data);
-        buffer.open(QIODevice::ReadOnly);
-        // Only the reader for what it was found as ever sees the data.
-        QImageReader image(&buffer, format);
-        image.setDecideFormatFromContent(false);
-        image.setAutoDetectImageFormat(false);
-        image.setAutoTransform(true);
-        const QSize full = image.size();
-        if (full.isValid() && (full.width() > r.size || full.height() > r.size))
-            image.setScaledSize(full.scaled(QSize(r.size, r.size), Qt::KeepAspectRatio));
-        return image.read();
+        if (!grid(option))
+            return QStyledItemDelegate::sizeHint(option, index);
+        const auto *view = qobject_cast<const QListView *>(option.widget);
+        return view->gridSize();
     }
 
-    std::shared_ptr<lost::Source> m_source;
-    QMutex m_lock;
-    QWaitCondition m_wake;
-    QList<Request> m_queue;
-    bool m_stop = false;
+    bool editorEvent(QEvent *event, QAbstractItemModel *model, const QStyleOptionViewItem &option, const QModelIndex &index) override
+    {
+        if (!grid(option))
+            return QStyledItemDelegate::editorEvent(event, model, option, index);
+        // A click on the tick box ticks, anywhere else it just picks the file.
+        if (event->type() == QEvent::MouseButtonRelease || event->type() == QEvent::MouseButtonDblClick) {
+            const auto *mouse = static_cast<QMouseEvent *>(event);
+            if (mouse->button() == Qt::LeftButton && checkRect(option).adjusted(-3, -3, 3, 3).contains(mouse->position().toPoint())) {
+                const bool on = index.data(Qt::CheckStateRole).toInt() == Qt::Checked;
+                return model->setData(index, on ? Qt::Unchecked : Qt::Checked, Qt::CheckStateRole);
+            }
+        } else if (event->type() == QEvent::KeyPress && static_cast<QKeyEvent *>(event)->key() == Qt::Key_Space) {
+            const bool on = index.data(Qt::CheckStateRole).toInt() == Qt::Checked;
+            return model->setData(index, on ? Qt::Unchecked : Qt::Checked, Qt::CheckStateRole);
+        }
+        return false;
+    }
 };
 
 // --- The model
@@ -334,7 +355,9 @@ QVariant LostFilesModel::data(const QModelIndex &index, int role) const
         if (thumb != m_thumbnails.cend() && !thumb->isNull())
             return *thumb;
         const filetypes::Category category = f.type >= 0 ? filetypes::types()[f.type].category : filetypes::Category::Other;
-        if (category == filetypes::Category::Picture && !m_asked.contains(i)) {
+        const bool shows = category == filetypes::Category::Picture || category == filetypes::Category::Video
+                        || category == filetypes::Category::Music || (f.type >= 0 && filetypes::types()[f.type].id == QLatin1String("pdf"));
+        if (shows && !m_asked.contains(i)) {
             m_asked.insert(i);
             Q_EMIT wantThumbnail(i);
         }
@@ -477,6 +500,7 @@ LostFilesDialog::LostFilesDialog(UDisks *udisks, const QString &preferredPath, Q
     m_view->setObjectName(QStringLiteral("files"));
     m_view->setModel(m_model);
     m_view->setViewMode(QListView::IconMode);
+    m_view->setItemDelegate(new GridDelegate(m_view));
     m_view->setIconSize(QSize(kThumbnail, kThumbnail));
     m_view->setGridSize(QSize(kThumbnail + 40, kThumbnail + 44));
     m_view->setUniformItemSizes(true);
@@ -751,15 +775,13 @@ void LostFilesDialog::scanSource(std::shared_ptr<lost::Source> source, const QSt
         m_folders->setCurrentItem(everywhere);
     }
 
-    m_thumbs = new ThumbnailLoader(m_source);
-    connect(m_thumbs, &ThumbnailLoader::ready, this, [this](int index, int size, const QImage &image) {
-        if (size == kThumbnail) {
+    m_thumbs = new PreviewLoader(m_source);
+    connect(m_thumbs, &PreviewLoader::ready, this, [this](int index, int pixels, const QImage &image, const QString &text, bool failed) {
+        if (pixels == kThumbnail) {
             if (!image.isNull())
                 m_model->setThumbnail(index, QPixmap::fromImage(image));
         } else if (index == m_previewIndex) {
-            m_previewImage->setPixmap(image.isNull() ? QPixmap() : QPixmap::fromImage(image));
-            if (image.isNull())
-                m_previewImage->setText(tr("This picture can't be shown (it may be damaged)."));
+            showPreviewResult(image, text, failed);
         }
     });
     m_thumbThread = startOnThread(this, m_thumbs);
@@ -974,18 +996,41 @@ void LostFilesDialog::showPreview()
                                                  "from where it started. That's right for most files.");
     }
     html += QStringLiteral("<br><br><span style=\"color:%1\">●</span> %2").arg(colour.name(), conditionWords(f).toHtmlEscaped());
+    if (!f.note.isEmpty())
+        html += QStringLiteral("<br>") + f.note.toHtmlEscaped();
     m_details->setText(html);
-    if (type.category == filetypes::Category::Picture && !readerFormat(type.id).isEmpty()) {
-        m_previewImage->setText(tr("Loading the picture…"));
-        if (m_thumbs)
-            m_thumbs->want(i, f, kPreview);
-        return;
+    // The picture and the words come from the preview helper; until then, a moment.
+    m_previewImage->setText(tr("Loading…"));
+    if (m_thumbs)
+        m_thumbs->want(i, f, kPreview);
+}
+
+void LostFilesDialog::showPreviewResult(const QImage &image, const QString &text, bool failed)
+{
+    const lost::Found &f = m_model->file(m_previewIndex);
+    const filetypes::Category category = f.type >= 0 ? filetypes::types()[f.type].category : filetypes::Category::Other;
+    if (!image.isNull()) {
+        // Bigger than the room there is (a PDF page in a narrow window): scaled down to fit.
+        const QSize room = m_previewImage->size();
+        QPixmap pixmap = QPixmap::fromImage(image);
+        if (room.width() > 16 && room.height() > 16 && (pixmap.width() > room.width() || pixmap.height() > room.height()))
+            pixmap = pixmap.scaled(room, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        m_previewImage->setPixmap(pixmap);
+    } else if (failed)
+        m_previewImage->setText(tr("It can't be shown: it may be damaged, or not what its name says."));
+    else if (category == filetypes::Category::Picture)
+        m_previewImage->setText(tr("This picture can't be shown (it may be damaged)."));
+    else
+        m_previewImage->setPixmap(QIcon::fromTheme(categoryIcon(category)).pixmap(96, 96));
+    // Its words when there are some (a document's text, what's in an archive, a song's details),
+    // otherwise what its first bytes are.
+    if (!text.isEmpty()) {
+        m_hex->setPlainText(text);
+    } else {
+        lost::FileReader reader(m_source, f);
+        m_hex->setPlainText(gpt::hexDump(reader.head(512), 0));
     }
-    // Everything else: what its first bytes are, for now.
-    lost::FileReader reader(m_source, f);
-    m_hex->setPlainText(gpt::hexDump(reader.head(512), 0));
     m_hex->show();
-    m_previewImage->setPixmap(QIcon::fromTheme(categoryIcon(type.category)).pixmap(96, 96));
 }
 
 void LostFilesDialog::updateTicked()
@@ -1089,4 +1134,3 @@ void LostFilesDialog::reject()
     QDialog::reject();
 }
 
-#include "lostfilesdialog.moc"

@@ -60,6 +60,8 @@ add_library(diskforge-core STATIC
     src/lostsource.cpp src/lostsource.h
     src/lostscan.cpp src/lostscan.h
     src/lostfs.cpp src/lostfs.h src/lostntfs.cpp src/lostraw.h
+    src/mediainfo.cpp src/mediainfo.h
+    src/officetext.cpp src/officetext.h
     src/filetypes.cpp src/filetypes.h
     src/checksums.cpp src/checksums.h
     src/benchmark.cpp src/benchmark.h
@@ -116,6 +118,8 @@ add_library(diskforge-ui STATIC
     src/diskmap.cpp src/diskmap.h
     src/homewindow.cpp src/homewindow.h
     src/lostfilesdialog.cpp src/lostfilesdialog.h
+    src/preview.cpp src/preview.h
+    src/previewloader.cpp src/previewloader.h
     src/mainwindow.cpp src/mainwindow.h
     src/dialogs.cpp src/dialogs.h
     src/tools.cpp src/tools.h
@@ -151,6 +155,17 @@ add_library(diskforge-ui STATIC
     src/thememaker.cpp src/thememaker.h
 )
 target_link_libraries(diskforge-ui PUBLIC diskforge-core Qt6::Widgets Qt6::Network)
+# PDF pages in Find Lost Files' previews, when poppler's Qt 6 library is there (releases have it).
+option(DISKFORGE_PDF "Show PDF pages in Find Lost Files (needs poppler-qt6)" ON)
+if(DISKFORGE_PDF)
+    pkg_check_modules(POPPLER IMPORTED_TARGET poppler-qt6)
+    if(POPPLER_FOUND)
+        target_link_libraries(diskforge-ui PRIVATE PkgConfig::POPPLER)
+        target_compile_definitions(diskforge-ui PRIVATE DISKFORGE_PDF)
+    else()
+        message(STATUS "poppler-qt6 not found: Find Lost Files shows PDFs without their pages")
+    endif()
+endif()
 if(WIN32)
     target_link_libraries(diskforge-ui PRIVATE powrprof)
 endif()

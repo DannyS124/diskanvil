@@ -5,10 +5,12 @@
 #include "format.h"
 #include "homewindow.h"
 #include "mainwindow.h"
+#include "preview.h"
 #include "translations.h"
 #include "udisks.h"
 
 #include <QApplication>
+#include <QGuiApplication>
 #include <QCommandLineParser>
 #include <QIcon>
 #include <QMenu>
@@ -58,6 +60,12 @@ void dump(const QVector<Disk> &disks)
 
 int main(int argc, char *argv[])
 {
+    // Find Lost Files' preview helper (preview.h): no window, no screen, just answers.
+    if (argc == 2 && QByteArray(argv[1]) == "--preview-helper") {
+        qputenv("QT_QPA_PLATFORM", "offscreen");
+        QGuiApplication helper(argc, argv);
+        return preview::runHelper();
+    }
     // These never open a window, so they shouldn't need a screen (over SSH, on a text console).
     for (int i = 1; i < argc; ++i) {
         const QByteArray arg(argv[i]);

@@ -17,6 +17,10 @@
 #include "../src/blockio.h"
 #include "../src/imagesource.h"
 #include "../src/lostfilesdialog.h"
+#include "../src/filetypes.h"
+#include "../src/jobui.h"
+#include "../src/preview.h"
+#include "../src/previewloader.h"
 #include "../src/inspectdialog.h"
 #include "../src/isomode.h"
 #include "../src/filecopy.h"
@@ -42,10 +46,13 @@
 #include <QAbstractButton>
 #include <QAction>
 #include <QApplication>
+#include <QGuiApplication>
 #include <QCheckBox>
 #include <QStorageInfo>
 #include <QBuffer>
 #include <QPainter>
+#include <QPdfWriter>
+#include <QThread>
 #include <QListView>
 #include <QTreeWidget>
 #include <QTreeWidgetItemIterator>
@@ -2157,6 +2164,119 @@ void homeScreen()
 // Find Lost Files through its window: a disk image with pictures hidden in random bytes, looked
 // through, a picture previewed, everything ticked and saved, and the saved files compared. Then
 // saving onto the drive being looked through is refused.
+// A ZIP whose files are stored as they are, for the office previews.
+QByteArray storedZip(const QList<QPair<QByteArray, QByteArray>> &files)
+{
+    auto le16 = [](QByteArray &d, quint16 v) { d.append(char(v)).append(char(v >> 8)); };
+    auto le32 = [](QByteArray &d, quint32 v) { d.append(char(v)).append(char(v >> 8)).append(char(v >> 16)).append(char(v >> 24)); };
+    QByteArray out, central;
+    for (const auto &[name, data] : files) {
+        const quint32 crc = filetypes::crc32(reinterpret_cast<const uchar *>(data.constData()), data.size());
+        const quint32 at = quint32(out.size());
+        QByteArray local("PK\3\4", 4);
+        le16(local, 10); le16(local, 0); le16(local, 0); le16(local, 0); le16(local, 0);
+        le32(local, crc); le32(local, quint32(data.size())); le32(local, quint32(data.size()));
+        le16(local, quint16(name.size())); le16(local, 0);
+        out += local + name + data;
+        QByteArray entry("PK\1\2", 4);
+        le16(entry, 20); le16(entry, 10); le16(entry, 0); le16(entry, 0); le16(entry, 0); le16(entry, 0);
+        le32(entry, crc); le32(entry, quint32(data.size())); le32(entry, quint32(data.size()));
+        le16(entry, quint16(name.size())); le16(entry, 0); le16(entry, 0); le16(entry, 0); le16(entry, 0);
+        le32(entry, 0); le32(entry, at);
+        central += entry + name;
+    }
+    QByteArray end("PK\5\6", 4);
+    le16(end, 0); le16(end, 0); le16(end, quint16(files.size())); le16(end, quint16(files.size()));
+    le32(end, quint32(central.size())); le32(end, quint32(out.size()));
+    le16(end, 0);
+    return out + central + end;
+}
+
+// Previews come from the helper process (in its sandbox, where bwrap is here): a PDF's first
+// page, a Word document's text, an MP3's cover and tags; a broken file gets no picture but
+// doesn't take the helper down with it.
+void previewsThroughHelper()
+{
+    QByteArray pdf;
+    {
+        QBuffer buffer(&pdf);
+        buffer.open(QIODevice::WriteOnly);
+        QPdfWriter writer(&buffer);
+        writer.setTitle(QStringLiteral("Bank letter"));
+        QPainter p(&writer);
+        p.setFont(QFont(QStringLiteral("DejaVu Sans"), 24));
+        p.drawText(QRect(0, 0, 4000, 1000), QStringLiteral("Your account is fine."));
+    }
+    const QByteArray docx = storedZip({{"word/document.xml", "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">"
+                                                             "<w:body><w:p><w:r><w:t>Dear landlord,</w:t></w:r></w:p></w:body></w:document>"}});
+    QByteArray cover;
+    {
+        QImage image(64, 64, QImage::Format_RGB32);
+        image.fill(QColor(0x2b, 0xee, 0x8a));
+        QBuffer buffer(&cover);
+        buffer.open(QIODevice::WriteOnly);
+        image.save(&buffer, "PNG");
+    }
+    QByteArray frames;
+    for (int i = 0; i < 50; ++i)
+        frames += QByteArray("\xFF\xFB\x90\x00", 4) + QByteArray(413, '\x55');
+    auto frame = [](const char *id, const QByteArray &body) {
+        QByteArray f(id, 4);
+        const quint32 n = quint32(body.size());
+        f.append(char(n >> 24)).append(char(n >> 16)).append(char(n >> 8)).append(char(n));
+        return f + QByteArray(2, '\0') + body;
+    };
+    const QByteArray tags = frame("TIT2", QByteArray("\3Lost song", 10)) + frame("APIC", QByteArray("\0image/png\0\3\0", 13) + cover);
+    const quint32 n = quint32(tags.size());
+    const QByteArray mp3 = QByteArray("ID3\3\0\0", 6) + char((n >> 21) & 0x7F) + char((n >> 14) & 0x7F) + char((n >> 7) & 0x7F) + char(n & 0x7F) + tags + frames;
+    const QByteArray broken = QByteArray("\xFF\xD8\xFF\xE0", 4) + QByteArray(5000, '\x13');
+
+    // All of them one after the other on a pretend drive.
+    struct Sample {
+        QString name;
+        QByteArray data;
+    };
+    const QVector<Sample> samples = {{QStringLiteral("letter.pdf"), pdf}, {QStringLiteral("rent.docx"), docx}, {QStringLiteral("song.mp3"), mp3},
+                                     {QStringLiteral("broken.jpg"), broken}};
+    QByteArray drive;
+    QVector<lost::Found> files;
+    for (const Sample &sample : samples) {
+        lost::Found f;
+        f.name = sample.name;
+        f.type = filetypes::typeForName(sample.name);
+        f.size = quint64(sample.data.size());
+        f.extents = {{quint64(drive.size()), f.size}};
+        files << f;
+        drive += sample.data + QByteArray(4096 - sample.data.size() % 4096, '\0');
+    }
+    auto *loader = new PreviewLoader(lost::Source::fromMemory(drive));
+    QHash<int, std::tuple<QImage, QString, bool>> results;
+    QObject context;
+    QObject::connect(loader, &PreviewLoader::ready, &context, [&results](int index, int, const QImage &image, const QString &text, bool failed) {
+        results.insert(index, {image, text, failed});
+    });
+    QThread *thread = startOnThread(&context, loader);
+    for (int i = int(files.size()) - 1; i >= 0; --i)
+        loader->want(i, files[i], 480);
+    waitUntil([&] { return results.size() == files.size(); }, 60000);
+    loader->stop();
+    thread->quit();
+    thread->wait();
+
+    const auto [pdfImage, pdfText, pdfFailed] = results.value(0);
+    report(!pdfImage.isNull() && pdfText.contains(QLatin1String("Bank letter")) && pdfText.contains(QLatin1String("1 page")),
+           QStringLiteral("Find Lost Files: a PDF shows its first page and title"), QString(pdfText).replace(QLatin1Char('\n'), QLatin1String(" / ")));
+    report(std::get<1>(results.value(1)) == QLatin1String("Dear landlord,"), QStringLiteral("a Word document shows its text"), std::get<1>(results.value(1)));
+    const auto [songImage, songText, songFailed] = results.value(2);
+    report(!songImage.isNull() && songImage.pixel(5, 5) == QColor(0x2b, 0xee, 0x8a).rgb() && songText.contains(QLatin1String("Lost song")),
+           QStringLiteral("an MP3 shows its cover and title"), QString(songText).replace(QLatin1Char('\n'), QLatin1String(" / ")));
+    report(std::get<0>(results.value(3)).isNull() && results.size() == 4, QStringLiteral("a broken picture shows nothing and the helper carries on"));
+    const QStringList command = PreviewLoader::helperCommand(true);
+    if (!QStandardPaths::findExecutable(QStringLiteral("bwrap")).isEmpty())
+        report(command.first().endsWith(QLatin1String("bwrap")) && command.contains(QStringLiteral("--unshare-all")),
+               QStringLiteral("the helper runs in a bubblewrap sandbox"), command.first());
+}
+
 // A FAT32 image with deleted files (tests/data/lostfs): they show with their names, under their
 // folders, and the deleted folder's files are found by picking it in the tree.
 void lostFilesFromFileSystem()
@@ -2212,6 +2332,14 @@ void lostFilesFromFileSystem()
     auto *details = dialog.findChild<QLabel *>(QStringLiteral("details"));
     report(details->text().contains(QLatin1String("Was in TESTFAT32/Old stuff")) && details->text().contains(QLatin1String("should open fine")),
            QStringLiteral("its details say where it was and that it's whole"), details->text().left(160));
+
+    // DISKFORGE_UITEST_SHOTS=folder: a picture of the window as it is now, to look at.
+    if (qEnvironmentVariableIsSet("DISKFORGE_UITEST_SHOTS")) {
+        folders->setCurrentItem(folders->topLevelItem(0));
+        QApplication::processEvents();
+        dialog.grab().save(qEnvironmentVariable("DISKFORGE_UITEST_SHOTS") + QStringLiteral("/lostfiles-fat32.png"));
+        folders->setCurrentItem(oldStuff);
+    }
 
     // Unticking "Only deleted files" shows the two that are still there too.
     auto *deletedOnly = dialog.findChild<QCheckBox *>(QStringLiteral("deletedOnly"));
@@ -2481,6 +2609,7 @@ int userScenarios()
     homeScreen();
     lostFilesThroughWindow();
     lostFilesFromFileSystem();
+    previewsThroughHelper();
     out << (failures ? QStringLiteral("%1 step(s) failed").arg(failures) : QStringLiteral("All steps passed")) << Qt::endl;
     return failures ? 1 : 0;
 }
@@ -2489,6 +2618,12 @@ int userScenarios()
 
 int main(int argc, char *argv[])
 {
+    // Find Lost Files starts this program as its preview helper, as it would DiskForge itself.
+    if (argc == 2 && QByteArray(argv[1]) == "--preview-helper") {
+        qputenv("QT_QPA_PLATFORM", "offscreen");
+        QGuiApplication helper(argc, argv);
+        return preview::runHelper();
+    }
     QApplication app(argc, argv);
     // As the user: the add-on, menu and theme parts, which need no test disks.
     if (app.arguments().contains(QStringLiteral("--user")))

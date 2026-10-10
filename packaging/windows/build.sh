@@ -9,7 +9,7 @@ root=$(cd "$(dirname "$0")/../.." && pwd)
 work=$(realpath -m "${1:-${DISKFORGE_WINDOWS_WORK:-$HOME/.cache/diskforge-windows}}")
 mkdir -p "$work"
 
-python3 "$root/packaging/windows/fetch-msys2.py" "$work" qt6-base qt6-svg qt6-imageformats qt6-translations zstd libarchive openssl
+python3 "$root/packaging/windows/fetch-msys2.py" "$work" qt6-base qt6-svg qt6-imageformats qt6-translations zstd libarchive openssl poppler-qt6
 qt=$(sed -n 's/^set(PACKAGE_VERSION "\([0-9.]*\)")$/\1/p' "$work/sysroot/ucrt64/lib/cmake/Qt6Core/Qt6CoreConfigVersionImpl.cmake")
 hostqt="$work/hostqt/$qt/gcc_64"
 if [[ ! -x $hostqt/libexec/moc ]]; then

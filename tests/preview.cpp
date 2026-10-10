@@ -3,6 +3,7 @@
 
 // Renders the dialogs to PNGs: QT_QPA_PLATFORM=offscreen diskforge-preview <dir>
 
+#include "../src/preview.h"
 #include "../src/about.h"
 #include "../src/addonform.h"
 #include "../src/addonmaker.h"
@@ -35,6 +36,7 @@
 #include "../src/udisks.h"
 
 #include <QApplication>
+#include <QGuiApplication>
 #include <QDir>
 #include <QIcon>
 #include <QCheckBox>
@@ -74,6 +76,12 @@ void save(QWidget &widget, const QString &path)
 
 int main(int argc, char *argv[])
 {
+    // Find Lost Files starts this program as its preview helper, as it would DiskForge itself.
+    if (argc == 2 && QByteArray(argv[1]) == "--preview-helper") {
+        qputenv("QT_QPA_PLATFORM", "offscreen");
+        QGuiApplication helper(argc, argv);
+        return preview::runHelper();
+    }
     QApplication app(argc, argv);
     // Without a desktop there's no icon theme; DISKFORGE_PREVIEW_ICONS=breeze-dark (say) picks one,
     // for screenshots that look like the app does on a desktop.

@@ -13,10 +13,13 @@
 #include "../src/lostfs.h"
 #include "../src/lostscan.h"
 #include "../src/lostsource.h"
+#include "../src/mediainfo.h"
+#include "../src/officetext.h"
 
 #include <QBuffer>
 #include <QCryptographicHash>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QImage>
 #include <QPainter>
@@ -688,6 +691,176 @@ int scanImage(const QString &path)
     return 0;
 }
 
+// --- What the previews read: media details, office text, archive listings
+
+QByteArray fullBox(const char *type, quint8 version, const QByteArray &body)
+{
+    return box(type, QByteArray(1, char(version)) + QByteArray(3, '\0') + body);
+}
+
+QByteArray mp4Film()
+{
+    QByteArray mvhd(8, '\0'); // created, changed
+    be32(mvhd, 1000);         // time scale
+    be32(mvhd, 125000);       // duration: 125 s
+    mvhd.append(QByteArray(80, '\0'));
+    QByteArray tkhd(72, '\0');
+    be32(tkhd, 1920 << 16);
+    be32(tkhd, 1080 << 16);
+    QByteArray stsd;
+    be32(stsd, 1); // one entry
+    QByteArray entry("avc1");
+    entry.append(QByteArray(78, '\0'));
+    QByteArray sized;
+    be32(sized, quint32(4 + entry.size()));
+    stsd.append(sized + entry);
+    QByteArray hdlr(4, '\0');
+    hdlr.append("vide").append(QByteArray(12, '\0')).append("Video\0", 6);
+    const QByteArray trak = box("trak", fullBox("tkhd", 0, tkhd)
+                                            + box("mdia", fullBox("hdlr", 0, hdlr) + box("minf", box("stbl", fullBox("stsd", 0, stsd)))));
+    auto tag = [](const char *type, const QByteArray &value) {
+        QByteArray data;
+        be32(data, 1); // UTF-8
+        be32(data, 0);
+        return box(type, box("data", data + value));
+    };
+    const QByteArray ilst = box("ilst", tag("\xa9nam", "Beach day") + tag("\xa9" "ART", "Danny"));
+    const QByteArray udta = box("udta", fullBox("meta", 0, QByteArray() + ilst).mid(0));
+    return box("ftyp", QByteArray("isom\0\0\x02\0isomavc1", 16)) + box("moov", fullBox("mvhd", 0, mvhd) + trak + udta)
+           + box("mdat", QByteArray(4096, '\x11'));
+}
+
+QByteArray syncsafe(quint32 v)
+{
+    return QByteArray(1, char((v >> 21) & 0x7F)) + char((v >> 14) & 0x7F) + char((v >> 7) & 0x7F) + char(v & 0x7F);
+}
+
+QByteArray mp3Song(const QByteArray &cover)
+{
+    auto frame = [](const char *id, const QByteArray &body) {
+        QByteArray f(id, 4);
+        be32(f, quint32(body.size()));
+        return f + QByteArray(2, '\0') + body;
+    };
+    const QByteArray frames = frame("TIT2", QByteArray("\3Song title", 11)) + frame("TPE1", QByteArray("\3The band", 9))
+                              + frame("TALB", QByteArray("\3First album", 12)) + frame("TYER", QByteArray("\0" "2024", 5))
+                              + frame("APIC", QByteArray("\0image/png\0\3\0", 13) + cover);
+    QByteArray out = QByteArray("ID3\3\0\0", 6) + syncsafe(quint32(frames.size())) + frames;
+    for (int i = 0; i < 400; ++i) { // 128 kbit/s MPEG-1 layer III frames: 400 of them, about 10 s
+        QByteArray f(417, '\x55');
+        f[0] = char(0xFF);
+        f[1] = char(0xFB);
+        f[2] = char(0x90);
+        f[3] = char(0x00);
+        out += f;
+    }
+    return out;
+}
+
+QByteArray oggSong()
+{
+    QByteArray id("\x01vorbis", 7);
+    le32(id, 0); // version
+    id.append(char(2));
+    le32(id, 44100);
+    id.append(QByteArray(13, '\0')).append(char(1));
+    QByteArray comments("\x03vorbis", 7);
+    le32(comments, 4);
+    comments.append("test");
+    le32(comments, 2);
+    for (const QByteArray &c : {QByteArray("TITLE=Night song"), QByteArray("ARTIST=Someone")}) {
+        le32(comments, quint32(c.size()));
+        comments.append(c);
+    }
+    comments.append(char(1));
+    return oggPage(0x02, 0, id) + oggPage(0x00, 1, comments) + oggPage(0x04, 2, QByteArray(100, 'b'));
+}
+
+void mediaAndOffice()
+{
+    const int mp4Type = filetypes::typeNumber(QStringLiteral("mp4")), mp3Type = filetypes::typeNumber(QStringLiteral("mp3"));
+    const QByteArray film = mp4Film();
+    const mediainfo::Info f = mediainfo::read(mp4Type, film, quint64(film.size()));
+    report(f.durationMs == 125000 && f.width == 1920 && f.height == 1080 && f.codec == QLatin1String("H.264") && f.title == QLatin1String("Beach day"),
+           QStringLiteral("previews: an MP4 film's length, size, codec and title"), mediainfo::describe(f).replace(QLatin1Char('\n'), QLatin1String(" / ")));
+
+    const QByteArray cover = picture("PNG");
+    const QByteArray song = mp3Song(cover);
+    const mediainfo::Info m = mediainfo::read(mp3Type, song, quint64(song.size()));
+    report(m.title == QLatin1String("Song title") && m.artist == QLatin1String("The band") && m.album == QLatin1String("First album")
+               && m.year == QLatin1String("2024") && m.cover == cover && m.sampleRate == 44100 && m.durationMs > 9000 && m.durationMs < 12000,
+           QStringLiteral("previews: an MP3's tags, its cover and about how long it is"), mediainfo::describe(m).replace(QLatin1Char('\n'), QLatin1String(" / ")));
+
+    const QByteArray night = oggSong();
+    const mediainfo::Info o = mediainfo::read(filetypes::typeNumber(QStringLiteral("ogg")), night, quint64(night.size()));
+    report(o.codec == QLatin1String("Vorbis") && o.title == QLatin1String("Night song") && o.artist == QLatin1String("Someone") && o.sampleRate == 44100
+               && o.channels == 2,
+           QStringLiteral("previews: an Ogg song's codec and tags"), mediainfo::describe(o).replace(QLatin1Char('\n'), QLatin1String(" / ")));
+
+    const QByteArray sound = wav();
+    const mediainfo::Info w = mediainfo::read(filetypes::typeNumber(QStringLiteral("wav")), sound, quint64(sound.size()));
+    report(w.durationMs == 1000 && w.sampleRate == 44100 && w.channels == 1, QStringLiteral("previews: how long a WAV is"), mediainfo::describe(w));
+
+    // Office files: their text, in order.
+    const QByteArray docx = zip({{"[Content_Types].xml", "<Types/>"},
+                                 {"word/document.xml", "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body>"
+                                                       "<w:p><w:r><w:t>Dear landlord,</w:t></w:r></w:p><w:p><w:r><w:t>the rent </w:t></w:r>"
+                                                       "<w:r><w:t>is paid.</w:t></w:r></w:p></w:body></w:document>"}});
+    report(officetext::text(filetypes::typeNumber(QStringLiteral("docx")), docx) == QLatin1String("Dear landlord,\nthe rent is paid."),
+           QStringLiteral("previews: a Word document's text"), officetext::text(filetypes::typeNumber(QStringLiteral("docx")), docx));
+    const QByteArray odt = zip({{"mimetype", "application/vnd.oasis.opendocument.text"},
+                                {"content.xml", "<office:document-content xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" "
+                                                "xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\"><office:body><office:text>"
+                                                "<text:h>Shopping</text:h><text:p>Milk<text:s/>and <text:span>bread</text:span></text:p>"
+                                                "</office:text></office:body></office:document-content>"}});
+    report(officetext::text(filetypes::typeNumber(QStringLiteral("odt")), odt) == QLatin1String("Shopping\nMilk and bread"),
+           QStringLiteral("previews: an OpenDocument text's words"), officetext::text(filetypes::typeNumber(QStringLiteral("odt")), odt));
+    const QByteArray pptx = zip({{"ppt/slides/slide2.xml", "<p:sld xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:p=\"x\">"
+                                                           "<a:p><a:r><a:t>Second</a:t></a:r></a:p></p:sld>"},
+                                 {"ppt/slides/slide1.xml", "<p:sld xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" xmlns:p=\"x\">"
+                                                           "<a:p><a:r><a:t>First</a:t></a:r></a:p></p:sld>"}});
+    report(officetext::text(filetypes::typeNumber(QStringLiteral("pptx")), pptx) == QLatin1String("First\n\nSecond"),
+           QStringLiteral("previews: a PowerPoint's slides in order"), officetext::text(filetypes::typeNumber(QStringLiteral("pptx")), pptx));
+    const QByteArray xlsx = zip({{"xl/sharedStrings.xml", "<sst xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">"
+                                                          "<si><t>Name</t></si><si><t>Total</t></si></sst>"}});
+    report(officetext::text(filetypes::typeNumber(QStringLiteral("xlsx")), xlsx) == QLatin1String("Name\nTotal"),
+           QStringLiteral("previews: the words in an Excel sheet"));
+
+    bool complete = false;
+    const QVector<officetext::Entry> entries = officetext::list(docx, 100, &complete);
+    report(entries.size() == 2 && complete && entries[1].path == QLatin1String("word/document.xml") && entries[1].size > 100,
+           QStringLiteral("previews: what's in a ZIP"), QString::number(entries.size()));
+
+    // XML that would grow without end if every entity were expanded: it stops, quickly.
+    QByteArray bomb = "<?xml version=\"1.0\"?><!DOCTYPE d [<!ENTITY a \"aaaaaaaaaa\">";
+    for (int i = 1; i < 12; ++i)
+        bomb += "<!ENTITY " + QByteArray(1, char('a' + i)) + " \"" + QByteArray("&").append(char('a' + i - 1)).append(';').repeated(10) + "\">";
+    bomb += "]><w:document xmlns:w=\"x\"><w:p><w:t>&l;</w:t></w:p></w:document>";
+    QElapsedTimer timer;
+    timer.start();
+    const QString exploded = officetext::text(filetypes::typeNumber(QStringLiteral("docx")), zip({{"word/document.xml", bomb}}));
+    report(timer.elapsed() < 5000 && exploded.size() <= 4000, QStringLiteral("previews: an XML bomb is cut short"),
+           QStringLiteral("%1 ms, %2 characters").arg(timer.elapsed()).arg(exploded.size()));
+
+    // Damaged ones: random bytes, cut-off copies and flipped bytes never crash the readers.
+    QRandomGenerator rnd(42);
+    int runs = 0;
+    for (const QByteArray &sample : {film, song, night, sound, docx, odt}) {
+        for (int round = 0; round < 200; ++round) {
+            QByteArray broken = sample.left(rnd.bounded(int(sample.size())) + 1);
+            for (int k = 0; k < 20 && !broken.isEmpty(); ++k)
+                broken[rnd.bounded(int(broken.size()))] = char(rnd.bounded(256));
+            for (const QString &id : {QStringLiteral("mp4"), QStringLiteral("mp3"), QStringLiteral("ogg"), QStringLiteral("wav"), QStringLiteral("avi")})
+                mediainfo::read(filetypes::typeNumber(id), broken, quint64(sample.size()));
+            for (const QString &id : {QStringLiteral("docx"), QStringLiteral("odt"), QStringLiteral("pptx"), QStringLiteral("xlsx")})
+                officetext::text(filetypes::typeNumber(id), broken);
+            officetext::list(broken, 50);
+            ++runs;
+        }
+    }
+    report(runs == 1200, QStringLiteral("previews: 1200 damaged files read without a crash"));
+}
+
 void lostFilesTests()
 {
     QTemporaryDir dir;
@@ -697,4 +870,5 @@ void lostFilesTests()
     fuzz();
     fileSystems(dir.path());
     fileSystemFuzz();
+    mediaAndOffice();
 }
