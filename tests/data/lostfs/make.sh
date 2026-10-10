@@ -12,30 +12,7 @@ mnt="$work/mnt"
 mkdir -p "$mnt" "$work/files"
 trap 'mountpoint -q "$mnt" && sudo umount "$mnt"; rm -rf "$work"' EXIT
 
-# Pictures of random dots (they don't pack small, so they span several clusters), always the same.
-python3 -I - "$work/files" <<'PY'
-import random, sys
-from PIL import Image
-out = sys.argv[1]
-def dots(path, w, h, seed, fmt):
-    rnd = random.Random(seed)
-    img = Image.new("RGB", (w, h))
-    img.putdata([(rnd.randrange(256), rnd.randrange(256), rnd.randrange(256)) for _ in range(w * h)])
-    img.save(path, fmt, **({"quality": 90} if fmt == "JPEG" else {}))
-dots(f"{out}/photo.jpg", 64, 48, 1, "JPEG")
-dots(f"{out}/holiday.jpg", 96, 64, 2, "JPEG")
-dots(f"{out}/pic1.png", 48, 48, 3, "PNG")
-dots(f"{out}/pic2.jpg", 80, 60, 4, "JPEG")
-dots(f"{out}/scan.png", 40, 40, 5, "PNG")
-dots(f"{out}/kitten.jpg", 72, 72, 6, "JPEG")
-PY
-# A small PDF, the same one the carving tests make.
-printf '%s\n' '%PDF-1.4' '1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj' \
-    '2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj' \
-    '3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >> endobj' \
-    'trailer << /Root 1 0 R >>' '%%EOF' > "$work/files/letter.pdf"
-printf 'Things to remember.\nThe stick is in the drawer.\n' > "$work/files/notes.txt"
-printf 'An old-style 8.3 name: FAT keeps no long name for it.\n' > "$work/files/readme.txt"
+python3 -I "$here/files.py" "$work/files"
 
 make() { # name, size in MiB, mount type, mkfs command...
     local name=$1 size=$2 type=$3
@@ -98,5 +75,8 @@ make exfat 16 exfat mkfs.exfat -L TESTEXFAT
 make ntfs 16 ntfs-3g mkntfs -q -F -Q -L TESTNTFS
 # Linux's own NTFS driver deletes differently: it takes the names away.
 make ntfs-linux 16 ntfs3 mkntfs -q -F -Q -L TESTNTFS3
+# ntfs-windows.img.zst is made by Windows itself (windows-job.cmd, then blank-boot-code.py), so
+# it's kept as it is.
+grep '^ntfs-windows|' "$here/expected.txt" >> "$work/expected.txt" || true
 cp "$work/expected.txt" "$here/expected.txt"
 ls -la "$here"

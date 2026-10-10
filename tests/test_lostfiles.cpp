@@ -497,14 +497,16 @@ void fileSystems(const QString &dir)
     }
     const QHash<QString, QString> labels = {{QStringLiteral("fat12"), QStringLiteral("TESTFAT12")}, {QStringLiteral("fat16"), QStringLiteral("TESTFAT16")},
                                             {QStringLiteral("fat32"), QStringLiteral("TESTFAT32")}, {QStringLiteral("exfat"), QStringLiteral("TESTEXFAT")},
-                                            {QStringLiteral("ntfs"), QStringLiteral("TESTNTFS")}};
-    for (const QString &name : {QStringLiteral("fat12"), QStringLiteral("fat16"), QStringLiteral("fat32"), QStringLiteral("exfat"), QStringLiteral("ntfs")}) {
+                                            {QStringLiteral("ntfs"), QStringLiteral("TESTNTFS")}, {QStringLiteral("ntfs-windows"), QStringLiteral("WINNTFS")}};
+    // ntfs-windows: made and deleted from by Windows itself (windows-job.cmd).
+    for (const QString &name : {QStringLiteral("fat12"), QStringLiteral("fat16"), QStringLiteral("fat32"), QStringLiteral("exfat"), QStringLiteral("ntfs"),
+                                QStringLiteral("ntfs-windows")}) {
         const QByteArray image = unpack(data + name + QStringLiteral(".img.zst"));
         report(!image.isEmpty(), QStringLiteral("%1: the test image unpacks").arg(name));
         auto source = lost::Source::fromMemory(image);
         QVector<lost::Volume> volumes;
         const QVector<lost::Found> found = quickScan(source, &volumes);
-        const QString type = name.startsWith(QLatin1String("fat")) ? QStringLiteral("vfat") : name;
+        const QString type = name.startsWith(QLatin1String("fat")) ? QStringLiteral("vfat") : name.section(QLatin1Char('-'), 0, 0);
         report(volumes.size() == 1 && volumes.value(0).label == labels[name] && volumes.value(0).type == type,
                QStringLiteral("%1: the file system and its label are found").arg(name),
                volumes.isEmpty() ? QStringLiteral("none") : volumes[0].type + QLatin1Char(' ') + volumes[0].label);
@@ -664,6 +666,26 @@ void fileSystemFuzz()
         }
     }
     report(runs == 4 * rounds, QStringLiteral("file systems: %1 damaged images read without a crash").arg(4 * rounds));
+}
+
+int scanImage(const QString &path)
+{
+    QString error;
+    auto source = lost::Source::fromImage(path, &error);
+    if (!source) {
+        out << error << Qt::endl;
+        return 1;
+    }
+    QVector<lost::Volume> volumes;
+    const QVector<lost::Found> found = quickScan(source, &volumes);
+    for (const lost::Volume &v : std::as_const(volumes))
+        out << v.type << " " << v.label << " at " << v.where.start << ": " << v.files << " files, " << v.deleted << " deleted" << Qt::endl;
+    for (const lost::Found &f : found) {
+        out << (f.deleted ? "deleted " : "        ") << f.folder << "/" << f.name << "  " << f.size << " bytes, condition "
+            << int(f.condition) << (f.checked ? " checked" : "") << (f.nameGuessed ? " name-guessed" : "")
+            << (f.note.isEmpty() ? QString() : QStringLiteral("  (%1)").arg(f.note)) << Qt::endl;
+    }
+    return 0;
 }
 
 void lostFilesTests()

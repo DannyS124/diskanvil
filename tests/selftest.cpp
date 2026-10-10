@@ -929,6 +929,9 @@ int main(int argc, char *argv[])
         windowsTests();
     } else if (args.contains(QStringLiteral("--lostfiles"))) {
         lostFilesTests();
+    } else if (args.contains(QStringLiteral("--scan-image"))) {
+        // For looking into a problem by hand: what Find Lost Files' quick scan lists in an image.
+        return scanImage(args.value(args.indexOf(QStringLiteral("--scan-image")) + 1));
     } else if (args.contains(QStringLiteral("--raid"))) {
         if (needsRoot("--raid"))
             return 2;

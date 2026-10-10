@@ -48,3 +48,11 @@ ntfs-linux|Pictures/2024/pic2.jpg|no|5189|c444bf89ff27949491b6598c7819bc1c0f09fe
 ntfs-linux|Old stuff/letter.pdf|yes|218|6350af32579ffbd7b251a6244bf9bd036d303cbc7404ae06d5e02f1b8f5b994f
 ntfs-linux|Old stuff/scan.png|yes|4908|44281c966097fb9ce19a7a667390389a129f3f539bdea83ed9faf417f56604bf
 ntfs-linux|Recycle Bin/kitten.jpg|yes|5526|cc9ae193453d191999ddd3290d47d45e1bf3665f8a71a4c6d244827f7e6bd451
+ntfs-windows|photo.jpg|no|3362|c30ec95dfbc01e68ba7e8ac4e10e00a2494babadad20e90546dd4d6c26be8008
+ntfs-windows|Holiday photo with a long name.jpg|yes|6132|be0565189c1ff73baa285bf66c65e7a9d302b46ec47640c6e92b2701b2ccbaab
+ntfs-windows|notes.txt|yes|48|c6b6687f042b5f2cc58f44b0046fbc58571aded0a9dd82eed6b92455d36e351e
+ntfs-windows|README.TXT|yes|54|fd953933cea03f04fc90164d4389b3a09e47c301ecbf7189af1efaa830e9133f
+ntfs-windows|Pictures/2024/pic1.png|yes|7028|c90fd8f7352e1bbdf0ef0a7e48870c59544760b09c386fc5bdda54155f55023f
+ntfs-windows|Pictures/2024/pic2.jpg|no|5189|c444bf89ff27949491b6598c7819bc1c0f09fea870f06c841eec7cdff6cd99dc
+ntfs-windows|Old stuff/letter.pdf|yes|218|6350af32579ffbd7b251a6244bf9bd036d303cbc7404ae06d5e02f1b8f5b994f
+ntfs-windows|Old stuff/scan.png|yes|4908|44281c966097fb9ce19a7a667390389a129f3f539bdea83ed9faf417f56604bf

@@ -58,6 +58,7 @@ void imageTests();
 void isoModeTests();
 void windowsTests();
 void lostFilesTests();
+int scanImage(const QString &path);
 void raidTests();
 void lvmTests();
 void stopTests();

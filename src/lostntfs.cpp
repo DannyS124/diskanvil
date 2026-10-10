@@ -522,12 +522,18 @@ bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::
     }
 
     const bool listLive = liveFiles <= kListLiveFilesUpTo;
+    // NTFS's and Windows' own bookkeeping, deleted or not, is nobody's lost file.
+    const QStringList internal = {top + QStringLiteral("/$Extend"), top + QStringLiteral("/System Volume Information")};
     QVector<Found> batch;
     int listed = 0, deleted = 0;
     for (Candidate &c : candidates) {
         if (cancel)
             break;
         QString folder = pathOf(c.parent, c.parentSequence, 0);
+        if (std::any_of(internal.cbegin(), internal.cend(), [&folder](const QString &skip) {
+                return folder.compare(skip, Qt::CaseInsensitive) == 0 || folder.startsWith(skip + QLatin1Char('/'), Qt::CaseInsensitive);
+            }))
+            continue;
         QString name = c.name;
         QString note;
         bool binned = false;
