@@ -15,6 +15,7 @@
 #include "../src/lostsource.h"
 #include "../src/mediainfo.h"
 #include "../src/officetext.h"
+#include "../src/vdisk.h"
 #include "../src/vshadow.h"
 
 #include <QBuffer>
@@ -1035,6 +1036,148 @@ void shadowCopyFuzz()
     report(runs == rounds, QStringLiteral("shadow copies: %1 damaged sets of records read without a crash").arg(runs));
 }
 
+// A compressed test file unpacked to `to`, sparse: the 64 KiB pieces that are only zeros are left
+// as holes, so a big, mostly empty disk takes up little room (memory, when it's in /tmp).
+bool unpackSparse(const QString &from, const QString &to)
+{
+    QString error;
+    const std::unique_ptr<ImageSource> image = ImageSource::open(from, &error);
+    QFile out(to);
+    if (!image || !out.open(QIODevice::WriteOnly))
+        return false;
+    QByteArray piece(64 * 1024, Qt::Uninitialized);
+    qint64 size = 0;
+    for (bool more = true; more;) {
+        qint64 filled = 0;
+        for (qint64 n = 1; filled < piece.size() && n > 0; filled += std::max<qint64>(n, 0))
+            n = image->read(piece.data() + filled, piece.size() - filled);
+        more = filled == piece.size();
+        if (piece.left(filled).count('\0') != filled && (!out.seek(size) || out.write(piece.constData(), filled) != filled))
+            return false;
+        size += filled;
+    }
+    return out.resize(size);
+}
+
+// Virtual machines' disk files (tests/data/vdisk/make.sh): the same small disk in every format and
+// kind qemu-img writes reads back byte for byte, with its files found; the disks that only hold
+// changes made to another one are refused, naming it.
+void virtualDisks()
+{
+    const QString data = QStringLiteral(SOURCE_DIR "/tests/data/vdisk/");
+    QTemporaryDir dir;
+    int unpacked = 0;
+    for (const QString &name : QDir(data).entryList({QStringLiteral("*.zst")}, QDir::Files))
+        unpacked += unpackSparse(data + name, dir.filePath(name.chopped(4)));
+    QFile sum(data + QStringLiteral("disk.sha256"));
+    const QByteArray want = sum.open(QIODevice::ReadOnly) ? sum.readAll().trimmed() : QByteArray();
+    report(unpacked >= 23 && !want.isEmpty(), QStringLiteral("virtual disks: the test disks unpack"), QString::number(unpacked));
+    constexpr quint64 kDisk = 40 * kMiB;
+    struct Case {
+        const char *file, *format, *refused;
+    };
+    const Case cases[] = {
+        {"dynamic.vdi", "VDI", nullptr},    {"fixed.vdi", "VDI", nullptr},          {"dynamic.vhd", "VHD", nullptr},
+        {"fixed.vhd", "VHD", nullptr},      {"dynamic.vhdx", "VHDX", nullptr},      {"fixed.vhdx", "VHDX", nullptr},
+        {"sparse.vmdk", "VMDK", nullptr},   {"stream.vmdk", "VMDK", nullptr},       {"split.vmdk", "VMDK", nullptr},
+        {"flat.vmdk", "VMDK", nullptr},     {"plain.qcow2", "QCOW2", nullptr},      {"v2.qcow2", "QCOW2", nullptr},
+        {"packed.qcow2", "QCOW2", nullptr}, {"zstd.qcow2", "QCOW2", nullptr},       {"subclusters.qcow2", "QCOW2", nullptr},
+        {"child.qcow2", "QCOW2", "plain.qcow2"}, {"child.vmdk", "VMDK", "sparse.vmdk"},
+        // Made by Windows itself (windows-job.ps1).
+        {"win-dynamic.vhdx", "VHDX", nullptr}, {"win-dynamic.vhd", "VHD", nullptr}, {"win-fixed.vhd", "VHD", nullptr},
+    };
+    for (const Case &c : cases) {
+        const QString name = QString::fromLatin1(c.file), path = dir.filePath(name);
+        report(vdisk::formatOf(path) == QLatin1String(c.format), QStringLiteral("virtual disks: %1 is known as %2").arg(name, QLatin1String(c.format)),
+               vdisk::formatOf(path));
+        QString problem, warning;
+        const auto disk = vdisk::open(path, &problem, &warning);
+        if (c.refused) {
+            report(!disk && problem.contains(QLatin1String(c.refused)), QStringLiteral("%1: refused on its own, naming the disk it needs").arg(name), problem);
+            continue;
+        }
+        report(disk != nullptr && warning.isEmpty(), QStringLiteral("%1: opens").arg(name), problem + warning);
+        if (!disk)
+            continue;
+        QCryptographicHash sha(QCryptographicHash::Sha256);
+        QByteArray buffer(qsizetype(kMiB), Qt::Uninitialized);
+        bool zerosAfter = true;
+        for (quint64 at = 0, n = 0; at < disk->size(); at += n) {
+            n = std::min<quint64>(kMiB, disk->size() - at);
+            disk->read(at, buffer.data(), n);
+            const quint64 inside = at < kDisk ? std::min(n, kDisk - at) : 0;
+            sha.addData(QByteArrayView(buffer.constData(), qsizetype(inside)));
+            zerosAfter = zerosAfter && QByteArrayView(buffer.constData() + inside, qsizetype(n - inside)).count('\0') == qsizetype(n - inside);
+        }
+        report(disk->size() >= kDisk && sha.result().toHex() == want && zerosAfter, QStringLiteral("%1: reads back as the disk, byte for byte").arg(name),
+               QString::number(disk->size()));
+        QVector<lost::Volume> volumes;
+        QStringList files;
+        for (const lost::Found &f : quickScan(disk, &volumes))
+            files << f.name.toLower();
+        files.sort();
+        report(volumes.size() == 1 && volumes[0].label == QLatin1String("VDISKFAT") && files == QStringList({QStringLiteral("notes.txt"), QStringLiteral("numbers.txt")}),
+               QStringLiteral("%1: Find Lost Files finds what's on it").arg(name), files.join(QStringLiteral(", ")));
+    }
+}
+
+// Virtual machines' disk files with their headers and tables flipped at random (the first MiB and
+// the last 64 KiB of each, where those are, and anywhere now and then): opening, reading all of
+// the disk and looking through it must never crash or loop.
+void virtualDiskFuzz()
+{
+    const QString data = QStringLiteral(SOURCE_DIR "/tests/data/vdisk/");
+    QTemporaryDir dir;
+    for (const QString &name : QDir(data).entryList({QStringLiteral("*.zst")}, QDir::Files))
+        unpackSparse(data + name, dir.filePath(name.chopped(4)));
+    QRandomGenerator rnd(20261012);
+    const int rounds = qEnvironmentVariableIsSet("DISKFORGE_FUZZ_ROUNDS") ? qEnvironmentVariableIntValue("DISKFORGE_FUZZ_ROUNDS") / 10 + 1 : 4;
+    int runs = 0;
+    const QStringList files = {QStringLiteral("dynamic.vdi"), QStringLiteral("dynamic.vhd"), QStringLiteral("fixed.vhd"), QStringLiteral("dynamic.vhdx"),
+                               QStringLiteral("sparse.vmdk"), QStringLiteral("stream.vmdk"), QStringLiteral("split-s001.vmdk"), QStringLiteral("plain.qcow2"),
+                               QStringLiteral("packed.qcow2"), QStringLiteral("zstd.qcow2"), QStringLiteral("subclusters.qcow2")};
+    for (const QString &name : files) {
+        QFile original(dir.filePath(name));
+        if (!original.open(QIODevice::ReadOnly))
+            continue;
+        const qint64 size = original.size();
+        const QByteArray head = original.read(std::min<qint64>(size, qint64(kMiB)));
+        original.seek(std::max<qint64>(0, size - 65536));
+        const QByteArray tail = original.read(65536);
+        original.close();
+        // The split disk's descriptor names its extent file, so that one is changed in place.
+        const QString broken = name.startsWith(QLatin1String("split")) ? dir.filePath(name) : dir.filePath(QStringLiteral("broken-") + name);
+        if (broken != dir.filePath(name))
+            QFile::copy(dir.filePath(name), broken);
+        for (int round = 0; round < rounds; ++round) {
+            QByteArray h = head, t = tail;
+            for (int k = 0; k < 40; ++k) {
+                if (k % 4 == 3)
+                    t[rnd.bounded(int(t.size()))] = char(rnd.bounded(256));
+                else
+                    h[rnd.bounded(k % 2 ? 4096 : int(h.size()))] = char(rnd.bounded(256));
+            }
+            QFile f(broken);
+            if (!f.open(QIODevice::ReadWrite))
+                break;
+            f.write(h);
+            f.seek(std::max<qint64>(0, size - 65536));
+            f.write(t);
+            f.close();
+            QString problem;
+            const QString open = broken.endsWith(QLatin1String("split-s001.vmdk")) ? dir.filePath(QStringLiteral("split.vmdk")) : broken;
+            if (const auto disk = vdisk::open(open, &problem)) {
+                QByteArray buffer(qsizetype(kMiB), Qt::Uninitialized);
+                for (quint64 at = 0; at < std::min<quint64>(disk->size(), 64 * kMiB); at += kMiB)
+                    disk->read(at, buffer.data(), std::min<quint64>(kMiB, disk->size() - at));
+                quickScan(disk);
+            }
+            ++runs;
+        }
+    }
+    report(runs == rounds * int(files.size()), QStringLiteral("virtual disks: %1 damaged disk files read without a crash").arg(runs));
+}
+
 // For looking into shadow copies by hand: each copy of the NTFS volume an image holds (from its
 // start), the way shadow-job.ps1 has Windows write it down.
 int shadowImage(const QString &path)
@@ -1315,5 +1458,7 @@ void lostFilesTests()
     fileSystemFuzz();
     shadowCopies();
     shadowCopyFuzz();
+    virtualDisks();
+    virtualDiskFuzz();
     mediaAndOffice();
 }

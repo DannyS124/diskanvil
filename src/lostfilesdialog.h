@@ -168,6 +168,7 @@ private:
     std::shared_ptr<lost::Source> m_source;
     QString m_diskDevice;
     QString m_title;
+    QString m_sourceWarning; // what's worth saying about where the files are (a disk file not closed properly)
     lost::QuickScan *m_quick = nullptr;
     QThread *m_quickThread = nullptr;
     lost::DeepScan *m_scan = nullptr;

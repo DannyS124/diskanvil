@@ -2289,15 +2289,14 @@ void previewsThroughHelper()
                QStringLiteral("the helper runs in a bubblewrap sandbox"), command.first());
 }
 
-// One of tests/data/lostfs's images, unpacked into `dir`; empty when it couldn't be.
-QString unpackLostFsImage(const QString &name, const QTemporaryDir &dir)
+// A compressed test file unpacked to `path`; empty when it couldn't be.
+QString unpackTestFile(const QString &packed, const QString &path)
 {
     QString error;
-    const auto image = ImageSource::open(QStringLiteral(SOURCE_DIR "/tests/data/lostfs/") + name + QStringLiteral(".img.zst"), &error);
-    const QString path = dir.filePath(name + QStringLiteral(".img"));
+    const auto image = ImageSource::open(packed, &error);
     QFile out(path);
     if (!image || !out.open(QIODevice::WriteOnly)) {
-        report(false, QStringLiteral("unpack the %1 test image").arg(name), error);
+        report(false, QStringLiteral("unpack %1").arg(QFileInfo(packed).fileName()), error);
         return {};
     }
     // Sparse: what's only zeros is left as a hole, so a big, mostly empty image takes up little
@@ -2317,6 +2316,12 @@ QString unpackLostFsImage(const QString &name, const QTemporaryDir &dir)
     }
     out.resize(size);
     return path;
+}
+
+// One of tests/data/lostfs's images, unpacked into `dir`; empty when it couldn't be.
+QString unpackLostFsImage(const QString &name, const QTemporaryDir &dir)
+{
+    return unpackTestFile(QStringLiteral(SOURCE_DIR "/tests/data/lostfs/") + name + QStringLiteral(".img.zst"), dir.filePath(name + QStringLiteral(".img")));
 }
 
 // A FAT32 image with deleted files (tests/data/lostfs): they show with their names, under their
@@ -2380,6 +2385,33 @@ void lostFilesFromFileSystem()
     deletedOnly->setChecked(false);
     report(view->model()->rowCount() == 8, QStringLiteral("and the files that weren't deleted show when asked"),
            QString::number(view->model()->rowCount()));
+}
+
+// Virtual machines' disk files (tests/data/vdisk): Find Lost Files reads a VHDX as the disk inside
+// it, and turns down one that only holds the changes made to another, saying which.
+void lostFilesFromVirtualDisk()
+{
+    QTemporaryDir dir;
+    for (const char *name : {"dynamic.vhdx", "child.qcow2"})
+        unpackTestFile(QStringLiteral(SOURCE_DIR "/tests/data/vdisk/") + QLatin1String(name) + QStringLiteral(".zst"), dir.filePath(QLatin1String(name)));
+    UDisks udisks;
+    LostFilesDialog dialog(&udisks, QString());
+    dialog.show();
+    dialog.scanImage(dir.filePath(QStringLiteral("child.qcow2")));
+    auto *note = dialog.findChild<QLabel *>(QStringLiteral("driveNote"));
+    report(note->text().contains(QLatin1String("child.qcow2 can't be looked through")) && note->text().contains(QLatin1String("plain.qcow2")),
+           QStringLiteral("Find Lost Files: a disk that's only changes to another says which one it needs"), note->text());
+    dialog.scanImage(dir.filePath(QStringLiteral("dynamic.vhdx")));
+    auto *status = dialog.findChild<QLabel *>(QStringLiteral("status"));
+    waitUntil([&] { return status->text().startsWith(QLatin1String("Done")); }, 60000);
+    dialog.findChild<QCheckBox *>(QStringLiteral("deletedOnly"))->setChecked(false);
+    auto *view = dialog.findChild<QListView *>(QStringLiteral("files"));
+    QStringList names;
+    for (int r = 0; r < view->model()->rowCount(); ++r)
+        names << view->model()->index(r, 0).data().toString().toLower();
+    names.sort();
+    report(status->text().contains(QLatin1String("dynamic.vhdx")) && names == QStringList({QStringLiteral("notes.txt"), QStringLiteral("numbers.txt")}),
+           QStringLiteral("a VHDX is read as the disk inside it"), status->text() + QStringLiteral(" / ") + names.join(QStringLiteral(", ")));
 }
 
 // Windows' earlier copies of a drive (tests/data/lostfs/shadow-job.ps1): once the drive's file
@@ -3436,7 +3468,7 @@ int userScenarios(const QStringList &only)
         {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostfs", lostFilesFromFileSystem},
-        {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies},
+        {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},
         {"previews", previewsThroughHelper}, {"viruses", virusScanThroughWindow}, {"virusdrive", virusScanOnDrive}, {"viruswindows", virusScanWindowsDrive}, {"virusboot", virusScanBoot}, {"viruslookup", virusLookUpOnline}, {"newids", newIdsThroughWindow},
     };
     for (const auto &[name, run] : scenarios) {

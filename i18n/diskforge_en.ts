@@ -75,7 +75,7 @@
 <context>
     <name>LostFilesDialog</name>
     <message numerus="yes">
-        <location filename="../src/lostfilesdialog.cpp" line="922"/>
+        <location filename="../src/lostfilesdialog.cpp" line="928"/>
         <source>Windows kept %n earlier version(s) of this drive, the newest from %1. Files that have changed or gone since can come back from them.</source>
         <translation>
             <numerusform>Windows kept %n earlier version of this drive, the newest from %1. Files that have changed or gone since can come back from them.</numerusform>
@@ -83,11 +83,19 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfilesdialog.cpp" line="965"/>
+        <location filename="../src/lostfilesdialog.cpp" line="971"/>
         <source>%n file(s) from the earlier versions have changed or gone since: they&apos;re in the &quot;as it was on&quot; folders.</source>
         <translation>
             <numerusform>%n file from the earlier versions have changed or gone since: they're in the "as it was on" folders.</numerusform>
             <numerusform>%n files from the earlier versions have changed or gone since: they're in the "as it was on" folders.</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/lostfilesdialog.cpp" line="1023"/>
+        <source>Done: nothing deleted was found on %1. %n file(s) that weren&apos;t deleted show when &quot;Only deleted files&quot; is unticked.</source>
+        <translation>
+            <numerusform>Done: nothing deleted was found on %1. %n file that weren't deleted show when "Only deleted files" is unticked.</numerusform>
+            <numerusform>Done: nothing deleted was found on %1. %n files that weren't deleted show when "Only deleted files" is unticked.</numerusform>
         </translation>
     </message>
 </context>

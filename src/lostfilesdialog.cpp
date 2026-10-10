@@ -13,6 +13,7 @@
 #include "lostfs.h"
 #include "previewloader.h"
 #include "udisks.h"
+#include "vdisk.h"
 
 #include <QApplication>
 #include <QBuffer>
@@ -793,8 +794,10 @@ void LostFilesDialog::start()
 
 void LostFilesDialog::chooseImage()
 {
-    const QString file = QFileDialog::getOpenFileName(this, tr("Choose a Disk Image"), QDir::homePath(),
-                                                      tr("Disk images (*.img *.iso *.raw *.dd *.bin);;All files (*)"));
+    const QString file = QFileDialog::getOpenFileName(
+        this, tr("Choose a Disk Image"), QDir::homePath(),
+        tr("Disk images (*.img *.iso *.raw *.dd *.bin *.vdi *.vmdk *.vhd *.vhdx *.qcow2);;Virtual machines' disks (*.vdi *.vmdk *.vhd *.vhdx "
+           "*.qcow2);;All files (*)"));
     if (!file.isEmpty())
         scanImage(file);
 }
@@ -806,19 +809,22 @@ void LostFilesDialog::scanImage(const QString &path)
                                         "to a drive).")));
         return;
     }
-    QString error;
-    auto source = lost::Source::fromImage(path, &error);
+    QString error, warning;
+    // A virtual machine's disk file is read as the disk inside it.
+    auto source = vdisk::formatOf(path).isEmpty() ? lost::Source::fromImage(path, &error) : vdisk::open(path, &error, &warning);
     if (!source) {
-        m_driveNote->setText(redText(error.toHtmlEscaped()));
+        m_driveNote->setText(redText(tr("%1 can't be looked through. %2").arg(QFileInfo(path).fileName(), error).toHtmlEscaped()));
         return;
     }
     scanSource(source, QFileInfo(path).fileName(), QString());
+    m_sourceWarning = warning;
 }
 
 void LostFilesDialog::scanSource(std::shared_ptr<lost::Source> source, const QString &title, const QString &diskDevice)
 {
     stopWorkers();
     m_source = std::move(source);
+    m_sourceWarning.clear();
     m_title = title;
     m_diskDevice = diskDevice;
     m_model->clear();
@@ -1013,8 +1019,13 @@ void LostFilesDialog::scanDone(bool stopped)
         text = tr("Done. Nothing was found on %1.").arg(m_title);
     else if (kept == 0)
         text = tr("Done: found %1 files on %2.").arg(deleted).arg(m_title);
+    else if (deleted == 0)
+        text = tr("Done: nothing deleted was found on %1. %n file(s) that weren't deleted show when \"Only deleted files\" is unticked.", nullptr, kept)
+                   .arg(m_title);
     else
         text = tr("Done: found %1 deleted files on %2, and %3 that weren't deleted.").arg(deleted).arg(m_title).arg(kept);
+    if (!m_sourceWarning.isEmpty())
+        text += QLatin1Char(' ') + m_sourceWarning;
     m_status->setText(text);
     refreshFolderCounts();
     updateTicked();

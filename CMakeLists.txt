@@ -25,6 +25,7 @@ endif()
 qt_standard_project_setup(I18N_SOURCE_LANGUAGE en)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(ZSTD REQUIRED IMPORTED_TARGET libzstd)
+pkg_check_modules(ZLIB REQUIRED IMPORTED_TARGET zlib) # packed grains and clusters in virtual machines' disks
 if(NOT WIN32)
     pkg_check_modules(BLKID REQUIRED IMPORTED_TARGET blkid) # util-linux, finds file systems for Recover Partitions
 endif()
@@ -61,6 +62,7 @@ add_library(diskforge-core STATIC
     src/lostscan.cpp src/lostscan.h
     src/lostfs.cpp src/lostfs.h src/lostntfs.cpp src/lostraw.h
     src/vshadow.cpp src/vshadow.h
+    src/vdisk.cpp src/vdisk.h
     src/mediainfo.cpp src/mediainfo.h
     src/officetext.cpp src/officetext.h
     src/virusscan.cpp src/virusscan.h
@@ -109,7 +111,7 @@ if(WIN32)
         src/win/winutil.cpp src/win/winutil.h
         src/win/winstartup_win.cpp
         src/win/unavailable.cpp)
-    target_link_libraries(diskforge-core PUBLIC Qt6::Core PRIVATE PkgConfig::ZSTD PkgConfig::ARCHIVE OpenSSL::Crypto
+    target_link_libraries(diskforge-core PUBLIC Qt6::Core PRIVATE PkgConfig::ZSTD PkgConfig::ZLIB PkgConfig::ARCHIVE OpenSSL::Crypto
         setupapi cfgmgr32 ole32 oleaut32 wbemuuid uuid virtdisk)
     # Large files and the Windows 10 API (CM_Register_Notification, storage queries).
     target_compile_definitions(diskforge-core PUBLIC _FILE_OFFSET_BITS=64 _WIN32_WINNT=0x0A00 WINVER=0x0A00 UNICODE _UNICODE NOMINMAX)
@@ -117,7 +119,7 @@ else()
     target_sources(diskforge-core PRIVATE
         src/udisks.cpp src/operations.cpp src/dbusnames.h
         src/systemd.cpp src/snapper.cpp src/firmware.cpp src/partscan.cpp)
-    target_link_libraries(diskforge-core PUBLIC Qt6::Core Qt6::DBus PRIVATE PkgConfig::ZSTD PkgConfig::BLKID PkgConfig::ARCHIVE OpenSSL::Crypto)
+    target_link_libraries(diskforge-core PUBLIC Qt6::Core Qt6::DBus PRIVATE PkgConfig::ZSTD PkgConfig::ZLIB PkgConfig::BLKID PkgConfig::ARCHIVE OpenSSL::Crypto)
 endif()
 target_include_directories(diskforge-core PUBLIC src)
 target_compile_definitions(diskforge-core PUBLIC ${APP_DEFINITIONS})
