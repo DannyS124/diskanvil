@@ -7,11 +7,15 @@
 // text and DeviceIoControl with answers of any size.
 
 #include <QByteArray>
+#include <QHash>
 #include <QString>
 
+#include <functional>
 #include <string>
 
 #include <windows.h>
+
+class QObject;
 
 namespace win {
 
@@ -71,5 +75,14 @@ bool ioctl(HANDLE h, DWORD code, const void *in, DWORD inSize, void *out, DWORD 
 
 // Lower case without braces, the way Linux shows GUIDs.
 QString guidString(const GUID &g);
+
+// Windows' own cmdlets (the Storage Management API that Disk Management uses, Optimize-Volume,
+// scheduled tasks...), each in a PowerShell of its own. The script goes in encoded, and the
+// values as environment variables, so nothing in them can change what runs. `done` gets whether
+// it worked and what the script wrote, or Windows' own words when it didn't.
+void powerShell(QObject *owner, const QString &script, const QHash<QString, QString> &values,
+                const std::function<void(bool ok, const QString &said)> &done);
+// A cmdlet's error the way people read it: without "Activity ID: {...}" and the like.
+QString windowsWords(QString said);
 
 } // namespace win

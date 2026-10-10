@@ -53,7 +53,7 @@
 <context>
     <name>CleanupDialog</name>
     <message numerus="yes">
-        <location filename="../src/systemtools.cpp" line="443"/>
+        <location filename="../src/systemtools.cpp" line="447"/>
         <source>%n item(s) couldn&apos;t be deleted (first: %1).</source>
         <translation>
             <numerusform>%n item couldn't be deleted (first: %1).</numerusform>
@@ -145,7 +145,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/fswalk.cpp" line="37"/>
+        <location filename="../src/fswalk.cpp" line="38"/>
         <source>%n smaller file(s)</source>
         <translation>
             <numerusform>%n smaller file</numerusform>
@@ -153,7 +153,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/usagedialog.cpp" line="50"/>
+        <location filename="../src/usagedialog.cpp" line="53"/>
         <source>%n file(s)</source>
         <translation>
             <numerusform>%n file</numerusform>
@@ -372,7 +372,7 @@
 <context>
     <name>SnapshotsDialog</name>
     <message numerus="yes">
-        <location filename="../src/systemtools.cpp" line="537"/>
+        <location filename="../src/systemtools.cpp" line="543"/>
         <source>&lt;small&gt;%n snapshot(s). Sizes aren&apos;t shown: Btrfs only knows them with quotas switched on, which slows it down. To go back to a snapshot, use snapper or the snapshot entries in your boot menu.&lt;/small&gt;</source>
         <translation>
             <numerusform>&lt;small&gt;%n snapshot. Sizes aren't shown: Btrfs only knows them with quotas switched on, which slows it down. To go back to a snapshot, use snapper or the snapshot entries in your boot menu.&lt;/small&gt;</numerusform>
@@ -434,7 +434,7 @@
 <context>
     <name>UsageDialog</name>
     <message numerus="yes">
-        <location filename="../src/usagedialog.cpp" line="337"/>
+        <location filename="../src/usagedialog.cpp" line="341"/>
         <source>%n folder(s) couldn&apos;t be opened (they belong to the system or other users), so the total may be a little low.</source>
         <translation>
             <numerusform>%n folder couldn't be opened (they belong to the system or other users), so the total may be a little low.</numerusform>

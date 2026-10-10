@@ -765,7 +765,7 @@ void MainWindow::createActions()
 
 #ifdef Q_OS_WIN
     // Linux's own things (LUKS, fstab, RAID, Btrfs), and what the Windows version can't do yet.
-    for (QAction *a : {m_lock, m_changePass, m_startup, m_raidCheck, m_snapshots, m_recover, m_secureErase, m_cleanup, m_optimize})
+    for (QAction *a : {m_lock, m_changePass, m_startup, m_raidCheck, m_snapshots, m_recover, m_secureErase})
         a->setVisible(false);
 #endif
 

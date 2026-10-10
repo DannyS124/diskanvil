@@ -78,43 +78,9 @@ QString partitionPath(DWORD disk, DWORD partition)
 
 // What a storage cmdlet said, without its trimmings: the sentence after "Extended information",
 // when there's one, and no "Activity ID".
-QString windowsWords(QString said)
-{
-    said = said.simplified();
-    const qsizetype extended = said.indexOf(QLatin1String("Extended information:"));
-    if (extended >= 0)
-        said = said.mid(extended + 21);
-    static const QRegularExpression activity(QStringLiteral("\\s*Activity ID: \\{[^}]*\\}"));
-    return said.remove(activity).trimmed();
-}
-
-// Windows' own storage cmdlets (New-Partition, Format-Volume...: the Storage Management API that
-// Disk Management uses too), each in a PowerShell of its own. The script goes in encoded, and the
-// values as environment variables, so nothing in them can change what runs. `done` gets whether
-// it worked, and Windows' own words when it didn't.
 void storage(QObject *owner, const QString &script, const QHash<QString, QString> &values, const std::function<void(bool, const QString &)> &done)
 {
-    auto *ps = new QProcess(owner);
-    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-    for (auto it = values.cbegin(); it != values.cend(); ++it)
-        env.insert(it.key(), it.value());
-    ps->setProcessEnvironment(env);
-    QObject::connect(ps, &QProcess::finished, owner, [ps, done](int code, QProcess::ExitStatus status) {
-        ps->deleteLater();
-        done(status == QProcess::NormalExit && code == 0, windowsWords(QString::fromUtf8(ps->readAllStandardOutput())));
-    });
-    // Progress records (modules being set up the first time) would come out as XML.
-    const QString wrapped = QStringLiteral("[Console]::OutputEncoding = [Text.Encoding]::UTF8; $ErrorActionPreference = 'Stop'; "
-                                           "$ProgressPreference = 'SilentlyContinue'; "
-                                           "try { %1 } catch { Write-Output $_.Exception.Message; exit 1 }")
-                                .arg(script);
-    QByteArray utf16;
-    for (const QChar c : wrapped) {
-        utf16 += char(c.unicode() & 0xff);
-        utf16 += char(c.unicode() >> 8);
-    }
-    ps->start(QStringLiteral("powershell.exe"), {QStringLiteral("-NoProfile"), QStringLiteral("-NonInteractive"), QStringLiteral("-ExecutionPolicy"),
-                                                 QStringLiteral("Bypass"), QStringLiteral("-EncodedCommand"), QString::fromLatin1(utf16.toBase64())});
+    win::powerShell(owner, script, values, done);
 }
 
 int diskNumber(const QString &blockPath)

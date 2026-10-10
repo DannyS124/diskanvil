@@ -20,6 +20,80 @@ class QThread;
 class QTreeWidget;
 class Systemd;
 
+#ifdef Q_OS_WIN
+
+// On Windows, with Windows' own tools (src/win/systemtools_win.cpp): Optimize-Volume, which
+// trims SSDs and defragments hard drives, and the weekly task Windows runs it from; the
+// temporary folders, the Recycle Bin, error reports and Delivery Optimization's downloads.
+class OptimizeDialog : public QDialog
+{
+    Q_OBJECT
+public:
+    explicit OptimizeDialog(UDisks *udisks, QWidget *parent = nullptr);
+
+protected:
+    void reject() override;
+
+private:
+    void refresh();
+    void askAboutTask();
+    void optimizeNext(QStringList letters);
+
+    UDisks *m_udisks;
+    QTreeWidget *m_list;
+    QLabel *m_last;
+    QCheckBox *m_weekly;
+    QPushButton *m_now;
+    QLabel *m_status;
+    bool m_running = false;
+};
+
+class CleanupDialog : public QDialog
+{
+    Q_OBJECT
+public:
+    explicit CleanupDialog(UDisks *udisks, QWidget *parent = nullptr);
+    ~CleanupDialog() override;
+
+    struct Sizes {
+        quint64 userTemp = 0;
+        quint64 windowsTemp = 0;
+        quint64 recycleBin = 0;
+        quint64 errorReports = 0;
+        quint64 delivery = 0; // Delivery Optimization's cache
+    };
+
+protected:
+    void reject() override;
+
+private:
+    void measure(const QString &done = {});
+    void showSizes(const Sizes &sizes);
+    void clean();
+    void setBusy(bool busy, const QString &text = {});
+
+    UDisks *m_udisks;
+    QCheckBox *m_userTemp;
+    QCheckBox *m_windowsTemp;
+    QCheckBox *m_recycle;
+    QCheckBox *m_reports;
+    QCheckBox *m_delivery;
+    QLabel *m_userTempSize;
+    QLabel *m_windowsTempSize;
+    QLabel *m_recycleSize;
+    QLabel *m_reportsSize;
+    QLabel *m_deliverySize;
+    QLabel *m_status;
+    QPushButton *m_clean;
+    QThread *m_thread = nullptr;
+    Sizes m_sizes;
+    quint64 m_before = 0;
+    QStringList m_problems;
+    bool m_busy = false;
+};
+
+#else
+
 class OptimizeDialog : public QDialog
 {
     Q_OBJECT
@@ -85,6 +159,8 @@ private:
     QStringList m_problems;
     bool m_busy = false;
 };
+
+#endif
 
 Q_DECLARE_METATYPE(CleanupDialog::Sizes)
 

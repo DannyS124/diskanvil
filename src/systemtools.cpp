@@ -39,6 +39,7 @@ const QString kPackageService = QStringLiteral("paccache.service");
 const QString kUninstalledService = QStringLiteral("diskforge-paccache-uninstalled.service");
 const QString kJournalService = QStringLiteral("diskforge-journal-vacuum.service");
 
+#ifndef Q_OS_WIN // for Optimize, which is Windows' own there
 // Mount options for a mount point, the per-mount and the file system's own together.
 QString mountOptions(const QString &mountPoint)
 {
@@ -63,6 +64,7 @@ QString when(quint64 usec)
         return QObject::tr("never");
     return QLocale().toString(QDateTime::fromMSecsSinceEpoch(qint64(usec / 1000)), QLocale::ShortFormat);
 }
+#endif
 
 QTreeWidget *plainList(const QStringList &headers)
 {
@@ -75,6 +77,8 @@ QTreeWidget *plainList(const QStringList &headers)
 }
 
 } // namespace
+
+#ifndef Q_OS_WIN // Windows' are in win/systemtools_win.cpp
 
 // --- Optimize -----------------------------------------------------------------
 
@@ -457,6 +461,8 @@ void CleanupDialog::startUnits(QStringList units, const std::function<void()> &d
         startUnits(units, done);
     });
 }
+
+#endif // !Q_OS_WIN
 
 // --- Btrfs snapshots ----------------------------------------------------------
 
