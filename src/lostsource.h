@@ -23,6 +23,17 @@ struct Extent {
     bool zeros() const { return start == kZeros; }
 };
 
+// Bytes worked out from other bytes as they're read: one of Windows' shadow copies of a volume,
+// say. Reads have to be safe from several threads at once.
+class Layer
+{
+public:
+    virtual ~Layer() = default;
+    virtual quint64 size() const = 0;
+    // Exactly `len` bytes at `offset` (inside size()); false when they can't be had.
+    virtual bool read(quint64 offset, char *buf, quint64 len) = 0;
+};
+
 class Source
 {
 public:
@@ -30,6 +41,7 @@ public:
     static std::shared_ptr<Source> fromFd(int fd, bool direct);
     static std::shared_ptr<Source> fromImage(const QString &path, QString *error);
     static std::shared_ptr<Source> fromMemory(QByteArray data);
+    static std::shared_ptr<Source> fromLayer(std::unique_ptr<Layer> layer);
     ~Source();
     Source(const Source &) = delete;
     Source &operator=(const Source &) = delete;
@@ -54,6 +66,7 @@ private:
     void markBad(quint64 offset, quint64 len);
 
     int m_fd = -1;
+    std::unique_ptr<Layer> m_layer;
     bool m_direct = false;
     bool m_memory = false;
     QByteArray m_data;

@@ -64,6 +64,7 @@ void startupTests();
 void bootTests();
 void newIdsTests();
 int scanImage(const QString &path);
+int shadowImage(const QString &path);
 void raidTests();
 void lvmTests();
 void stopTests();

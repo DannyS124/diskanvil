@@ -15,6 +15,7 @@
 #include "../src/lostsource.h"
 #include "../src/mediainfo.h"
 #include "../src/officetext.h"
+#include "../src/vshadow.h"
 
 #include <QBuffer>
 #include <QCryptographicHash>
@@ -25,6 +26,7 @@
 #include <QPainter>
 #include <QRandomGenerator>
 #include <QTemporaryDir>
+#include <QTimeZone>
 #include <QtEndian>
 
 #include <archive.h>
@@ -467,6 +469,57 @@ QByteArray unpack(const QString &path)
     return out;
 }
 
+// A big test image that's mostly zeros, unpacked keeping only the 64 KiB pieces that aren't:
+// the shadow copies' gigabyte volume takes a few megabytes of memory this way.
+struct SparseImage {
+    static constexpr quint64 kPiece = 64 * 1024;
+    quint64 size = 0;
+    QHash<quint64, QByteArray> pieces;
+
+    static SparseImage unpack(const QString &path)
+    {
+        SparseImage out;
+        QString error;
+        const std::unique_ptr<ImageSource> image = ImageSource::open(path, &error);
+        QByteArray piece(qsizetype(kPiece), Qt::Uninitialized);
+        for (bool more = image != nullptr; more;) {
+            qsizetype filled = 0;
+            for (qint64 n = 1; filled < piece.size() && n > 0; filled += qsizetype(std::max<qint64>(n, 0)))
+                n = image->read(piece.data() + filled, piece.size() - filled);
+            more = filled == piece.size();
+            if (piece.left(filled).count('\0') != filled)
+                out.pieces.insert(out.size / kPiece, piece.left(filled));
+            out.size += quint64(filled);
+        }
+        return out;
+    }
+
+    std::shared_ptr<lost::Source> source() const
+    {
+        struct Layer : lost::Layer {
+            SparseImage image;
+            quint64 size() const override { return image.size; }
+            bool read(quint64 offset, char *buf, quint64 len) override
+            {
+                while (len > 0) {
+                    const quint64 in = offset % kPiece, n = std::min(len, kPiece - in);
+                    const QByteArray piece = image.pieces.value(offset / kPiece);
+                    const quint64 have = quint64(piece.size()) > in ? std::min<quint64>(n, quint64(piece.size()) - in) : 0;
+                    memcpy(buf, piece.constData() + in, have);
+                    memset(buf + have, 0, n - have);
+                    offset += n;
+                    buf += n;
+                    len -= n;
+                }
+                return true;
+            }
+        };
+        auto layer = std::make_unique<Layer>();
+        layer->image = *this;
+        return lost::Source::fromLayer(std::move(layer));
+    }
+};
+
 // Runs a quick scan to the end on this thread and collects what it found.
 QVector<lost::Found> quickScan(const std::shared_ptr<lost::Source> &source, QVector<lost::Volume> *volumes = nullptr)
 {
@@ -780,6 +833,190 @@ int scanImage(const QString &path)
     return 0;
 }
 
+// Windows' shadow copies, on a disk Windows made and took two copies of (shadow-job.ps1): each
+// copy reads back the way Windows itself read it, the same files and the same bytes (but where
+// Windows leaves them undefined: shadow-finish.sh).
+void shadowCopies()
+{
+    const QString data = QStringLiteral(SOURCE_DIR "/tests/data/lostfs/");
+    const SparseImage image = SparseImage::unpack(data + QStringLiteral("ntfs-shadow.img.zst"));
+    const auto source = image.source();
+    const lost::Extent where{0, source->size()};
+    QFile list(data + QStringLiteral("shadow-expected.txt"));
+    report(image.size > 0 && list.open(QIODevice::ReadOnly), QStringLiteral("shadow copies: the test disk and what Windows read from it"));
+    struct Expected {
+        QString id, time;
+        quint64 size = 0;
+        QByteArray digest;
+        QSet<quint64> undefined;
+        QVector<QPair<QString, QByteArray>> files;
+    };
+    QVector<Expected> expected;
+    for (const QByteArray &line : list.readAll().split('\n')) {
+        const QList<QByteArray> f = line.split('|');
+        if (f.value(0) == "copy" && f.size() == 7) {
+            Expected e{QString::fromUtf8(f[2]), QString::fromUtf8(f[3]), f[4].toULongLong(), f[5], {}, {}};
+            for (const QByteArray &mib : f[6].split(','))
+                e.undefined.insert(mib.toULongLong());
+            expected << e;
+        } else if (f.value(0) == "file" && f.size() == 4 && !expected.isEmpty()) {
+            expected.back().files.push_back({QString::fromUtf8(f[2]), f[3]});
+        }
+    }
+
+    QString problem;
+    const QVector<vss::Copy> copies = vss::copies(*source, where, &problem);
+    report(copies.size() == expected.size() && expected.size() == 2 && problem.isEmpty(), QStringLiteral("shadow copies: both of Windows' copies are found"),
+           QStringLiteral("%1, %2").arg(copies.size()).arg(problem));
+    for (int i = 0; i < std::min(copies.size(), expected.size()); ++i) {
+        const Expected &e = expected[i];
+        const QString what = QStringLiteral("shadow copy %1").arg(i + 1);
+        const QString time = QDateTime::fromMSecsSinceEpoch(copies[i].created, QTimeZone::UTC).toString(Qt::ISODate).chopped(1);
+        report(copies[i].id == e.id && time == e.time, what + QStringLiteral(": its ID and when it was taken"), copies[i].id + QLatin1Char(' ') + time);
+        const auto copy = vss::open(source, where, i, &problem);
+        report(copy != nullptr, what + QStringLiteral(": opens"), problem);
+        if (!copy)
+            continue;
+        QHash<QString, lost::Found> files;
+        for (const lost::Found &f : quickScan(copy)) {
+            const QString folder = f.folder.section(QLatin1Char('/'), 1);
+            if (!f.deleted)
+                files.insert(folder.isEmpty() ? f.name : folder + QLatin1Char('/') + f.name, f);
+        }
+        for (const auto &[path, sha256] : e.files) {
+            if (sha256 == "missing") {
+                report(!files.contains(path), what + QStringLiteral(": %1 isn't in it, as Windows said").arg(path));
+                continue;
+            }
+            const auto f = files.constFind(path);
+            QByteArray got;
+            if (f != files.cend())
+                got = QCryptographicHash::hash(lost::FileReader(copy, *f).head(qint64(f->size)), QCryptographicHash::Sha256).toHex();
+            report(got == sha256, what + QStringLiteral(": %1 is what Windows read").arg(path));
+        }
+        // The whole volume, a MiB at a time.
+        QCryptographicHash digest(QCryptographicHash::Sha256);
+        QByteArray buffer(qsizetype(kMiB), Qt::Uninitialized);
+        for (quint64 mib = 0; mib * kMiB < e.size; ++mib) {
+            const quint64 n = std::min<quint64>(kMiB, e.size - mib * kMiB);
+            if (e.undefined.contains(mib))
+                continue;
+            copy->read(mib * kMiB, buffer.data(), n);
+            digest.addData(QStringLiteral("mib %1 %2 %3\n")
+                               .arg(mib)
+                               .arg(n)
+                               .arg(QString::fromLatin1(QCryptographicHash::hash(QByteArrayView(buffer.constData(), qsizetype(n)), QCryptographicHash::Sha256).toHex()))
+                               .toUtf8());
+        }
+        report(digest.result().toHex() == e.digest, what + QStringLiteral(": every MiB is what Windows read"));
+    }
+
+    // A volume with no copies has none, and says nothing's wrong.
+    {
+        auto plain = lost::Source::fromMemory(unpack(data + QStringLiteral("ntfs-windows.img.zst")));
+        QString why;
+        report(vss::copies(*plain, {0, plain->size()}, &why).isEmpty() && why.isEmpty(), QStringLiteral("shadow copies: none on a volume without any"));
+    }
+}
+
+// Shadow copies' own records flipped at random: the catalog and every store's header, list and
+// bitmaps. It must never crash or loop, whatever it reads.
+void shadowCopyFuzz()
+{
+    const SparseImage clean = SparseImage::unpack(QStringLiteral(SOURCE_DIR "/tests/data/lostfs/ntfs-shadow.img.zst"));
+    const auto source = clean.source();
+    const lost::Extent where{0, source->size()};
+    // Where the records are: the header, the catalog, and from it each store's blocks.
+    QVector<quint64> hot = {0x1e00};
+    QByteArray block(16384, Qt::Uninitialized);
+    source->read(0x1e00, block.data(), 512);
+    const quint64 catalog = qFromLittleEndian<quint64>(block.constData() + 48);
+    hot << catalog;
+    source->read(catalog, block.data(), 16384);
+    for (int e = 128; e + 128 <= 16384; e += 128) {
+        if (qFromLittleEndian<quint64>(block.constData() + e) == 3) {
+            for (const int field : {8, 32, 48, 72})
+                hot << qFromLittleEndian<quint64>(block.constData() + e + field);
+        }
+    }
+    QRandomGenerator rnd(20261011);
+    const int rounds = qEnvironmentVariableIsSet("DISKFORGE_FUZZ_ROUNDS") ? qEnvironmentVariableIntValue("DISKFORGE_FUZZ_ROUNDS") : 40;
+    int runs = 0;
+    for (int round = 0; round < rounds; ++round) {
+        SparseImage broken = clean;
+        for (int k = 0; k < 30; ++k) {
+            const quint64 at = hot[rnd.bounded(int(hot.size()))] + quint64(rnd.bounded(k % 3 == 0 ? 128 : 16384));
+            QByteArray &piece = broken.pieces[at / SparseImage::kPiece];
+            if (piece.size() < qsizetype(SparseImage::kPiece))
+                piece.resize(qsizetype(SparseImage::kPiece), '\0');
+            piece[qsizetype(at % SparseImage::kPiece)] = char(rnd.bounded(256));
+        }
+        const auto damaged = broken.source();
+        QString problem;
+        const QVector<vss::Copy> copies = vss::copies(*damaged, where, &problem);
+        for (int i = 0; i < copies.size(); ++i) {
+            if (const auto copy = vss::open(damaged, where, i, &problem)) {
+                quickScan(copy);
+                for (int r = 0; r < 20; ++r)
+                    copy->read(quint64(rnd.bounded(quint32(copy->size() / 512))) * 512, block.data(), 16384);
+            }
+        }
+        ++runs;
+    }
+    report(runs == rounds, QStringLiteral("shadow copies: %1 damaged sets of records read without a crash").arg(runs));
+}
+
+// For looking into shadow copies by hand: each copy of the NTFS volume an image holds (from its
+// start), the way shadow-job.ps1 has Windows write it down.
+int shadowImage(const QString &path)
+{
+    QString error;
+    auto source = lost::Source::fromImage(path, &error);
+    if (!source) {
+        out << error << Qt::endl;
+        return 1;
+    }
+    const lost::Extent where{0, source->size()};
+    const QVector<vss::Copy> copies = vss::copies(*source, where, &error);
+    if (!error.isEmpty())
+        out << "problem: " << error << Qt::endl;
+    for (int i = 0; i < copies.size(); ++i) {
+        out << "copy " << copies[i].id << " " << QDateTime::fromMSecsSinceEpoch(copies[i].created, QTimeZone::UTC).toString(Qt::ISODate).chopped(1) << Qt::endl;
+        auto copy = vss::open(source, where, i, &error);
+        if (!copy) {
+            out << "problem: " << error << Qt::endl;
+            continue;
+        }
+        for (const lost::Found &f : quickScan(copy)) {
+            if (f.deleted)
+                continue;
+            lost::FileReader reader(copy, f);
+            out << "file " << f.folder.section(QLatin1Char('/'), 1) << (f.folder.contains(QLatin1Char('/')) ? "/" : "") << f.name << " "
+                << QCryptographicHash::hash(reader.head(qint64(f.size)), QCryptographicHash::Sha256).toHex() << Qt::endl;
+        }
+        // DISKFORGE_SHADOW_BLOCKS=1:106,2:10: those MiBs of those copies, 16 KiB at a time.
+        for (const QString &want : qEnvironmentVariable("DISKFORGE_SHADOW_BLOCKS").split(QLatin1Char(','), Qt::SkipEmptyParts)) {
+            if (want.section(QLatin1Char(':'), 0, 0).toInt() != i + 1)
+                continue;
+            const quint64 mib = want.section(QLatin1Char(':'), 1).toULongLong();
+            QByteArray block(16384, Qt::Uninitialized);
+            for (int b = 0; b < 64; ++b) {
+                copy->read((mib << 20) + quint64(b) * 16384, block.data(), 16384);
+                out << "block " << mib << " " << b << " "
+                    << (block.count('\0') == block.size() ? QByteArray("zeros") : QCryptographicHash::hash(block, QCryptographicHash::Sha256).toHex()) << Qt::endl;
+            }
+        }
+        QByteArray buffer(1024 * 1024, Qt::Uninitialized);
+        for (quint64 at = 0, n = 0; at < copy->size(); at += n) {
+            n = std::min<quint64>(buffer.size(), copy->size() - at);
+            copy->read(at, buffer.data(), n);
+            out << "mib " << at / (1024 * 1024) << " " << n << " "
+                << QCryptographicHash::hash(QByteArrayView(buffer.constData(), qsizetype(n)), QCryptographicHash::Sha256).toHex() << Qt::endl;
+        }
+    }
+    return 0;
+}
+
 // --- What the previews read: media details, office text, archive listings
 
 QByteArray fullBox(const char *type, quint8 version, const QByteArray &body)
@@ -1007,5 +1244,7 @@ void lostFilesTests()
     fuzz();
     fileSystems(dir.path());
     fileSystemFuzz();
+    shadowCopies();
+    shadowCopyFuzz();
     mediaAndOffice();
 }

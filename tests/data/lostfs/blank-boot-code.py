@@ -17,7 +17,8 @@ with open(path, "r+b") as f:
         data[at + 0x54 : at + 0x1FE] = bytes(0x1FE - 0x54)  # between the numbers and the 55 AA
 
     blank(0)
-    data[sector:8192] = bytes(8192 - sector)  # $Boot is 8 KiB
+    # $Boot is 8 KiB; its last 512 bytes are the shadow copies' header (VSS's, not code), kept.
+    data[sector:0x1E00] = bytes(0x1E00 - sector)
     backup = sectors * sector
     if data[backup + 3 : backup + 11] == b"NTFS    ":
         blank(backup)

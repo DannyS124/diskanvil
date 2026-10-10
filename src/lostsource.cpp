@@ -59,6 +59,14 @@ std::shared_ptr<lost::Source> lost::Source::fromMemory(QByteArray data)
     return source;
 }
 
+std::shared_ptr<lost::Source> lost::Source::fromLayer(std::unique_ptr<Layer> layer)
+{
+    std::shared_ptr<Source> source(new Source);
+    source->m_size = layer->size();
+    source->m_layer = std::move(layer);
+    return source;
+}
+
 lost::Source::~Source()
 {
     if (m_fd >= 0)
@@ -75,6 +83,8 @@ bool lost::Source::rawRead(quint64 offset, char *buf, quint64 len)
         memcpy(buf, m_data.constData() + offset, len);
         return true;
     }
+    if (m_layer)
+        return m_layer->read(offset, buf, len);
     if (!m_direct)
         return blockio::readAt(m_fd, buf, len, offset);
     // O_DIRECT: whole aligned blocks into an aligned buffer, then the part that was asked for.

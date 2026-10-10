@@ -60,6 +60,7 @@ add_library(diskforge-core STATIC
     src/lostsource.cpp src/lostsource.h
     src/lostscan.cpp src/lostscan.h
     src/lostfs.cpp src/lostfs.h src/lostntfs.cpp src/lostraw.h
+    src/vshadow.cpp src/vshadow.h
     src/mediainfo.cpp src/mediainfo.h
     src/officetext.cpp src/officetext.h
     src/virusscan.cpp src/virusscan.h

@@ -1,0 +1,15 @@
+# What Windows read from each shadow copy on ntfs-shadow.img (shadow-finish.sh made this).
+copy|1|{F5654003-6801-4BB6-B022-D6879C1E3846}|2026-10-10T19:38:53|1072689152|03d85c7b94b9595f2c8a63cad598cd54f657275a5607b653d2afa97d9e979167|0,104
+file|1|notes.txt|c6b6687f042b5f2cc58f44b0046fbc58571aded0a9dd82eed6b92455d36e351e
+file|1|Docs/photo.jpg|c30ec95dfbc01e68ba7e8ac4e10e00a2494babadad20e90546dd4d6c26be8008
+file|1|Docs/letter.pdf|6350af32579ffbd7b251a6244bf9bd036d303cbc7404ae06d5e02f1b8f5b994f
+file|1|Docs/holiday.jpg|missing
+file|1|big.bin|299524a810ad2f40d60c776223aea3c1ec9fcb48e81a7024c4a6a3330a7664e8
+file|1|kitten.jpg|missing
+copy|2|{B5696D78-F897-4967-87C7-F5B30CC69650}|2026-10-10T19:38:57|1072689152|022e0848e98ed3dea6ea7a325312325d2f672f03f73406bfc02014e90370cede|0,8
+file|2|notes.txt|7bc91f55580a38fbddb234a52f53d65c3dfdb92a432e9e43c98e74e7ebb2e7ab
+file|2|Docs/photo.jpg|missing
+file|2|Docs/letter.pdf|6350af32579ffbd7b251a6244bf9bd036d303cbc7404ae06d5e02f1b8f5b994f
+file|2|Docs/holiday.jpg|be0565189c1ff73baa285bf66c65e7a9d302b46ec47640c6e92b2701b2ccbaab
+file|2|big.bin|412c4f7cf0698702deb8fe60d2e952b1a9ccece617765d3ab3edf0f7cbdacf01
+file|2|kitten.jpg|missing
