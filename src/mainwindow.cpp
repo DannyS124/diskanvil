@@ -654,6 +654,11 @@ void MainWindow::createActions()
     tools->setToolTipsVisible(true);
     connect(tools, &QMenu::aboutToShow, this, [this, tools] {
         tools->clear();
+#ifdef Q_OS_WIN
+        // Quick Fixes' tools, and add-ons (Linux commands), aren't in the Windows version yet.
+        tools->addActions({m_usage, m_cleanup, m_optimize, m_snapshots});
+        return;
+#endif
         tools->addAction(themeIcon("tools-wizard", "system-run"), tr("&Quick Fixes…"), this, [this] {
             // Its own window, so it can stay open next to this one.
             auto *fixes = new HomeWindow(m_udisks, HomeWindow::Mode::Window);
@@ -714,6 +719,16 @@ void MainWindow::createActions()
         AboutDialog(m_udisks->daemonVersion(), this).exec();
     });
     help->addAction(themeIcon("qtcreator", "help-about"), tr("About &Qt"), qApp, &QApplication::aboutQt);
+
+#ifdef Q_OS_WIN
+    // Linux's own things (LUKS, fstab, RAID, Btrfs), and what the Windows version can't do yet:
+    // so far it reads drives, but doesn't write to them.
+    for (QAction *a : {m_unlock, m_lock, m_changePass, m_startup, m_raidCheck, m_snapshots, m_newPartition, m_format, m_resize,
+                       m_typeFlags, m_check, m_delete, m_newTable, m_recover, m_wipe, m_secureErase, m_openImage, m_detachImage,
+                       m_writeImage, m_windowsUsb, m_rescueUsb, m_restore, m_clone, m_badSectors, m_checkStick, m_safelyRemove,
+                       m_cleanup, m_optimize})
+        a->setVisible(false);
+#endif
 
     m_toolbar = addToolBar(tr("Main"));
     m_toolbar->setObjectName(QStringLiteral("mainToolbar"));
@@ -1345,7 +1360,11 @@ void MainWindow::showProperties()
         if (v->encrypted)
             add(tr("Encryption"), v->cleartextPath.isEmpty() ? tr("LUKS, locked") : tr("LUKS, unlocked (%1 inside)").arg(v->cleartextFsType));
         add(tr("Disk"), d->device);
+#ifdef Q_OS_WIN
+        add(tr("Windows path"), v->objectPath);
+#else
         add(tr("UDisks2 object"), v->objectPath);
+#endif
     } else if (sel.kind == DiskMap::Selection::Kind::Free) {
         title = tr("Unallocated space on %1").arg(shortDevice(d->device));
         add(tr("Disk"), d->device);
@@ -1359,20 +1378,24 @@ void MainWindow::showProperties()
         add(tr("Type"), diskKind(*d));
         add(tr("Partition table"), tableName(*d));
         add(tr("Capacity"), bytes(d->size));
-        if (d->rotationRate > 0)
+        if (d->rotationRate > 1) // 1: it spins, but the drive didn't say how fast
             add(tr("Rotation rate"), tr("%1 rpm").arg(d->rotationRate));
         add(tr("Image file"), d->backingFile);
         add(tr("Removable"), d->removable ? tr("Yes") : tr("No"));
         if (d->health.state != Health::State::Unknown) {
             add(tr("Health"), d->health.summary);
-            if (d->health.temperatureC > 0)
-                add(tr("Temperature"), QStringLiteral("%1 °C").arg(qRound(d->health.temperatureC)));
             if (d->health.powerOnHours > 0)
                 add(tr("Powered on"), tr("%L1 hours").arg(d->health.powerOnHours));
         }
+        if (d->health.temperatureC > 0)
+            add(tr("Temperature"), QStringLiteral("%1 °C").arg(qRound(d->health.temperatureC)));
         if (d->isSystem)
             add(tr("System disk"), tr("%1. This app won't modify it.").arg(d->systemReason));
+#ifdef Q_OS_WIN
+        add(tr("Windows path"), d->blockPath);
+#else
         add(tr("UDisks2 object"), d->blockPath);
+#endif
     }
 
     QDialog dialog(this);

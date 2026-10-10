@@ -14,7 +14,7 @@ qt=$(sed -n 's/^set(PACKAGE_VERSION "\([0-9.]*\)")$/\1/p' "$work/sysroot/ucrt64/
 hostqt="$work/hostqt/$qt/gcc_64"
 if [[ ! -x $hostqt/libexec/moc ]]; then
     [[ -x $work/venv/bin/aqt ]] || { python3 -m venv "$work/venv" && "$work/venv/bin/pip" install -q aqtinstall; }
-    "$work/venv/bin/aqt" install-qt linux desktop "$qt" linux_gcc_64 --archives qtbase qttools qtdeclarative icu -O "$work/hostqt"
+    (cd "$work" && "$work/venv/bin/aqt" install-qt linux desktop "$qt" linux_gcc_64 --archives qtbase qttools qtdeclarative icu -O "$work/hostqt")
 fi
 
 cmake -S "$root" -B "$work/build" -G Ninja -DCMAKE_BUILD_TYPE=Release \

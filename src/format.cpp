@@ -4,6 +4,7 @@
 #include "format.h"
 
 #include <QCoreApplication>
+#include <QDir>
 #include <QFileInfo>
 #include <QHash>
 #include <QRegularExpression>
@@ -39,7 +40,9 @@ QString volumeTitle(const Volume &v)
 
 QString volumeStatus(const Volume &v, bool brief)
 {
-    auto mounted = [brief](const QStringList &mps) {
+    auto mounted = [brief](QStringList mps) {
+        for (QString &mp : mps)
+            mp = QDir::toNativeSeparators(mp); // E:\ on Windows
         if (brief && mps.size() > 1)
             return tr("Mounted at %1 (+%2)").arg(mps.first()).arg(mps.size() - 1);
         return tr("Mounted at %1").arg(mps.join(QStringLiteral(", ")));
