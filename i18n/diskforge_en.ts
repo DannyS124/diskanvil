@@ -584,6 +584,17 @@
     </message>
 </context>
 <context>
+    <name>newids</name>
+    <message numerus="yes">
+        <location filename="../src/newids.cpp" line="75"/>
+        <source>%n partition ID(s)</source>
+        <translation>
+            <numerusform>%n partition ID</numerusform>
+            <numerusform>%n partition IDs</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
     <name>preview</name>
     <message numerus="yes">
         <location filename="../src/preview.cpp" line="235"/>

@@ -21,9 +21,9 @@ namespace newids {
 
 namespace {
 
-QString tr(const char *text, int n = -1)
+QString tr(const char *text)
 {
-    return QCoreApplication::translate("newids", text, nullptr, n);
+    return QCoreApplication::translate("newids", text);
 }
 
 // IDs that several drives share on purpose: the members of one RAID array, ZFS pool or
@@ -72,7 +72,7 @@ QVector<Clash> clashes(const QVector<Disk> &disks)
                 }
             }
             if (partitions > 0)
-                c.ids << tr("%n partition ID(s)", partitions);
+                c.ids << QCoreApplication::translate("newids", "%n partition ID(s)", nullptr, partitions);
             c.ids << fileSystems;
             if (!c.ids.isEmpty())
                 out << c;

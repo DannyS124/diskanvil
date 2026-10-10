@@ -368,6 +368,7 @@ private:
     // (src/win/udisks_win.cpp).
     struct Windows;
     std::shared_ptr<Windows> m_windows;
+    void forgetProbes(const Disk *disk);
     // Reports, a moment later, that something isn't in the Windows version yet.
     void notOnWindows(const QString &failure);
 #endif

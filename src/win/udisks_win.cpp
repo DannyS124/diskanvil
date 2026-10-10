@@ -755,6 +755,7 @@ void UDisks::setUuid(const Volume &volume, const QString &uuid)
         win::ioctl(h.get(), FSCTL_UNLOCK_VOLUME, nullptr, 0, nullptr, 0);
     }
     h.reset();
+    forgetProbes(disk);
     QTimer::singleShot(0, this, [this, ok, name, failure, error] {
         refresh();
         emit operationFinished(ok, ok ? tr("Gave %1 a new ID").arg(name) : failure + QStringLiteral(": ") + error);
@@ -826,10 +827,20 @@ void UDisks::giveNewDiskIds(const Disk &disk)
         error = win::lastErrorText();
     }
     h.reset();
+    forgetProbes(&disk);
     QTimer::singleShot(0, this, [this, ok, name, failure, error] {
         refresh();
         emit operationFinished(ok, ok ? tr("Gave %1 new IDs").arg(name) : failure + QStringLiteral(": ") + error);
     });
+}
+
+// What was read from a drive's partitions is read again after DiskForge changed them.
+void UDisks::forgetProbes(const Disk *disk)
+{
+    if (!disk)
+        return;
+    const QString prefix = disk->drivePath + QLatin1Char('/');
+    m_windows->probed.removeIf([&prefix](const QHash<QString, fsprobe::Result>::iterator it) { return it.key().startsWith(prefix); });
 }
 
 void UDisks::format(const Volume &volume, const QString &, const QString &, const QString &)
