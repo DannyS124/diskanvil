@@ -87,6 +87,7 @@ private:
     QTreeWidget *m_attributes;
     QLabel *m_meaning; // what the selected attribute is
     QPushButton *m_selftest;
+    QPushButton *m_longTest = nullptr;
     QPushButton *m_conveyance = nullptr;
     QPushButton *m_smartOn = nullptr;
     QPushButton *m_stopTest; // while one runs

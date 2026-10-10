@@ -20,6 +20,7 @@
 #include "fsprobe.h"
 #include "health.h"
 #include "newids.h"
+#include "smartdata.h"
 #include "winutil.h"
 
 #include <QCollator>
@@ -32,6 +33,7 @@
 #include <QProcess>
 #include <QRandomGenerator>
 #include <QRegularExpression>
+#include <QSet>
 #include <QSysInfo>
 #include <QThread>
 #include <QTimer>
@@ -274,6 +276,172 @@ struct DriveInfo {
     QString instanceId; // the device's ID in Windows' device tree
 };
 
+// What a drive says about its health, as it hands it over: the SMART pages of an ATA drive (and
+// whether it says it's failing), or an NVMe drive's health log and its identify page.
+struct RawHealth {
+    qint64 when = 0; // seconds since 1970
+    bool read = false, ata = false, nvme = false, failing = false, asleep = false, smartOff = false;
+    QByteArray data, thresholds, log, identify;
+};
+
+// An ATA SMART command through Windows' own SMART calls: a 512-byte page back, or with `regs`
+// the registers the drive answered with (how it says it's failing).
+bool smartCommand(HANDLE drive, BYTE command, BYTE feature, BYTE sector, QByteArray *page, IDEREGS *regs = nullptr)
+{
+    SENDCMDINPARAMS in {};
+    in.cBufferSize = page ? 512 : 0;
+    in.irDriveRegs.bFeaturesReg = feature;
+    in.irDriveRegs.bSectorCountReg = 1;
+    in.irDriveRegs.bSectorNumberReg = sector;
+    in.irDriveRegs.bCylLowReg = command == SMART_CMD ? SMART_CYL_LOW : 0;
+    in.irDriveRegs.bCylHighReg = command == SMART_CMD ? SMART_CYL_HI : 0;
+    in.irDriveRegs.bDriveHeadReg = 0xA0;
+    in.irDriveRegs.bCommandReg = command;
+    QByteArray out(qsizetype(sizeof(SENDCMDOUTPARAMS) + 512), '\0');
+    DWORD got = 0;
+    if (!DeviceIoControl(drive, page ? SMART_RCV_DRIVE_DATA : SMART_SEND_DRIVE_COMMAND, &in, sizeof in - 1, out.data(), DWORD(out.size()), &got, nullptr))
+        return false;
+    const auto *o = reinterpret_cast<const SENDCMDOUTPARAMS *>(out.constData());
+    if (o->DriverStatus.bDriverError)
+        return false;
+    if (page)
+        *page = QByteArray(reinterpret_cast<const char *>(o->bBuffer), 512);
+    if (regs)
+        memcpy(regs, o->bBuffer, sizeof(IDEREGS));
+    return true;
+}
+
+// An NVMe page through the storage stack's protocol queries: the health log, or identify.
+QByteArray nvmeQuery(HANDLE drive, STORAGE_PROPERTY_ID property, STORAGE_PROTOCOL_NVME_DATA_TYPE type, DWORD value, DWORD length)
+{
+    const qsizetype header = qsizetype(offsetof(STORAGE_PROPERTY_QUERY, AdditionalParameters) + sizeof(STORAGE_PROTOCOL_SPECIFIC_DATA));
+    QByteArray buffer(header + qsizetype(length), '\0');
+    auto *query = reinterpret_cast<STORAGE_PROPERTY_QUERY *>(buffer.data());
+    auto *data = reinterpret_cast<STORAGE_PROTOCOL_SPECIFIC_DATA *>(query->AdditionalParameters);
+    query->PropertyId = property;
+    query->QueryType = PropertyStandardQuery;
+    data->ProtocolType = ProtocolTypeNvme;
+    data->DataType = type;
+    data->ProtocolDataRequestValue = value;
+    data->ProtocolDataOffset = sizeof(STORAGE_PROTOCOL_SPECIFIC_DATA);
+    data->ProtocolDataLength = length;
+    DWORD got = 0;
+    if (!DeviceIoControl(drive, IOCTL_STORAGE_QUERY_PROPERTY, buffer.data(), DWORD(buffer.size()), buffer.data(), DWORD(buffer.size()), &got, nullptr))
+        return {};
+    const auto *descriptor = reinterpret_cast<const STORAGE_PROTOCOL_DATA_DESCRIPTOR *>(buffer.constData());
+    const STORAGE_PROTOCOL_SPECIFIC_DATA &answer = descriptor->ProtocolSpecificData;
+    const qsizetype at = qsizetype(offsetof(STORAGE_PROTOCOL_DATA_DESCRIPTOR, ProtocolSpecificData) + answer.ProtocolDataOffset);
+    if (answer.ProtocolDataLength < length || at + qsizetype(length) > buffer.size())
+        return {};
+    return buffer.mid(at, qsizetype(length));
+}
+
+// Not from a drive that's asleep: asking would wake it.
+RawHealth readRawHealth(const QString &blockPath, bool nvme)
+{
+    RawHealth r;
+    const win::Handle drive = win::openDevice(blockPath, GENERIC_READ | GENERIC_WRITE);
+    if (!drive.valid())
+        return r;
+    BOOL on = TRUE;
+    if (GetDevicePowerState(drive.get(), &on) && !on) {
+        r.asleep = true;
+        return r;
+    }
+    if (nvme) {
+        constexpr DWORD kHealthLog = 2, kIdentifyController = 1;
+        r.log = nvmeQuery(drive.get(), StorageAdapterProtocolSpecificProperty, NVMeDataTypeLogPage, kHealthLog, 512);
+        if (r.log.isEmpty())
+            r.log = nvmeQuery(drive.get(), StorageDeviceProtocolSpecificProperty, NVMeDataTypeLogPage, kHealthLog, 512);
+        r.identify = nvmeQuery(drive.get(), StorageAdapterProtocolSpecificProperty, NVMeDataTypeIdentify, kIdentifyController, 4096);
+        r.nvme = r.read = !r.log.isEmpty();
+        return r;
+    }
+    if (!smartCommand(drive.get(), SMART_CMD, READ_ATTRIBUTES, 1, &r.data)) {
+        // Can it do SMART, switched off? IDENTIFY says: word 82 bit 0 it can, word 85 bit 0 it's on.
+        QByteArray identify;
+        if (smartCommand(drive.get(), ID_CMD, 0, 1, &identify)) {
+            const auto *w = reinterpret_cast<const uchar *>(identify.constData());
+            r.smartOff = (w[164] & 1) && !(w[170] & 1);
+        }
+        return r;
+    }
+    smartCommand(drive.get(), SMART_CMD, READ_THRESHOLDS, 1, &r.thresholds);
+    IDEREGS answer {};
+    if (smartCommand(drive.get(), SMART_CMD, RETURN_SMART_STATUS, 0, nullptr, &answer))
+        r.failing = answer.bCylLowReg == 0xF4 && answer.bCylHighReg == 0x2C;
+    r.ata = r.read = true;
+    return r;
+}
+
+// What a drive's raw health data means: the same verdict as Linux reaches from UDisks.
+Health healthFrom(const RawHealth &r, const Disk &d)
+{
+    Health h = d.health; // its key, and the temperature Windows already says
+    h.updated = quint64(r.when);
+    if (r.ata) {
+        const QVector<SmartAttribute> attributes = smart::ataAttributes(r.data, r.thresholds);
+        auto raw = [&attributes](int id) {
+            for (const SmartAttribute &a : attributes) {
+                if (a.id == id)
+                    return qMax<qint64>(0, a.rawValue);
+            }
+            return qint64(attributes.isEmpty() ? -1 : 0);
+        };
+        for (const SmartAttribute &a : attributes) {
+            if ((a.id == 194 || (a.id == 190 && h.temperatureC < 0)) && a.rawValue > 0)
+                h.temperatureC = double(a.rawValue);
+            if (a.id == 9 && a.rawValue >= 0)
+                h.powerOnHours = quint64(a.rawValue);
+        }
+        h.reallocatedSectors = raw(5);
+        h.pendingSectors = raw(197);
+        h.badSectors = attributes.isEmpty() ? -1 : h.reallocatedSectors + h.pendingSectors;
+        const smart::AtaSelftest test = smart::ataSelftest(r.data);
+        h.selftestStatus = test.status;
+        h.selftestPercentRemaining = test.percentRemaining;
+        health::remember(h.key, attributes);
+        health::AtaInput in;
+        in.driveSaysFailing = r.failing;
+        in.failingNow = int(std::count_if(attributes.cbegin(), attributes.cend(), [](const SmartAttribute &a) { return a.failing; }));
+        in.failedBefore = int(std::count_if(attributes.cbegin(), attributes.cend(), [](const SmartAttribute &a) {
+            return a.threshold > 0 && a.worst > 0 && a.worst <= a.threshold;
+        }));
+        in.attributes = attributes;
+        in.seen = health::seen(h.key);
+        in.temperatureC = h.temperatureC;
+        in.ssd = d.rotationRate == 0;
+        const health::Verdict v = health::ata(in);
+        h.state = v.state;
+        h.summary = v.summary;
+        h.reasons = v.reasons;
+        h.lifeLeft = v.lifeLeft;
+        return h;
+    }
+    const smart::NvmeHealth n = smart::nvmeHealth(r.log);
+    h.nvme = true;
+    if (n.temperatureC > -1)
+        h.temperatureC = n.temperatureC;
+    h.powerOnHours = n.powerOnHours;
+    h.criticalWarnings = n.criticalWarnings;
+    h.percentUsed = n.percentUsed;
+    smart::nvmeTemperatureLimits(r.identify, &h.warningTempC, &h.criticalTempC);
+    health::NvmeInput in;
+    in.criticalWarnings = n.criticalWarnings;
+    in.availableSpare = n.availableSpare;
+    in.spareThreshold = n.spareThreshold;
+    in.percentUsed = n.percentUsed;
+    in.mediaErrors = qint64(n.mediaErrors);
+    in.temperatureC = h.temperatureC;
+    in.warningTempC = h.warningTempC;
+    const health::Verdict v = health::nvme(in);
+    h.state = v.state;
+    h.summary = v.summary;
+    h.reasons = v.reasons;
+    h.lifeLeft = h.percentUsed >= 0 ? qMax(0, 100 - h.percentUsed) : -1;
+    return h;
+}
+
 // The file a virtual disk (a .vhd or .vhdx Windows opened) is kept in, by the volume it's on and
 // where on it.
 QString imageOf(HANDLE disk)
@@ -370,6 +538,9 @@ struct UDisks::Windows {
     // when it's been stopped, and the threads doing them.
     QVector<Job> jobs;
     QHash<QString, std::shared_ptr<std::atomic<bool>>> stops;
+    // What each drive's SMART or health log said last, by disk; and the ones to read again soon.
+    QHash<QString, RawHealth> health;
+    QSet<QString> healthStale;
     QHash<QString, QString> stopMessages;
     QList<QThread *> workers;
 
@@ -507,6 +678,29 @@ void UDisks::refresh()
         d.health.key = health::keyFor(d.serial.isEmpty() ? QString() : d.model + QLatin1Char('-') + d.serial, d.drivePath);
         if (!win::ioctl(query.get(), IOCTL_DISK_IS_WRITABLE, nullptr, 0, nullptr, 0) && GetLastError() == ERROR_WRITE_PROTECT)
             d.readOnly = true;
+
+        // Health, straight from the drive: SMART for an ATA one, the health log for an NVMe one.
+        // Read again every ten minutes, or when asked; not on every refresh.
+        if (!d.isLoop && d.bus != QLatin1String("usb") && d.bus != QLatin1String("sd")) {
+            RawHealth &raw = m_windows->health[d.blockPath];
+            const qint64 now = QDateTime::currentSecsSinceEpoch();
+            if (raw.when == 0 || now - raw.when > 600 || m_windows->healthStale.remove(d.blockPath)) {
+                RawHealth fresh = readRawHealth(d.blockPath, d.bus == QLatin1String("nvme"));
+                if (!fresh.asleep) {
+                    raw = fresh;
+                    raw.when = now;
+                }
+            }
+            if (raw.read)
+                d.health = healthFrom(raw, d);
+            else if (raw.smartOff) {
+                d.health.smartOff = true;
+                d.health.summary = tr("SMART is turned off");
+            }
+        } else if (d.bus == QLatin1String("usb") && !d.removable) {
+            d.health.usbNoData = true; // most USB boxes don't pass it through
+        }
+        health::noteSelftestStatus(d.health.key, d.health.selftestStatus);
 
         // The partition table takes read access.
         const win::Handle disk = win::openDevice(d.blockPath, GENERIC_READ);
@@ -1496,34 +1690,107 @@ void UDisks::cancelJob(const QString &jobPath, const QString &stoppedMessage)
     *stop = true;
 }
 
-void UDisks::smartUpdate(const Disk &)
+void UDisks::smartUpdate(const Disk &disk)
 {
+    m_windows->healthStale.insert(disk.blockPath);
+    refresh();
+    const Disk *fresh = diskByPath(disk.blockPath);
+    const bool ok = fresh && fresh->health.updated > 0;
+    emit operationFinished(ok, ok ? tr("Read fresh health data from %1").arg(shortDevice(disk.device))
+                                  : tr("Couldn't read health data from %1").arg(shortDevice(disk.device)));
+}
+
+void UDisks::refreshHealthQuietly(const Disk &disk)
+{
+    m_windows->healthStale.insert(disk.blockPath);
     m_debounce.start();
 }
 
-void UDisks::smartSelftest(const Disk &disk, const QString &)
+// A self-test runs in the drive itself ("off-line"), while it's in use: started and stopped with
+// SMART's own command. NVMe ones aren't reached through Windows yet.
+void UDisks::smartSelftest(const Disk &disk, const QString &type)
 {
-    notOnWindows(tr("Couldn't start a self-test on %1").arg(shortDevice(disk.device)));
-}
-
-void UDisks::smartSetEnabled(const Disk &disk, bool)
-{
-    notOnWindows(tr("Couldn't change SMART on %1").arg(shortDevice(disk.device)));
+    const QString name = shortDevice(disk.device);
+    const QString failure = tr("Couldn't start a self-test on %1").arg(name);
+    static const QHash<QString, BYTE> kinds = {{QStringLiteral("short"), 1}, {QStringLiteral("extended"), 2}, {QStringLiteral("conveyance"), 3}};
+    QString why;
+    if (disk.health.nvme)
+        why = tr("self-tests of NVMe drives aren't in the Windows version yet");
+    else if (!kinds.contains(type))
+        why = tr("there's no such test");
+    else if (!smartSend(disk, EXECUTE_OFFLINE_DIAGS, kinds.value(type)))
+        why = win::lastErrorText();
+    finishSmart(disk, why.isEmpty(), why.isEmpty() ? tr("Self-test started on %1").arg(name) : failure + QStringLiteral(": ") + why);
 }
 
 void UDisks::smartSelftestAbort(const Disk &disk)
 {
-    notOnWindows(tr("Couldn't stop the self-test on %1").arg(shortDevice(disk.device)));
+    const QString name = shortDevice(disk.device);
+    const bool ok = !disk.health.nvme && smartSend(disk, EXECUTE_OFFLINE_DIAGS, 0x7F);
+    finishSmart(disk, ok, ok ? tr("Stopped the self-test on %1").arg(name) : tr("Couldn't stop the self-test on %1").arg(name));
+}
+
+void UDisks::smartSetEnabled(const Disk &disk, bool enabled)
+{
+    const QString name = shortDevice(disk.device);
+    const bool ok = !disk.health.nvme && smartSend(disk, enabled ? ENABLE_SMART : DISABLE_SMART, 0);
+    finishSmart(disk, ok, !ok ? tr("Couldn't change SMART on %1").arg(name)
+                          : enabled ? tr("SMART is on for %1").arg(name) : tr("SMART is off for %1").arg(name));
+}
+
+bool UDisks::smartSend(const Disk &disk, BYTE feature, BYTE sector)
+{
+    const win::Handle drive = win::openDevice(disk.blockPath, GENERIC_READ | GENERIC_WRITE);
+    return drive.valid() && smartCommand(drive.get(), SMART_CMD, feature, sector, nullptr);
+}
+
+// The health read again in a moment (a test's progress shows up in it), and the result said.
+void UDisks::finishSmart(const Disk &disk, bool ok, const QString &message)
+{
+    QTimer::singleShot(1500, this, [this, path = disk.blockPath] {
+        m_windows->healthStale.insert(path);
+        refresh();
+    });
+    QTimer::singleShot(0, this, [this, ok, message] { emit operationFinished(ok, message); });
+}
+
+QVector<SmartAttribute> UDisks::smartAttributes(const Disk &disk)
+{
+    const auto raw = m_windows->health.constFind(disk.blockPath);
+    if (raw == m_windows->health.cend() || !raw->read)
+        return {};
+    if (raw->ata)
+        return smart::ataAttributes(raw->data, raw->thresholds);
+    // An NVMe drive's: the same rows Linux shows.
+    const smart::NvmeHealth n = smart::nvmeHealth(raw->log);
+    QVector<SmartAttribute> out;
+    auto add = [&out](const QString &name, const QString &value) { out.push_back({0, name, -1, -1, -1, value, -1, false}); };
+    add(tr("Available spare"), QStringLiteral("%1%").arg(n.availableSpare));
+    add(tr("Spare threshold"), QStringLiteral("%1%").arg(n.spareThreshold));
+    add(tr("Life used"), QStringLiteral("%1%").arg(n.percentUsed));
+    add(tr("Data read"), formatSize(n.bytesRead));
+    add(tr("Data written"), formatSize(n.bytesWritten));
+    add(tr("Power cycles"), QStringLiteral("%L1").arg(n.powerCycles));
+    add(tr("Unsafe shutdowns"), QStringLiteral("%L1").arg(n.unsafeShutdowns));
+    add(tr("Media errors"), QStringLiteral("%L1").arg(n.mediaErrors));
+    add(tr("Error log entries"), QStringLiteral("%L1").arg(n.errorLogEntries));
+    add(tr("Minutes above warning temperature"), QStringLiteral("%L1").arg(n.warningTempMinutes));
+    add(tr("Minutes above critical temperature"), QStringLiteral("%L1").arg(n.criticalTempMinutes));
+    QStringList sensors;
+    for (const double c : n.sensorsC)
+        sensors << QStringLiteral("%1 °C").arg(qRound(c));
+    if (!sensors.isEmpty())
+        add(tr("Temperature sensors"), sensors.join(QStringLiteral(", ")));
+    double warning = -1, critical = -1;
+    smart::nvmeTemperatureLimits(raw->identify, &warning, &critical);
+    if (warning > -1 && critical > -1)
+        add(tr("Temperature limits"), tr("warning at %1 °C, critical at %2 °C").arg(qRound(warning)).arg(qRound(critical)));
+    return out;
 }
 
 void UDisks::raidSyncAction(const Disk &array, const QString &)
 {
     notOnWindows(tr("Couldn't check %1").arg(shortDevice(array.device)));
-}
-
-void UDisks::refreshHealthQuietly(const Disk &)
-{
-    m_debounce.start();
 }
 
 void UDisks::setPowerSettings(const Disk &disk, const QVariantMap &)
@@ -1542,7 +1809,3 @@ int UDisks::powerState(const Disk &)
 }
 
 
-QVector<SmartAttribute> UDisks::smartAttributes(const Disk &)
-{
-    return {};
-}

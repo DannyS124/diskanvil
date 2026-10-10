@@ -90,6 +90,7 @@ add_library(diskforge-core STATIC
     src/signature.cpp src/signature.h
     src/outputfilter.cpp src/outputfilter.h
     src/health.cpp src/health.h
+    src/smartdata.cpp src/smartdata.h
     src/firmware.h
     src/btrfscheck.cpp src/btrfscheck.h
     src/drivepower.cpp src/drivepower.h

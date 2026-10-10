@@ -11,6 +11,7 @@
 #include "../src/firmware.h"
 #include "../src/health.h"
 #include "../src/powerbox.h"
+#include "../src/smartdata.h"
 #include "../src/systemd.h"
 
 #include <QDir>
@@ -19,6 +20,7 @@
 #include <QProcess>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QtEndian>
 
 namespace {
 
@@ -62,9 +64,78 @@ void hiddenArea()
            QStringLiteral("drive settings: seek noise, reading ahead, and a switch back to the drive's own"));
 }
 
+// The raw SMART and NVMe pages DiskForge reads itself on Windows: decoded the way UDisks decodes
+// them on Linux. The ATA page is QEMU's own (hw/ide/core.c), the drive the Windows VM sees.
+void rawPages()
+{
+    QByteArray data(512, '\0'), thresholds(512, '\0');
+    const uchar qemu[][12] = {
+        {0x01, 0x03, 0x00, 0x64, 0x64, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06}, {0x03, 0x03, 0x00, 0x64, 0x64, 0, 0, 0, 0, 0, 0, 0x00},
+        {0x04, 0x02, 0x00, 0x64, 0x64, 0, 0, 0, 0, 0, 0, 0x14},                   {0x05, 0x03, 0x00, 0x64, 0x64, 0, 0, 0, 0, 0, 0, 0x24},
+        {0x09, 0x03, 0x00, 0x64, 0x64, 0, 0, 0, 0, 0, 0, 0x00},                   {0x0c, 0x03, 0x00, 0x64, 0x64, 0, 0, 0, 0, 0, 0, 0x00},
+        {190, 0x03, 0x00, 0x45, 0x45, 0x1f, 0x00, 0x1f, 0x1f, 0x00, 0x00, 0x32},
+    };
+    for (int i = 0; i < int(std::size(qemu)); ++i) {
+        // QEMU keeps each threshold in the last byte of its table; the drive hands it over apart.
+        memcpy(data.data() + 2 + i * 12, qemu[i], 11);
+        thresholds[2 + i * 12] = char(qemu[i][0]);
+        thresholds[2 + i * 12 + 1] = char(qemu[i][11]);
+    }
+    // And a drive that's had a bad time: 300 hours, 1234 replaced sectors at their limit.
+    const uchar worn[12] = {0x05, 0x33, 0x00, 0x24, 0x24, 0xd2, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00};
+    memcpy(data.data() + 2 + 7 * 12, worn, 12);
+    data[2 + 7 * 12] = char(197);
+    data[2 + 4 * 12 + 5] = char(0x2c); // power-on: 300 hours
+    data[2 + 4 * 12 + 6] = char(0x01);
+    thresholds[2 + 7 * 12] = char(197);
+    thresholds[2 + 7 * 12 + 1] = char(0x30);
+    const QVector<SmartAttribute> a = smart::ataAttributes(data, thresholds);
+    QStringList seen;
+    for (const SmartAttribute &x : a)
+        seen << QStringLiteral("%1:%2/%3/%4 %5%6").arg(x.id).arg(x.value).arg(x.threshold).arg(x.rawValue).arg(x.raw, x.failing ? QStringLiteral(" failing") : QString());
+    report(seen == QStringList({QStringLiteral("1:100/6/0 0"), QStringLiteral("3:100/0/0 0"), QStringLiteral("4:100/20/0 0"), QStringLiteral("5:100/36/0 0 sectors"),
+                                QStringLiteral("9:100/0/300 300 hours"), QStringLiteral("12:100/0/0 0"), QStringLiteral("190:69/50/31 31 °C"),
+                                QStringLiteral("197:36/48/1234 1,234 sectors failing")}),
+           QStringLiteral("ATA SMART pages: QEMU's attributes, hours, sectors, temperature, a failing one"), seen.join(QStringLiteral(", ")));
+
+    QByteArray testing(512, '\0');
+    testing[363] = char(0xF3);
+    QByteArray readError(512, '\0');
+    readError[363] = char(0x70);
+    report(smart::ataSelftest(testing).status == QLatin1String("inprogress") && smart::ataSelftest(testing).percentRemaining == 30
+               && smart::ataSelftest(readError).status == QLatin1String("error_read") && smart::ataSelftest(QByteArray(512, '\0')).status == QLatin1String("success"),
+           QStringLiteral("ATA self-test byte: running, failed reading, done"));
+
+    QByteArray log(512, '\0');
+    log[0] = char(0x05); // spare below its threshold, reliability degraded
+    qToLittleEndian<quint16>(320, log.data() + 1);
+    log[3] = char(80);
+    log[4] = char(10);
+    log[5] = char(3);
+    qToLittleEndian<quint64>(1000, log.data() + 32);
+    qToLittleEndian<quint64>(42, log.data() + 128);
+    qToLittleEndian<quint64>(7, log.data() + 160);
+    qToLittleEndian<quint16>(310, log.data() + 200);
+    qToLittleEndian<quint16>(330, log.data() + 202);
+    const smart::NvmeHealth h = smart::nvmeHealth(log);
+    report(h.valid && h.criticalWarnings == QStringList({QStringLiteral("spare"), QStringLiteral("degraded")}) && qRound(h.temperatureC) == 47
+               && h.availableSpare == 80 && h.spareThreshold == 10 && h.percentUsed == 3 && h.bytesRead == 512000000ull && h.powerOnHours == 42
+               && h.mediaErrors == 7 && h.sensorsC.size() == 2 && qRound(h.sensorsC[1]) == 57,
+           QStringLiteral("NVMe health log: warnings, temperature, spare, wear, counters, sensors"));
+    QByteArray identify(4096, '\0');
+    qToLittleEndian<quint16>(343, identify.data() + 266);
+    qToLittleEndian<quint16>(358, identify.data() + 268);
+    double warning = 0, critical = 0;
+    smart::nvmeTemperatureLimits(identify, &warning, &critical);
+    report(qRound(warning) == 70 && qRound(critical) == 85, QStringLiteral("NVMe identify: the drive's own temperature limits"));
+    report(smart::ataAttributes(QByteArray(100, '\x7f'), {}).isEmpty() && !smart::nvmeHealth(QByteArray(10, '\0')).valid,
+           QStringLiteral("SMART pages too short to be real are left alone"));
+}
+
 void healthTests()
 {
     hiddenArea();
+    rawPages();
     QTemporaryDir config;
     qputenv("XDG_CONFIG_HOME", QFile::encodeName(config.path()));
 

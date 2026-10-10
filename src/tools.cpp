@@ -276,7 +276,7 @@ HealthDialog::HealthDialog(UDisks *udisks, const QString &blockPath, QWidget *pa
         }
     };
     connect(m_selftest, &QPushButton::clicked, this, [test] { test(QStringLiteral("short")); });
-    auto *longTest = new QPushButton(tr("Run Long Self-Test"));
+    auto *longTest = m_longTest = new QPushButton(tr("Run Long Self-Test"));
     connect(longTest, &QPushButton::clicked, this, [test] { test(QStringLiteral("extended")); });
     // A test made for after a hard drive was moved or posted: it looks for damage from knocks.
     m_conveyance = new QPushButton(tr("Run Conveyance Test"));
@@ -427,6 +427,11 @@ void HealthDialog::reload()
         m_form->addRow(firmwareName, firmwareBox);
     }
     const bool running = h.selftestStatus == QLatin1String("inprogress");
+#ifdef Q_OS_WIN
+    // Windows doesn't pass an NVMe drive's self-test command through (yet).
+    m_selftest->setVisible(!h.nvme);
+    m_longTest->setVisible(!h.nvme);
+#endif
     m_selftest->setEnabled(!running && !h.smartOff);
     m_stopTest->setVisible(running);
     m_conveyance->setVisible(!h.nvme && !disk->isLoop && disk->rotationRate != 0);
