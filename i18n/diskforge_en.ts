@@ -4,7 +4,7 @@
 <context>
     <name>AddonOutputWindow</name>
     <message numerus="yes">
-        <location filename="../src/addonoutput.cpp" line="156"/>
+        <location filename="../src/addonoutput.cpp" line="168"/>
         <source>… (%n line(s) skipped)</source>
         <translation>
             <numerusform>… (%n line skipped)</numerusform>
@@ -75,7 +75,7 @@
 <context>
     <name>MainWindow</name>
     <message numerus="yes">
-        <location filename="../src/mainwindow.cpp" line="834"/>
+        <location filename="../src/mainwindow.cpp" line="856"/>
         <source>%n more drive(s) need a look; their health is in the Status column.</source>
         <translation>
             <numerusform>%n more drive need a look; their health is in the Status column.</numerusform>
@@ -83,7 +83,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/mainwindow.cpp" line="1762"/>
+        <location filename="../src/mainwindow.cpp" line="1793"/>
         <source>%n add-on command(s) still running. Stop them and quit?</source>
         <translation>
             <numerusform>%n add-on command still running. Stop them and quit?</numerusform>
@@ -118,7 +118,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/fswalk.cpp" line="111"/>
+        <location filename="../src/fswalk.cpp" line="37"/>
         <source>%n smaller file(s)</source>
         <translation>
             <numerusform>%n smaller file</numerusform>
@@ -396,7 +396,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/udisks.cpp" line="436"/>
+        <location filename="../src/udisks.cpp" line="415"/>
         <source>The volume group %1 is missing %n of its drives. What was on them can&apos;t be read.</source>
         <translation>
             <numerusform>The volume group %1 is missing %n of its drives. What was on them can't be read.</numerusform>
@@ -416,13 +416,99 @@
     </message>
 </context>
 <context>
+    <name>VirusDialog</name>
+    <message numerus="yes">
+        <location filename="../src/virusdialog.cpp" line="64"/>
+        <source>%n day(s) ago</source>
+        <translation>
+            <numerusform>%n day ago</numerusform>
+            <numerusform>%n days ago</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/virusdialog.cpp" line="341"/>
+        <source>Delete %n Ticked File(s)…</source>
+        <translation>
+            <numerusform>Delete %n Ticked File…</numerusform>
+            <numerusform>Delete %n Ticked Files…</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/virusdialog.cpp" line="550"/>
+        <source>Stopped. %n thing(s) found before that.</source>
+        <translation>
+            <numerusform>Stopped. %n thing found before that.</numerusform>
+            <numerusform>Stopped. %n things found before that.</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/virusdialog.cpp" line="556"/>
+        <source>Done: found %n thing(s) in %L1 files.</source>
+        <translation>
+            <numerusform>Done: found %n thing in %L1 files.</numerusform>
+            <numerusform>Done: found %n things in %L1 files.</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/virusdialog.cpp" line="556"/>
+        <source>Done: found %n thing(s).</source>
+        <translation>
+            <numerusform>Done: found %n thing.</numerusform>
+            <numerusform>Done: found %n things.</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/virusdialog.cpp" line="558"/>
+        <source>%n file(s) couldn&apos;t be read: another user&apos;s or the system&apos;s, or in use.</source>
+        <translation>
+            <numerusform>%n file couldn't be read: another user's or the system's, or in use.</numerusform>
+            <numerusform>%n files couldn't be read: another user's or the system's, or in use.</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/virusdialog.cpp" line="590"/>
+        <source>…and %n more</source>
+        <translation>
+            <numerusform>…and %n more</numerusform>
+            <numerusform>…and %n more</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/virusdialog.cpp" line="591"/>
+        <source>Delete these %n file(s) for good?</source>
+        <translation>
+            <numerusform>Delete these %n file for good?</numerusform>
+            <numerusform>Delete these %n files for good?</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/virusdialog.cpp" line="629"/>
+        <source>Deleted %n file(s). The list of what was done is in %1.</source>
+        <translation>
+            <numerusform>Deleted %n file. The list of what was done is in %1.</numerusform>
+            <numerusform>Deleted %n files. The list of what was done is in %1.</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
     <name>format</name>
     <message numerus="yes">
-        <location filename="../src/format.cpp" line="120"/>
+        <location filename="../src/format.cpp" line="123"/>
         <source>%n drive(s), all there</source>
         <translation>
             <numerusform>%n drive, all there</numerusform>
             <numerusform>%n drives, all there</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
+    <name>preview</name>
+    <message numerus="yes">
+        <location filename="../src/preview.cpp" line="235"/>
+        <source>%n page(s)</source>
+        <translation>
+            <numerusform>%n page</numerusform>
+            <numerusform>%n pages</numerusform>
         </translation>
     </message>
 </context>

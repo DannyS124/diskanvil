@@ -1,0 +1,68 @@
+#!/bin/bash
+# Keeps Scan for Viruses' list of known malware (ClamAV's signatures, about 250 MB) on the stick
+# between starts. DiskForge uses the list from memory, /run/diskforge-live/clamav; this copies
+# it there from the stick before the first scan, and back to the stick after an update.
+#
+#   diskforge-live-virus-list load    stick -> memory
+#   diskforge-live-virus-list save    memory -> stick
+#
+# Exits 0 when it worked (load: also when the stick has no list yet), 2 when there's no stick
+# to use (started from the ISO, or written to the stick as an ISO), 1 when it went wrong.
+# The stick is only writable for the moment the list is copied, like for the logs.
+set -u
+[ "$(id -u)" = 0 ] || exec sudo -n "$0" "$@"
+
+. /etc/diskforge-live.conf
+state=/run/diskforge-live
+ram=$state/clamav
+. /usr/local/lib/diskforge-live/find-stick.sh
+
+exec 9>"$state/virus-list.lock"
+flock -w 600 9 || { echo "Another copy of the list is still running."; exit 1; }
+
+stick=$(find_stick) || { echo "There's no DiskForge Live stick to keep the list on."; exit 2; }
+done_with_stick() {
+    [ "$stick" = "$state/stick" ] && umount "$stick"
+}
+on_stick=$stick/diskforge-live/virus-signatures
+result=0
+
+case ${1:-} in
+load)
+    mkdir -p "$ram"
+    if [ -d "$on_stick" ]; then
+        cp -a "$on_stick/." "$ram/" || { echo "Couldn't copy the list from the stick."; result=1; }
+    fi
+    chown -R rescue:rescue "$ram"
+    ;;
+save)
+    if [ "$(findmnt -no FSTYPE "$stick")" != vfat ]; then
+        echo "This copy of DiskForge Live is read-only (written as an ISO), so the list stays in memory until it shuts down."
+        result=2
+    elif ! mount -o remount,rw "$stick"; then
+        echo "Couldn't write to the stick."
+        result=1
+    else
+        # A new folder first, then swap: a stick pulled out halfway still has a whole list.
+        rm -rf "$on_stick.new"
+        if mkdir -p "$on_stick.new" && cp -r "$ram/." "$on_stick.new/"; then
+            rm -rf "$on_stick.old"
+            [ -d "$on_stick" ] && mv "$on_stick" "$on_stick.old"
+            mv "$on_stick.new" "$on_stick" && rm -rf "$on_stick.old"
+            echo "The virus list is on the stick for next time."
+        else
+            rm -rf "$on_stick.new"
+            echo "Couldn't copy the list to the stick (is it full?). It's in memory until DiskForge Live shuts down."
+            result=1
+        fi
+        sync
+        mount -o remount,ro "$stick"
+    fi
+    ;;
+*)
+    echo "usage: diskforge-live-virus-list load|save" >&2
+    result=1
+    ;;
+esac
+done_with_stick
+exit $result

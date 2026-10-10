@@ -53,6 +53,9 @@ systemctl enable diskforge-live-logs.service diskforge-live-logs.timer >/dev/nul
 # Nothing that touches the PC's own drives on its own, or keeps the stick busy
 systemctl mask fstrim.timer e2scrub_all.timer e2scrub_reap.service smartmontools.service \
     apt-daily.timer apt-daily-upgrade.timer man-db.timer dpkg-db-backup.timer >/dev/null 2>&1
+# ClamAV's own updater would download 250 MB into memory at every start; Scan for Viruses
+# updates the list on the stick itself, when asked (diskforge-live-virus-list).
+systemctl mask clamav-freshclam.service >/dev/null 2>&1
 
 # Our boot animation. The initrd below gets it, so it shows from the start.
 plymouth-set-default-theme diskforge-live

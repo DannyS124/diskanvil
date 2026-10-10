@@ -620,14 +620,17 @@ void UDisks::unmountThen(const QVector<Volume> &volumes, const QString &failure,
     (*run)(0);
 }
 
-void UDisks::mount(const Volume &volume)
+void UDisks::mount(const Volume &volume, bool readOnly)
 {
     const QString name = shortDevice(volume.device);
     if (volume.encrypted && volume.cleartextPath.isEmpty()) {
         emit operationFinished(false, tr("Couldn't mount %1: unlock it first").arg(name));
         return;
     }
-    call(volume.filesystemPath(), kFilesystem, QStringLiteral("Mount"), {options()},
+    QVariantMap extra;
+    if (readOnly)
+        extra.insert(QStringLiteral("options"), QStringLiteral("ro"));
+    call(volume.filesystemPath(), kFilesystem, QStringLiteral("Mount"), {options(extra)},
          [name](const QDBusMessage &reply) { return tr("Mounted %1 at %2").arg(name, reply.arguments().value(0).toString()); },
          tr("Couldn't mount %1").arg(name));
 }

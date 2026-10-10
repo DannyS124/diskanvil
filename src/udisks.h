@@ -243,7 +243,8 @@ public:
     void refresh();
 
     // Async, results via operationFinished. System disks are refused here as well.
-    void mount(const Volume &volume);
+    // readOnly: nothing on it can change while it's mounted (Scan for Viruses looks at drives so).
+    void mount(const Volume &volume, bool readOnly = false);
     void unmount(const Volume &volume);
     void setLabel(const Volume &volume, const QString &label);
     // Type and Flags: the type first (when it's not empty), then the flags (when asked to).

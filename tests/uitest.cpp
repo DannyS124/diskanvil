@@ -30,6 +30,7 @@
 #include "../src/stickcheckdialog.h"
 #include "../src/noticebar.h"
 #include "../src/typedialog.h"
+#include "../src/virusdialog.h"
 #include "../src/windowsusbjob.h"
 #include "../src/windowsusbdialog.h"
 #include "slowdisk.h"
@@ -2349,6 +2350,240 @@ void lostFilesFromFileSystem()
            QString::number(view->model()->rowCount()));
 }
 
+// A virus list of our own for Scan for Viruses: made-up "viruses" by their MD5, packed into
+// ClamAV's unsigned list kind with its own sigtool, in DiskForge's list folder.
+bool makeVirusList(const QVector<QPair<QByteArray, const char *>> &viruses, const QString &work, QString *problem)
+{
+    QByteArray lines;
+    for (const auto &[data, name] : viruses)
+        lines += QCryptographicHash::hash(data, QCryptographicHash::Md5).toHex() + ':' + QByteArray::number(data.size()) + ':' + name + '\n';
+    QDir().mkpath(work + QStringLiteral("/old"));
+    for (const auto &[file, data] : {qMakePair(QStringLiteral("daily.hdb"), lines), qMakePair(QStringLiteral("COPYING"), QByteArray("test list\n"))}) {
+        QFile f(work + QLatin1Char('/') + file);
+        if (!f.open(QIODevice::WriteOnly) || f.write(data) != data.size()) {
+            *problem = f.errorString();
+            return false;
+        }
+    }
+    QFile::remove(work + QStringLiteral("/daily.cud"));
+    QProcess sig;
+    sig.setWorkingDirectory(work);
+    sig.setProcessChannelMode(QProcess::MergedChannels);
+    sig.start(QStringLiteral("sigtool"), {QStringLiteral("--build=daily.cud"), QStringLiteral("--unsigned"), QStringLiteral("--cvd-version=1"),
+                                          QStringLiteral("--datadir=old")});
+    sig.write("diskforge-test\n");
+    sig.closeWriteChannel();
+    sig.waitForFinished(60000);
+    const QString own = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/diskforge/clamav");
+    QDir().mkpath(own);
+    QFile::remove(own + QStringLiteral("/daily.cud"));
+    if (!QFile::copy(work + QStringLiteral("/daily.cud"), own + QStringLiteral("/daily.cud"))) {
+        *problem = QString::fromUtf8(sig.readAll());
+        return false;
+    }
+    return true;
+}
+
+// Scan for Viruses, with real ClamAV and a list of our own: a folder, then (virusScanOnDrive)
+// a drive the window mounts itself.
+void virusScanThroughWindow()
+{
+    const QString sigtool = QStandardPaths::findExecutable(QStringLiteral("sigtool"));
+    if (QStandardPaths::findExecutable(QStringLiteral("clamscan")).isEmpty() || sigtool.isEmpty()) {
+        out << "SKIP  Scan for Viruses: ClamAV isn't installed" << Qt::endl;
+        return;
+    }
+    QTemporaryDir dir;
+    const QString drive = dir.filePath(QStringLiteral("drive"));
+    auto write = [](const QString &path, const QByteArray &data) {
+        QDir().mkpath(QFileInfo(path).absolutePath());
+        QFile f(path);
+        return f.open(QIODevice::WriteOnly) && f.write(data) == data.size();
+    };
+    const QByteArray trojan = "pretend this is a trojan\n";
+    const QByteArray ransom = QByteArray(5000, 'r') + "pretend this is ransomware";
+    write(drive + QStringLiteral("/Users/a/Downloads/setup.exe"), trojan);
+    write(drive + QStringLiteral("/Users/a/Downloads/tool.exe"), "a clean program\n");
+    write(drive + QStringLiteral("/Windows/System32/helper.dll"), ransom);
+    write(drive + QStringLiteral("/Users/a/Pictures/cat.jpg"), trojan); // not looked at by a quick scan
+
+    UDisks udisks;
+    const bool systemList = !QDir(QStringLiteral("/var/lib/clamav")).entryList({QStringLiteral("daily.*")}).isEmpty();
+    if (!systemList) {
+        VirusDialog dialog(&udisks);
+        auto *engine = dialog.findChild<QLabel *>(QStringLiteral("engine"));
+        QPushButton *download = findButton(&dialog, QStringLiteral("Download the List"));
+        QPushButton *scan = findButton(&dialog, QStringLiteral("Scan"));
+        report(engine->text().contains(QLatin1String("doesn't have its list of viruses yet")) && download && scan && !scan->isEnabled(),
+               QStringLiteral("Scan for Viruses: without a list it says so, and offers the download"), engine->text().left(100));
+    }
+
+    QString problem;
+    if (!makeVirusList({{trojan, "Win.Trojan.DiskForgeTest-1"}, {ransom, "Win.Ransomware.DiskForgeTest-2"}}, dir.filePath(QStringLiteral("list")),
+                       &problem)) {
+        report(false, QStringLiteral("make a test virus list with sigtool"), problem);
+        return;
+    }
+
+    VirusDialog dialog(&udisks);
+    dialog.show();
+    auto *engine = dialog.findChild<QLabel *>(QStringLiteral("engine"));
+    report(engine->text().contains(QLatin1String("list of viruses from today")) && engine->text().contains(QLatin1String("2 known")),
+           QStringLiteral("with a list, it says how old it is"), engine->text().left(100));
+    dialog.scanFolder(drive);
+    auto *status = dialog.findChild<QLabel *>(QStringLiteral("status"));
+    waitUntil([&] { return status->text().startsWith(QLatin1String("Done")); }, 60000);
+    auto *hits = dialog.findChild<QTreeWidget *>(QStringLiteral("hits"));
+    QStringList found;
+    for (int i = 0; i < hits->topLevelItemCount(); ++i)
+        found << hits->topLevelItem(i)->text(0) + QLatin1Char('=') + hits->topLevelItem(i)->text(1).section(QLatin1Char(':'), 0, 0);
+    found.sort();
+    report(status->text().startsWith(QLatin1String("Done: found 2 thing")) && status->text().contains(QLatin1String(" in 3 files."))
+               && found == QStringList{QStringLiteral("/Users/a/Downloads/setup.exe=A Trojan"), QStringLiteral("/Windows/System32/helper.dll=Ransomware")},
+           QStringLiteral("a quick scan finds both, in plain words"), status->text() + QLatin1Char(' ') + found.join(QStringLiteral(", ")));
+    if (qEnvironmentVariableIsSet("DISKFORGE_UITEST_SHOTS"))
+        dialog.grab().save(qEnvironmentVariable("DISKFORGE_UITEST_SHOTS") + QStringLiteral("/virusscan.png"));
+
+    // Delete: asked first, with a warning for Windows' own folders; then gone, and in the log.
+    QStringList boxes;
+    Answerer answerer;
+    answerer.answer = [&](QWidget *modal) {
+        if (auto *box = qobject_cast<QMessageBox *>(modal)) {
+            boxes << box->text();
+            box->button(QMessageBox::Yes)->click();
+            return true;
+        }
+        return false;
+    };
+    dialog.deleteTicked();
+    waitUntil([&] { return status->text().startsWith(QLatin1String("Deleted")); }, 10000);
+    QFile log(QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/diskforge/virus-scan.log"));
+    const QString logged = log.open(QIODevice::ReadOnly) ? QString::fromUtf8(log.readAll()) : QString();
+    report(boxes.size() == 1 && boxes[0].contains(QLatin1String("Delete these 2 file")) && boxes[0].contains(QLatin1String("Windows' own folders"))
+               && !QFile::exists(drive + QStringLiteral("/Users/a/Downloads/setup.exe")) && !QFile::exists(drive + QStringLiteral("/Windows/System32/helper.dll"))
+               && QFile::exists(drive + QStringLiteral("/Users/a/Downloads/tool.exe")) && logged.contains(QLatin1String("deleted ") + drive),
+           QStringLiteral("deleting asks first, warns about Windows' folders, and logs it"), status->text().left(100));
+}
+
+// A drive that isn't mounted (an NTFS loop device standing in for Windows' drive): the window
+// mounts it read-only to scan, writable only to delete, and unmounts it again when it closes.
+void virusScanOnDrive()
+{
+    for (const char *tool : {"clamscan", "sigtool", "mkntfs", "ntfscp"}) {
+        if (QStandardPaths::findExecutable(QLatin1String(tool)).isEmpty()) {
+            out << "SKIP  Scan for Viruses on a drive: " << tool << " isn't installed" << Qt::endl;
+            return;
+        }
+    }
+    QTemporaryDir dir;
+    const QByteArray trojan = "pretend this is a trojan on a drive\n";
+    QString problem;
+    if (!makeVirusList({{trojan, "Win.Trojan.DiskForgeTest-3"}}, dir.filePath(QStringLiteral("list")), &problem)) {
+        report(false, QStringLiteral("make a test virus list with sigtool"), problem);
+        return;
+    }
+    const QString image = dir.filePath(QStringLiteral("windows.img"));
+    for (const auto &[file, data] : {qMakePair(QStringLiteral("trojan.bin"), trojan), qMakePair(QStringLiteral("clean.bin"), QByteArray("clean\n"))}) {
+        QFile f(dir.filePath(file));
+        if (f.open(QIODevice::WriteOnly))
+            f.write(data);
+    }
+    sh(QStringLiteral("truncate"), {QStringLiteral("-s"), QStringLiteral("32M"), image});
+    const bool made = sh(QStringLiteral("mkntfs"), {QStringLiteral("-q"), QStringLiteral("-F"), QStringLiteral("-Q"), QStringLiteral("-L"),
+                                                    QStringLiteral("VIRUSTEST"), image}) == 0
+                   && sh(QStringLiteral("ntfscp"), {QStringLiteral("-q"), image, dir.filePath(QStringLiteral("trojan.bin")), QStringLiteral("/setup.exe")}) == 0
+                   && sh(QStringLiteral("ntfscp"), {QStringLiteral("-q"), image, dir.filePath(QStringLiteral("clean.bin")), QStringLiteral("/clean.exe")}) == 0;
+    QFile backing(image);
+    QString loopPath;
+    if (made && backing.open(QIODevice::ReadWrite)) {
+        QDBusMessage call = QDBusMessage::createMethodCall(QStringLiteral("org.freedesktop.UDisks2"), QStringLiteral("/org/freedesktop/UDisks2/Manager"),
+                                                           QStringLiteral("org.freedesktop.UDisks2.Manager"), QStringLiteral("LoopSetup"));
+        call << QVariant::fromValue(QDBusUnixFileDescriptor(backing.handle())) << QVariantMap{{QStringLiteral("auth.no_user_interaction"), true}};
+        loopPath = QDBusConnection::systemBus().call(call, QDBus::Block, 30000).arguments().value(0).value<QDBusObjectPath>().path();
+        backing.close();
+    }
+    report(!loopPath.isEmpty(), QStringLiteral("Scan for Viruses: an NTFS loop device stands in for Windows' drive"));
+    if (loopPath.isEmpty())
+        return;
+    UDisks udisks;
+    udisks.setInteractive(false);
+    QString volumePath;
+    waitUntil([&] {
+        udisks.refresh();
+        if (const Disk *d = udisks.diskByPath(loopPath)) {
+            for (const Volume &v : d->volumes) {
+                if (v.fsType == QLatin1String("ntfs"))
+                    volumePath = v.objectPath;
+            }
+        }
+        return !volumePath.isEmpty();
+    }, 15000);
+    auto mountOf = [&]() -> QString {
+        udisks.refresh();
+        if (const Disk *d = udisks.diskByPath(loopPath)) {
+            for (const Volume &v : d->volumes) {
+                if (v.objectPath == volumePath)
+                    return v.mountPoints.value(0);
+            }
+        }
+        return {};
+    };
+    auto options = [](const QString &mount) {
+        QFile f(QStringLiteral("/proc/self/mounts"));
+        if (!f.open(QIODevice::ReadOnly))
+            return QString();
+        for (const QByteArray &line : f.readAll().split('\n')) {
+            const QList<QByteArray> fields = line.split(' ');
+            if (fields.size() > 3 && QString::fromUtf8(fields[1]).replace(QStringLiteral("\\040"), QStringLiteral(" ")) == mount)
+                return QString::fromUtf8(fields[3]);
+        }
+        return QString();
+    };
+    {
+        VirusDialog dialog(&udisks);
+        dialog.show();
+        auto *targets = dialog.findChild<QTreeWidget *>(QStringLiteral("targets"));
+        QTreeWidgetItem *item = nullptr;
+        for (int i = 0; i < targets->topLevelItemCount(); ++i) {
+            if (targets->topLevelItem(i)->data(0, Qt::UserRole).toString() == volumePath)
+                item = targets->topLevelItem(i);
+        }
+        report(item != nullptr, QStringLiteral("the drive is in the list to pick from"));
+        if (item) {
+            targets->setCurrentItem(item);
+            findButton(&dialog, QStringLiteral("Scan"))->click();
+            auto *status = dialog.findChild<QLabel *>(QStringLiteral("status"));
+            waitUntil([&] { return status->text().startsWith(QLatin1String("Done")); }, 60000);
+            const QString mount = mountOf();
+            auto *hits = dialog.findChild<QTreeWidget *>(QStringLiteral("hits"));
+            report(!mount.isEmpty() && options(mount).startsWith(QLatin1String("ro")) && hits->topLevelItemCount() == 1
+                       && hits->topLevelItem(0)->text(0) == QLatin1String("/setup.exe"),
+                   QStringLiteral("it's mounted read-only to scan, and the trojan is found"),
+                   status->text() + QStringLiteral(" | ") + mount + QStringLiteral(" ") + options(mount));
+
+            Answerer answerer;
+            answerer.answer = [&](QWidget *modal) {
+                if (auto *box = qobject_cast<QMessageBox *>(modal)) {
+                    box->button(QMessageBox::Yes)->click();
+                    return true;
+                }
+                return false;
+            };
+            dialog.deleteTicked();
+            waitUntil([&] { return status->text().startsWith(QLatin1String("Deleted")) || status->text().contains(QLatin1String("can't")); },
+                      30000);
+            const QString writable = mountOf();
+            report(!writable.isEmpty() && options(writable).startsWith(QLatin1String("rw")) && !QFile::exists(writable + QStringLiteral("/setup.exe"))
+                       && QFile::exists(writable + QStringLiteral("/clean.exe")),
+                   QStringLiteral("to delete, it's made writable, and only the trojan goes"), status->text().left(120));
+        }
+        dialog.reject();
+    }
+    waitUntil([&] { return mountOf().isEmpty(); }, 15000);
+    report(mountOf().isEmpty(), QStringLiteral("closing the window unmounts the drive it mounted"));
+    cleanUpLoop(udisks, loopPath);
+}
+
 void lostFilesThroughWindow()
 {
     QTemporaryDir dir;
@@ -2589,27 +2824,24 @@ void rescueMode()
     rescue::rescueConfPath = realConf;
 }
 
-int userScenarios()
+// `only`: just the scenarios with these names (--only=viruses,home), for when one is being worked on.
+int userScenarios(const QStringList &only)
 {
     QTemporaryDir home;
     qputenv("XDG_DATA_HOME", QFile::encodeName(home.filePath(QStringLiteral("data"))));
     qputenv("XDG_CONFIG_HOME", QFile::encodeName(home.filePath(QStringLiteral("config"))));
-    outputWindow();
-    addonMenus();
-    themes();
-    maker();
-    banner();
-    jobBars();
-    rescueUsb();
-    stickCheck();
-    isoCopy();
-    windowsUsb();
-    rescueMode();
-    enterKey();
-    homeScreen();
-    lostFilesThroughWindow();
-    lostFilesFromFileSystem();
-    previewsThroughHelper();
+    const QVector<QPair<const char *, void (*)()>> scenarios = {
+        {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
+        {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
+        {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"isocopy", isoCopy},
+        {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
+        {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostfs", lostFilesFromFileSystem},
+        {"previews", previewsThroughHelper}, {"viruses", virusScanThroughWindow}, {"virusdrive", virusScanOnDrive},
+    };
+    for (const auto &[name, run] : scenarios) {
+        if (only.isEmpty() || only.contains(QLatin1String(name)))
+            run();
+    }
     out << (failures ? QStringLiteral("%1 step(s) failed").arg(failures) : QStringLiteral("All steps passed")) << Qt::endl;
     return failures ? 1 : 0;
 }
@@ -2626,8 +2858,14 @@ int main(int argc, char *argv[])
     }
     QApplication app(argc, argv);
     // As the user: the add-on, menu and theme parts, which need no test disks.
-    if (app.arguments().contains(QStringLiteral("--user")))
-        return userScenarios();
+    if (app.arguments().contains(QStringLiteral("--user"))) {
+        QStringList only;
+        for (const QString &arg : app.arguments()) {
+            if (arg.startsWith(QLatin1String("--only=")))
+                only = arg.mid(7).split(QLatin1Char(','));
+        }
+        return userScenarios(only);
+    }
     if (geteuid() != 0) {
         out << "Run as root: it creates a loop device (or use --user for the parts that don't)." << Qt::endl;
         return 2;

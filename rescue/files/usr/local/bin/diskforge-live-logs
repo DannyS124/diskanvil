@@ -70,33 +70,9 @@ boot_mode() {
     fi
 }
 
-# The stick to write to: the one this system started from, or, when it started from the ISO
-# (a CD, a VM), a stick made from that same ISO that's plugged in. Those are found by their
-# build file and mounted here just while the logs are copied. With "copy to memory" that's
-# the stick it started from too: live-boot lets go of it so it's free to come out.
-find_stick() {
-    if mountpoint -q /run/live/medium && [ -e "/run/live/medium/.disk/diskforge-live-$BUILD_ID" ] &&
-        [ "$(findmnt -no FSTYPE /run/live/medium)" = vfat ]; then
-        echo /run/live/medium
-        return 0
-    fi
-    local mnt=$state/stick
-    if mountpoint -q "$mnt" && [ -e "$mnt/.disk/diskforge-live-$BUILD_ID" ]; then
-        echo "$mnt"
-        return 0
-    fi
-    mkdir -p "$mnt"
-    local dev
-    for dev in $(blkid -t TYPE=vfat -o device 2>/dev/null); do
-        mount -o ro "$dev" "$mnt" 2>/dev/null || continue
-        if [ -e "$mnt/.disk/diskforge-live-$BUILD_ID" ]; then
-            echo "$mnt"
-            return 0
-        fi
-        umount "$mnt"
-    done
-    return 1
-}
+# The stick to write to (find_stick: the one this system started from, or one made from the
+# same ISO).
+. /usr/local/lib/diskforge-live/find-stick.sh
 
 stick=$(find_stick) || stick=
 

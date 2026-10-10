@@ -106,6 +106,7 @@ private:
     QAction *m_recover = nullptr;
     QAction *m_findFiles = nullptr;
     QAction *m_findFilesImage = nullptr;
+    QAction *m_virusScan = nullptr;
     QAction *m_raidCheck = nullptr;
     QAction *m_newTable = nullptr;
     QAction *m_safelyRemove = nullptr;

@@ -277,6 +277,9 @@ QVector<HomeWindow::Tile> HomeWindow::allTiles() const
     add(QStringLiteral("recover"), QStringLiteral("diskforge-live-recover"), QStringLiteral("edit-find"), tr("Get Files Back"),
         tr("Deleted files, or files from a formatted or damaged drive"))
         .tool = QStringLiteral("lost-files");
+    add(QStringLiteral("viruses"), QStringLiteral("diskforge-live-virus"), QStringLiteral("security-high"), tr("Scan for Viruses"),
+        desktop ? tr("Windows' drive, while Windows can't hide anything") : tr("Known malware on a drive or in a folder"))
+        .tool = QStringLiteral("virus-scan");
     add(QStringLiteral("testdisk"), QStringLiteral("diskforge-live-testdisk"), QStringLiteral("drive-harddisk"), tr("Find Lost Partitions"),
         tr("Partitions that disappeared, and boot sectors (TestDisk)"))
         .desktopId = QStringLiteral("diskforge-live-testdisk");

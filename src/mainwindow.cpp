@@ -16,6 +16,7 @@
 #include "snapper.h"
 #include "systemtools.h"
 #include "usagedialog.h"
+#include "virusdialog.h"
 #include "dialogs.h"
 #include "tools.h"
 #include "typedialog.h"
@@ -542,6 +543,9 @@ void MainWindow::createActions()
     connect(m_optimize, &QAction::triggered, this, [this] { OptimizeDialog(m_udisks, this).exec(); });
     m_cleanup = new QAction(themeIcon("edit-clear-history", "edit-clear"), tr("Disk &Cleanup…"), this);
     connect(m_cleanup, &QAction::triggered, this, [this] { CleanupDialog(m_udisks, this).exec(); });
+    m_virusScan = new QAction(themeIcon("diskforge-live-virus", "security-high"), tr("Scan for &Viruses…"), this);
+    m_virusScan->setToolTip(tr("Look for known malware on a drive or in a folder"));
+    connect(m_virusScan, &QAction::triggered, this, [this] { VirusDialog(m_udisks, toolParent()).exec(); });
     m_snapshots = new QAction(themeIcon("camera-photo", "document-open-recent"), tr("Btrfs &Snapshots…"), this);
     connect(m_snapshots, &QAction::triggered, this, [this] { SnapshotsDialog(this).exec(); });
 
@@ -656,7 +660,7 @@ void MainWindow::createActions()
         tools->clear();
 #ifdef Q_OS_WIN
         // Quick Fixes' tools, and add-ons (Linux commands), aren't in the Windows version yet.
-        tools->addActions({m_usage, m_cleanup, m_optimize, m_snapshots});
+        tools->addActions({m_virusScan, m_usage, m_cleanup, m_optimize, m_snapshots});
         return;
 #endif
         tools->addAction(themeIcon("tools-wizard", "system-run"), tr("&Quick Fixes…"), this, [this] {
@@ -666,7 +670,7 @@ void MainWindow::createActions()
             fixes->show();
         });
         tools->addSeparator();
-        tools->addActions({m_usage, m_cleanup, m_optimize, m_snapshots});
+        tools->addActions({m_virusScan, m_usage, m_cleanup, m_optimize, m_snapshots});
         tools->addSection(tr("Add-ons"));
         // Every add-on action is listed. One that doesn't fit the selection is greyed out,
         // with the reason where a shortcut would go (and as its tooltip).
@@ -1220,7 +1224,8 @@ bool MainWindow::openTool(const QString &name)
                                              {QStringLiteral("windows-usb"), m_windowsUsb},
                                              {QStringLiteral("rescue-usb"), m_rescueUsb},
                                              {QStringLiteral("check-stick"), m_checkStick},
-                                             {QStringLiteral("lost-files"), m_findFiles}};
+                                             {QStringLiteral("lost-files"), m_findFiles},
+                                             {QStringLiteral("virus-scan"), m_virusScan}};
     QAction *action = tools.value(name);
     if (!action)
         return false;

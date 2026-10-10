@@ -139,3 +139,8 @@ htop
 locales
 console-setup
 kbd
+# Scan for Viruses: ClamAV run as its own program; its list is kept on the stick
+clamav
+clamav-freshclam
+# the sandbox for Find Lost Files' previews
+bubblewrap
