@@ -69,6 +69,7 @@ add_library(diskforge-core STATIC
     src/authenticode.cpp src/authenticode.h
     src/efivars.cpp src/efivars.h
     src/bootcheck.cpp src/bootcheck.h
+    src/newids.cpp src/newids.h
     src/filetypes.cpp src/filetypes.h
     src/checksums.cpp src/checksums.h
     src/benchmark.cpp src/benchmark.h
@@ -145,6 +146,7 @@ add_library(diskforge-ui STATIC
     src/usagedialog.cpp src/usagedialog.h
     src/virusdialog.cpp src/virusdialog.h
     src/hashlookup.cpp src/hashlookup.h
+    src/newidsdialog.cpp src/newidsdialog.h
     src/systemtools.cpp src/systemtools.h
     src/erasedialog.cpp src/erasedialog.h
     src/addonsdialog.cpp src/addonsdialog.h
@@ -211,7 +213,7 @@ if(DISKFORGE_SELFTEST)
         tests/test_gpt.cpp tests/test_copy.cpp tests/test_blockmap.cpp
         tests/test_usage.cpp tests/test_backup.cpp
         tests/test_rescue.cpp tests/test_clone.cpp tests/test_system.cpp
-        tests/test_catalog.cpp tests/test_fuzz.cpp tests/test_health.cpp tests/test_jobs.cpp tests/test_recover.cpp tests/test_rescueusb.cpp tests/test_stickcheck.cpp tests/test_images.cpp tests/test_isomode.cpp tests/test_windows.cpp tests/test_lostfiles.cpp tests/test_viruses.cpp tests/test_registry.cpp tests/test_startup.cpp tests/test_boot.cpp tests/testsign.cpp tests/testsign.h tests/test_raid.cpp tests/test_lvm.cpp)
+        tests/test_catalog.cpp tests/test_fuzz.cpp tests/test_health.cpp tests/test_jobs.cpp tests/test_recover.cpp tests/test_rescueusb.cpp tests/test_stickcheck.cpp tests/test_images.cpp tests/test_isomode.cpp tests/test_windows.cpp tests/test_lostfiles.cpp tests/test_viruses.cpp tests/test_registry.cpp tests/test_startup.cpp tests/test_boot.cpp tests/test_newids.cpp tests/testsign.cpp tests/testsign.h tests/test_raid.cpp tests/test_lvm.cpp)
     target_link_libraries(diskforge-selftest PRIVATE diskforge-ui OpenSSL::Crypto)
     target_compile_definitions(diskforge-selftest PRIVATE SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 

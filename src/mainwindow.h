@@ -53,6 +53,8 @@ private:
     void updateActions();
     void updateProgress();
     void updateNotices();
+    void updateCloneNotices();
+    QStringList m_cloneNoticeKey;
     void updateJobBars();
     void showNoticesIfAny();
     void stopJob(const QString &jobPath);
@@ -126,6 +128,7 @@ private:
     QAction *m_badSectors = nullptr;
     QAction *m_checkStick = nullptr;
     QAction *m_clone = nullptr;
+    QAction *m_newIds = nullptr;
     QAction *m_backup = nullptr;
     QAction *m_restore = nullptr;
     QAction *m_rescue = nullptr;

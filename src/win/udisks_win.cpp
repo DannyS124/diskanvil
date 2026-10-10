@@ -19,12 +19,14 @@
 #include "format.h"
 #include "fsprobe.h"
 #include "health.h"
+#include "newids.h"
 #include "winutil.h"
 
 #include <QCollator>
 #include <QDir>
 #include <QHash>
 #include <QSysInfo>
+#include <QRandomGenerator>
 #include <QTimer>
 
 #include <algorithm>
@@ -464,6 +466,10 @@ void UDisks::refresh()
             const bool wholeDisk = mbr && info->PartitionCount >= 1 && info->PartitionEntry[0].StartingOffset.QuadPart == 0
                                 && info->PartitionEntry[0].PartitionLength.QuadPart > 0;
             d.tableType = gpt ? QStringLiteral("gpt") : mbr && !wholeDisk ? QStringLiteral("dos") : QString();
+            if (gpt)
+                d.tableId = win::guidString(info->Gpt.DiskId);
+            else if (mbr && !wholeDisk)
+                d.tableId = QStringLiteral("%1").arg(uint(info->Mbr.Signature), 8, 16, QLatin1Char('0'));
             if (wholeDisk) {
                 Volume v;
                 v.objectPath = d.blockPath;
@@ -693,9 +699,137 @@ void UDisks::setPartitionTypeAndFlags(const Volume &volume, const QString &, boo
     notOnWindows(tr("Couldn't change the type of %1").arg(shortDevice(volume.device)));
 }
 
-void UDisks::setUuid(const Volume &volume, const QString &)
+// A file system's serial number, written into its boot sectors with the volume locked, so
+// nothing reads it halfway. Windows mounts it again by itself afterwards.
+void UDisks::setUuid(const Volume &volume, const QString &uuid)
 {
-    notOnWindows(tr("Couldn't give %1 a new ID").arg(shortDevice(volume.device)));
+    const QString name = shortDevice(volume.device);
+    const QString failure = tr("Couldn't give %1 a new ID").arg(name);
+    const Disk *disk = diskOf(volume);
+    if (refuseSystem(disk, failure))
+        return;
+    const qint64 sector = disk ? std::max(512, disk->sectorSize) : 512;
+    QString path = m_windows->volumeNames.value(volume.objectPath);
+    if (path.endsWith(QLatin1Char('\\')))
+        path.chop(1);
+    if (path.isEmpty())
+        path = volume.objectPath;
+    QString error;
+    win::Handle h = win::openDevice(path, GENERIC_READ | GENERIC_WRITE);
+    auto at = [&h](qint64 offset) {
+        LARGE_INTEGER to;
+        to.QuadPart = offset;
+        return SetFilePointerEx(h.get(), to, nullptr, FILE_BEGIN);
+    };
+    auto readAt = [&](qint64 offset, QByteArray &buffer) {
+        DWORD done = 0;
+        return at(offset) && ReadFile(h.get(), buffer.data(), DWORD(buffer.size()), &done, nullptr) && done == DWORD(buffer.size());
+    };
+    auto writeAt = [&](qint64 offset, const QByteArray &buffer) {
+        DWORD done = 0;
+        return at(offset) && WriteFile(h.get(), buffer.constData(), DWORD(buffer.size()), &done, nullptr) && done == DWORD(buffer.size());
+    };
+    bool ok = h.valid();
+    if (!ok) {
+        error = win::lastErrorText();
+    } else if (!win::ioctl(h.get(), FSCTL_LOCK_VOLUME, nullptr, 0, nullptr, 0)) {
+        ok = false;
+        error = tr("something has files open on it; close them and try again");
+    }
+    if (ok) {
+        win::ioctl(h.get(), FSCTL_DISMOUNT_VOLUME, nullptr, 0, nullptr, 0);
+        QByteArray boot(newids::bootBytes(volume.fsType, int(sector)), '\0');
+        ok = readAt(0, boot) && newids::setSerial(boot, volume.fsType, uuid, &error) && writeAt(0, boot);
+        if (ok && volume.fsType == QLatin1String("ntfs")) {
+            // NTFS keeps a copy of its boot sector in the volume's last sector.
+            GET_LENGTH_INFORMATION length = {};
+            QByteArray last(sector, '\0');
+            QString ignored;
+            if (win::ioctl(h.get(), IOCTL_DISK_GET_LENGTH_INFO, nullptr, 0, &length, sizeof length) && length.Length.QuadPart > sector
+                && readAt(length.Length.QuadPart - sector, last) && newids::setSerial(last, volume.fsType, uuid, &ignored))
+                writeAt(length.Length.QuadPart - sector, last);
+        }
+        if (!ok && error.isEmpty())
+            error = win::lastErrorText();
+        FlushFileBuffers(h.get());
+        win::ioctl(h.get(), FSCTL_UNLOCK_VOLUME, nullptr, 0, nullptr, 0);
+    }
+    h.reset();
+    QTimer::singleShot(0, this, [this, ok, name, failure, error] {
+        refresh();
+        emit operationFinished(ok, ok ? tr("Gave %1 a new ID").arg(name) : failure + QStringLiteral(": ") + error);
+    });
+}
+
+namespace {
+
+// IOCTL_DISK_SET_DISK_ATTRIBUTES and its SET_DISK_ATTRIBUTES, from ntddisk.h, which MinGW's
+// headers don't have.
+constexpr DWORD kSetDiskAttributes = CTL_CODE(IOCTL_DISK_BASE, 0x003d, METHOD_BUFFERED, FILE_READ_ACCESS | FILE_WRITE_ACCESS);
+constexpr DWORDLONG kDiskOffline = 0x1;
+struct SetDiskAttributes {
+    DWORD version;
+    BOOLEAN persist;
+    BYTE reserved1[3];
+    DWORDLONG attributes;
+    DWORDLONG mask;
+    DWORD reserved2[4];
+};
+
+} // namespace
+
+void UDisks::giveNewDiskIds(const Disk &disk)
+{
+    const QString name = shortDevice(disk.device);
+    const QString failure = tr("Couldn't give %1 new IDs").arg(name);
+    if (refuseSystem(&disk, failure))
+        return;
+    QString error;
+    win::Handle h = win::openDevice(disk.blockPath, GENERIC_READ | GENERIC_WRITE);
+    QByteArray layout = h.valid() ? win::ioctl(h.get(), IOCTL_DISK_GET_DRIVE_LAYOUT_EX) : QByteArray();
+    bool ok = layout.size() >= qsizetype(sizeof(DRIVE_LAYOUT_INFORMATION_EX));
+    if (ok) {
+        auto *info = reinterpret_cast<DRIVE_LAYOUT_INFORMATION_EX *>(layout.data());
+        if (info->PartitionStyle == PARTITION_STYLE_GPT) {
+            CoCreateGuid(&info->Gpt.DiskId);
+            for (DWORD i = 0; i < info->PartitionCount; ++i) {
+                PARTITION_INFORMATION_EX &p = info->PartitionEntry[i];
+                CoCreateGuid(&p.Gpt.PartitionId);
+                p.RewritePartition = TRUE;
+            }
+        } else if (info->PartitionStyle == PARTITION_STYLE_MBR) {
+            DWORD signature = 0;
+            while (signature == 0) // 0 means "none"
+                signature = QRandomGenerator::system()->generate();
+            info->Mbr.Signature = signature;
+            for (DWORD i = 0; i < info->PartitionCount; ++i)
+                info->PartitionEntry[i].RewritePartition = TRUE;
+        } else {
+            ok = false;
+            error = tr("it has no partition table");
+        }
+        const DWORD size = DWORD(offsetof(DRIVE_LAYOUT_INFORMATION_EX, PartitionEntry) + info->PartitionCount * sizeof(PARTITION_INFORMATION_EX));
+        if (ok && !win::ioctl(h.get(), IOCTL_DISK_SET_DRIVE_LAYOUT_EX, info, size, nullptr, 0)) {
+            ok = false;
+            error = win::lastErrorText();
+        }
+        if (ok) {
+            win::ioctl(h.get(), IOCTL_DISK_UPDATE_PROPERTIES, nullptr, 0, nullptr, 0);
+            // Windows switched it off for having the same IDs as another drive: on again.
+            SetDiskAttributes attributes = {};
+            attributes.version = sizeof attributes;
+            attributes.persist = TRUE;
+            attributes.mask = kDiskOffline;
+            win::ioctl(h.get(), kSetDiskAttributes, &attributes, sizeof attributes, nullptr, 0);
+        }
+    } else {
+        error = win::lastErrorText();
+    }
+    h.reset();
+    QTimer::singleShot(0, this, [this, ok, name, failure, error] {
+        refresh();
+        emit operationFinished(ok, ok ? tr("Gave %1 new IDs").arg(name) : failure + QStringLiteral(": ") + error);
+    });
 }
 
 void UDisks::format(const Volume &volume, const QString &, const QString &, const QString &)

@@ -83,7 +83,7 @@ case "$cmd" in
         fi
     }
     # As you: the system-disk guard and everything that works on plain files.
-    for suite in guard addons gpt copy usage backup rescuemap cleanup catalog fuzz health jobs recover rescueusb stickcheck images isomode windows lostfiles viruses registry startup boot; do
+    for suite in guard addons gpt copy usage backup rescuemap cleanup catalog fuzz health jobs recover rescueusb stickcheck images isomode windows lostfiles viruses registry startup boot newids; do
         run_tests $suite ./build/diskforge-selftest --$suite
     done
     run_tests window-user env QT_QPA_PLATFORM=offscreen ./build/diskforge-uitest --user
@@ -93,11 +93,12 @@ case "$cmd" in
         run_tests $suite sudo ./build/diskforge-selftest --$suite
     done
     run_tests window sudo env QT_QPA_PLATFORM=offscreen ./build/diskforge-uitest
+    run_tests window-newids sudo env QT_QPA_PLATFORM=offscreen ./build/diskforge-uitest --user --only=newids
     # The file-based suites again with AddressSanitizer and UBSan, which catch memory errors
     # that don't crash. Last, because building it takes a while and sudo's login runs out.
     cmake -S . -B build-asan -DDISKFORGE_SANITIZE=ON -DCMAKE_BUILD_TYPE=Debug >/dev/null
     cmake --build build-asan -j"$(nproc)" --target diskforge-selftest >/dev/null
-    for suite in addons gpt copy usage backup rescuemap catalog fuzz health jobs recover rescueusb stickcheck images isomode windows lostfiles viruses registry startup boot; do
+    for suite in addons gpt copy usage backup rescuemap catalog fuzz health jobs recover rescueusb stickcheck images isomode windows lostfiles viruses registry startup boot newids; do
         run_tests asan-$suite env ASAN_OPTIONS=detect_leaks=0 ./build-asan/diskforge-selftest --$suite
     done
 

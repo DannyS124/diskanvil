@@ -3,6 +3,8 @@
 
 #include "udisks.h"
 
+#include "partrecover.h"
+
 #include "applog.h"
 #include "dbusnames.h"
 #include "btrfscheck.h"
@@ -343,8 +345,10 @@ void UDisks::refresh()
         if (!d.isLoop)
             d.health = readHealth(d.drivePath, drive, driveIfaces.value(kAta), driveIfaces.value(kNvme));
 
-        if (ifaces.contains(kPartitionTable))
+        if (ifaces.contains(kPartitionTable)) {
             d.tableType = ifaces.value(kPartitionTable).value(QStringLiteral("Type")).toString();
+            d.tableId = recover::diskId(d.device);
+        }
         else if (!block.value(QStringLiteral("IdUsage")).toString().isEmpty())
             d.volumes.push_back(makeVolume(d.blockPath, ifaces)); // fs on the bare disk
 
@@ -684,7 +688,9 @@ void UDisks::setUuid(const Volume &volume, const QString &uuid)
     const QString name = shortDevice(volume.device);
     if (refuseSystem(diskOf(volume), tr("Couldn't change the ID of %1").arg(name)))
         return;
-    call(volume.filesystemPath(), kFilesystem, QStringLiteral("SetUUID"), {uuid, options()},
+    // A swap area has its own interface for it (UDisks 2.10 and later).
+    const bool swap = volume.fsType == QLatin1String("swap");
+    call(swap ? volume.objectPath : volume.filesystemPath(), swap ? kSwapspace : kFilesystem, QStringLiteral("SetUUID"), {uuid, options()},
          [name](const QDBusMessage &) { return tr("Gave %1 a new ID").arg(name); },
          tr("Couldn't change the ID of %1").arg(name));
 }

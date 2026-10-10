@@ -3,6 +3,8 @@
 
 #include "clone.h"
 
+#include "newids.h"
+
 #include "blockio.h"
 #include "format.h"
 #include "gpt.h"
@@ -124,7 +126,7 @@ QString newUuid(const QString &fsType)
         return s;
     };
     static const QStringList uuidStyle = {QStringLiteral("ext2"), QStringLiteral("ext3"), QStringLiteral("ext4"), QStringLiteral("xfs"),
-                                          QStringLiteral("btrfs"), QStringLiteral("f2fs")};
+                                          QStringLiteral("btrfs"), QStringLiteral("f2fs"), QStringLiteral("swap")};
     if (uuidStyle.contains(fsType))
         return QUuid::createUuid().toString(QUuid::WithoutBraces);
     if (fsType == QLatin1String("vfat") || fsType == QLatin1String("exfat")) {
@@ -190,16 +192,8 @@ void CloneJob::run()
             return;
         }
     } else if (m_newIds && !m_plan.extents.isEmpty() && m_plan.extents.first().source == 0) {
-        // MBR: the disk signature at byte 440 is what partition IDs are made from.
-        const quint64 sector = quint64(m_plan.sectorSize);
-        blockio::Buffer mbr = blockio::alignedBuffer(std::max<size_t>(sector, blockio::kAlign));
-        bool ok = mbr && blockio::readAt(m_target, mbr.get(), sector, 0);
-        if (ok) {
-            const quint32 signature = QRandomGenerator::system()->generate();
-            std::memcpy(mbr.get() + 440, &signature, 4);
-            ok = blockio::writeAt(m_target, mbr.get(), sector, 0) && blockio::flush(m_target);
-        }
-        if (!ok) {
+        QString error;
+        if (!newids::giveDiskNewIds(m_target, false, m_plan.sectorSize, &error)) {
             emit finished(false, tr("Copied, but the disk ID couldn't be changed."));
             return;
         }

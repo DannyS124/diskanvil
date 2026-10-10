@@ -32,6 +32,8 @@
 #include "../src/noticebar.h"
 #include "../src/typedialog.h"
 #include "../src/virusdialog.h"
+#include "../src/newids.h"
+#include "../src/newidsdialog.h"
 #include "../src/hashlookup.h"
 #include "../src/efivars.h"
 #include "testsign.h"
@@ -2631,6 +2633,143 @@ void virusScanWindowsDrive()
            QStringLiteral("scanned again, what was switched off isn't odd any more"), still.join(QStringLiteral(", ")));
 }
 
+// Give New IDs: a drive and its byte-for-byte copy (a GPT with an EFI partition and an ext4
+// Linux whose fstab and boot entry name them by ID), both connected. The window warns, and
+// the copy gets its own IDs, its Linux's settings changed to match.
+void newIdsThroughWindow()
+{
+    QTemporaryDir dir;
+    const QString original = dir.filePath(QStringLiteral("original.img")), copy = dir.filePath(QStringLiteral("copy.img"));
+    sh(QStringLiteral("truncate"), {QStringLiteral("-s"), QStringLiteral("96M"), original});
+    QProcess sfdisk;
+    sfdisk.start(QStringLiteral("sfdisk"), {QStringLiteral("-q"), original});
+    sfdisk.waitForStarted();
+    sfdisk.write("label: gpt\nstart=2048, size=40960, type=U\nstart=43008, type=L\n");
+    sfdisk.closeWriteChannel();
+    sfdisk.waitForFinished();
+    // The Linux's own files: they name the file systems the way an installer would.
+    const QString efiUuid = QStringLiteral("1234-ABCD"), rootUuid = QStringLiteral("7c9e6679-7425-40de-944b-e07fc1f90ae7");
+    const QString tree = dir.filePath(QStringLiteral("root"));
+    QDir().mkpath(tree + QStringLiteral("/etc"));
+    QFile fstab(tree + QStringLiteral("/etc/fstab"));
+    if (fstab.open(QIODevice::WriteOnly))
+        fstab.write(QStringLiteral("UUID=%1 / ext4 defaults 0 1\nUUID=%2 /boot vfat umask=0077 0 2\n").arg(rootUuid, efiUuid).toUtf8());
+    fstab.close();
+    QString partitions;
+    sh(QStringLiteral("sfdisk"), {QStringLiteral("--part-uuid"), original, QStringLiteral("2")}, &partitions);
+    const QString rootPart = partitions.trimmed().toLower();
+    const QString entries = dir.filePath(QStringLiteral("arch.conf"));
+    QFile entry(entries);
+    if (entry.open(QIODevice::WriteOnly))
+        entry.write(QStringLiteral("title Arch\nlinux /vmlinuz-linux\noptions root=PARTUUID=%1 rw\n").arg(rootPart).toUtf8());
+    entry.close();
+    sh(QStringLiteral("mkfs.vfat"), {QStringLiteral("-i"), QString(efiUuid).remove(QLatin1Char('-')), QStringLiteral("--offset=2048"), original,
+                                     QStringLiteral("20480")});
+    sh(QStringLiteral("mmd"), {QStringLiteral("-i"), original + QStringLiteral("@@1M"), QStringLiteral("::/loader"), QStringLiteral("::/loader/entries")});
+    sh(QStringLiteral("mcopy"), {QStringLiteral("-i"), original + QStringLiteral("@@1M"), entries, QStringLiteral("::/loader/entries/arch.conf")});
+    sh(QStringLiteral("mke2fs"), {QStringLiteral("-q"), QStringLiteral("-t"), QStringLiteral("ext4"), QStringLiteral("-U"), rootUuid, QStringLiteral("-d"), tree,
+                                  QStringLiteral("-E"), QStringLiteral("offset=%1").arg(43008 * 512), original, QStringLiteral("70M")});
+    QFile::copy(original, copy);
+
+    // Both connected.
+    QStringList loops;
+    for (const QString &image : {original, copy}) {
+        QFile backing(image);
+        if (!backing.open(QIODevice::ReadWrite))
+            continue;
+        QDBusMessage call = QDBusMessage::createMethodCall(QStringLiteral("org.freedesktop.UDisks2"), QStringLiteral("/org/freedesktop/UDisks2/Manager"),
+                                                           QStringLiteral("org.freedesktop.UDisks2.Manager"), QStringLiteral("LoopSetup"));
+        call << QVariant::fromValue(QDBusUnixFileDescriptor(backing.handle())) << QVariantMap{{QStringLiteral("auth.no_user_interaction"), true}};
+        loops << QDBusConnection::systemBus().call(call, QDBus::Block, 30000).arguments().value(0).value<QDBusObjectPath>().path();
+    }
+    report(loops.size() == 2 && !loops.contains(QString()), QStringLiteral("Give New IDs: a drive and its copy are connected (loop devices)"));
+    if (loops.size() != 2 || loops.contains(QString()))
+        return;
+    UDisks udisks;
+    udisks.setInteractive(false);
+    waitUntil([&] {
+        udisks.refresh();
+        const Disk *a = udisks.diskByPath(loops[0]), *b = udisks.diskByPath(loops[1]);
+        return a && b && a->volumes.size() == 2 && b->volumes.size() == 2 && !b->volumes[1].uuid.isEmpty();
+    }, 15000);
+    QVector<newids::Clash> found;
+    for (const newids::Clash &c : newids::clashes(udisks.disks())) {
+        if (loops.contains(c.first) && loops.contains(c.second))
+            found << c;
+    }
+    report(found.size() == 1 && found[0].ids.contains(QStringLiteral("the disk ID")), QStringLiteral("they're seen as copies of each other"),
+           found.isEmpty() ? QString() : found[0].ids.join(QStringLiteral(", ")));
+    {
+        MainWindow window(&udisks);
+        window.show();
+        QApplication::processEvents();
+        bool warned = false;
+        for (NoticeBar *bar : window.findChildren<NoticeBar *>(QStringLiteral("clone")))
+            warned = warned || (bar->isVisible() && bar->findChildren<QPushButton *>().size() == 2);
+        report(warned, QStringLiteral("the main window warns, with a button to fix it"));
+    }
+
+    // Writing to a drive takes polkit's yes, which only root gets without being asked.
+    if (geteuid() != 0) {
+        out << "SKIP  Give New IDs' writing part: run this scenario as root (sudo ... --user --only=newids)" << Qt::endl;
+        for (const QString &loop : std::as_const(loops))
+            cleanUpLoop(udisks, loop);
+        return;
+    }
+    const Disk *before = udisks.diskByPath(loops[1]);
+    const QString oldTable = before->tableId, oldPart = before->volumes[1].partUuid;
+    QStringList said;
+    Answerer answerer;
+    answerer.answer = [&said](QWidget *modal) {
+        if (auto *box = qobject_cast<QMessageBox *>(modal)) {
+            said << box->text();
+            box->accept();
+            return true;
+        }
+        return false;
+    };
+    {
+        NewIdsDialog dialog(&udisks, loops[1]);
+        dialog.show();
+        dialog.findChild<QLineEdit *>(QStringLiteral("confirm"))->setText(shortDevice(before->device));
+        dialog.start();
+        waitUntil([&] { return !dialog.isVisible(); }, 90000);
+    }
+    QString root, efi;
+    waitUntil([&] {
+        udisks.refresh();
+        const Disk *after = udisks.diskByPath(loops[1]);
+        return after && after->tableId != oldTable && after->volumes.size() == 2 && after->volumes[1].uuid != rootUuid;
+    }, 15000);
+    const Disk *after = udisks.diskByPath(loops[1]);
+    const Disk *kept = udisks.diskByPath(loops[0]);
+    QStringList clashLeft;
+    for (const newids::Clash &c : newids::clashes(udisks.disks())) {
+        if (loops.contains(c.first) && loops.contains(c.second))
+            clashLeft << c.ids;
+    }
+    report(after && kept && after->tableId != oldTable && after->volumes[1].partUuid != oldPart && after->volumes[1].uuid != rootUuid
+               && after->volumes[0].uuid.compare(efiUuid, Qt::CaseInsensitive) != 0 && kept->tableId == oldTable && clashLeft.isEmpty(),
+           QStringLiteral("the copy has its own IDs now, the original keeps its own"), clashLeft.join(QStringLiteral(", ")) + QStringLiteral(" | ") + said.join(QStringLiteral(" / ")));
+    // What its Linux says now: read from the copy's image, with the tools that made it.
+    QString newFstab, newEntry;
+    sh(QStringLiteral("debugfs"), {QStringLiteral("-R"), QStringLiteral("cat /etc/fstab"), copy + QStringLiteral("?offset=%1").arg(43008 * 512)}, &newFstab);
+    if (newFstab.trimmed().isEmpty()) {
+        // debugfs without image offsets: through a copy of just that file system
+        const QString part = dir.filePath(QStringLiteral("root.ext4"));
+        sh(QStringLiteral("dd"), {QStringLiteral("if=") + copy, QStringLiteral("of=") + part, QStringLiteral("bs=512"), QStringLiteral("skip=43008"),
+                                  QStringLiteral("status=none")});
+        sh(QStringLiteral("debugfs"), {QStringLiteral("-R"), QStringLiteral("cat /etc/fstab"), part}, &newFstab);
+    }
+    sh(QStringLiteral("mtype"), {QStringLiteral("-i"), copy + QStringLiteral("@@1M"), QStringLiteral("::/loader/entries/arch.conf")}, &newEntry);
+    report(after && after->volumes[1].uuid != rootUuid && newFstab.contains(after->volumes[1].uuid) && !newFstab.contains(rootUuid)
+               && newFstab.contains(after->volumes[0].uuid, Qt::CaseInsensitive) && newEntry.contains(after->volumes[1].partUuid, Qt::CaseInsensitive)
+               && !newEntry.contains(rootPart, Qt::CaseInsensitive),
+           QStringLiteral("and its Linux's fstab and boot entry name the new IDs"), newFstab.simplified().left(140) + QStringLiteral(" | ") + newEntry.simplified());
+    for (const QString &loop : std::as_const(loops))
+        cleanUpLoop(udisks, loop);
+}
+
 // The online check: asked first, only fingerprints sent, answers shown. A server of our own
 // stands in for CIRCL's.
 void virusLookUpOnline()
@@ -3161,7 +3300,7 @@ int userScenarios(const QStringList &only)
         {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostfs", lostFilesFromFileSystem},
-        {"previews", previewsThroughHelper}, {"viruses", virusScanThroughWindow}, {"virusdrive", virusScanOnDrive}, {"viruswindows", virusScanWindowsDrive}, {"virusboot", virusScanBoot}, {"viruslookup", virusLookUpOnline},
+        {"previews", previewsThroughHelper}, {"viruses", virusScanThroughWindow}, {"virusdrive", virusScanOnDrive}, {"viruswindows", virusScanWindowsDrive}, {"virusboot", virusScanBoot}, {"viruslookup", virusLookUpOnline}, {"newids", newIdsThroughWindow},
     };
     for (const auto &[name, run] : scenarios) {
         if (only.isEmpty() || only.contains(QLatin1String(name)))

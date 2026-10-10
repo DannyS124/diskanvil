@@ -16,6 +16,8 @@
 #include "snapper.h"
 #include "systemtools.h"
 #include "usagedialog.h"
+#include "newids.h"
+#include "newidsdialog.h"
 #include "virusdialog.h"
 #include "dialogs.h"
 #include "tools.h"
@@ -507,6 +509,13 @@ void MainWindow::createActions()
             CloneDialog(m_udisks, d->blockPath, this).exec();
     });
 
+    m_newIds = new QAction(themeIcon("view-refresh", "view-refresh"), tr("Give New &IDs…"), this);
+    m_newIds->setToolTip(tr("Give a copy of a drive its own IDs, so it can be used next to the drive it was copied from"));
+    connect(m_newIds, &QAction::triggered, this, [this] {
+        if (const Disk *d = selectedDisk())
+            NewIdsDialog(m_udisks, d->blockPath, this).exec();
+    });
+
     // A selected partition is backed up or restored on its own; otherwise the whole drive.
     auto backupTarget = [this]() -> QString {
         if (const Volume *v = selectedVolume())
@@ -622,7 +631,7 @@ void MainWindow::createActions()
     action->addSeparator();
     action->addActions({m_health, m_badSectors, m_checkStick, m_benchmark, m_raidCheck});
     action->addSeparator();
-    action->addActions({m_backup, m_restore, m_clone, m_rescue});
+    action->addActions({m_backup, m_restore, m_clone, m_newIds, m_rescue});
     action->addSeparator();
     action->addActions({m_copy, m_properties});
 
@@ -766,6 +775,61 @@ void MainWindow::rebuild()
         statusBar()->showMessage(tr("UDisks2 is not available: %1").arg(m_udisks->lastError()));
     updateProgress();
     updateNotices();
+    updateCloneNotices();
+}
+
+// A bar for each pair of drives that are copies of each other (the same IDs), until it's
+// dismissed: Linux may mount the wrong one, and Windows switches one off.
+void MainWindow::updateCloneNotices()
+{
+    const QVector<Disk> &disks = m_udisks->disks();
+    QSettings settings(QStringLiteral("diskforge"), QStringLiteral("diskforge"));
+    QVector<newids::Clash> shown;
+    QStringList key;
+    for (const newids::Clash &c : newids::clashes(disks)) {
+        const QString id = newids::clashKey(c, disks);
+        if (settings.value(QStringLiteral("dismissed/clone-") + id).toBool())
+            continue;
+        shown << c;
+        key << id + c.first + c.second;
+    }
+    if (key == m_cloneNoticeKey)
+        return;
+    m_cloneNoticeKey = key;
+    for (NoticeBar *old : m_notices->findChildren<NoticeBar *>(QStringLiteral("clone"), Qt::FindDirectChildrenOnly)) {
+        old->hide();
+        old->deleteLater();
+    }
+    for (const newids::Clash &c : std::as_const(shown).mid(0, 2)) {
+        const Disk *a = m_udisks->diskByPath(c.first), *b = m_udisks->diskByPath(c.second);
+        if (!a || !b)
+            continue;
+        // The one to give new IDs: never the system drive; a USB drive before an inner one.
+        const Disk *copy = b->isSystem || (!a->isSystem && a->bus == QLatin1String("usb") && b->bus != QLatin1String("usb")) ? a : b;
+        auto name = [](const Disk *d) { return QStringLiteral("%1 (%2)").arg(d->model.isEmpty() ? tr("A drive") : d->model, shortDevice(d->device)); };
+        auto *bar = new NoticeBar(NoticeBar::Level::Warning,
+                                  tr("%1 and %2 are copies of each other: they share %3. Linux may use the wrong one at the next start, "
+                                     "and Windows switches one of them off.")
+                                      .arg(name(a), name(b), c.ids.join(QStringLiteral(", "))));
+        bar->setObjectName(QStringLiteral("clone"));
+        const QString device = copy->device;
+        if (!copy->isSystem) {
+            QPushButton *fix = bar->addButton(tr("Give %1 New IDs…").arg(shortDevice(copy->device)));
+            connect(fix, &QPushButton::clicked, this, [this, device] { runOnDrive(device, m_newIds); });
+        }
+        QPushButton *dismiss = bar->addButton(tr("Dismiss"));
+        const QString id = newids::clashKey(c, disks);
+        connect(dismiss, &QPushButton::clicked, this, [this, id] {
+            QTimer::singleShot(0, this, [this, id] {
+                QSettings(QStringLiteral("diskforge"), QStringLiteral("diskforge")).setValue(QStringLiteral("dismissed/clone-") + id, true);
+                m_cloneNoticeKey.clear();
+                updateCloneNotices();
+            });
+        });
+        m_notices->layout()->addWidget(bar);
+        bar->show();
+    }
+    showNoticesIfAny();
 }
 
 // Select a drive and run one of the window's actions on it, the same as from the menu (so
@@ -1173,6 +1237,7 @@ void MainWindow::updateActions()
     // Clone and Rescue read the whole drive and refuse the running system; Back Up works on
     // anything that can be unmounted (or isn't mounted); Restore writes, so not the system disk.
     m_clone->setEnabled(d && !lvm && !d->isSystem && !busy && d->size > 0);
+    m_newIds->setEnabled(d && !lvm && !d->isRaid && !d->isSystem && !busy && d->size > 0);
     m_rescue->setEnabled(d && !lvm && !d->isSystem && !d->isLoop && !busy);
     const bool partition = v && !v->isContainer;
     bool anyMounted = false;
@@ -1285,7 +1350,7 @@ void MainWindow::buildContextMenu(QMenu *menu)
     add({m_safelyRemove, m_detachImage, m_health, m_badSectors, m_benchmark});
     if (!v)
         add({m_backup, m_restore});
-    add({m_clone, m_rescue, m_findFiles});
+    add({m_clone, m_newIds, m_rescue, m_findFiles});
     if (!d->isSystem && (d->removable || d->bus == QLatin1String("usb")))
         add({m_writeImage, m_windowsUsb, m_rescueUsb, m_checkStick});
     add({m_newTable, m_wipe, m_secureErase});
@@ -1355,6 +1420,7 @@ void MainWindow::showProperties()
         add(tr("Partition name"), v->partName);
         add(tr("File system"), v->fsType);
         add(tr("UUID"), v->uuid);
+        add(tr("Partition ID"), v->partUuid);
         add(tr("Status"), volumeStatus(*v));
         add(tr("Capacity"), bytes(v->size));
         if (v->fsTotal)
@@ -1385,6 +1451,7 @@ void MainWindow::showProperties()
         add(tr("Serial"), d->serial);
         add(tr("Type"), diskKind(*d));
         add(tr("Partition table"), tableName(*d));
+        add(tr("Disk ID"), d->tableId);
         add(tr("Capacity"), bytes(d->size));
         if (d->rotationRate > 1) // 1: it spins, but the drive didn't say how fast
             add(tr("Rotation rate"), tr("%1 rpm").arg(d->rotationRate));

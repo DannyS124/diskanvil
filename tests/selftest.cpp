@@ -937,6 +937,8 @@ int main(int argc, char *argv[])
         startupTests();
     } else if (args.contains(QStringLiteral("--boot"))) {
         bootTests();
+    } else if (args.contains(QStringLiteral("--newids"))) {
+        newIdsTests();
     } else if (args.contains(QStringLiteral("--scan-image"))) {
         // For looking into a problem by hand: what Find Lost Files' quick scan lists in an image.
         return scanImage(args.value(args.indexOf(QStringLiteral("--scan-image")) + 1));

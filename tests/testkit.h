@@ -62,6 +62,7 @@ void virusTests();
 void registryTests();
 void startupTests();
 void bootTests();
+void newIdsTests();
 int scanImage(const QString &path);
 void raidTests();
 void lvmTests();

@@ -75,7 +75,7 @@
 <context>
     <name>MainWindow</name>
     <message numerus="yes">
-        <location filename="../src/mainwindow.cpp" line="856"/>
+        <location filename="../src/mainwindow.cpp" line="920"/>
         <source>%n more drive(s) need a look; their health is in the Status column.</source>
         <translation>
             <numerusform>%n more drive need a look; their health is in the Status column.</numerusform>
@@ -83,7 +83,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/mainwindow.cpp" line="1793"/>
+        <location filename="../src/mainwindow.cpp" line="1860"/>
         <source>%n add-on command(s) still running. Stop them and quit?</source>
         <translation>
             <numerusform>%n add-on command still running. Stop them and quit?</numerusform>
@@ -396,7 +396,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/udisks.cpp" line="415"/>
+        <location filename="../src/udisks.cpp" line="419"/>
         <source>The volume group %1 is missing %n of its drives. What was on them can&apos;t be read.</source>
         <translation>
             <numerusform>The volume group %1 is missing %n of its drives. What was on them can't be read.</numerusform>

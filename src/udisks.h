@@ -111,6 +111,7 @@ struct Disk {
     QString revision; // firmware version
     QString bus; // "usb" or empty; on Windows also "nvme" and "sd"
     QString tableType; // "gpt", "dos" or empty
+    QString tableId;   // the GPT disk ID, or the MBR disk signature (8 hex digits); lower case
     quint64 size = 0;
     int rotationRate = -1; // 0 = SSD, -1 = unknown
     bool removable = false;
@@ -251,6 +252,11 @@ public:
     void setPartitionTypeAndFlags(const Volume &volume, const QString &type, bool setFlags, quint64 flags);
     // A new file system ID, for a clone kept next to its original.
     void setUuid(const Volume &volume, const QString &uuid);
+#ifdef Q_OS_WIN
+    // New disk and partition IDs, through Windows' own drive layout call (on Linux they're
+    // written to the drive by newids::giveDiskNewIds).
+    void giveNewDiskIds(const Disk &disk);
+#endif
     // passphrase non-empty: LUKS2 container with the filesystem inside
     void format(const Volume &volume, const QString &fsType, const QString &label, const QString &passphrase = {});
     void deletePartition(const Volume &volume);
