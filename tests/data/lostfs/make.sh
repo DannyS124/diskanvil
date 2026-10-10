@@ -77,6 +77,7 @@ make ntfs 16 ntfs-3g mkntfs -q -F -Q -L TESTNTFS
 make ntfs-linux 16 ntfs3 mkntfs -q -F -Q -L TESTNTFS3
 # ntfs-windows.img.zst is made by Windows itself (windows-job.cmd, then blank-boot-code.py), so
 # it's kept as it is.
-grep '^ntfs-windows|' "$here/expected.txt" >> "$work/expected.txt" || true
+# ntfs-journal.img.zst too (journal-job.cmd, then journal-finish.sh).
+grep -E '^ntfs-(windows|journal)\|' "$here/expected.txt" >> "$work/expected.txt" || true
 cp "$work/expected.txt" "$here/expected.txt"
 ls -la "$here"

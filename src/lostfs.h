@@ -40,6 +40,21 @@ bool readFileSystem(Source &source, const Extent &where, const Batch &out, const
 // The NTFS part of that (lostntfs.cpp).
 bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::atomic<bool> &cancel, Volume *volume);
 
+// NTFS's change journal ($Extend\$UsnJrnl, its $J stream): what Windows did to which file,
+// with the file's name and folder at the time. It names deleted files whose own record is
+// gone or was reused. (Exposed for the tests.)
+struct JournalEntry {
+    quint64 record = 0; // the file's MFT record, and how many times that record had been used
+    quint16 sequence = 0;
+    quint64 parent = 0;
+    quint16 parentSequence = 0;
+    qint64 time = 0;     // ms since 1970
+    quint32 reason = 0;  // what happened: USN_REASON_* bits (0x100 made, 0x200 deleted, 0x2000 renamed to this)
+    quint32 attributes = 0; // 0x10: a folder
+    QString name;
+};
+QVector<JournalEntry> readJournal(const QByteArray &bytes);
+
 // How whole a deleted file looks from what's in it: the start against what its name says it
 // is, and when `full`, the whole structure (the deep scan's checks). Sets condition and checked.
 void checkContents(const std::shared_ptr<Source> &source, Found &file, bool full);

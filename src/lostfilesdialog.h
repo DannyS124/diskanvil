@@ -34,10 +34,11 @@ struct LostFilter {
     int category = -1;       // a filetypes::Category, -1: every kind
     bool hideDamaged = false;
     bool deletedOnly = false;
-    QString folder;          // and what's in it, or kFoundByContents; empty: everywhere
+    QString folder;          // and what's in it, or kFoundByContents or kDeletedRecently; empty: everywhere
     QString text;
 
     static inline const QString kFoundByContents = QStringLiteral("\x01contents");
+    static inline const QString kDeletedRecently = QStringLiteral("\x01recent"); // what's known to have been deleted when, newest first
 };
 
 // What Find Lost Files found, filtered by kind, folder and what's typed, with a tick box each and
@@ -74,7 +75,9 @@ private:
     bool passes(const lost::Found &f) const;
 
     QVector<lost::Found> m_files;
-    QVector<int> m_shown; // file indexes in the list, in order
+    void sortShown();
+
+    QVector<int> m_shown; // file indexes in the list, in order (newest deleted first for kDeletedRecently)
     QSet<int> m_ticked;
     QHash<int, QPixmap> m_thumbnails;
     mutable QSet<int> m_asked;
@@ -168,6 +171,7 @@ private:
     QHash<QString, QTreeWidgetItem *> m_folderItems;
     QHash<QString, int> m_inFolder, m_deletedInFolder;
     QTreeWidgetItem *m_contentsItem = nullptr;
+    QTreeWidgetItem *m_recentItem = nullptr;
     lost::Saver *m_saver = nullptr;
     QThread *m_saveThread = nullptr;
     PreviewLoader *m_thumbs = nullptr;

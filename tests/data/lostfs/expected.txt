@@ -56,3 +56,8 @@ ntfs-windows|Pictures/2024/pic1.png|yes|7028|c90fd8f7352e1bbdf0ef0a7e48870c59544
 ntfs-windows|Pictures/2024/pic2.jpg|no|5189|c444bf89ff27949491b6598c7819bc1c0f09fea870f06c841eec7cdff6cd99dc
 ntfs-windows|Old stuff/letter.pdf|yes|218|6350af32579ffbd7b251a6244bf9bd036d303cbc7404ae06d5e02f1b8f5b994f
 ntfs-windows|Old stuff/scan.png|yes|4908|44281c966097fb9ce19a7a667390389a129f3f539bdea83ed9faf417f56604bf
+ntfs-journal|Trip/beach.jpg|yes|3362|c30ec95dfbc01e68ba7e8ac4e10e00a2494babadad20e90546dd4d6c26be8008
+ntfs-journal|Trip/sunset.jpg|no|5189|c444bf89ff27949491b6598c7819bc1c0f09fea870f06c841eec7cdff6cd99dc
+ntfs-journal|keep.txt|yes|54|fd953933cea03f04fc90164d4389b3a09e47c301ecbf7189af1efaa830e9133f
+ntfs-journal|Drafts/plan.txt|yes|0|-
+ntfs-journal|Drafts/old letter.pdf|yes|0|-

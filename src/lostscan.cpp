@@ -291,13 +291,17 @@ void lost::Saver::run()
     for (const Found &f : std::as_const(m_files))
         total += f.size;
     int saved = 0, failed = 0;
-    QStringList report, problems;
+    QStringList report, problems, namesOnly;
     QByteArray buffer(1024 * 1024, Qt::Uninitialized);
     qCInfo(lcOps).noquote() << "Find Lost Files: saving" << m_files.size() << "files to" << base;
 
     for (const Found &f : std::as_const(m_files)) {
         if (m_cancel)
             break;
+        if (f.nameOnly) {
+            namesOnly << f.folder + QLatin1Char('/') + f.name;
+            continue;
+        }
         QString folder = base;
         if (f.origin == Origin::FileSystem && !f.folder.isEmpty()) {
             for (const QString &part : f.folder.split(QLatin1Char('/'), Qt::SkipEmptyParts))
@@ -356,6 +360,8 @@ void lost::Saver::run()
         if (!problems.isEmpty())
             text << tr("Not saved:") << problems << QString();
         text << tr("Saved (%1):").arg(saved) << report;
+        if (!namesOnly.isEmpty())
+            text << QString() << tr("Only their names were left, so there was nothing to save:") << namesOnly;
         summary.write(text.join(QLatin1Char('\n')).toUtf8() + '\n');
     }
     const QString message = m_cancel ? tr("Stopped. %1 files were saved before that.").arg(saved) : QString();

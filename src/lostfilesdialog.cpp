@@ -93,6 +93,8 @@ QString conditionWords(lost::Condition condition)
 // What's known about how whole a file is, in plain words.
 QString conditionWords(const lost::Found &f)
 {
+    if (f.nameOnly)
+        return QObject::tr("Only its name is left: there's nothing of it to save.");
     if (f.origin == lost::Origin::FileSystem && !f.deleted && f.condition == lost::Condition::Good)
         return QObject::tr("It wasn't deleted: the file system still lists it, so it should be whole.");
     if (f.origin == lost::Origin::FileSystem && f.condition == lost::Condition::Good && !f.checked) {
@@ -111,6 +113,8 @@ QString conditionWords(const lost::Found &f)
 // (or its icon, or a card with its extension when there's neither) above its name, with the
 // tick box in the corner. Styles draw icon grids very differently (Windows 11's puts the name
 // beside the picture and gets where to click wrong), and here they all have to work alike.
+constexpr int kNameRole = Qt::UserRole + 1; // the file's own name, without what the list adds to it
+
 class GridDelegate : public QStyledItemDelegate
 {
 public:
@@ -152,7 +156,8 @@ public:
             p->drawPixmap(QRect(area.center() - QPoint(fit.width() / 2, fit.height() / 2), fit), picture);
         } else {
             // No picture and no icon: a card with the file's extension on it.
-            const QString ext = opt.text.contains(QLatin1Char('.')) ? opt.text.section(QLatin1Char('.'), -1).toUpper().left(5) : QStringLiteral("?");
+            const QString name = index.data(kNameRole).toString(); // the shown text may have more after it
+            const QString ext = name.contains(QLatin1Char('.')) ? name.section(QLatin1Char('.'), -1).toUpper().left(5) : QStringLiteral("?");
             const QRect card(area.center() - QPoint(26, 32), QSize(52, 64));
             p->setRenderHint(QPainter::Antialiasing);
             p->setPen(QPen(opt.palette.color(QPalette::Mid), 1.5));
@@ -168,10 +173,14 @@ public:
         }
 
         QStyleOptionViewItem check(opt);
-        check.rect = checkRect(opt);
+        if (!index.data(Qt::CheckStateRole).isValid())
+            check.rect = QRect(); // nothing to save, so nothing to tick
+        else
+            check.rect = checkRect(opt);
         check.state = check.state & ~QStyle::State_HasFocus;
         check.state |= index.data(Qt::CheckStateRole).toInt() == Qt::Checked ? QStyle::State_On : QStyle::State_Off;
-        style->drawPrimitive(QStyle::PE_IndicatorItemViewItemCheck, &check, p, opt.widget);
+        if (check.rect.isValid())
+            style->drawPrimitive(QStyle::PE_IndicatorItemViewItemCheck, &check, p, opt.widget);
 
         const bool selected = opt.state & QStyle::State_Selected;
         p->setPen(opt.palette.color(selected ? QPalette::HighlightedText : QPalette::Text));
@@ -238,6 +247,9 @@ bool LostFilesModel::passes(const lost::Found &f) const
     if (w.folder == LostFilter::kFoundByContents) {
         if (f.origin != lost::Origin::Contents)
             return false;
+    } else if (w.folder == LostFilter::kDeletedRecently) {
+        if (f.deletedAt <= 0)
+            return false;
     } else if (!w.folder.isEmpty()) {
         if (f.origin != lost::Origin::FileSystem || (f.folder != w.folder && !f.folder.startsWith(w.folder + QLatin1Char('/'))))
             return false;
@@ -255,6 +267,14 @@ void LostFilesModel::append(const QVector<lost::Found> &files)
     m_files += files;
     if (add.isEmpty())
         return;
+    if (m_filter.folder == LostFilter::kDeletedRecently) {
+        // In time order, so the list is made again.
+        beginResetModel();
+        m_shown += add;
+        sortShown();
+        endResetModel();
+        return;
+    }
     beginInsertRows({}, int(m_shown.size()), int(m_shown.size() + add.size() - 1));
     m_shown += add;
     endInsertRows();
@@ -282,7 +302,14 @@ void LostFilesModel::setFilter(const LostFilter &filter)
         if (passes(m_files[i]))
             m_shown << i;
     }
+    sortShown();
     endResetModel();
+}
+
+void LostFilesModel::sortShown()
+{
+    if (m_filter.folder == LostFilter::kDeletedRecently)
+        std::stable_sort(m_shown.begin(), m_shown.end(), [this](int a, int b) { return m_files[a].deletedAt > m_files[b].deletedAt; });
 }
 
 int LostFilesModel::count(int category) const
@@ -298,7 +325,8 @@ int LostFilesModel::count(int category) const
 void LostFilesModel::setThumbnail(int index, const QPixmap &thumbnail)
 {
     m_thumbnails.insert(index, thumbnail);
-    const auto it = std::lower_bound(m_shown.cbegin(), m_shown.cend(), index);
+    const auto it = m_filter.folder == LostFilter::kDeletedRecently ? std::find(m_shown.cbegin(), m_shown.cend(), index)
+                                                                   : std::lower_bound(m_shown.cbegin(), m_shown.cend(), index);
     if (it != m_shown.cend() && *it == index) {
         const QModelIndex row = createIndex(int(it - m_shown.cbegin()), 0);
         Q_EMIT dataChanged(row, row, {Qt::DecorationRole});
@@ -326,7 +354,7 @@ quint64 LostFilesModel::tickedSize() const
 void LostFilesModel::tickShown(bool tick)
 {
     for (int i : std::as_const(m_shown)) {
-        if (tick)
+        if (tick && !m_files[i].nameOnly)
             m_ticked.insert(i);
         else
             m_ticked.remove(i);
@@ -347,9 +375,10 @@ QVariant LostFilesModel::data(const QModelIndex &index, int role) const
     if (i < 0)
         return {};
     const lost::Found &f = m_files[i];
+    const QString deleted = f.deletedAt > 0 ? QLocale().toString(QDateTime::fromMSecsSinceEpoch(f.deletedAt), QLocale::ShortFormat) : QString();
     switch (role) {
     case Qt::DisplayRole:
-        return f.name;
+        return m_filter.folder == LostFilter::kDeletedRecently ? tr("%1 (deleted %2)").arg(f.name, deleted) : f.name;
     case Qt::DecorationRole: {
         const auto thumb = m_thumbnails.constFind(i);
         if (thumb != m_thumbnails.cend() && !thumb->isNull())
@@ -364,11 +393,20 @@ QVariant LostFilesModel::data(const QModelIndex &index, int role) const
         return QIcon::fromTheme(categoryIcon(category));
     }
     case Qt::CheckStateRole:
+        if (f.nameOnly)
+            return {};
         return m_ticked.contains(i) ? Qt::Checked : Qt::Unchecked;
-    case Qt::ToolTipRole:
-        return QStringLiteral("%1\n%2, %3").arg(f.name, f.type >= 0 ? filetypes::types()[f.type].name : tr("File"), formatSize(f.size));
+    case Qt::ToolTipRole: {
+        QString tip = QStringLiteral("%1\n%2, %3").arg(f.name, f.type >= 0 ? filetypes::types()[f.type].name : tr("File"),
+                                                       f.nameOnly ? tr("only the name is left") : formatSize(f.size));
+        if (!deleted.isEmpty())
+            tip += QLatin1Char('\n') + tr("Deleted %1").arg(deleted);
+        return tip;
+    }
     case Qt::UserRole:
         return i;
+    case kNameRole:
+        return f.name;
     default:
         return {};
     }
@@ -377,7 +415,7 @@ QVariant LostFilesModel::data(const QModelIndex &index, int role) const
 bool LostFilesModel::setData(const QModelIndex &index, const QVariant &value, int role)
 {
     const int i = fileIndex(index.row());
-    if (i < 0 || role != Qt::CheckStateRole)
+    if (i < 0 || role != Qt::CheckStateRole || m_files[i].nameOnly)
         return false;
     if (value.toInt() == Qt::Checked)
         m_ticked.insert(i);
@@ -390,7 +428,12 @@ bool LostFilesModel::setData(const QModelIndex &index, const QVariant &value, in
 
 Qt::ItemFlags LostFilesModel::flags(const QModelIndex &index) const
 {
-    return index.isValid() ? Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsUserCheckable : Qt::NoItemFlags;
+    if (!index.isValid())
+        return Qt::NoItemFlags;
+    const int i = fileIndex(index.row());
+    if (i >= 0 && m_files[i].nameOnly)
+        return Qt::ItemIsEnabled | Qt::ItemIsSelectable;
+    return Qt::ItemIsEnabled | Qt::ItemIsSelectable | Qt::ItemIsUserCheckable;
 }
 
 // --- The window
@@ -768,6 +811,7 @@ void LostFilesDialog::scanSource(std::shared_ptr<lost::Source> source, const QSt
     m_inFolder.clear();
     m_deletedInFolder.clear();
     m_contentsItem = nullptr;
+    m_recentItem = nullptr;
     {
         const QSignalBlocker block(m_folders);
         auto *everywhere = new QTreeWidgetItem(m_folders, {tr("Everywhere")});
@@ -871,6 +915,20 @@ void LostFilesDialog::addFolders(const QVector<lost::Found> &files)
 {
     QSet<QString> changed;
     for (const lost::Found &f : files) {
+        if (f.deletedAt > 0) {
+            if (!m_recentItem) {
+                // Right under "Everywhere".
+                m_recentItem = new QTreeWidgetItem;
+                m_folders->insertTopLevelItem(std::min(1, m_folders->topLevelItemCount()), m_recentItem);
+                m_recentItem->setData(0, Qt::UserRole, LostFilter::kDeletedRecently);
+                m_recentItem->setIcon(0, QIcon::fromTheme(QStringLiteral("document-open-recent")));
+                m_recentItem->setToolTip(0, tr("Deleted files whose time of deleting is known (from NTFS's change journal or the "
+                                               "Recycle Bin), the newest first"));
+            }
+            m_inFolder[LostFilter::kDeletedRecently] += 1;
+            m_deletedInFolder[LostFilter::kDeletedRecently] += 1;
+            changed.insert(LostFilter::kDeletedRecently);
+        }
         if (f.origin == lost::Origin::Contents) {
             if (!m_contentsItem) {
                 m_contentsItem = new QTreeWidgetItem(m_folders);
@@ -920,6 +978,8 @@ void LostFilesDialog::refreshFolderCounts()
         label(it.value(), it.value()->data(0, Qt::UserRole + 1).toString(), it.key());
     if (m_contentsItem)
         label(m_contentsItem, tr("Found by what's inside them"), LostFilter::kFoundByContents);
+    if (m_recentItem)
+        label(m_recentItem, tr("Deleted recently"), LostFilter::kDeletedRecently);
 }
 
 int LostFilesDialog::chosenCategory() const
@@ -981,7 +1041,8 @@ void LostFilesDialog::showPreview()
                         : f.condition == lost::Condition::MaybeDamaged ? QColor(0xff, 0xb3, 0x00)
                                                                       : QColor(0xff, 0x33, 0x55);
     const quint64 where = f.extents.isEmpty() ? 0 : f.extents.first().start;
-    QString html = QStringLiteral("<b>%1</b><br>%2, %3<br>").arg(f.name.toHtmlEscaped(), type.name.toHtmlEscaped(), formatSize(f.size));
+    QString html = QStringLiteral("<b>%1</b><br>%2, %3<br>")
+                       .arg(f.name.toHtmlEscaped(), type.name.toHtmlEscaped(), f.nameOnly ? tr("size not known") : formatSize(f.size));
     if (f.origin == lost::Origin::Contents) {
         html += tr("Found by what's inside it, %1 into the drive. Its real name and folder aren't known, so it has a made-up name.")
                     .arg(formatSize(where));
@@ -989,6 +1050,8 @@ void LostFilesDialog::showPreview()
         html += (f.deleted ? tr("Was in %1") : tr("In %1")).arg(f.folder.toHtmlEscaped());
         if (f.modified > 0)
             html += QStringLiteral("<br>") + tr("Last changed %1").arg(QLocale().toString(QDateTime::fromMSecsSinceEpoch(f.modified), QLocale::ShortFormat));
+        if (f.deletedAt > 0)
+            html += QStringLiteral("<br>") + tr("Deleted %1").arg(QLocale().toString(QDateTime::fromMSecsSinceEpoch(f.deletedAt), QLocale::ShortFormat));
         if (f.nameGuessed)
             html += QStringLiteral("<br>") + tr("Deleting it took away the first letter of its name; _ stands in for it.");
         if (f.piecesGuessed)
@@ -999,6 +1062,8 @@ void LostFilesDialog::showPreview()
     if (!f.note.isEmpty())
         html += QStringLiteral("<br>") + f.note.toHtmlEscaped();
     m_details->setText(html);
+    if (f.nameOnly)
+        return; // nothing of it to show
     // The picture and the words come from the preview helper; until then, a moment.
     m_previewImage->setText(tr("Loading…"));
     if (m_thumbs)

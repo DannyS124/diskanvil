@@ -606,6 +606,65 @@ void fileSystems(const QString &dir)
                QStringLiteral("%1 missing; %2").arg(missing).arg(names.join(QStringLiteral(", "))));
     }
 
+    // NTFS's change journal, on a stick Windows used with it on (journal-job.cmd): a folder and its
+    // files deleted and their records taken by new files, so only the journal still has their
+    // names; and a file Linux's driver deleted, taking its name away, named again from the journal.
+    {
+        auto source = lost::Source::fromMemory(unpack(data + QStringLiteral("ntfs-journal.img.zst")));
+        const QVector<lost::Found> found = quickScan(source);
+        int namesOnly = 0;
+        for (const lost::Found &f : found)
+            namesOnly += f.nameOnly;
+        report(namesOnly == 2, QStringLiteral("ntfs journal: only the files whose records were taken are listed by name alone"), QString::number(namesOnly));
+        for (const Expected &e : expected.value(QStringLiteral("ntfs-journal"))) {
+            const QString folder = QStringLiteral("WINJRNL") + (e.path.contains(QLatin1Char('/')) ? QLatin1Char('/') + e.path.section(QLatin1Char('/'), 0, -2) : QString());
+            const lost::Found *match = nullptr;
+            for (const lost::Found &f : found) {
+                if (f.name == e.path.section(QLatin1Char('/'), -1) && f.folder == folder)
+                    match = &f;
+            }
+            const QString what = QStringLiteral("ntfs journal: ") + e.path;
+            report(match && match->deleted == e.deleted, what + QStringLiteral(" is listed where it was"));
+            if (!match)
+                continue;
+            if (e.sha256 == "-") {
+                const QDateTime when = QDateTime::fromMSecsSinceEpoch(match->deletedAt);
+                report(match->nameOnly && match->condition == lost::Condition::Overwritten && when.date().year() == 2026
+                           && match->note.contains(QLatin1String("change journal")),
+                       what + QStringLiteral(": by name alone, with when it was deleted"), when.toString(Qt::ISODate));
+                continue;
+            }
+            lost::FileReader reader(source, *match);
+            report(!match->nameOnly && match->size == e.size
+                       && QCryptographicHash::hash(reader.head(qint64(match->size)), QCryptographicHash::Sha256).toHex() == e.sha256,
+                   what + QStringLiteral(" comes back whole"));
+            if (e.path == QLatin1String("Trip/beach.jpg"))
+                report(match->deletedAt > 0, what + QStringLiteral(": the journal says when it was deleted"));
+            if (e.path == QLatin1String("keep.txt"))
+                report(!match->nameGuessed && match->note.contains(QLatin1String("change journal")), what + QStringLiteral(": its name comes from the journal"),
+                       match->note);
+        }
+        // Saving: the files are saved, the names alone are listed in the summary.
+        QVector<lost::Found> deleted;
+        for (const lost::Found &f : found) {
+            if (f.deleted)
+                deleted << f;
+        }
+        lost::Saver saver(source, deleted, dir);
+        QString base;
+        int saved = -1;
+        QObject::connect(&saver, &lost::Saver::finished, [&](int n, int, const QString &folder, const QString &) {
+            saved = n;
+            base = folder;
+        });
+        saver.run();
+        QFile summary(base + QStringLiteral("/What was saved.txt"));
+        const QString text = summary.open(QIODevice::ReadOnly) ? QString::fromUtf8(summary.readAll()) : QString();
+        report(saved == 2 && text.contains(QLatin1String("WINJRNL/Drafts/plan.txt")) && !QFile::exists(base + QStringLiteral("/WINJRNL/Drafts/plan.txt")),
+               QStringLiteral("ntfs journal: what's only a name isn't saved, and the summary says so"), QString::number(saved));
+        QDir(base).removeRecursively();
+    }
+
     // Partition tables: the same file system inside an MBR and a GPT drive.
     const QByteArray fat16 = unpack(data + QStringLiteral("fat16.img.zst"));
     for (const bool gpt : {false, true}) {
@@ -645,6 +704,8 @@ void fileSystems(const QString &dir)
     }
 }
 
+QByteArray usnRecord(int version, quint64 record, quint16 sequence, quint64 parent, quint32 reason, const QString &name);
+
 // Damaged file systems: every byte of the tables and folders flipped at random, many times
 // over. It must never crash or loop, whatever it lists.
 void fileSystemFuzz()
@@ -669,6 +730,34 @@ void fileSystemFuzz()
         }
     }
     report(runs == 4 * rounds, QStringLiteral("file systems: %1 damaged images read without a crash").arg(4 * rounds));
+
+    // Windows put this one's MFT 22 MB in: the flips go there, where the change journal's record is.
+    {
+        const QByteArray clean = unpack(data + QStringLiteral("ntfs-journal.img.zst"));
+        const uchar *b = reinterpret_cast<const uchar *>(clean.constData());
+        const qsizetype mft = clean.size() > 0x40 ? qsizetype(qFromLittleEndian<quint64>(b + 0x30) * qFromLittleEndian<quint16>(b + 11) * b[13]) : 0;
+        int journalRuns = 0;
+        for (int round = 0; round < rounds && mft > 0 && mft + 96 * 1024 <= clean.size(); ++round) {
+            QByteArray broken = clean;
+            for (int k = 0; k < 200; ++k)
+                broken[mft + rnd.bounded(96 * 1024)] = char(rnd.bounded(256));
+            quickScan(lost::Source::fromMemory(broken));
+            ++journalRuns;
+        }
+        report(journalRuns == rounds, QStringLiteral("ntfs journal: %1 damaged MFTs read without a crash").arg(journalRuns));
+    }
+    // And the journal's records themselves, cut short and flipped.
+    QByteArray records;
+    for (int i = 0; i < 40; ++i)
+        records += usnRecord(i % 3 == 0 ? 3 : 2, quint64(64 + i), quint16(1 + i % 4), 5, i % 2 ? 0x200 : 0x100, QStringLiteral("file %1.txt").arg(i));
+    int parsed = 0;
+    for (int round = 0; round < rounds * 20; ++round) {
+        QByteArray broken = records.left(rnd.bounded(int(records.size()) + 1));
+        for (int k = 0; k < 20 && !broken.isEmpty(); ++k)
+            broken[rnd.bounded(int(broken.size()))] = char(rnd.bounded(256));
+        parsed += int(lost::readJournal(broken).size() >= 0);
+    }
+    report(parsed == rounds * 20, QStringLiteral("ntfs journal: %1 damaged journals read without a crash").arg(parsed));
 }
 
 int scanImage(const QString &path)
@@ -861,8 +950,56 @@ void mediaAndOffice()
     report(runs == 1200, QStringLiteral("previews: 1200 damaged files read without a crash"));
 }
 
+// One record of NTFS's change journal, the way Windows writes it (USN_RECORD_V2 or V3).
+QByteArray usnRecord(int version, quint64 record, quint16 sequence, quint64 parent, quint32 reason, const QString &name)
+{
+    {
+        const int header = version == 3 ? 76 : 60;
+        QByteArray utf16;
+        for (QChar ch : name) {
+            utf16 += char(ch.unicode() & 0xff);
+            utf16 += char(ch.unicode() >> 8);
+        }
+        QByteArray r(header, '\0');
+        r += utf16;
+        r.append((8 - r.size() % 8) % 8, '\0');
+        char *p = r.data();
+        qToLittleEndian<quint32>(quint32(r.size()), p);
+        qToLittleEndian<quint16>(quint16(version), p + 4);
+        qToLittleEndian<quint64>(record | (quint64(sequence) << 48), p + 8);
+        qToLittleEndian<quint64>(parent | (quint64(5) << 48), p + (version == 3 ? 24 : 16));
+        qToLittleEndian<quint64>(133000000000000000ull, p + (version == 3 ? 48 : 32)); // some day in 2022
+        qToLittleEndian<quint32>(reason, p + (version == 3 ? 56 : 40));
+        qToLittleEndian<quint16>(quint16(utf16.size()), p + (version == 3 ? 72 : 56));
+        qToLittleEndian<quint16>(quint16(header), p + (version == 3 ? 74 : 58));
+        return r;
+    }
+}
+
+// NTFS's change journal: records the way Windows writes them, V2 and V3, among zeros and junk.
+void journal()
+{
+    const auto record = usnRecord;
+    QByteArray bytes(4096, '\0'); // a stretch the journal hasn't used
+    bytes += record(2, 64, 3, 5, 0x100, QStringLiteral("holiday.jpg"));
+    bytes += QByteArray("junk that isn't a record at all", 32);
+    bytes += record(2, 64, 3, 5, 0x200, QStringLiteral("holiday.jpg"));
+    bytes += record(3, 70, 1, 5, 0x2000, QStringLiteral("Grüße.txt"));
+    QByteArray broken = record(2, 71, 1, 5, 0x200, QStringLiteral("cut.txt"));
+    qToLittleEndian<quint16>(500, broken.data() + 56); // a name longer than the record
+    bytes += broken;
+    const QVector<lost::JournalEntry> entries = lost::readJournal(bytes);
+    QStringList seen;
+    for (const lost::JournalEntry &e : entries)
+        seen << QStringLiteral("%1/%2 %3 %4").arg(e.record).arg(e.sequence).arg(e.reason, 0, 16).arg(e.name);
+    report(seen == QStringList{QStringLiteral("64/3 100 holiday.jpg"), QStringLiteral("64/3 200 holiday.jpg"), QStringLiteral("70/1 2000 Grüße.txt")}
+               && entries.value(0).parent == 5 && entries.value(0).time > 0,
+           QStringLiteral("NTFS's change journal: V2 and V3 records, between zeros and junk"), seen.join(QStringLiteral(", ")));
+}
+
 void lostFilesTests()
 {
+    journal();
     QTemporaryDir dir;
     finding(dir.path());
     damage();

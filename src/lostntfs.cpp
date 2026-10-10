@@ -326,6 +326,7 @@ struct Node {
 
 struct Candidate {
     quint64 record = 0;
+    quint16 sequence = 0;
     QString name;
     quint64 parent = 0;
     quint16 parentSequence = 0;
@@ -334,6 +335,14 @@ struct Candidate {
     QVector<Attribute> data; // the unnamed $DATA, maybe in pieces across extension records
     quint16 dataFlags = 0;
 };
+
+constexpr quint32 kJournalDeleted = 0x200; // USN_REASON_FILE_DELETE
+constexpr quint64 kMostJournal = 256ull << 20; // a journal is 32 to 512 MB, mostly empty
+
+quint64 journalKey(quint64 record, quint16 sequence)
+{
+    return (record << 16) | sequence;
+}
 
 // The name to show from a record's $FILE_NAME attributes: the long one over the 8.3 one.
 bool pickName(const Record &r, QString *name, quint64 *parent, quint16 *parentSequence)
@@ -389,6 +398,45 @@ Binned readRecycleInfo(const QByteArray &info)
 
 } // namespace
 
+QVector<JournalEntry> readJournal(const QByteArray &data)
+{
+    // USN_RECORD_V2 (V3 has 128-bit file IDs, of which NTFS uses the low 64). Records are
+    // 8-byte aligned, and stretches the journal hasn't used read as zeros.
+    QVector<JournalEntry> out;
+    const uchar *p = bytes(data);
+    for (qsizetype at = 0; at + 60 <= data.size();) {
+        const quint32 length = le32(p + at);
+        const quint16 major = le16(p + at + 4);
+        if (length < 60 || length % 8 != 0 || at + qsizetype(length) > data.size() || (major != 2 && major != 3)) {
+            at += 8;
+            continue;
+        }
+        const bool v3 = major == 3;
+        if (v3 && length < 80) {
+            at += 8;
+            continue;
+        }
+        JournalEntry e;
+        const quint64 file = le64(p + at + 8), parent = le64(p + at + (v3 ? 24 : 16));
+        e.record = file & 0xFFFFFFFFFFFFull;
+        e.sequence = quint16(file >> 48);
+        e.parent = parent & 0xFFFFFFFFFFFFull;
+        e.parentSequence = quint16(parent >> 48);
+        e.time = fileTime(le64(p + at + (v3 ? 48 : 32)));
+        e.reason = le32(p + at + (v3 ? 56 : 40));
+        e.attributes = le32(p + at + (v3 ? 68 : 52));
+        const quint16 nameLength = le16(p + at + (v3 ? 72 : 56)), nameOffset = le16(p + at + (v3 ? 74 : 58));
+        if (nameLength % 2 != 0 || quint32(nameOffset) + nameLength > length || nameOffset < (v3 ? 76 : 60)) {
+            at += 8;
+            continue;
+        }
+        e.name = raw::utf16le(p + at + nameOffset, nameLength / 2);
+        out.push_back(std::move(e));
+        at += length;
+    }
+    return out;
+}
+
 bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::atomic<bool> &cancel, Volume *volume)
 {
     Ntfs fs(source, where);
@@ -400,6 +448,8 @@ bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::
     QVector<Candidate> candidates;
     QHash<quint64, QVector<Attribute>> extensionData; // $DATA pieces kept in extension records
     QHash<quint64, QByteArray> recycleInfo;           // $I files' contents, by record
+    QHash<quint64, QVector<Attribute>> journalData;   // $UsnJrnl's $J stream, by record (and its extension records)
+    quint64 journalRecord = 0;
     int liveFiles = 0;
 
     // The MFT, four megabytes at a time.
@@ -428,6 +478,8 @@ bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::
                 for (const Attribute &a : r.attributes) {
                     if (a.type == 0x80 && a.name.isEmpty())
                         extensionData[r.base].push_back(a);
+                    else if (a.type == 0x80 && a.name == QLatin1String("$J"))
+                        journalData[r.base].push_back(a);
                 }
                 continue;
             }
@@ -447,6 +499,13 @@ bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::
                 node.directory = r.directory;
                 nodes.insert(n, node);
             }
+            if (node.parent == kExtendRecord && node.name == QLatin1String("$UsnJrnl") && r.inUse) {
+                journalRecord = n;
+                for (const Attribute &a : r.attributes) {
+                    if (a.type == 0x80 && a.name == QLatin1String("$J"))
+                        journalData[n].push_back(a);
+                }
+            }
             if (r.directory || n < 16 || node.parent == kExtendRecord)
                 continue; // folders, and NTFS's own files ($MFT, $LogFile...)
             // On a big drive only deleted files are listed (and the Recycle Bin's): the rest
@@ -463,6 +522,7 @@ bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::
             }
             Candidate c;
             c.record = n;
+            c.sequence = r.sequence;
             c.name = node.name;
             c.parent = node.parent;
             c.parentSequence = node.parentSequence;
@@ -484,6 +544,29 @@ bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::
     if (cancel)
         return true;
 
+    // The change journal: the allocated parts of $J (the rest is a hole that reads as zeros).
+    QVector<JournalEntry> journal;
+    if (journalRecord) {
+        QVector<Attribute> parts = journalData.value(journalRecord);
+        std::sort(parts.begin(), parts.end(), [](const Attribute &a, const Attribute &b) { return a.startVcn < b.startVcn; });
+        QVector<Run> runs;
+        for (const Attribute &a : std::as_const(parts)) {
+            if (!a.resident && !a.badRuns)
+                runs += a.runs;
+        }
+        QByteArray bytes;
+        for (const Extent &e : fs.extentsOf(runs, ~quint64(0) >> 1)) {
+            if (e.zeros() || quint64(bytes.size()) + e.length > kMostJournal || cancel)
+                continue;
+            bytes += raw::read(source, e.start, e.length);
+        }
+        journal = readJournal(bytes);
+    }
+    // What the journal knew each file as, last; and the files it saw deleted.
+    QHash<quint64, JournalEntry> lastSeen;
+    for (const JournalEntry &e : std::as_const(journal))
+        lastSeen.insert(journalKey(e.record, e.sequence), e);
+
     const QString top = !label.isEmpty() ? label : tr("NTFS partition at %1").arg(formatSize(where.start));
     if (volume) {
         volume->type = QStringLiteral("ntfs");
@@ -496,14 +579,22 @@ bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::
     QHash<quint64, QString> paths;
     paths.insert(kRootRecord, top);
     const QString unknown = top + QLatin1Char('/') + tr("(folder unknown)");
-    std::function<QString(quint64, quint16, int)> pathOf = [&](quint64 record, quint16 sequence, int depth) -> QString {
+    std::function<QString(quint64, quint16, int)> pathOf;
+    // A folder the MFT has no record of any more, as the journal last saw it.
+    auto journalPath = [&](quint64 record, quint16 sequence, int depth) -> QString {
+        const auto seen = lastSeen.constFind(journalKey(record, sequence));
+        if (seen == lastSeen.cend() || !(seen->attributes & 0x10) || depth > 256)
+            return unknown;
+        return pathOf(seen->parent, seen->parentSequence, depth + 1) + QLatin1Char('/') + lost::cleanName(seen->name);
+    };
+    pathOf = [&](quint64 record, quint16 sequence, int depth) -> QString {
         const auto known = paths.constFind(record);
         const auto node = nodes.constFind(record);
         if (node == nodes.cend() || !node->directory || depth > 256)
-            return unknown;
+            return record == kRootRecord ? top : journalPath(record, sequence, depth);
         // NTFS counts a record's reuses; a folder deleted since counts one more.
         if (sequence != 0 && node->sequence != sequence && !(!node->inUse && node->sequence == quint16(sequence + 1)))
-            return unknown;
+            return journalPath(record, sequence, depth);
         if (known != paths.cend())
             return *known;
         const QString parent = record == kRootRecord ? QString() : pathOf(node->parent, node->parentSequence, depth + 1);
@@ -537,6 +628,12 @@ bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::
         QString name = c.name;
         QString note;
         bool binned = false;
+        qint64 deletedAt = 0;
+        if (c.deleted) {
+            const auto seen = lastSeen.constFind(journalKey(c.record, quint16(c.sequence - 1)));
+            if (seen != lastSeen.cend() && (seen->reason & kJournalDeleted))
+                deletedAt = seen->time;
+        }
         const qsizetype bin = folder.indexOf(QLatin1String("/$Recycle.Bin/"), 0, Qt::CaseInsensitive);
         if (bin >= 0 && !c.deleted) {
             // In the Recycle Bin: its real name and where it was, from its $I file. A whole
@@ -558,6 +655,7 @@ bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::
                 inside = b.path.section(QLatin1Char('\\'), -1) + QLatin1Char('/') + inside;
             }
             folder = top + QLatin1Char('/') + tr("Recycle Bin") + (inside.isEmpty() ? QString() : QLatin1Char('/') + inside);
+            deletedAt = b.deleted;
             note = tr("In the Recycle Bin. It was in %1, and was deleted %2.")
                        .arg(was, b.deleted ? QLocale().toString(QDateTime::fromMSecsSinceEpoch(b.deleted), QLocale::ShortFormat) : tr("at some point"));
             binned = true;
@@ -571,6 +669,7 @@ bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::
         f.origin = Origin::FileSystem;
         f.deleted = c.deleted || binned;
         f.modified = c.modified;
+        f.deletedAt = deletedAt;
         f.note = note;
         f.type = filetypes::typeForName(name);
         // The data: kept in the record itself, or pieces on the drive (maybe listed across
@@ -620,6 +719,21 @@ bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::
         if (broken && f.condition == Condition::Good)
             f.condition = Condition::MaybeDamaged;
         if (name.isEmpty()) {
+            // What the journal last called it (Windows counts the record's use up by one when it
+            // deletes the file).
+            for (const quint16 sequence : {c.sequence, quint16(c.sequence - 1)}) {
+                const auto seen = lastSeen.constFind(journalKey(c.record, sequence));
+                if (seen != lastSeen.cend() && !seen->name.isEmpty()) {
+                    name = seen->name;
+                    f.name = name;
+                    f.folder = pathOf(seen->parent, seen->parentSequence, 0);
+                    f.type = filetypes::typeForName(name);
+                    f.note = tr("Named from NTFS's change journal: NTFS's own record of it had lost its name.");
+                    break;
+                }
+            }
+        }
+        if (name.isEmpty()) {
             // No name: one from what kind of file its start says it is.
             f.type = -1;
             const QByteArray start = f.data.isEmpty() ? (f.extents.isEmpty() || f.extents.first().zeros()
@@ -646,6 +760,45 @@ bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::
         batch.push_back(std::move(f));
         ++listed;
         deleted += c.deleted || binned;
+        if (batch.size() >= kBatch)
+            out(std::exchange(batch, {}));
+    }
+    // Deleted files the journal saw go, whose record has gone to another file since: only the
+    // name, folder and time are left, but that's worth knowing, and the deep scan may still
+    // find what was in them.
+    QSet<quint64> listedRecords;
+    for (const Candidate &c : std::as_const(candidates)) {
+        listedRecords.insert(journalKey(c.record, c.sequence));
+        if (c.deleted) // Windows counts the record's use up by one when it deletes the file
+            listedRecords.insert(journalKey(c.record, quint16(c.sequence - 1)));
+    }
+    QSet<QString> nameOnly;
+    for (auto it = journal.crbegin(); it != journal.crend() && !cancel; ++it) {
+        const JournalEntry &e = *it;
+        if (!(e.reason & kJournalDeleted) || (e.attributes & 0x10) || e.name.isEmpty() || listedRecords.contains(journalKey(e.record, e.sequence)))
+            continue;
+        const QString folder = pathOf(e.parent, e.parentSequence, 0);
+        if (std::any_of(internal.cbegin(), internal.cend(), [&folder](const QString &skip) {
+                return folder.compare(skip, Qt::CaseInsensitive) == 0 || folder.startsWith(skip + QLatin1Char('/'), Qt::CaseInsensitive);
+            }) || folder.contains(QLatin1String("/$Recycle.Bin"), Qt::CaseInsensitive))
+            continue;
+        if (nameOnly.contains(folder + QLatin1Char('/') + e.name) || nameOnly.size() >= 5000)
+            continue;
+        nameOnly.insert(folder + QLatin1Char('/') + e.name);
+        Found f;
+        f.name = e.name;
+        f.folder = folder;
+        f.origin = Origin::FileSystem;
+        f.deleted = true;
+        f.deletedAt = e.time;
+        f.nameOnly = true;
+        f.condition = Condition::Overwritten;
+        f.type = filetypes::typeForName(e.name);
+        f.note = tr("Its name is from NTFS's change journal: its record in the file system has gone to another file since. The "
+                    "deep scan may still find what was in it, under a made-up name.");
+        batch.push_back(std::move(f));
+        ++listed;
+        ++deleted;
         if (batch.size() >= kBatch)
             out(std::exchange(batch, {}));
     }

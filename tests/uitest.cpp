@@ -2288,23 +2288,31 @@ void previewsThroughHelper()
                QStringLiteral("the helper runs in a bubblewrap sandbox"), command.first());
 }
 
+// One of tests/data/lostfs's images, unpacked into `dir`; empty when it couldn't be.
+QString unpackLostFsImage(const QString &name, const QTemporaryDir &dir)
+{
+    QString error;
+    const auto image = ImageSource::open(QStringLiteral(SOURCE_DIR "/tests/data/lostfs/") + name + QStringLiteral(".img.zst"), &error);
+    const QString path = dir.filePath(name + QStringLiteral(".img"));
+    QFile out(path);
+    if (!image || !out.open(QIODevice::WriteOnly)) {
+        report(false, QStringLiteral("unpack the %1 test image").arg(name), error);
+        return {};
+    }
+    QByteArray buffer(1024 * 1024, Qt::Uninitialized);
+    for (qint64 n; (n = image->read(buffer.data(), buffer.size())) > 0;)
+        out.write(buffer.constData(), n);
+    return path;
+}
+
 // A FAT32 image with deleted files (tests/data/lostfs): they show with their names, under their
 // folders, and the deleted folder's files are found by picking it in the tree.
 void lostFilesFromFileSystem()
 {
     QTemporaryDir dir;
-    QString error;
-    const auto image = ImageSource::open(QStringLiteral(SOURCE_DIR "/tests/data/lostfs/fat32.img.zst"), &error);
-    const QString path = dir.filePath(QStringLiteral("stick.img"));
-    QFile out(path);
-    if (!image || !out.open(QIODevice::WriteOnly)) {
-        report(false, QStringLiteral("unpack the FAT32 test image"), error);
+    const QString path = unpackLostFsImage(QStringLiteral("fat32"), dir);
+    if (path.isEmpty())
         return;
-    }
-    QByteArray buffer(1024 * 1024, Qt::Uninitialized);
-    for (qint64 n; (n = image->read(buffer.data(), buffer.size())) > 0;)
-        out.write(buffer.constData(), n);
-    out.close();
 
     UDisks udisks;
     LostFilesDialog dialog(&udisks, QString());
@@ -2358,6 +2366,64 @@ void lostFilesFromFileSystem()
     deletedOnly->setChecked(false);
     report(view->model()->rowCount() == 8, QStringLiteral("and the files that weren't deleted show when asked"),
            QString::number(view->model()->rowCount()));
+}
+
+// NTFS's change journal (tests/data/lostfs/journal-job.cmd): "Deleted recently" lists what's known
+// to have been deleted when, newest first, and a file only its name is left of can't be ticked.
+void lostFilesDeletedRecently()
+{
+    QTemporaryDir dir;
+    const QString path = unpackLostFsImage(QStringLiteral("ntfs-journal"), dir);
+    if (path.isEmpty())
+        return;
+    UDisks udisks;
+    LostFilesDialog dialog(&udisks, QString());
+    dialog.show();
+    dialog.scanImage(path);
+    auto *status = dialog.findChild<QLabel *>(QStringLiteral("status"));
+    waitUntil([&] { return status->text().startsWith(QLatin1String("Done")); }, 60000);
+    auto *folders = dialog.findChild<QTreeWidget *>(QStringLiteral("folders"));
+    auto *view = dialog.findChild<QListView *>(QStringLiteral("files"));
+    QTreeWidgetItem *recent = nullptr;
+    for (QTreeWidgetItemIterator it(folders); *it; ++it) {
+        if ((*it)->data(0, Qt::UserRole).toString() == LostFilter::kDeletedRecently)
+            recent = *it;
+    }
+    report(recent && recent->text(0) == QLatin1String("Deleted recently (3)") && folders->indexOfTopLevelItem(recent) == 1,
+           QStringLiteral("Find Lost Files: \"Deleted recently\" is right under \"Everywhere\""), recent ? recent->text(0) : QStringLiteral("missing"));
+    if (!recent)
+        return;
+    folders->setCurrentItem(recent);
+    QStringList rows;
+    for (int r = 0; r < view->model()->rowCount(); ++r)
+        rows << view->model()->index(r, 0).data().toString();
+    report(rows.size() == 3 && rows.value(0).startsWith(QLatin1String("beach.jpg (deleted ")), QStringLiteral("it lists them newest first, with when"),
+           rows.join(QStringLiteral(", ")));
+
+    int plan = -1;
+    for (int r = 0; r < rows.size(); ++r) {
+        if (rows[r].startsWith(QLatin1String("plan.txt")))
+            plan = r;
+    }
+    const QModelIndex planRow = view->model()->index(plan, 0);
+    report(plan >= 0 && !(planRow.flags() & Qt::ItemIsUserCheckable) && !planRow.data(Qt::CheckStateRole).isValid(),
+           QStringLiteral("a file that's only a name has no tick box"));
+    view->setCurrentIndex(planRow);
+    auto *details = dialog.findChild<QLabel *>(QStringLiteral("details"));
+    report(details->text().contains(QLatin1String("size not known")) && details->text().contains(QLatin1String("Was in WINJRNL/Drafts"))
+               && details->text().contains(QLatin1String("Deleted ")) && details->text().contains(QLatin1String("nothing of it to save")),
+           QStringLiteral("its details say where it was, when it went and that there's nothing to save"), details->text().left(240));
+    for (QPushButton *b : dialog.findChildren<QPushButton *>()) {
+        if (b->text() == QLatin1String("Tick All Shown"))
+            b->click();
+    }
+    auto *ticked = dialog.findChild<QLabel *>(QStringLiteral("ticked"));
+    report(ticked->text().startsWith(QLatin1String("One file ticked")), QStringLiteral("\"Tick All Shown\" leaves it out"), ticked->text());
+
+    if (qEnvironmentVariableIsSet("DISKFORGE_UITEST_SHOTS")) {
+        QApplication::processEvents();
+        dialog.grab().save(qEnvironmentVariable("DISKFORGE_UITEST_SHOTS") + QStringLiteral("/lostfiles-recent.png"));
+    }
 }
 
 // A virus list of our own for Scan for Viruses: made-up "viruses" by their MD5, packed into
@@ -3300,6 +3366,7 @@ int userScenarios(const QStringList &only)
         {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostfs", lostFilesFromFileSystem},
+        {"lostrecent", lostFilesDeletedRecently},
         {"previews", previewsThroughHelper}, {"viruses", virusScanThroughWindow}, {"virusdrive", virusScanOnDrive}, {"viruswindows", virusScanWindowsDrive}, {"virusboot", virusScanBoot}, {"viruslookup", virusLookUpOnline}, {"newids", newIdsThroughWindow},
     };
     for (const auto &[name, run] : scenarios) {
