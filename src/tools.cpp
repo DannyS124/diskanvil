@@ -450,9 +450,9 @@ void HealthDialog::reload()
     }
     const bool running = h.selftestStatus == QLatin1String("inprogress");
 #ifdef Q_OS_WIN
-    // Windows doesn't pass an NVMe drive's self-test command through (yet).
-    m_selftest->setVisible(!h.nvme);
-    m_longTest->setVisible(!h.nvme);
+    // On Windows the drive's own Identify data says whether it does self-tests.
+    m_selftest->setVisible(!h.nvme || h.nvmeSelftest);
+    m_longTest->setVisible(!h.nvme || h.nvmeSelftest);
 #endif
     m_selftest->setEnabled(!running && !h.smartOff);
     m_stopTest->setVisible(running);

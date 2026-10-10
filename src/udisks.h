@@ -101,6 +101,7 @@ struct Health {
     double criticalTempC = -1;
     bool usbNoData = false;     // a USB adapter that doesn't pass health data through
     bool smartOff = false;      // the drive can do SMART, but it's switched off
+    bool nvmeSelftest = false;  // Windows: an NVMe drive that does self-tests (UDisks doesn't say)
 };
 
 struct Disk {

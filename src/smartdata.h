@@ -53,5 +53,15 @@ NvmeHealth nvmeHealth(const QByteArray &page);
 // NVMe's Identify Controller page: the drive's own warning and critical temperatures (-1 when
 // it doesn't say).
 void nvmeTemperatureLimits(const QByteArray &identify, double *warningC, double *criticalC);
+// The same page: whether the drive does self-tests (the Device Self-test command).
+bool nvmeCanSelftest(const QByteArray &identify);
+// NVMe's Device Self-test log page (06h): the test running now, or the newest one's result, in
+// UDisks' words: "inprogress", "success", "aborted", "fatal_error", "unknown_seg_fail",
+// "known_seg_fail"; empty when no test ever ran.
+struct NvmeSelftest {
+    QString status;
+    int percentRemaining = -1;
+};
+NvmeSelftest nvmeSelftest(const QByteArray &log);
 
 } // namespace smart

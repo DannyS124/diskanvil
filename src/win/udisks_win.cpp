@@ -40,6 +40,7 @@
 #include <QThread>
 #include <QTimer>
 #include <QUuid>
+#include <QtEndian>
 
 #include <algorithm>
 #include <cstring>
@@ -331,8 +332,39 @@ struct DriveInfo {
 struct RawHealth {
     qint64 when = 0; // seconds since 1970
     bool read = false, ata = false, nvme = false, failing = false, asleep = false, smartOff = false;
-    QByteArray data, thresholds, log, identify;
+    QByteArray data, thresholds, log, identify, selftest;
 };
+
+// NVMe's Device Self-test, through Windows' pass-through for NVMe admin commands: `code` 1 starts
+// a short one, 2 an extended one, 0xF stops the one running. For all of the drive (namespace ID
+// all ones). False with GetLastError when Windows or the drive turned it down.
+bool nvmeSelftestCommand(HANDLE drive, DWORD code)
+{
+    constexpr DWORD kCommand = STORAGE_PROTOCOL_COMMAND_LENGTH_NVME;
+    const DWORD size = DWORD(FIELD_OFFSET(STORAGE_PROTOCOL_COMMAND, Command)) + kCommand;
+    QByteArray buffer(int(size), '\0');
+    auto *c = reinterpret_cast<STORAGE_PROTOCOL_COMMAND *>(buffer.data());
+    c->Version = STORAGE_PROTOCOL_STRUCTURE_VERSION;
+    c->Length = sizeof(STORAGE_PROTOCOL_COMMAND);
+    c->ProtocolType = ProtocolTypeNvme;
+    c->Flags = STORAGE_PROTOCOL_COMMAND_FLAG_ADAPTER_REQUEST;
+    c->CommandLength = kCommand;
+    c->TimeOutValue = 30;
+    c->CommandSpecific = STORAGE_PROTOCOL_SPECIFIC_NVME_ADMIN_COMMAND;
+    // The 64-byte NVMe command: the opcode in dword 0, the namespace in 1, the test in 10.
+    auto *command = reinterpret_cast<uchar *>(c->Command);
+    command[0] = 0x14;
+    qToLittleEndian<quint32>(0xFFFFFFFF, command + 4);
+    qToLittleEndian<quint32>(quint32(code), command + 40);
+    DWORD returned = 0;
+    if (!DeviceIoControl(drive, IOCTL_STORAGE_PROTOCOL_COMMAND, buffer.data(), size, buffer.data(), size, &returned, nullptr))
+        return false;
+    if (c->ReturnStatus != STORAGE_PROTOCOL_STATUS_SUCCESS) {
+        SetLastError(ERROR_NOT_SUPPORTED);
+        return false;
+    }
+    return true;
+}
 
 // An ATA SMART command through Windows' own SMART calls: a 512-byte page back, or with `regs`
 // the registers the drive answered with (how it says it's failing).
@@ -404,6 +436,10 @@ RawHealth readRawHealth(const QString &blockPath, bool nvme)
         if (r.log.isEmpty())
             r.log = nvmeQuery(drive.get(), StorageDeviceProtocolSpecificProperty, NVMeDataTypeLogPage, kHealthLog, 512);
         r.identify = nvmeQuery(drive.get(), StorageAdapterProtocolSpecificProperty, NVMeDataTypeIdentify, kIdentifyController, 4096);
+        if (smart::nvmeCanSelftest(r.identify)) {
+            constexpr DWORD kSelftestLog = 6;
+            r.selftest = nvmeQuery(drive.get(), StorageAdapterProtocolSpecificProperty, NVMeDataTypeLogPage, kSelftestLog, 564);
+        }
         r.nvme = r.read = !r.log.isEmpty();
         return r;
     }
@@ -476,6 +512,10 @@ Health healthFrom(const RawHealth &r, const Disk &d)
     h.criticalWarnings = n.criticalWarnings;
     h.percentUsed = n.percentUsed;
     smart::nvmeTemperatureLimits(r.identify, &h.warningTempC, &h.criticalTempC);
+    h.nvmeSelftest = smart::nvmeCanSelftest(r.identify);
+    const smart::NvmeSelftest test = smart::nvmeSelftest(r.selftest);
+    h.selftestStatus = test.status;
+    h.selftestPercentRemaining = test.percentRemaining;
     health::NvmeInput in;
     in.criticalWarnings = n.criticalWarnings;
     in.availableSpare = n.availableSpare;
@@ -2099,19 +2139,30 @@ void UDisks::smartSelftest(const Disk &disk, const QString &type)
     const QString failure = tr("Couldn't start a self-test on %1").arg(name);
     static const QHash<QString, BYTE> kinds = {{QStringLiteral("short"), 1}, {QStringLiteral("extended"), 2}, {QStringLiteral("conveyance"), 3}};
     QString why;
-    if (disk.health.nvme)
-        why = tr("self-tests of NVMe drives aren't in the Windows version yet");
-    else if (!kinds.contains(type))
+    if (!kinds.contains(type) || (disk.health.nvme && type == QLatin1String("conveyance"))) {
         why = tr("there's no such test");
-    else if (!smartSend(disk, EXECUTE_OFFLINE_DIAGS, kinds.value(type)))
+    } else if (disk.health.nvme) {
+        const win::Handle drive = win::openDevice(disk.blockPath, GENERIC_READ | GENERIC_WRITE);
+        if (!disk.health.nvmeSelftest)
+            why = tr("the drive doesn't do self-tests");
+        else if (!drive.valid() || !nvmeSelftestCommand(drive.get(), kinds.value(type)))
+            why = win::lastErrorText();
+    } else if (!smartSend(disk, EXECUTE_OFFLINE_DIAGS, kinds.value(type))) {
         why = win::lastErrorText();
+    }
     finishSmart(disk, why.isEmpty(), why.isEmpty() ? tr("Self-test started on %1").arg(name) : failure + reasonAfter(failure) + why);
 }
 
 void UDisks::smartSelftestAbort(const Disk &disk)
 {
     const QString name = shortDevice(disk.device);
-    const bool ok = !disk.health.nvme && smartSend(disk, EXECUTE_OFFLINE_DIAGS, 0x7F);
+    bool ok = false;
+    if (disk.health.nvme) {
+        const win::Handle drive = win::openDevice(disk.blockPath, GENERIC_READ | GENERIC_WRITE);
+        ok = drive.valid() && nvmeSelftestCommand(drive.get(), 0xF);
+    } else {
+        ok = smartSend(disk, EXECUTE_OFFLINE_DIAGS, 0x7F);
+    }
     finishSmart(disk, ok, ok ? tr("Stopped the self-test on %1").arg(name) : tr("Couldn't stop the self-test on %1").arg(name));
 }
 

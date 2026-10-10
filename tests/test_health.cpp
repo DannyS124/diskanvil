@@ -128,6 +128,27 @@ void rawPages()
     double warning = 0, critical = 0;
     smart::nvmeTemperatureLimits(identify, &warning, &critical);
     report(qRound(warning) == 70 && qRound(critical) == 85, QStringLiteral("NVMe identify: the drive's own temperature limits"));
+    const bool before = smart::nvmeCanSelftest(identify);
+    qToLittleEndian<quint16>(0x0017, identify.data() + 256); // security, format, firmware, self-test
+    report(!before && smart::nvmeCanSelftest(identify), QStringLiteral("NVMe identify: whether the drive does self-tests"));
+
+    // The self-test log: one running (40 % done), then results newest first.
+    QByteArray tests(564, '\0');
+    tests[0] = char(0x02);
+    tests[1] = char(40);
+    const smart::NvmeSelftest running = smart::nvmeSelftest(tests);
+    tests[0] = 0;
+    tests[4] = char(0x27); // an extended test, a part of it failed
+    const smart::NvmeSelftest failed = smart::nvmeSelftest(tests);
+    tests[4] = char(0x11); // a short one, stopped
+    const smart::NvmeSelftest stopped = smart::nvmeSelftest(tests);
+    tests[4] = char(0x10);
+    const smart::NvmeSelftest passed = smart::nvmeSelftest(tests);
+    tests[4] = char(0x0F);
+    report(running.status == QLatin1String("inprogress") && running.percentRemaining == 60 && failed.status == QLatin1String("known_seg_fail")
+               && stopped.status == QLatin1String("aborted") && passed.status == QLatin1String("success")
+               && smart::nvmeSelftest(tests).status.isEmpty() && smart::nvmeSelftest(QByteArray()).status.isEmpty(),
+           QStringLiteral("NVMe self-test log: running, a part failed, stopped, passed, never ran"));
     report(smart::ataAttributes(QByteArray(100, '\x7f'), {}).isEmpty() && !smart::nvmeHealth(QByteArray(10, '\0')).valid,
            QStringLiteral("SMART pages too short to be real are left alone"));
 }

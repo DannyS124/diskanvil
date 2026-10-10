@@ -7,6 +7,8 @@
 #include <QHash>
 #include <QtEndian>
 
+#include <algorithm>
+
 namespace smart {
 
 namespace {
@@ -165,6 +167,35 @@ NvmeHealth nvmeHealth(const QByteArray &page)
             h.sensorsC << kelvin(k);
     }
     return h;
+}
+
+bool nvmeCanSelftest(const QByteArray &identify)
+{
+    // Optional Admin Command Support, bit 4.
+    return identify.size() >= 258 && (qFromLittleEndian<quint16>(identify.constData() + 256) & 0x10);
+}
+
+NvmeSelftest nvmeSelftest(const QByteArray &log)
+{
+    NvmeSelftest t;
+    if (log.size() < 32)
+        return t;
+    const auto *p = reinterpret_cast<const uchar *>(log.constData());
+    // The test running now (byte 0) and how far it is (byte 1); then the results, newest first.
+    if (p[0] & 0x0F) {
+        t.status = QStringLiteral("inprogress");
+        t.percentRemaining = 100 - std::min(100, p[1] & 0x7F);
+        return t;
+    }
+    switch (p[4] & 0x0F) {
+    case 0x0: t.status = QStringLiteral("success"); break;
+    case 0x5: t.status = QStringLiteral("fatal_error"); break;
+    case 0x6: t.status = QStringLiteral("unknown_seg_fail"); break;
+    case 0x7: t.status = QStringLiteral("known_seg_fail"); break;
+    case 0xF: break; // no test in this entry
+    default: t.status = QStringLiteral("aborted"); // by a command, a reset, a format, a sanitize...
+    }
+    return t;
 }
 
 void nvmeTemperatureLimits(const QByteArray &identify, double *warningC, double *criticalC)
