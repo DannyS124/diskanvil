@@ -10,6 +10,8 @@
 #include "../src/gpt.h"
 #include "../src/partrecover.h"
 #include "../src/partscan.h"
+#include "../src/blockio.h"
+#include "../src/fsprobe.h"
 
 #include <QDir>
 #include <QFile>
@@ -322,10 +324,56 @@ void scanning()
            QString::number(early.size()));
 }
 
+// DiskForge's own probe (what Windows has for Recover Partitions) against libblkid's, on file
+// systems made by their own tools: the same type, and the same size, which is what a found
+// partition gets. The partition has to hold all of it, so the own probe counts NTFS's last
+// sector (the boot sector's copy) and swap's header page, which libblkid leaves out.
+void probeSizes()
+{
+    QTemporaryDir dir;
+    struct Case {
+        const char *name;
+        int mib;
+        QString make; // %1: the image
+        quint64 more = 0; // what libblkid leaves out
+    };
+    const QVector<Case> cases = {
+        {"ext2 with 1 KiB blocks", 20, QStringLiteral("mke2fs -q -t ext2 -b 1024 '%1'")},
+        {"ext4, 64-bit", 120, QStringLiteral("mke2fs -q -t ext4 -O 64bit '%1'")},
+        {"FAT16", 64, QStringLiteral("mkfs.fat -F 16 '%1' >/dev/null")},
+        {"FAT32", 100, QStringLiteral("mkfs.fat -F 32 '%1' >/dev/null")},
+        {"exFAT", 64, QStringLiteral("mkfs.exfat -q '%1' >/dev/null 2>&1 || mkfs.exfat '%1' >/dev/null")},
+        {"NTFS", 64, QStringLiteral("mkntfs -q -F -f '%1'"), 512},
+        {"Btrfs", 200, QStringLiteral("mkfs.btrfs -q '%1'")},
+        {"swap", 32, QStringLiteral("mkswap -q '%1'"), 4096},
+    };
+    for (const Case &c : cases) {
+        const QString image = dir.filePath(QString::fromLatin1(c.name).replace(QLatin1Char(' '), QLatin1Char('_')) + QStringLiteral(".img"));
+        int code = -1;
+        sh(QStringLiteral("sh"), {QStringLiteral("-c"), QStringLiteral("truncate -s %1M '%2' && ").arg(c.mib).arg(image) + c.make.arg(image)}, &code);
+        if (code != 0) {
+            out << "SKIP  " << c.name << ": its mkfs isn't installed" << Qt::endl;
+            continue;
+        }
+        const quint64 size = quint64(c.mib) * MiB;
+        const int fd = ::open(QFile::encodeName(image).constData(), O_RDONLY | O_CLOEXEC);
+        const std::optional<partscan::Found> blkid = partscan::probe(fd, 0, size);
+        QByteArray head(fsprobe::kHeadSize, '\0');
+        const bool read = blockio::readAt(fd, head.data(), quint64(head.size()), 0);
+        ::close(fd);
+        const fsprobe::Result own = fsprobe::probe(head);
+        const quint64 expected = blkid && blkid->size ? blkid->size + c.more : 0;
+        report(read && blkid && own.type == blkid->type && own.size == expected && own.size > 0 && own.size <= size,
+               QStringLiteral("own probe, %1: the same type and size as libblkid").arg(QLatin1String(c.name)),
+               QStringLiteral("%1 %2 bytes, libblkid %3 %4").arg(own.type).arg(own.size).arg(blkid ? blkid->type : QString()).arg(blkid ? blkid->size : 0));
+    }
+}
+
 } // namespace
 
 void recoverTests()
 {
+    probeSizes();
     gptRecovery(512);
     gptRecovery(4096);
     mbrRecovery();

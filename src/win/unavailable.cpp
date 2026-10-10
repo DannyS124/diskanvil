@@ -6,7 +6,6 @@
 // entries that would use them are hidden on Windows.
 
 #include "firmware.h"
-#include "partscan.h"
 #include "snapper.h"
 #include "systemd.h"
 
@@ -169,31 +168,4 @@ void firmware::Check::start(const QString &, const QString &, const QString &)
 
 void firmware::Check::askUpgrades(const Device &)
 {
-}
-
-// libblkid (Recover Partitions finds file systems with it)
-
-std::optional<partscan::Found> partscan::probe(int, quint64, quint64)
-{
-    return std::nullopt;
-}
-
-QVector<partscan::Found> partscan::scan(int, quint64, const std::function<bool(quint64, quint64)> &)
-{
-    return {};
-}
-
-QVector<partscan::Found> partscan::tidy(QVector<Found> found, quint64, int)
-{
-    return found;
-}
-
-QString partscan::typeFor(const QString &, const QString &)
-{
-    return {};
-}
-
-recover::Layout partscan::toLayout(const QVector<Found> &, const QString &, quint64)
-{
-    return {};
 }

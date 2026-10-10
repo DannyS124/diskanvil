@@ -326,7 +326,7 @@
 <context>
     <name>RecoverDialog</name>
     <message numerus="yes">
-        <location filename="../src/recoverdialog.cpp" line="193"/>
+        <location filename="../src/recoverdialog.cpp" line="198"/>
         <source>The backup copy at the end of the drive: %n partition(s)</source>
         <translation>
             <numerusform>The backup copy at the end of the drive: %n partition</numerusform>
@@ -334,7 +334,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/recoverdialog.cpp" line="333"/>
+        <location filename="../src/recoverdialog.cpp" line="338"/>
         <source>Stopped: %n file system(s) found before that.</source>
         <translation>
             <numerusform>Stopped: %n file system found before that.</numerusform>
@@ -342,7 +342,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/recoverdialog.cpp" line="334"/>
+        <location filename="../src/recoverdialog.cpp" line="339"/>
         <source>Found %n file system(s).</source>
         <translation>
             <numerusform>Found %n file system.</numerusform>
@@ -350,7 +350,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/recoverdialog.cpp" line="436"/>
+        <location filename="../src/recoverdialog.cpp" line="441"/>
         <source>The partition table of %1 is back: %n partition(s).</source>
         <translation>
             <numerusform>The partition table of %1 is back: %n partition.</numerusform>

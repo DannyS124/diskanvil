@@ -105,6 +105,7 @@ add_library(diskforge-core STATIC
     src/hostprocess.cpp src/hostprocess.h
     src/rescuestick.cpp src/rescuestick.h
     src/stickcheck.cpp src/stickcheck.h
+    src/partscan.cpp src/partscan.h
 )
 if(WIN32)
     target_sources(diskforge-core PRIVATE
@@ -120,7 +121,7 @@ if(WIN32)
 else()
     target_sources(diskforge-core PRIVATE
         src/udisks.cpp src/operations.cpp src/dbusnames.h
-        src/systemd.cpp src/snapper.cpp src/firmware.cpp src/partscan.cpp)
+        src/systemd.cpp src/snapper.cpp src/firmware.cpp)
     target_link_libraries(diskforge-core PUBLIC Qt6::Core Qt6::DBus PRIVATE PkgConfig::ZSTD PkgConfig::ZLIB PkgConfig::BLKID PkgConfig::ARCHIVE OpenSSL::Crypto)
 endif()
 target_include_directories(diskforge-core PUBLIC src)

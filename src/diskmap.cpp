@@ -349,8 +349,14 @@ void DiskMap::paintHeader(QPainter &p, int row) const
     bold.setBold(true);
     p.setFont(bold);
     p.setPen(pal.color(QPalette::ButtonText));
+#ifdef Q_OS_WIN
+    // Windows' own number ("Disk 3", as in Disk Management), wherever the map shows it.
+    Q_UNUSED(row)
+    p.drawText(QRect(body.left() + 28, body.top(), body.width() - 48, 22), Qt::AlignLeft | Qt::AlignVCenter, d.device);
+#else
     p.drawText(QRect(body.left() + 28, body.top(), body.width() - 48, 22), Qt::AlignLeft | Qt::AlignVCenter,
                tr("Disk %1").arg(row));
+#endif
     p.setFont(font());
 
     const QFontMetrics fm = fontMetrics();

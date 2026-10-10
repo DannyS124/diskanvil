@@ -5,7 +5,12 @@
 
 #include "format.h"
 
+#ifdef Q_OS_WIN
+#include "blockio.h"
+#include "fsprobe.h"
+#else
 #include <blkid.h>
+#endif
 
 #include <algorithm>
 #include <cstring>
@@ -13,6 +18,12 @@
 namespace {
 
 constexpr quint64 kMiB = 1024 * 1024;
+
+} // namespace
+
+#ifndef Q_OS_WIN
+
+namespace {
 
 // The file systems worth finding; anything else stays unknown rather than a false match.
 const char *const kTypes[] = {"ext2", "ext3", "ext4", "btrfs", "xfs", "vfat", "exfat", "ntfs", "f2fs", "swap",
@@ -63,6 +74,41 @@ std::optional<partscan::Found> partscan::probe(int fd, quint64 offset, quint64 d
     blkid_free_probe(pr);
     return out;
 }
+
+#else
+
+// Windows has no libblkid: DiskForge's own probe, which knows the same file systems' headers
+// and what size they say they are. Read at each spot: the first 16 KiB (boot sectors,
+// superblocks, swap's page) and the 4 KiB 64 KiB in, where Btrfs keeps its superblock.
+std::optional<partscan::Found> partscan::probe(int fd, quint64 offset, quint64 deviceSize)
+{
+    static const QStringList types = {QStringLiteral("ext2"), QStringLiteral("ext3"),  QStringLiteral("ext4"),        QStringLiteral("btrfs"),
+                                      QStringLiteral("xfs"),  QStringLiteral("vfat"),  QStringLiteral("exfat"),       QStringLiteral("ntfs"),
+                                      QStringLiteral("swap"), QStringLiteral("hfsplus"), QStringLiteral("crypto_LUKS"), QStringLiteral("LVM2_member")};
+    constexpr quint64 kFirst = 16 * 1024, kBtrfs = 64 * 1024, kBtrfsLength = 4096;
+    if (offset >= deviceSize)
+        return std::nullopt;
+    blockio::Buffer buffer = blockio::alignedBuffer(kFirst);
+    const quint64 first = std::min(kFirst, deviceSize - offset);
+    if (!buffer || !blockio::readAt(fd, buffer.get(), first, offset))
+        return std::nullopt;
+    QByteArray head(fsprobe::kHeadSize, '\0');
+    memcpy(head.data(), buffer.get(), first);
+    if (deviceSize - offset >= kBtrfs + kBtrfsLength && blockio::readAt(fd, buffer.get(), kBtrfsLength, offset + kBtrfs))
+        memcpy(head.data() + kBtrfs, buffer.get(), kBtrfsLength);
+    const fsprobe::Result r = fsprobe::probe(head);
+    if (!r.found() || !types.contains(r.type))
+        return std::nullopt;
+    Found f;
+    f.offset = offset;
+    f.type = r.type;
+    f.label = cleanName(r.label).trimmed();
+    f.uuid = r.uuid;
+    f.size = r.size <= deviceSize - offset ? r.size : 0;
+    return f;
+}
+
+#endif
 
 QVector<partscan::Found> partscan::scan(int fd, quint64 deviceSize, const std::function<bool(quint64, quint64)> &progress)
 {

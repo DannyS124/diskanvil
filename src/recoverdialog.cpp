@@ -34,6 +34,11 @@ QString RecoverDialog::refusal(const Disk &disk)
     if (disk.isSystem)
         return tr("%1 holds the running system, so its partition table can't be written while it runs.").arg(shortDevice(disk.device));
     for (const Volume &v : disk.volumes) {
+#ifdef Q_OS_WIN
+        // Windows gives a blank stick a drive letter all the same: that holds no file system.
+        if (!v.hasFilesystem)
+            continue;
+#endif
         if (!v.mounts().isEmpty() || v.swapActive || !v.cleartextPath.isEmpty())
             return tr("%1 is in use. Unmount (and lock) everything on the drive first.").arg(shortDevice(v.device));
     }
@@ -435,8 +440,12 @@ void RecoverDialog::waitForPartitions(int expected)
         const QString message = found >= expected
             ? tr("The partition table of %1 is back: %n partition(s).", nullptr, found).arg(m_device)
             : tr("The table was written, but only %1 of %2 partitions showed up%3.").arg(found).arg(expected).arg(inTime ? QString() : tr(" in time"));
-        m_problem->setText(message.toHtmlEscaped());
+        // The window stays open to show how it went: the drive as it is now, and the message
+        // (after refresh(), which would clear it).
+        if (d)
+            m_before->setDisks({*d});
         refresh();
+        m_problem->setText(message.toHtmlEscaped());
         emit done(found >= expected, message);
     };
     connect(m_udisks, &UDisks::changed, this, [this, settled, expected] {

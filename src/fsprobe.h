@@ -21,6 +21,7 @@ struct Result {
     QString usage; // filesystem, crypto, other (swap), raid (RAID and LVM members)
     QString label;
     QString uuid;
+    quint64 size = 0; // what the file system says it covers, in bytes; 0 when it doesn't say (LUKS)
     bool found() const { return !type.isEmpty(); }
 };
 
