@@ -10,6 +10,7 @@
 #include <QString>
 
 #include <cstdlib>
+#include <functional>
 #include <memory>
 
 class QFile;
@@ -47,8 +48,16 @@ enum class FileMode {
     Replace,   // write; created, or emptied if it's there
     Update,    // read and write; created if it isn't there, kept if it is
     CreateNew, // write; fails if anything (a symlink too) has that name already
+    ReadBack,  // read what's on the drive itself, not what the cache kept: to check what was written
+               // (and flushed). On Windows, reads have to go through readSome()/readFull() then.
 };
 int openFile(const QString &path, FileMode mode);
+
+// Closes an fd from openFile() or UDisks::openBlock, then runs what was waiting for it to be
+// closed: on Windows, a drive taken offline to be written to is brought back online.
+void close(int fd);
+// `then` runs once `fd` is closed with close() above (on the thread that closes it).
+void whenClosed(int fd, std::function<void()> then);
 
 // What was written is on the drive, not just in the cache. True for things that can't be
 // flushed (pipes).

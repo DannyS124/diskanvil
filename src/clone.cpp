@@ -152,9 +152,9 @@ CloneJob::CloneJob(int sourceFd, int targetFd, const diskclone::Plan &plan, bool
 CloneJob::~CloneJob()
 {
     if (m_source >= 0)
-        ::close(m_source);
+        blockio::close(m_source);
     if (m_target >= 0)
-        ::close(m_target);
+        blockio::close(m_target);
 }
 
 void CloneJob::run()

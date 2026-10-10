@@ -178,7 +178,7 @@ void WindowsUsbJob::verify()
             continue;
         blockio::flush(fd);
         blockio::dropCache(fd);
-        ::close(fd);
+        blockio::close(fd);
     }
     runWimlib({QStringLiteral("verify"), m_stick + QStringLiteral("/sources/install.swm"),
                QStringLiteral("--ref=%1/sources/install*.swm").arg(m_stick)},

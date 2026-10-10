@@ -235,7 +235,7 @@ bool filecopy::Copier::copy(const Entry &entry, quint64 &done, quint64 total)
         ok = false;
     }
     blockio::dropCache(out);
-    ::close(out);
+    blockio::close(out);
     const QByteArray expected = m_options.expected.value(entry.path);
     if (ok && !expected.isEmpty() && original.result().toHex() != expected) {
         m_error = tr("The image is damaged: %1 doesn't match its checksum. Download it again.").arg(entry.path);
@@ -251,21 +251,25 @@ bool filecopy::Copier::copy(const Entry &entry, quint64 &done, quint64 total)
 
 bool filecopy::Copier::check(const QString &path, quint64 &done, quint64 total)
 {
-    const int in = blockio::openFile(m_root + QLatin1Char('/') + path, blockio::FileMode::Read);
+    const int in = blockio::openFile(m_root + QLatin1Char('/') + path, blockio::FileMode::ReadBack);
     if (in < 0) {
         m_error = tr("%1 isn't on the stick after writing it. The stick may be failing; try another one.").arg(path);
         return false;
     }
-    blockio::dropCache(in);
     QCryptographicHash hash(QCryptographicHash::Sha256);
-    QByteArray buffer(kChunk, Qt::Uninitialized);
+    blockio::Buffer buffer = blockio::alignedBuffer(kChunk);
+    if (!buffer) {
+        blockio::close(in);
+        m_error = tr("Not enough memory to check %1.").arg(path);
+        return false;
+    }
     bool ok = true;
-    for (;;) {
+    for (quint64 at = 0;;) {
         if (m_cancel) {
             ok = false;
             break;
         }
-        const ssize_t n = ::read(in, buffer.data(), size_t(buffer.size()));
+        const qint64 n = blockio::readSome(in, buffer.get(), kChunk, at);
         if (n < 0 && errno == EINTR)
             continue;
         if (n < 0) {
@@ -275,11 +279,12 @@ bool filecopy::Copier::check(const QString &path, quint64 &done, quint64 total)
         }
         if (n == 0)
             break;
-        hash.addData(QByteArrayView(buffer.constData(), n));
+        hash.addData(QByteArrayView(buffer.get(), n));
+        at += quint64(n);
         done += quint64(n);
         emit progress(tr("Checking"), done, total);
     }
-    ::close(in);
+    blockio::close(in);
     if (ok && hash.result() != m_written.value(path)) {
         m_error = tr("The stick gave back something different from what was written to %1. "
                      "It may be failing; try another one.").arg(path);

@@ -34,7 +34,7 @@ ImageWriter::ImageWriter(const QString &imagePath, int fd, bool verify, const ch
 ImageWriter::~ImageWriter()
 {
     if (m_fd >= 0)
-        ::close(m_fd);
+        blockio::close(m_fd);
 }
 
 bool ImageWriter::fail(const QString &message)
@@ -170,7 +170,7 @@ void ImageWriter::run()
         }
     }
 
-    ::close(m_fd);
+    blockio::close(m_fd);
     m_fd = -1;
     emit finished(true, m_verify ? tr("Done. The image was written and verified.") : tr("Done. The image was written."));
 }

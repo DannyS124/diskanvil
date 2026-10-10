@@ -92,7 +92,7 @@ RecoverDialog::RecoverDialog(UDisks *udisks, const Disk &disk, QWidget *parent)
         gpt::Report report;
         if (fd >= 0) {
             report = gpt::inspect(fd);
-            ::close(fd);
+            blockio::close(fd);
         }
         listSources(report);
         emit ready();
@@ -107,7 +107,7 @@ RecoverDialog::~RecoverDialog()
         m_scanThread->wait();
     }
     if (m_scanFd >= 0)
-        ::close(m_scanFd);
+        blockio::close(m_scanFd);
 }
 
 void RecoverDialog::build()
@@ -319,7 +319,7 @@ void RecoverDialog::scanFinished(const QVector<partscan::Found> &found)
     }
     const bool stopped = m_stopFlag && m_stopFlag->load();
     if (m_scanFd >= 0)
-        ::close(m_scanFd);
+        blockio::close(m_scanFd);
     m_scanFd = -1;
     m_busy = false;
     m_progress->hide();
@@ -400,7 +400,7 @@ void RecoverDialog::write()
             return;
         }
         const gpt::Result result = source.backup ? gpt::restoreFromBackup(fd) : recover::write(fd, source.layout);
-        ::close(fd);
+        blockio::close(fd);
         qCInfo(lcOps).noquote() << "Recover Partitions on" << m_blockPath << (source.backup ? "from the backup GPT" : "from a layout")
                                 << (result.ok ? QStringLiteral("done") : QStringLiteral("failed: ") + result.error);
         if (!result.ok) {

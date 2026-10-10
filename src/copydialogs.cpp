@@ -298,7 +298,7 @@ void CloneDialog::start()
             return failed(tr("Couldn't open %1.").arg(sourceName));
         openBlockThen(m_udisks, this, m_target, UDisks::OpenMode::ReadWrite, [=, this](int out) {
             if (out < 0) {
-                ::close(in);
+                blockio::close(in);
                 return failed(tr("Couldn't open %1.").arg(targetName));
             }
             m_job = new CloneJob(in, out, plan, m_newIds, verify);
@@ -1250,14 +1250,14 @@ void RescueDialog::start()
         if (toFile) {
             const int out = blockio::openFile(file, blockio::FileMode::Update);
             if (out < 0) {
-                ::close(in);
+                blockio::close(in);
                 return failed(tr("Couldn't open %1: %2").arg(file, QString::fromLocal8Bit(std::strerror(errno))));
             }
             return run(in, out);
         }
         openBlockThen(m_udisks, this, target, UDisks::OpenMode::ReadWrite, [=](int out) {
             if (out < 0) {
-                ::close(in);
+                blockio::close(in);
                 return failed(tr("Couldn't open the drive to copy to."));
             }
             run(in, out);

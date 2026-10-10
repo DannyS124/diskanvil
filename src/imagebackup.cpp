@@ -151,7 +151,7 @@ BackupJob::BackupJob(int sourceFd, const QString &imagePath, const BackupInfo &i
 BackupJob::~BackupJob()
 {
     if (m_source >= 0)
-        ::close(m_source);
+        blockio::close(m_source);
 }
 
 void BackupJob::run()
@@ -172,7 +172,7 @@ void BackupJob::run()
     o.extents = {{0, m_info.size, 0}};
     const QString phase = tr("Backing up");
     const blockcopy::Result r = blockcopy::copy(o, m_cancel, [&](quint64 done, quint64 total) { emit progress(phase, done, total); });
-    ::close(out);
+    blockio::close(out);
     if (!r.ok)
         return fail(r.cancelled ? tr("Stopped. The unfinished backup was removed.") : r.error);
 
@@ -197,7 +197,7 @@ RestoreJob::RestoreJob(const QString &imagePath, const BackupInfo &info, int tar
 RestoreJob::~RestoreJob()
 {
     if (m_target >= 0)
-        ::close(m_target);
+        blockio::close(m_target);
 }
 
 void RestoreJob::run()
@@ -221,7 +221,7 @@ void RestoreJob::run()
         o.extents = whole;
         const QString phase = tr("Checking the backup");
         const blockcopy::Result check = blockcopy::copy(o, m_cancel, [&](quint64 done, quint64 total) { emit progress(phase, done, total); });
-        ::close(in);
+        blockio::close(in);
         if (!check.ok) {
             emit finished(false, check.cancelled ? tr("Stopped. Nothing was written.") : tr("Nothing was written. %1").arg(check.error), false);
             return;
@@ -244,7 +244,7 @@ void RestoreJob::run()
     o.extents = whole;
     const QString writing = tr("Restoring");
     const blockcopy::Result r = blockcopy::copy(o, m_cancel, [&](quint64 done, quint64 total) { emit progress(writing, done, total); });
-    ::close(in);
+    blockio::close(in);
     if (!r.ok) {
         emit finished(false, r.cancelled ? tr("Stopped partway. What's there now is incomplete; restore again or format it.") : r.error, true);
         return;

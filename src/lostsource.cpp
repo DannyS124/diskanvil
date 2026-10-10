@@ -70,7 +70,7 @@ std::shared_ptr<lost::Source> lost::Source::fromLayer(std::unique_ptr<Layer> lay
 lost::Source::~Source()
 {
     if (m_fd >= 0)
-        ::close(m_fd);
+        blockio::close(m_fd);
 }
 
 bool lost::Source::rawRead(quint64 offset, char *buf, quint64 len)

@@ -3,6 +3,7 @@
 
 #include "jobui.h"
 
+#include "blockio.h"
 #include "format.h"
 
 #include <QLabel>
@@ -12,7 +13,6 @@
 
 #include <algorithm>
 #include <memory>
-#include <unistd.h>
 
 QString durationText(double seconds)
 {
@@ -178,7 +178,7 @@ void openBlockThen(UDisks *udisks, QObject *context, const QString &objectPath, 
         QObject::disconnect(*conn);
         if (!guard) {
             if (fd >= 0)
-                ::close(fd);
+                blockio::close(fd);
             return;
         }
         then(fd);

@@ -114,7 +114,7 @@ void TableInspectorDialog::load(int fd)
 TableInspectorDialog::~TableInspectorDialog()
 {
     if (m_fd >= 0)
-        ::close(m_fd);
+        blockio::close(m_fd);
 }
 
 void TableInspectorDialog::fill()

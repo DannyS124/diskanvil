@@ -35,7 +35,7 @@ SurfaceScan::SurfaceScan(int fd, quint64 size)
 SurfaceScan::~SurfaceScan()
 {
     if (m_fd >= 0)
-        ::close(m_fd);
+        blockio::close(m_fd);
 }
 
 void SurfaceScan::run()
@@ -115,7 +115,7 @@ SectorRepair::SectorRepair(int fd, const QVector<quint64> &badSectors, int physi
 SectorRepair::~SectorRepair()
 {
     if (m_fd >= 0)
-        ::close(m_fd);
+        blockio::close(m_fd);
 }
 
 void SectorRepair::run()

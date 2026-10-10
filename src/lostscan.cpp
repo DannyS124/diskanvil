@@ -397,7 +397,7 @@ void lost::Saver::run()
         ok = ok && blockio::flush(fd);
         if (ok && f.modified > 0)
             blockio::setFileTime(fd, f.modified);
-        ::close(fd);
+        blockio::close(fd);
         if (!ok || m_cancel) {
             QFile::remove(path);
             if (!m_cancel) {

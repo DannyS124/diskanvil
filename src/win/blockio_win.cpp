@@ -63,8 +63,9 @@ bool transfer(HANDLE h, bool write, void *buf, DWORD len, quint64 offset, DWORD 
     return write ? WriteFile(h, buf, len, done, &at) : ReadFile(h, buf, len, done, &at);
 }
 
-// Drives and partitions only take whole sectors at sector boundaries. For a piece that
-// isn't, the sectors around it go through a buffer of its own (4 KiB covers both sector sizes).
+// Drives and partitions only take whole sectors at sector boundaries, from memory on a sector
+// boundary. For a piece that isn't, the sectors around it go through a buffer of its own (4 KiB
+// covers both sector sizes); a write of whole sectors from memory that's only off isn't read first.
 qint64 unaligned(HANDLE h, bool write, char *buf, quint64 len, quint64 offset)
 {
     const quint64 start = offset / kAlign * kAlign;
@@ -73,6 +74,12 @@ qint64 unaligned(HANDLE h, bool write, char *buf, quint64 len, quint64 offset)
     if (!bounce)
         return errno = ENOMEM, -1;
     DWORD done = 0;
+    if (write && start == offset && end == offset + len) {
+        std::memcpy(bounce.get(), buf, size_t(len));
+        if (!transfer(h, true, bounce.get(), DWORD(len), offset, &done))
+            return errno = errnoFor(GetLastError()), -1;
+        return qint64(done);
+    }
     if (!transfer(h, false, bounce.get(), DWORD(end - start), start, &done))
         return errno = errnoFor(GetLastError()), -1;
     if (done < offset - start)
@@ -100,7 +107,7 @@ qint64 positioned(int fd, bool write, char *buf, quint64 len, quint64 offset)
     const DWORD error = GetLastError();
     if (error == ERROR_HANDLE_EOF)
         return 0;
-    if (error == ERROR_INVALID_PARAMETER && (offset % kAlign || chunk % kAlign) && chunk <= 64 * 1024 * 1024)
+    if (error == ERROR_INVALID_PARAMETER && (offset % kAlign || chunk % kAlign || quintptr(buf) % kAlign) && chunk <= 64 * 1024 * 1024)
         return unaligned(h, write, buf, chunk, offset);
     errno = errnoFor(error);
     return -1;
@@ -126,6 +133,54 @@ void alignedFree(void *p)
 Buffer alignedBuffer(size_t size)
 {
     return Buffer(static_cast<char *>(_aligned_malloc(std::max<size_t>(size, 1), kAlign)), &alignedFree);
+}
+
+// The sequential calls, at the handle's own position: through the same whole-sector rules as
+// the rest, which the C library's read() and write() don't know about.
+quint64 positionOf(HANDLE h)
+{
+    LARGE_INTEGER zero {}, at {};
+    SetFilePointerEx(h, zero, &at, FILE_CURRENT);
+    return quint64(at.QuadPart);
+}
+
+void moveTo(HANDLE h, quint64 offset)
+{
+    LARGE_INTEGER to;
+    to.QuadPart = LONGLONG(offset);
+    SetFilePointerEx(h, to, nullptr, FILE_BEGIN);
+}
+
+bool writeAll(int fd, const char *data, qint64 size)
+{
+    const HANDLE h = handleOf(fd);
+    quint64 at = positionOf(h);
+    while (size > 0) {
+        const qint64 n = positioned(fd, true, const_cast<char *>(data), quint64(size), at);
+        if (n <= 0)
+            return false;
+        data += n;
+        size -= n;
+        at += quint64(n);
+    }
+    moveTo(h, at);
+    return true;
+}
+
+qint64 readFull(int fd, char *data, qint64 size)
+{
+    const HANDLE h = handleOf(fd);
+    quint64 at = positionOf(h);
+    qint64 total = 0;
+    while (total < size) {
+        const qint64 n = positioned(fd, false, data + total, quint64(size - total), at);
+        if (n <= 0)
+            break;
+        total += n;
+        at += quint64(n);
+    }
+    moveTo(h, at);
+    return total;
 }
 
 qint64 readSome(int fd, char *buf, quint64 len, quint64 offset)
@@ -204,6 +259,18 @@ int openFile(const QString &path, FileMode mode)
     case FileMode::Replace: flags |= _O_WRONLY | _O_CREAT | _O_TRUNC; break;
     case FileMode::Update: flags |= _O_RDWR | _O_CREAT; break;
     case FileMode::CreateNew: flags |= _O_WRONLY | _O_CREAT | _O_EXCL; break;
+    case FileMode::ReadBack: {
+        // Windows can't drop a file's cached pages, but a handle of its own can read past them.
+        win::Handle h(CreateFileW(win::wide(QDir::toNativeSeparators(path)).c_str(), GENERIC_READ,
+                                  FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                                  FILE_FLAG_NO_BUFFERING, nullptr));
+        if (!h.valid())
+            return errno = errnoFor(GetLastError()), -1;
+        const int fd = _open_osfhandle(intptr_t(h.get()), _O_RDONLY | _O_BINARY);
+        if (fd >= 0)
+            h.release();
+        return fd;
+    }
     }
     return _wopen(win::wide(QDir::toNativeSeparators(path)).c_str(), flags, _S_IREAD | _S_IWRITE);
 }

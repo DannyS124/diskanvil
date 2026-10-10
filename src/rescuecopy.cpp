@@ -207,9 +207,9 @@ RescueCopy::RescueCopy(int sourceFd, quint64 size, int targetFd, const QString &
 RescueCopy::~RescueCopy()
 {
     if (m_source >= 0)
-        ::close(m_source);
+        blockio::close(m_source);
     if (m_target >= 0)
-        ::close(m_target);
+        blockio::close(m_target);
 }
 
 bool RescueCopy::readSource(char *buf, quint64 len, quint64 pos)

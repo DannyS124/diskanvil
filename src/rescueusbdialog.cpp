@@ -4,6 +4,7 @@
 #include "rescueusbdialog.h"
 
 #include "applog.h"
+#include "blockio.h"
 #include "dialogs.h"
 #include "format.h"
 #include "usbprep.h"
@@ -440,7 +441,7 @@ void RescueUsbDialog::writeBiosBoot()
         QString error = tr("the stick couldn't be opened for writing");
         const bool ok = fd >= 0 && rescue::writeBiosBoot(fd, boot, core, &error);
         if (fd >= 0)
-            ::close(fd);
+            blockio::close(fd);
         qCInfo(lcOps).noquote() << "Make a DiskForge Live USB: boot code for BIOS PCs" << (ok ? "written" : "not written: " + error);
         finish(true, ok ? readyText(true)
                         : readyText(false) + QStringLiteral("\n\n") + tr("Old BIOS-only PCs won't start from it: %1. Making it again "

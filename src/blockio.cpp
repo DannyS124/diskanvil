@@ -6,6 +6,8 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QHash>
+#include <QMutex>
 #include <QStringList>
 
 #include <algorithm>
@@ -52,6 +54,33 @@ bool writeAt(int fd, const char *buf, quint64 len, quint64 offset)
     return true;
 }
 
+// Closing, and what waits for it: by fd, while it's open.
+namespace {
+QMutex closeLock;
+QHash<int, std::function<void()>> onClose;
+} // namespace
+
+void whenClosed(int fd, std::function<void()> then)
+{
+    QMutexLocker locker(&closeLock);
+    onClose.insert(fd, std::move(then));
+}
+
+void close(int fd)
+{
+    if (fd < 0)
+        return;
+    std::function<void()> then;
+    {
+        QMutexLocker locker(&closeLock);
+        then = onClose.take(fd);
+    }
+    ::close(fd);
+    if (then)
+        then();
+}
+
+#ifndef Q_OS_WIN // Windows' go through blockio_win.cpp's whole-sector rules
 bool writeAll(int fd, const char *data, qint64 size)
 {
     while (size > 0) {
@@ -79,6 +108,7 @@ qint64 readFull(int fd, char *data, qint64 size)
     }
     return total;
 }
+#endif
 
 #ifndef Q_OS_WIN
 
@@ -157,8 +187,12 @@ int openFile(const QString &path, FileMode mode)
     case FileMode::Replace: flags |= O_WRONLY | O_CREAT | O_TRUNC; break;
     case FileMode::Update: flags |= O_RDWR | O_CREAT; break;
     case FileMode::CreateNew: flags |= O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW; break;
+    case FileMode::ReadBack: flags |= O_RDONLY; break;
     }
-    return ::open(QFile::encodeName(path).constData(), flags, 0644);
+    const int fd = ::open(QFile::encodeName(path).constData(), flags, 0644);
+    if (fd >= 0 && mode == FileMode::ReadBack)
+        dropCache(fd); // flushed already, so the cache lets go of it
+    return fd;
 }
 
 bool flush(int fd)

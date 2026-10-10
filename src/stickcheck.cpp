@@ -79,7 +79,7 @@ public:
     ~FdTarget() override
     {
         if (m_fd >= 0)
-            ::close(m_fd);
+            blockio::close(m_fd);
     }
     quint64 size() const override { return m_size; }
     bool write(quint64 offset, const char *data, qsizetype length) override
