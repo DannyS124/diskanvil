@@ -9,7 +9,9 @@
 #include "rescuestick.h"
 #include "udisks.h"
 
+#include <QApplication>
 #include <QButtonGroup>
+#include <QCheckBox>
 #include <QColor>
 #include <QDateTime>
 #include <QDialogButtonBox>
@@ -29,6 +31,8 @@
 #include <QRegularExpression>
 #include <QStackedWidget>
 #include <QStandardPaths>
+#include <QStyle>
+#include <QTabWidget>
 #include <QThread>
 #include <QTreeWidget>
 #include <QVBoxLayout>
@@ -72,6 +76,12 @@ QString logPath()
     return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/diskforge/virus-scan.log");
 }
 
+#ifdef Q_OS_WIN
+constexpr Qt::CaseSensitivity kPathCase = Qt::CaseInsensitive;
+#else
+constexpr Qt::CaseSensitivity kPathCase = Qt::CaseSensitive;
+#endif
+
 // Drives are mounted read-only for the scan where that's possible (Windows has no such thing
 // for a drive letter).
 #ifdef Q_OS_WIN
@@ -79,6 +89,12 @@ constexpr bool kReadOnlyMounts = false;
 #else
 constexpr bool kReadOnlyMounts = true;
 #endif
+
+QIcon severityIcon(int severity)
+{
+    return severity >= 2 ? QIcon::fromTheme(QStringLiteral("dialog-error"), QApplication::style()->standardIcon(QStyle::SP_MessageBoxCritical))
+                         : QIcon::fromTheme(QStringLiteral("dialog-warning"), QApplication::style()->standardIcon(QStyle::SP_MessageBoxWarning));
+}
 
 QColor severityColor(int severity)
 {
@@ -105,6 +121,12 @@ VirusDialog::VirusDialog(UDisks *udisks, QWidget *parent)
     , m_hitInfo(new QLabel)
     , m_delete(new QPushButton(tr("Delete Ticked Files…")))
     , m_again(new QPushButton(tr("Scan Something Else")))
+    , m_tabs(new QTabWidget)
+    , m_startupList(new QTreeWidget)
+    , m_startupInfo(new QLabel)
+    , m_startupDetails(new QLabel)
+    , m_showAll(new QCheckBox(tr("Show everything that starts with Windows")))
+    , m_switchOff(new QPushButton(tr("Switch Off Ticked…")))
 {
     setWindowTitle(tr("Scan for Viruses"));
     setObjectName(QStringLiteral("virusScan"));
@@ -171,7 +193,40 @@ VirusDialog::VirusDialog(UDisks *udisks, QWidget *parent)
     m_hits->setWordWrap(true);
     m_hits->header()->setSectionResizeMode(0, QHeaderView::Interactive);
     m_hits->header()->resizeSection(0, 380);
-    resultsLayout->addWidget(m_hits, 1);
+    m_tabs->setObjectName(QStringLiteral("tabs"));
+    m_tabs->addTab(m_hits, tr("Files"));
+    // What starts with Windows: the places malware puts itself to start again.
+    auto *startupPage = new QWidget;
+    auto *startupLayout = new QVBoxLayout(startupPage);
+    m_startupInfo->setWordWrap(true);
+    m_startupInfo->setTextFormat(Qt::RichText);
+    m_startupInfo->setObjectName(QStringLiteral("startupInfo"));
+    startupLayout->addWidget(m_startupInfo);
+    m_startupList->setObjectName(QStringLiteral("startup"));
+    m_startupList->setHeaderLabels({tr("Name"), tr("How it starts"), tr("Why it looks odd")});
+    m_startupList->setRootIsDecorated(false);
+    m_startupList->setUniformRowHeights(true);
+    m_startupList->header()->resizeSection(0, 220);
+    m_startupList->header()->resizeSection(1, 280);
+    startupLayout->addWidget(m_startupList, 2);
+    // The one picked, in full.
+    m_startupDetails->setObjectName(QStringLiteral("startupDetails"));
+    m_startupDetails->setWordWrap(true);
+    m_startupDetails->setTextFormat(Qt::RichText);
+    m_startupDetails->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    m_startupDetails->setAlignment(Qt::AlignTop | Qt::AlignLeft);
+    m_startupDetails->setMinimumHeight(110);
+    startupLayout->addWidget(m_startupDetails, 1);
+    m_showAll->setObjectName(QStringLiteral("showAll"));
+    auto *startupButtons = new QHBoxLayout;
+    startupButtons->addWidget(m_showAll, 1);
+    m_switchOff->setAutoDefault(false);
+    m_switchOff->setEnabled(false);
+    startupButtons->addWidget(m_switchOff);
+    startupLayout->addLayout(startupButtons);
+    m_tabs->addTab(startupPage, tr("Starts with Windows"));
+    m_tabs->setTabVisible(1, false);
+    resultsLayout->addWidget(m_tabs, 1);
     auto *bottom = new QHBoxLayout;
     m_hitInfo->setWordWrap(true);
     m_hitInfo->setObjectName(QStringLiteral("hitInfo"));
@@ -195,10 +250,23 @@ VirusDialog::VirusDialog(UDisks *udisks, QWidget *parent)
     connect(m_targets, &QTreeWidget::currentItemChanged, this, &VirusDialog::updateButtons);
     connect(m_targets, &QTreeWidget::itemDoubleClicked, this, &VirusDialog::start);
     connect(m_stop, &QPushButton::clicked, this, [this] {
+        m_stopped = true;
         if (m_job)
             m_job->cancel();
         m_stop->setEnabled(false);
     });
+    connect(m_showAll, &QCheckBox::toggled, this, &VirusDialog::showStartup);
+    connect(m_startupList, &QTreeWidget::currentItemChanged, this, &VirusDialog::showStartupDetails);
+    connect(m_startupList, &QTreeWidget::itemChanged, this, [this](QTreeWidgetItem *item) {
+        const int index = item->data(0, Qt::UserRole).toInt();
+        if (item->checkState(0) == Qt::Checked)
+            m_ticked.insert(index);
+        else
+            m_ticked.remove(index);
+        m_switchOff->setEnabled(!m_ticked.isEmpty() && !m_busy);
+        m_switchOff->setText(m_ticked.isEmpty() ? tr("Switch Off Ticked…") : tr("Switch Off %n Ticked…", nullptr, int(m_ticked.size())));
+    });
+    connect(m_switchOff, &QPushButton::clicked, this, &VirusDialog::switchOffTicked);
     connect(m_again, &QPushButton::clicked, this, [this] {
         m_pages->setCurrentIndex(0);
         fillTargets();
@@ -224,13 +292,16 @@ void VirusDialog::stopWorkers()
         m_job->cancel();
     if (m_updateJob)
         m_updateJob->cancel();
-    if (m_thread) {
-        m_thread->quit();
-        m_thread->wait();
+    for (QThread *thread : {m_thread, m_startupThread}) {
+        if (thread) {
+            thread->quit();
+            thread->wait();
+        }
     }
     m_job = nullptr;
     m_updateJob = nullptr;
     m_thread = nullptr;
+    m_startupThread = nullptr;
 }
 
 void VirusDialog::reject()
@@ -488,7 +559,76 @@ void VirusDialog::startScan(const QStringList &folders, const QString &title)
     log({QStringLiteral("%1 scanning %2 (%3) with %4, list from %5")
              .arg(QDateTime::currentDateTime().toString(Qt::ISODate), folders.join(QStringLiteral(", ")), title, m_engine.name(),
                   m_engine.listDate.isValid() ? m_engine.listDate.toString(Qt::ISODate) : QStringLiteral("-"))});
-    m_job = new virus::Scan(m_engine, folders, virus::Depth(m_depth->checkedId()));
+    m_stopped = false;
+    m_startup = {};
+    m_ticked.clear();
+    m_switched.clear();
+    m_startupList->clear();
+    m_tabs->setTabVisible(1, false);
+    m_tabs->setCurrentIndex(0);
+    m_tabs->setTabText(0, tr("Files"));
+    updateButtons();
+
+    // What starts with Windows comes first: those programs are scanned whatever else is.
+    QString windows;
+    for (const QString &folder : folders) {
+        if (startup::hasWindows(folder)) {
+            windows = folder;
+            break;
+        }
+    }
+    bool running = false;
+#ifdef Q_OS_WIN
+    // The Windows that's running is read through its registry, not its files.
+    // Only for the whole drive, not a folder on it.
+    const QString systemDrive = qEnvironmentVariable("SystemDrive").toLower();
+    for (QString folder : folders) {
+        folder = QDir::fromNativeSeparators(folder).toLower();
+        while (folder.endsWith(QLatin1Char('/')))
+            folder.chop(1);
+        running = running || folder == systemDrive;
+    }
+    if (running)
+        windows.clear();
+#endif
+    m_windowsRoot = windows;
+    if (windows.isEmpty() && !running) {
+        runScan({});
+        return;
+    }
+    m_phase->setText(tr("Reading what starts with Windows"));
+    auto *finder = new startup::Finder(windows);
+    connect(finder, &startup::Finder::finished, this, [this](const startup::Report &report) {
+        if (m_startupThread) {
+            m_startupThread->quit();
+            m_startupThread->wait();
+            m_startupThread = nullptr;
+        }
+        m_startup = report;
+        QStringList lines;
+        QStringList programs;
+        for (const startup::Entry &e : std::as_const(m_startup.entries)) {
+            if (!e.file.isEmpty())
+                programs << e.file;
+            if (e.severity > 0)
+                lines << QStringLiteral("  starts with Windows, looks odd (%1): %2, %3 = %4").arg(e.severity).arg(e.location, e.name, e.command);
+        }
+        programs.removeDuplicates();
+        log(QStringList{QStringLiteral("  %1 things start with Windows").arg(m_startup.entries.size())} + lines);
+        showStartup();
+        if (m_stopped) {
+            scanFinished(false, 0, 0, tr("Stopped."));
+            return;
+        }
+        runScan(programs);
+    });
+    m_startupThread = startOnThread(this, finder);
+}
+
+void VirusDialog::runScan(const QStringList &alsoScan)
+{
+    m_job = new virus::Scan(m_engine, m_folders, virus::Depth(m_depth->checkedId()));
+    m_job->alsoScan(alsoScan);
     connect(m_job, &virus::Scan::phase, this, [this](const QString &text) { m_phase->setText(text); });
     connect(m_job, &virus::Scan::progress, this, [this](quint64 done, quint64 total) {
         if (total == 0) {
@@ -502,7 +642,79 @@ void VirusDialog::startScan(const QStringList &folders, const QString &title)
     connect(m_job, &virus::Scan::found, this, &VirusDialog::addHit);
     connect(m_job, &virus::Scan::finished, this, &VirusDialog::scanFinished);
     m_thread = startOnThread(this, m_job);
-    updateButtons();
+}
+
+void VirusDialog::showStartupDetails()
+{
+    const QTreeWidgetItem *item = m_startupList->currentItem();
+    if (!item) {
+        m_startupDetails->clear();
+        return;
+    }
+    const startup::Entry &e = m_startup.entries.at(item->data(0, Qt::UserRole).toInt());
+    auto code = [](const QString &text) { return QStringLiteral("<code>%1</code>").arg(text.toHtmlEscaped()); };
+    QString html = QStringLiteral("<b>%1</b>: %2").arg(e.name.toHtmlEscaped(), e.where.toHtmlEscaped());
+    if (!e.reasons.isEmpty()) {
+        html += QStringLiteral("<ul style=\"margin: 4px 0\">");
+        for (const QString &reason : e.reasons)
+            html += QStringLiteral("<li>%1</li>").arg(reason.toHtmlEscaped());
+        html += QStringLiteral("</ul>");
+    } else {
+        html += QStringLiteral("<br>");
+    }
+    html += tr("Kept in: %1").arg(code(e.value.isEmpty() ? e.location : e.location + QStringLiteral(" → ") + e.value)) + QStringLiteral("<br>");
+    html += tr("It runs: %1").arg(code(e.command)) + QStringLiteral("<br>");
+    if (!e.program.isEmpty())
+        html += tr("The program: %1").arg(code(e.program)) + (e.file.isEmpty() ? QLatin1Char(' ') + tr("(not there)") : QString());
+    m_startupDetails->setText(html);
+}
+
+void VirusDialog::showStartup()
+{
+    m_startupList->clear();
+    QVector<int> order;
+    int odd = 0;
+    for (int i = 0; i < m_startup.entries.size(); ++i) {
+        odd += m_startup.entries[i].severity > 0;
+        if (m_startup.entries[i].severity > 0 || m_showAll->isChecked())
+            order << i;
+    }
+    // The worst first; otherwise as Windows has them.
+    std::stable_sort(order.begin(), order.end(), [this](int a, int b) { return m_startup.entries[a].severity > m_startup.entries[b].severity; });
+    for (int i : std::as_const(order)) {
+        const startup::Entry &e = m_startup.entries[i];
+        auto *item = new QTreeWidgetItem({e.name, e.where, e.reasons.isEmpty() ? tr("Nothing odd") : e.reasons.first()});
+        item->setData(0, Qt::UserRole, i);
+        if (e.severity > 0) {
+            item->setIcon(0, severityIcon(e.severity));
+            item->setForeground(2, severityColor(e.severity));
+        }
+        const auto switched = m_switched.constFind(i);
+        if (switched != m_switched.constEnd() && switched->first) {
+            item->setText(2, tr("Switched off: %1").arg(switched->second));
+            item->setForeground(2, QColor(0x2b, 0xee, 0x8a));
+            item->setIcon(0, QIcon::fromTheme(QStringLiteral("dialog-ok-apply"), QApplication::style()->standardIcon(QStyle::SP_DialogApplyButton)));
+        } else if (e.severity > 0 && startup::canSwitchOff(e)) {
+            item->setCheckState(0, m_ticked.contains(i) ? Qt::Checked : Qt::Unchecked);
+            if (switched != m_switched.constEnd())
+                item->setText(2, tr("Not switched off: %1").arg(switched->second));
+        }
+        m_startupList->addTopLevelItem(item);
+    }
+    if (m_startupList->topLevelItemCount() > 0)
+        m_startupList->setCurrentItem(m_startupList->topLevelItem(0));
+    showStartupDetails();
+    m_switchOff->setEnabled(!m_ticked.isEmpty() && !m_busy);
+    m_switchOff->setText(m_ticked.isEmpty() ? tr("Switch Off Ticked…") : tr("Switch Off %n Ticked…", nullptr, int(m_ticked.size())));
+    m_tabs->setTabVisible(1, m_startup.windows);
+    m_tabs->setTabText(1, odd ? tr("Starts with Windows (%n odd)", nullptr, odd) : tr("Starts with Windows"));
+    QString info = odd ? tr("%1 things start with Windows. Odd ones: %n. Pick one to see exactly where it's kept and what it runs.",
+                            nullptr, odd)
+                             .arg(m_startup.entries.size())
+                       : tr("Nothing that starts with Windows looks odd (%n looked at).", nullptr, int(m_startup.entries.size()));
+    for (const QString &note : std::as_const(m_startup.notes))
+        info += QStringLiteral("<br><small>") + note.toHtmlEscaped() + QStringLiteral("</small>");
+    m_startupInfo->setText(info);
 }
 
 void VirusDialog::addHit(const virus::Detection &d)
@@ -513,12 +725,30 @@ void VirusDialog::addHit(const virus::Detection &d)
     item->setData(0, Qt::UserRole, d.path);
     item->setToolTip(0, QDir::toNativeSeparators(d.path));
     item->setToolTip(1, virus::shownName(d.name));
-    item->setIcon(0, QIcon::fromTheme(severity >= 2 ? QStringLiteral("dialog-error") : QStringLiteral("dialog-warning")));
+    item->setIcon(0, severityIcon(severity));
     item->setForeground(1, severityColor(severity));
     // Real malware is ticked to go; guesses and unwanted programs are left to decide.
     item->setCheckState(0, severity >= 2 ? Qt::Checked : Qt::Unchecked);
     m_hits->addTopLevelItem(item);
     log({QStringLiteral("  found %1: %2").arg(virus::shownName(d.name), d.path)});
+    bool starts = false;
+    for (int i = 0; i < m_startup.entries.size(); ++i) {
+        startup::Entry &e = m_startup.entries[i];
+        if (!e.file.isEmpty() && QDir::cleanPath(e.file).compare(QDir::cleanPath(d.path), kPathCase) == 0) {
+            // The most important thing about it, so it goes first.
+            const QString found = tr("It starts something the virus scan found: %1").arg(virus::describe(d.name));
+            e.reasons.removeAll(found);
+            e.reasons.prepend(found);
+            e.severity = 2;
+            if (startup::canSwitchOff(e))
+                m_ticked.insert(i);
+            starts = true;
+        }
+    }
+    if (starts) {
+        item->setText(1, item->text(1) + QLatin1Char(' ') + tr("It starts with Windows."));
+        showStartup();
+    }
     updateButtons();
 }
 
@@ -547,7 +777,7 @@ void VirusDialog::scanFinished(bool completed, int scanned, int unreadable, cons
     m_again->setEnabled(true);
     QString text;
     if (!completed && problem == tr("Stopped."))
-        text = tr("Stopped. %n thing(s) found before that.", nullptr, m_found);
+        text = m_found ? tr("Stopped. %n thing(s) found before that.", nullptr, m_found) : tr("Stopped.");
     else if (!completed)
         text = redText(tr("The scan didn't finish: %1").arg(problem.toHtmlEscaped()));
     else if (m_found == 0)
@@ -556,6 +786,14 @@ void VirusDialog::scanFinished(bool completed, int scanned, int unreadable, cons
         text = scanned > 0 ? tr("Done: found %n thing(s) in %L1 files.", nullptr, m_found).arg(scanned) : tr("Done: found %n thing(s).", nullptr, m_found);
     if (unreadable > 0)
         text += QLatin1Char(' ') + tr("%n file(s) couldn't be read: another user's or the system's, or in use.", nullptr, unreadable);
+    int odd = 0;
+    for (const startup::Entry &e : std::as_const(m_startup.entries))
+        odd += e.severity > 0;
+    if (odd > 0)
+        text += QLatin1Char(' ') + tr("Starts with Windows: %n odd thing(s) to look at.", nullptr, odd);
+    m_tabs->setTabText(0, m_found ? tr("Files (%1)").arg(m_found) : tr("Files"));
+    if (m_found == 0 && odd > 0)
+        m_tabs->setCurrentIndex(1);
     m_status->setText(text);
     m_bar->hide();
     m_phase->setText(m_found > 0 ? tr("What's ticked can be deleted. Real malware is ticked already; look at the rest first.") : QString());
@@ -595,14 +833,14 @@ void VirusDialog::deleteTicked()
     if (QMessageBox::question(this, windowTitle(), question, QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
         return;
 
-    auto remove = [this, paths, items](const QString &root) {
+    auto remove = [this, paths, items](const QString &from, const QString &to) {
         int deleted = 0;
         QStringList failed;
         for (int i = 0; i < paths.size(); ++i) {
             // Mounted again, the drive can be somewhere else: the same file, under the new place.
             QString path = paths[i];
-            if (!root.isEmpty() && m_folders.size() == 1 && path.startsWith(m_folders.first() + QLatin1Char('/')))
-                path = root + path.mid(m_folders.first().size());
+            if (from != to && path.startsWith(from + QLatin1Char('/')))
+                path = to + path.mid(from.size());
             QFile file(path);
             file.setPermissions(file.permissions() | QFileDevice::WriteOwner);
             if (file.remove()) {
@@ -610,7 +848,7 @@ void VirusDialog::deleteTicked()
                 items[i]->setData(0, Qt::UserRole + 1, true);
                 items[i]->setData(0, Qt::CheckStateRole, QVariant()); // nothing left to tick
                 items[i]->setFlags(items[i]->flags() & ~Qt::ItemIsUserCheckable);
-                items[i]->setIcon(0, QIcon::fromTheme(QStringLiteral("edit-delete")));
+                items[i]->setIcon(0, QIcon::fromTheme(QStringLiteral("edit-delete"), QApplication::style()->standardIcon(QStyle::SP_TrashIcon)));
                 items[i]->setText(1, tr("Deleted"));
                 items[i]->setForeground(1, QColor(0x2b, 0xee, 0x8a));
                 log({QStringLiteral("  deleted %1").arg(path)});
@@ -619,8 +857,6 @@ void VirusDialog::deleteTicked()
                 log({QStringLiteral("  couldn't delete %1: %2").arg(path, file.errorString())});
             }
         }
-        if (!root.isEmpty())
-            m_folders = QStringList{root};
         bool left = false;
         for (int i = 0; i < m_hits->topLevelItemCount(); ++i)
             left = left || !m_hits->topLevelItem(i)->data(0, Qt::UserRole + 1).toBool();
@@ -632,8 +868,14 @@ void VirusDialog::deleteTicked()
         updateButtons();
     };
 
+    whenWritable([remove](const QString &from, const QString &to) { remove(from, to); });
+}
+
+void VirusDialog::whenWritable(const std::function<void(const QString &from, const QString &to)> &then)
+{
+    const QString from = m_folders.value(0);
     if (!m_mountedReadOnly) {
-        remove(QString());
+        then(from, from);
         return;
     }
     // The drive was mounted read-only for the scan: unmounted, and mounted again so it can change.
@@ -654,8 +896,8 @@ void VirusDialog::deleteTicked()
     const QString objectPath = m_volumePath;
     auto changed = std::make_shared<QMetaObject::Connection>();
     auto failed = std::make_shared<QMetaObject::Connection>();
-    auto step = std::make_shared<int>(0); // 0: unmounting, 1: mounting again
-    *changed = connect(m_udisks, &UDisks::changed, this, [this, objectPath, changed, failed, step, remove] {
+    auto step = std::make_shared<int>(volume->mounts().isEmpty() ? 1 : 0); // 0: unmounting, 1: mounting again
+    *changed = connect(m_udisks, &UDisks::changed, this, [this, objectPath, changed, failed, step, from, then] {
         for (const Disk &d : m_udisks->disks()) {
             for (const Volume &v : d.volumes) {
                 if (v.objectPath != objectPath)
@@ -667,7 +909,15 @@ void VirusDialog::deleteTicked()
                     disconnect(*changed);
                     disconnect(*failed);
                     m_mountedReadOnly = false;
-                    remove(v.mounts().first());
+                    m_busy = false;
+                    const QString to = v.mounts().first();
+                    for (QString &folder : m_folders) {
+                        if (folder == from)
+                            folder = to;
+                    }
+                    if (m_windowsRoot == from)
+                        m_windowsRoot = to;
+                    then(from, to);
                 }
                 return;
             }
@@ -686,7 +936,80 @@ void VirusDialog::deleteTicked()
                                       .arg(message.toHtmlEscaped())));
         updateButtons();
     });
-    m_udisks->unmount(*volume);
+    if (*step == 1)
+        m_udisks->mount(*volume, false);
+    else
+        m_udisks->unmount(*volume);
+}
+
+void VirusDialog::switchOffTicked()
+{
+    QVector<int> picked;
+    QStringList shown;
+    for (int i : std::as_const(m_ticked)) {
+        if (m_switched.value(i).first)
+            continue;
+        picked << i;
+        const startup::Entry &e = m_startup.entries.at(i);
+        if (shown.size() < 15)
+            shown << QStringLiteral("• %1 (%2)").arg(e.name, e.where);
+    }
+    std::sort(picked.begin(), picked.end());
+    if (picked.isEmpty())
+        return;
+    if (picked.size() > 15)
+        shown << tr("…and %n more", nullptr, int(picked.size() - 15));
+    const QString question = tr("Switch off these %n thing(s) that start with Windows?", nullptr, int(picked.size())) + QStringLiteral("\n\n")
+                           + shown.join(QLatin1Char('\n')) + QStringLiteral("\n\n")
+                           + tr("Everything changed is copied to a \"DiskForge backups\" folder on that drive first, with a note saying how to put "
+                                "it back.");
+    if (QMessageBox::question(this, windowTitle(), question, QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
+        return;
+
+    whenWritable([this, picked](const QString &from, const QString &to) {
+        // On the drive that Windows is on; for the running Windows, its own drive.
+        QString drive = m_windowsRoot;
+#ifdef Q_OS_WIN
+        if (drive.isEmpty())
+            drive = QDir::fromNativeSeparators(qEnvironmentVariable("SystemDrive")) + QLatin1Char('/');
+#endif
+        if (drive.endsWith(QLatin1Char('/')))
+            drive.chop(1);
+        const QString backup = drive + QStringLiteral("/DiskForge backups/") + QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH.mm.ss"));
+        auto moved = [&from, &to](QString path) {
+            if (from != to && !path.isEmpty() && path.startsWith(from + QLatin1Char('/')))
+                path = to + path.mid(from.size());
+            return path;
+        };
+        QVector<startup::Entry> entries;
+        for (int i : picked) {
+            startup::Entry e = m_startup.entries.at(i);
+            e.hiveFile = e.hiveFile.startsWith(QLatin1String("registry:")) ? e.hiveFile : moved(e.hiveFile);
+            e.entryFile = moved(e.entryFile);
+            entries << e;
+        }
+        const QVector<startup::Change> changes = startup::switchOff(entries, backup);
+        int done = 0;
+        QStringList lines{QStringLiteral("  switching off %1 startup entries, backup in %2").arg(picked.size()).arg(backup)};
+        for (int n = 0; n < changes.size(); ++n) {
+            m_switched.insert(picked[n], {changes[n].done, changes[n].message});
+            if (changes[n].done) {
+                ++done;
+                m_ticked.remove(picked[n]);
+            }
+            lines << QStringLiteral("    %1 %2: %3").arg(changes[n].done ? QStringLiteral("switched off") : QStringLiteral("not switched off"), entries[n].name,
+                                                       changes[n].message);
+        }
+        log(lines);
+        showStartup();
+        m_status->setText(done == changes.size()
+                              ? tr("Switched off %n thing(s). The backup, and how to undo it, is in %1.", nullptr, done).arg(QDir::toNativeSeparators(backup))
+                              : redText(tr("Switched off %1 of %2; the list says why not the others. The backup is in %3.")
+                                            .arg(done)
+                                            .arg(changes.size())
+                                            .arg(QDir::toNativeSeparators(backup).toHtmlEscaped())));
+        updateButtons();
+    });
 }
 
 void VirusDialog::log(const QStringList &lines)

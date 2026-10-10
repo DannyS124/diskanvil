@@ -25,6 +25,7 @@
 #include "../src/isomode.h"
 #include "../src/filecopy.h"
 #include "../src/recoverdialog.h"
+#include "../src/reghive.h"
 #include "../src/rescuestick.h"
 #include "../src/rescueusbdialog.h"
 #include "../src/stickcheckdialog.h"
@@ -55,6 +56,7 @@
 #include <QPdfWriter>
 #include <QThread>
 #include <QListView>
+#include <QTabWidget>
 #include <QTreeWidget>
 #include <QTreeWidgetItemIterator>
 #include <QDirIterator>
@@ -2465,6 +2467,164 @@ void virusScanThroughWindow()
            QStringLiteral("deleting asks first, warns about Windows' folders, and logs it"), status->text().left(100));
 }
 
+// A task the way Task Scheduler stores one: UTF-16 with a byte order mark.
+QByteArray schedulerTask(const QString &command, const QString &arguments)
+{
+    const QString xml = QStringLiteral("<?xml version=\"1.0\" encoding=\"UTF-16\"?>\r\n"
+                                       "<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\r\n"
+                                       "  <Settings><Enabled>true</Enabled></Settings>\r\n"
+                                       "  <Actions Context=\"Author\"><Exec><Command>%1</Command><Arguments>%2</Arguments></Exec></Actions>\r\n"
+                                       "</Task>\r\n")
+                            .arg(command.toHtmlEscaped(), arguments.toHtmlEscaped());
+    QByteArray out("\xff\xfe", 2);
+    for (QChar c : xml) {
+        out += char(c.unicode() & 0xff);
+        out += char(c.unicode() >> 8);
+    }
+    return out;
+}
+
+// A Windows drive (made from the test hives in tests/data/registry): what starts with it is
+// read first, its programs are scanned even when a quick scan wouldn't look at them, and an
+// entry that starts something the scan found says so.
+void virusScanWindowsDrive()
+{
+    if (QStandardPaths::findExecutable(QStringLiteral("clamscan")).isEmpty() || QStandardPaths::findExecutable(QStringLiteral("sigtool")).isEmpty()) {
+        out << "SKIP  Scan for Viruses on a Windows drive: ClamAV isn't installed" << Qt::endl;
+        return;
+    }
+    QTemporaryDir dir;
+    const QByteArray trojan = "pretend this trojan starts with windows\n";
+    QString problem;
+    if (!makeVirusList({{trojan, "Win.Trojan.DiskForgeTest-4"}}, dir.filePath(QStringLiteral("list")), &problem)) {
+        report(false, QStringLiteral("make a test virus list with sigtool"), problem);
+        return;
+    }
+    const QString root = dir.filePath(QStringLiteral("drive"));
+    auto put = [&root](const QString &path, const QByteArray &data) {
+        QDir().mkpath(QFileInfo(root + QLatin1Char('/') + path).absolutePath());
+        QFile f(root + QLatin1Char('/') + path);
+        if (f.open(QIODevice::WriteOnly))
+            f.write(data);
+    };
+    auto fixture = [](const char *name) {
+        QFile f(QStringLiteral(SOURCE_DIR "/tests/data/registry/") + QLatin1String(name));
+        return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
+    };
+    put(QStringLiteral("Windows/System32/config/SOFTWARE"), fixture("software.hiv"));
+    put(QStringLiteral("Windows/System32/config/SYSTEM"), fixture("system.hiv"));
+    put(QStringLiteral("Users/tester/NTUSER.DAT"), fixture("ntuser.hiv"));
+    put(QStringLiteral("Users/tester/AppData/Local/Temp/xkqzvbnw.exe"), trojan);       // the Run key's Updater
+    put(QStringLiteral("Users/tester/AppData/Roaming/upd/payload.dat"), trojan);       // a task's library
+    for (const char *file : {"Windows/System32/rundll32.exe", "Windows/System32/SecurityHealthSystray.exe", "Windows/System32/cmd.exe",
+                             "Program Files (x86)/Old App/old.exe", "Windows/System32/userinit.exe", "Windows/System32/drivers/drv.sys",
+                             "Windows/System32/goodsvc.dll", "Users/tester/AppData/Local/Discord/Update.exe", "Windows/explorer.exe"})
+        put(QLatin1String(file), "MZ");
+    put(QStringLiteral("Windows/System32/Tasks/Sync"), schedulerTask(QStringLiteral("%windir%\\system32\\rundll32.exe"),
+                                                                      QStringLiteral("C:\\Users\\tester\\AppData\\Roaming\\upd\\payload.dat,Start")));
+
+    UDisks udisks;
+    VirusDialog dialog(&udisks);
+    dialog.show();
+    dialog.scanFolder(root);
+    auto *status = dialog.findChild<QLabel *>(QStringLiteral("status"));
+    waitUntil([&] { return status->text().startsWith(QLatin1String("Done")); }, 60000);
+    auto *tabs = dialog.findChild<QTabWidget *>(QStringLiteral("tabs"));
+    auto *hits = dialog.findChild<QTreeWidget *>(QStringLiteral("hits"));
+    auto *list = dialog.findChild<QTreeWidget *>(QStringLiteral("startup"));
+    QStringList found;
+    for (int i = 0; i < hits->topLevelItemCount(); ++i)
+        found << hits->topLevelItem(i)->text(0);
+    found.sort();
+    report(found == QStringList{QStringLiteral("/Users/tester/AppData/Local/Temp/xkqzvbnw.exe"), QStringLiteral("/Users/tester/AppData/Roaming/upd/payload.dat")}
+               && hits->topLevelItem(0)->text(1).contains(QLatin1String("It starts with Windows")),
+           QStringLiteral("Scan for Viruses: what starts with Windows is scanned too, even a .dat"), found.join(QStringLiteral(", ")));
+    QStringList odd;
+    QString updater;
+    for (int i = 0; i < list->topLevelItemCount(); ++i) {
+        odd << list->topLevelItem(i)->text(0);
+        if (list->topLevelItem(i)->text(0) == QLatin1String("Updater"))
+            updater = list->topLevelItem(i)->text(2);
+    }
+    report(tabs->isTabVisible(1) && tabs->tabText(1).startsWith(QLatin1String("Starts with Windows (")) && odd.size() >= 10 && odd.contains(QStringLiteral("Sync"))
+               && updater.contains(QLatin1String("the virus scan found")) && status->text().contains(QLatin1String("Starts with Windows:")),
+           QStringLiteral("the odd startup entries are listed, and the found ones say so"), tabs->tabText(1) + QStringLiteral(": ") + odd.join(QStringLiteral(", ")));
+    auto *showAll = dialog.findChild<QCheckBox *>(QStringLiteral("showAll"));
+    const int oddCount = list->topLevelItemCount();
+    showAll->setChecked(true);
+    report(list->topLevelItemCount() > oddCount, QStringLiteral("and everything that starts, when asked"), QString::number(list->topLevelItemCount()));
+    showAll->setChecked(false);
+    if (qEnvironmentVariableIsSet("DISKFORGE_UITEST_SHOTS")) {
+        tabs->setCurrentIndex(1);
+        dialog.grab().save(qEnvironmentVariable("DISKFORGE_UITEST_SHOTS") + QStringLiteral("/virus-startup.png"));
+        tabs->setCurrentIndex(0);
+        dialog.grab().save(qEnvironmentVariable("DISKFORGE_UITEST_SHOTS") + QStringLiteral("/virus-files.png"));
+    }
+
+    // Switching them off: what the scan found is ticked already; four more are ticked here.
+    QStringList ticked;
+    for (int i = 0; i < list->topLevelItemCount(); ++i) {
+        QTreeWidgetItem *item = list->topLevelItem(i);
+        if (QStringList{QStringLiteral("Windows Update Helper"), QStringLiteral("Shell"), QStringLiteral("BootExecute"), QStringLiteral("Load")}.contains(item->text(0)))
+            item->setCheckState(0, Qt::Checked);
+        if (item->checkState(0) == Qt::Checked)
+            ticked << item->text(0);
+    }
+    ticked.sort();
+    report(ticked == QStringList{QStringLiteral("BootExecute"), QStringLiteral("Load"), QStringLiteral("Shell"), QStringLiteral("Sync"), QStringLiteral("Updater"),
+                                 QStringLiteral("Windows Update Helper")},
+           QStringLiteral("what starts the malware found is ticked to switch off already"), ticked.join(QStringLiteral(", ")));
+    QStringList boxes;
+    Answerer answerer;
+    answerer.answer = [&](QWidget *modal) {
+        if (auto *box = qobject_cast<QMessageBox *>(modal)) {
+            boxes << box->text();
+            box->button(QMessageBox::Yes)->click();
+            return true;
+        }
+        return false;
+    };
+    dialog.switchOffTicked();
+    waitUntil([&] { return status->text().startsWith(QLatin1String("Switched off")); }, 10000);
+    const QStringList backups = QDir(root + QStringLiteral("/DiskForge backups")).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    const QString backup = root + QStringLiteral("/DiskForge backups/") + backups.value(0);
+    QStringList kept = QDir(backup).entryList(QDir::Files);
+    kept.sort();
+    report(status->text().startsWith(QLatin1String("Switched off 6")) && boxes.size() == 1 && boxes[0].contains(QLatin1String("backup"))
+               && backups.size() == 1 && QFile::exists(backup + QStringLiteral("/Tasks/Sync"))
+               && kept == QStringList{QStringLiteral("NTUSER.DAT (tester)"), QStringLiteral("SOFTWARE"), QStringLiteral("SYSTEM"),
+                                      QStringLiteral("What DiskForge changed.txt")},
+           QStringLiteral("switching off asks first, and keeps a backup with a note"), status->text().left(80) + QStringLiteral(" | ") + kept.join(QStringLiteral(", ")));
+
+    reg::Hive software, system, user;
+    QString error;
+    software.open(root + QStringLiteral("/Windows/System32/config/SOFTWARE"), &error);
+    system.open(root + QStringLiteral("/Windows/System32/config/SYSTEM"), &error);
+    user.open(root + QStringLiteral("/Users/tester/NTUSER.DAT"), &error);
+    auto text = [](const reg::Hive &h, const QString &key, const QString &name) {
+        const std::optional<reg::Value> v = h.value(h.key(key), name);
+        return v ? v->text() : QStringLiteral("(gone)");
+    };
+    report(text(software, QStringLiteral("Microsoft\\Windows\\CurrentVersion\\Run"), QStringLiteral("Updater")) == QLatin1String("(gone)")
+               && text(software, QStringLiteral("Microsoft\\Windows\\CurrentVersion\\Run"), QStringLiteral("Helper")) != QLatin1String("(gone)")
+               && text(software, QStringLiteral("Microsoft\\Windows NT\\CurrentVersion\\Winlogon"), QStringLiteral("Shell")) == QLatin1String("explorer.exe")
+               && text(system, QStringLiteral("ControlSet001\\Services\\EvilSvc"), QStringLiteral("Start")) == QLatin1String("4")
+               && text(system, QStringLiteral("ControlSet001\\Control\\Session Manager"), QStringLiteral("BootExecute")) == QLatin1String("autocheck autochk *")
+               && text(user, QStringLiteral("Software\\Microsoft\\Windows NT\\CurrentVersion\\Windows"), QStringLiteral("Load")) == QLatin1String("(gone)")
+               && !QFile::exists(root + QStringLiteral("/Windows/System32/Tasks/Sync")) && software.problems() + system.problems() + user.problems() == 0,
+           QStringLiteral("the registry files have only those changes, and the task is gone"), error);
+
+    dialog.scanFolder(root);
+    waitUntil([&] { return status->text().startsWith(QLatin1String("Done")); }, 60000);
+    QStringList still;
+    for (int i = 0; i < list->topLevelItemCount(); ++i)
+        still << list->topLevelItem(i)->text(0);
+    report(!still.contains(QStringLiteral("Updater")) && !still.contains(QStringLiteral("Windows Update Helper")) && !still.contains(QStringLiteral("Shell"))
+               && !still.contains(QStringLiteral("BootExecute")) && !still.contains(QStringLiteral("Load")) && !still.contains(QStringLiteral("Sync"))
+               && still.contains(QStringLiteral("Helper")),
+           QStringLiteral("scanned again, what was switched off isn't odd any more"), still.join(QStringLiteral(", ")));
+}
+
 // A drive that isn't mounted (an NTFS loop device standing in for Windows' drive): the window
 // mounts it read-only to scan, writable only to delete, and unmounts it again when it closes.
 void virusScanOnDrive()
@@ -2836,7 +2996,7 @@ int userScenarios(const QStringList &only)
         {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostfs", lostFilesFromFileSystem},
-        {"previews", previewsThroughHelper}, {"viruses", virusScanThroughWindow}, {"virusdrive", virusScanOnDrive},
+        {"previews", previewsThroughHelper}, {"viruses", virusScanThroughWindow}, {"virusdrive", virusScanOnDrive}, {"viruswindows", virusScanWindowsDrive},
     };
     for (const auto &[name, run] : scenarios) {
         if (only.isEmpty() || only.contains(QLatin1String(name)))

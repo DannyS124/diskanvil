@@ -257,6 +257,14 @@ qint64 Scan::listFiles(QIODevice &list)
     const QSet<QString> mounted = mountPoints();
 #endif
     qint64 count = 0;
+    QSet<QString> listed;
+    for (const QString &file : std::as_const(m_also)) {
+        if (!file.contains(QLatin1Char('\n')) && QFileInfo(file).isFile() && !listed.contains(file)) {
+            listed.insert(file);
+            list.write(QDir::toNativeSeparators(file).toUtf8() + '\n');
+            ++count;
+        }
+    }
     QElapsedTimer sinceReport;
     sinceReport.start();
     for (const QString &root : std::as_const(m_folders)) {
@@ -276,7 +284,7 @@ qint64 Scan::listFiles(QIODevice &list)
 #endif
                     folders << path;
                 } else if ((fi.isFile() || fi.isShortcut()) && !path.contains(QLatin1Char('\n'))) {
-                    if (m_depth == Depth::Quick && !quickScanWants(fi.fileName()))
+                    if ((m_depth == Depth::Quick && !quickScanWants(fi.fileName())) || listed.contains(path))
                         continue;
                     list.write(QDir::toNativeSeparators(path).toUtf8() + '\n');
                     ++count;

@@ -5,14 +5,21 @@
 
 #include "jobui.h"
 #include "virusscan.h"
+#include "winstartup.h"
 
 #include <QDialog>
+#include <QHash>
+#include <QSet>
+
+#include <functional>
 
 class QButtonGroup;
+class QCheckBox;
 class QLabel;
 class QProgressBar;
 class QPushButton;
 class QStackedWidget;
+class QTabWidget;
 class QThread;
 class QTreeWidget;
 class UDisks;
@@ -32,6 +39,8 @@ public:
     void scanFolder(const QString &folder);
     // Deletes the ticked files after asking (the tests answer the question).
     void deleteTicked();
+    // Switches the ticked startup entries off after asking, with a backup first.
+    void switchOffTicked();
     // Closing stops the scan and unmounts what this window mounted.
     void reject() override;
 
@@ -43,12 +52,19 @@ private:
     void chooseFolder();
     void mountThenScan(const QString &objectPath, const QString &title);
     void startScan(const QStringList &folders, const QString &title);
+    void runScan(const QStringList &alsoScan);
+    void showStartup();
+    void showStartupDetails();
     void addHit(const virus::Detection &d);
     void scanFinished(bool completed, int scanned, int unreadable, const QString &problem);
     QString shownPath(const QString &path) const;
     void updateButtons();
     void stopWorkers();
     void log(const QStringList &lines);
+    // Runs `then` once the drive being scanned can be written to: at once, unless this window
+    // mounted it read-only, which it then mounts again. `from` and `to` are where the drive was
+    // and is now (the same unless it moved).
+    void whenWritable(const std::function<void(const QString &from, const QString &to)> &then);
     void loadLiveList();
 
     UDisks *m_udisks;
@@ -70,6 +86,19 @@ private:
     QLabel *m_hitInfo;
     QPushButton *m_delete;
     QPushButton *m_again;
+    // What starts with Windows
+    QTabWidget *m_tabs;
+    QTreeWidget *m_startupList;
+    QLabel *m_startupInfo;
+    QLabel *m_startupDetails;
+    QCheckBox *m_showAll;
+    startup::Report m_startup;
+    QString m_windowsRoot; // where that Windows is; empty for the one that's running
+    QSet<int> m_ticked;    // startup entries ticked to switch off
+    QHash<int, QPair<bool, QString>> m_switched; // what happened when they were: done, and how
+    QPushButton *m_switchOff;
+    QThread *m_startupThread = nullptr;
+    bool m_stopped = false;
 
     QStringList m_folders;   // what's being scanned
     QString m_title;

@@ -63,6 +63,9 @@ add_library(diskforge-core STATIC
     src/mediainfo.cpp src/mediainfo.h
     src/officetext.cpp src/officetext.h
     src/virusscan.cpp src/virusscan.h
+    src/reghive.cpp src/reghive.h
+    src/winstartup.cpp src/winstartup.h
+    src/shelllink.cpp src/shelllink.h
     src/filetypes.cpp src/filetypes.h
     src/checksums.cpp src/checksums.h
     src/benchmark.cpp src/benchmark.h
@@ -99,6 +102,7 @@ if(WIN32)
         src/win/blockio_win.cpp
         src/win/udisks_win.cpp
         src/win/winutil.cpp src/win/winutil.h
+        src/win/winstartup_win.cpp
         src/win/unavailable.cpp)
     target_link_libraries(diskforge-core PUBLIC Qt6::Core PRIVATE PkgConfig::ZSTD PkgConfig::ARCHIVE OpenSSL::Crypto
         setupapi cfgmgr32 ole32 oleaut32 wbemuuid uuid virtdisk)
@@ -203,7 +207,7 @@ if(DISKFORGE_SELFTEST)
         tests/test_gpt.cpp tests/test_copy.cpp tests/test_blockmap.cpp
         tests/test_usage.cpp tests/test_backup.cpp
         tests/test_rescue.cpp tests/test_clone.cpp tests/test_system.cpp
-        tests/test_catalog.cpp tests/test_fuzz.cpp tests/test_health.cpp tests/test_jobs.cpp tests/test_recover.cpp tests/test_rescueusb.cpp tests/test_stickcheck.cpp tests/test_images.cpp tests/test_isomode.cpp tests/test_windows.cpp tests/test_lostfiles.cpp tests/test_viruses.cpp tests/test_raid.cpp tests/test_lvm.cpp)
+        tests/test_catalog.cpp tests/test_fuzz.cpp tests/test_health.cpp tests/test_jobs.cpp tests/test_recover.cpp tests/test_rescueusb.cpp tests/test_stickcheck.cpp tests/test_images.cpp tests/test_isomode.cpp tests/test_windows.cpp tests/test_lostfiles.cpp tests/test_viruses.cpp tests/test_registry.cpp tests/test_startup.cpp tests/test_raid.cpp tests/test_lvm.cpp)
     target_link_libraries(diskforge-selftest PRIVATE diskforge-ui)
     target_compile_definitions(diskforge-selftest PRIVATE SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 

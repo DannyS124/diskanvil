@@ -63,6 +63,8 @@ class Scan : public QObject
 public:
     Scan(Engine engine, QStringList folders, Depth depth);
     void cancel() { m_cancel = true; }
+    // Files scanned whatever the depth: the programs that start with Windows.
+    void alsoScan(const QStringList &files) { m_also = files; }
 
     // What's left out: the paging, swap and hibernation files (gigabytes of memory contents),
     // and folders of copies of what's scanned anyway (Windows' shadow copies, Btrfs snapshots).
@@ -85,6 +87,7 @@ private:
 
     Engine m_engine;
     QStringList m_folders;
+    QStringList m_also;
     Depth m_depth;
     std::atomic<bool> m_cancel{false};
 };

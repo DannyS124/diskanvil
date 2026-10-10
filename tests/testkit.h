@@ -59,6 +59,8 @@ void isoModeTests();
 void windowsTests();
 void lostFilesTests();
 void virusTests();
+void registryTests();
+void startupTests();
 int scanImage(const QString &path);
 void raidTests();
 void lvmTests();

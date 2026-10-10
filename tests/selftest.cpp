@@ -931,6 +931,10 @@ int main(int argc, char *argv[])
         lostFilesTests();
     } else if (args.contains(QStringLiteral("--viruses"))) {
         virusTests();
+    } else if (args.contains(QStringLiteral("--registry"))) {
+        registryTests();
+    } else if (args.contains(QStringLiteral("--startup"))) {
+        startupTests();
     } else if (args.contains(QStringLiteral("--scan-image"))) {
         // For looking into a problem by hand: what Find Lost Files' quick scan lists in an image.
         return scanImage(args.value(args.indexOf(QStringLiteral("--scan-image")) + 1));
