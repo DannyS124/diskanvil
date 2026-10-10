@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <vector>
 #ifdef Q_OS_WIN
 #include "win/winutil.h"
 
@@ -151,11 +152,14 @@ QSet<QString> mountPoints()
 
 #else
 
-// On Windows: what a folder's files take on disk is their size rounded up to whole
-// clusters (compressed and sparse files take less, but finding out costs a call per file).
-// Junctions, links and volumes mounted in a folder are left out, like other file systems on
-// Linux. Hard links are counted each time; telling them apart takes a call per file too.
+// On Windows each folder is listed in big batches that carry every file's ID and the space it
+// takes on disk (GetFileInformationByHandleEx, FileIdBothDirectoryInfo), so hard links (Windows
+// has many, in WinSxS) count once, as on Linux. Compressed and sparse files, and files Windows
+// keeps compressed itself (Compact OS), are asked about one by one; there are few. Junctions,
+// links and volumes mounted in a folder are left out, like other file systems on Linux.
 struct Walker {
+    bool fileIds = false; // NTFS and ReFS: a file has the same ID under each of its names
+    QSet<qint64> seenLinks;
     quint64 cluster = 4096;
     std::atomic<bool> *cancel = nullptr;
     int unreadable = 0;
@@ -163,48 +167,101 @@ struct Walker {
     QElapsedTimer sinceReport;
     UsageScan *scan = nullptr;
 
+    struct Entry {
+        QString name;
+        DWORD attributes = 0;
+        quint64 size = 0;
+        quint64 allocated = 0;
+        qint64 id = 0;
+    };
+
+    // The folder's entries, or false when it can't be opened.
+    bool list(const QString &path, QVector<Entry> &entries)
+    {
+        // A drive's root with its backslash: "C:" alone is the folder Windows is in on C:.
+        QString native = QDir::toNativeSeparators(path);
+        if (native.size() == 2 && native.at(1) == QLatin1Char(':'))
+            native += QLatin1Char('\\');
+        const win::Handle dir(CreateFileW(win::wide(native).c_str(), FILE_LIST_DIRECTORY | SYNCHRONIZE,
+                                          FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                                          FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+        if (!dir.valid())
+            return false;
+        std::vector<LONGLONG> buffer(64 * 1024 / sizeof(LONGLONG)); // the entries are 8-byte aligned
+        for (bool first = true;; first = false) {
+            if (!GetFileInformationByHandleEx(dir.get(), first ? FileIdBothDirectoryRestartInfo : FileIdBothDirectoryInfo,
+                                              buffer.data(), DWORD(buffer.size() * sizeof(LONGLONG))))
+                return !first || GetLastError() == ERROR_NO_MORE_FILES;
+            const char *at = reinterpret_cast<const char *>(buffer.data());
+            for (;;) {
+                const auto *e = reinterpret_cast<const FILE_ID_BOTH_DIR_INFO *>(at);
+                Entry entry;
+                entry.name = QString::fromWCharArray(e->FileName, int(e->FileNameLength / sizeof(wchar_t)));
+                if (entry.name != QLatin1String(".") && entry.name != QLatin1String("..")) {
+                    entry.attributes = e->FileAttributes;
+                    entry.size = quint64(e->EndOfFile.QuadPart);
+                    entry.allocated = quint64(e->AllocationSize.QuadPart);
+                    entry.id = e->FileId.QuadPart;
+                    entries.append(std::move(entry));
+                }
+                if (e->NextEntryOffset == 0)
+                    break;
+                at += e->NextEntryOffset;
+            }
+        }
+    }
+
     void walk(const QString &path, UsageNode *node, int depth)
     {
-        WIN32_FIND_DATAW data {};
-        const std::wstring pattern = win::wide(QDir::toNativeSeparators(path) + QStringLiteral("\\*"));
-        HANDLE find = FindFirstFileExW(pattern.c_str(), FindExInfoBasic, &data, FindExSearchNameMatch, nullptr,
-                                       FIND_FIRST_EX_LARGE_FETCH);
-        if (find == INVALID_HANDLE_VALUE) {
+        QVector<Entry> entries;
+        if (!list(path, entries)) {
             node->skipped = true;
             ++unreadable;
             return;
         }
         QVector<UsageNode> fileNodes;
-        do {
+        for (const Entry &e : entries) {
             if (*cancel)
-                break;
-            const QString name = win::fromWide(data.cFileName);
-            if (name == QLatin1String(".") || name == QLatin1String(".."))
-                continue;
-            if (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                return;
+            if (e.attributes & FILE_ATTRIBUTE_DIRECTORY) {
                 UsageNode child;
-                child.name = name;
+                child.name = e.name;
                 child.isDir = true;
-                if (data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) {
+                if (e.attributes & FILE_ATTRIBUTE_REPARSE_POINT) {
                     child.skipped = true;
                 } else if (depth >= kMaxDepth) {
                     child.skipped = true;
                     ++unreadable;
                 } else {
-                    walk(path + QLatin1Char('/') + name, &child, depth + 1);
+                    walk(path + QLatin1Char('/') + e.name, &child, depth + 1);
                 }
                 node->size += child.size;
                 node->files += child.files;
                 node->children.append(std::move(child));
                 continue;
             }
-            // Files kept in the cloud (OneDrive's placeholders) take no room here.
-            const bool elsewhere = data.dwFileAttributes
-                                 & (FILE_ATTRIBUTE_OFFLINE | FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS | FILE_ATTRIBUTE_RECALL_ON_OPEN);
-            const quint64 size = quint64(data.nFileSizeHigh) << 32 | data.nFileSizeLow;
-            const quint64 used = elsewhere ? 0 : (size + cluster - 1) / cluster * cluster;
+            if (fileIds && e.id != 0) {
+                if (seenLinks.contains(e.id))
+                    continue;
+                seenLinks.insert(e.id);
+            }
+            // Files kept in the cloud (OneDrive's placeholders) take no room here. Ones that take
+            // less than their length are compressed (by NTFS, or by Windows itself, as with Compact
+            // OS, which the listing doesn't show) or sparse: asked one by one. The smallest live
+            // inside the file table itself.
+            quint64 used = e.allocated;
+            if (e.attributes & (FILE_ATTRIBUTE_OFFLINE | FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS | FILE_ATTRIBUTE_RECALL_ON_OPEN)) {
+                used = 0;
+            } else if ((e.attributes & (FILE_ATTRIBUTE_COMPRESSED | FILE_ATTRIBUTE_SPARSE_FILE | FILE_ATTRIBUTE_REPARSE_POINT))
+                       || (e.size > 1024 && e.allocated < e.size)) {
+                DWORD high = 0;
+                SetLastError(NO_ERROR);
+                const DWORD low = GetCompressedFileSizeW(win::wide(QDir::toNativeSeparators(path + QLatin1Char('/') + e.name)).c_str(), &high);
+                const quint64 bytes = low != INVALID_FILE_SIZE || GetLastError() == NO_ERROR ? quint64(high) << 32 | low : e.size;
+                used = (bytes + cluster - 1) / cluster * cluster;
+            }
             UsageNode file;
-            file.name = name;
+            file.name = e.name;
             file.size = used;
             file.files = 1;
             node->size += used;
@@ -212,8 +269,7 @@ struct Walker {
             bytes += used;
             files += 1;
             fileNodes.append(std::move(file));
-        } while (FindNextFileW(find, &data));
-        FindClose(find);
+        }
 
         addFiles(node, std::move(fileNodes));
 
@@ -223,6 +279,22 @@ struct Walker {
         }
     }
 };
+
+// An administrator's backup rights (there, but switched off) open every folder for reading:
+// the system's own ones, like System Volume Information with the restore points, and other
+// users'. Only listing them; nothing is opened to read or change.
+void enableBackupRights()
+{
+    HANDLE token = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &token))
+        return;
+    TOKEN_PRIVILEGES privileges = {};
+    privileges.PrivilegeCount = 1;
+    privileges.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+    if (LookupPrivilegeValueW(nullptr, SE_BACKUP_NAME, &privileges.Privileges[0].Luid))
+        AdjustTokenPrivileges(token, FALSE, &privileges, 0, nullptr, nullptr);
+    CloseHandle(token);
+}
 
 #endif
 
@@ -245,11 +317,18 @@ void UsageScan::run()
     if (path.endsWith(QLatin1Char('/')))
         path.chop(1);
     Walker w;
+    enableBackupRights();
     wchar_t volume[MAX_PATH] = {};
     DWORD sectorsPerCluster = 0, bytesPerSector = 0, freeClusters = 0, clusters = 0;
-    if (GetVolumePathNameW(win::wide(QDir::toNativeSeparators(m_root)).c_str(), volume, MAX_PATH)
-        && GetDiskFreeSpaceW(volume, &sectorsPerCluster, &bytesPerSector, &freeClusters, &clusters))
-        w.cluster = std::max<quint64>(quint64(sectorsPerCluster) * bytesPerSector, 512);
+    if (GetVolumePathNameW(win::wide(QDir::toNativeSeparators(m_root)).c_str(), volume, MAX_PATH)) {
+        if (GetDiskFreeSpaceW(volume, &sectorsPerCluster, &bytesPerSector, &freeClusters, &clusters))
+            w.cluster = std::max<quint64>(quint64(sectorsPerCluster) * bytesPerSector, 512);
+        wchar_t fsName[MAX_PATH] = {};
+        if (GetVolumeInformationW(volume, nullptr, 0, nullptr, nullptr, nullptr, fsName, MAX_PATH)) {
+            const QString fs = QString::fromWCharArray(fsName);
+            w.fileIds = fs == QLatin1String("NTFS") || fs == QLatin1String("ReFS");
+        }
+    }
     w.cancel = &m_cancel;
     w.scan = this;
     w.sinceReport.start();
