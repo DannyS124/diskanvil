@@ -349,9 +349,11 @@ void MainWindow::createActions()
         if (!v)
             return;
         const QString path = v->objectPath;
+#ifndef Q_OS_WIN // Windows' chkdsk checks it where it is
         if (!v->mounts().isEmpty()
             && !askPlain(this, tr("Check for Errors"), tr("%1 has to be unmounted while it's checked. Continue?").arg(volumeTitle(*v))))
             return;
+#endif
         const Volume *fresh = volumeByPath(path);
         if (!fresh)
             return gone();
@@ -757,11 +759,11 @@ void MainWindow::createActions()
 
 #ifdef Q_OS_WIN
     // Linux's own things (LUKS, fstab, RAID, Btrfs), and what the Windows version can't do yet:
-    // so far it reads drives, but doesn't write to them.
-    for (QAction *a : {m_lock, m_changePass, m_startup, m_raidCheck, m_snapshots, m_newPartition, m_format, m_resize,
-                       m_typeFlags, m_check, m_delete, m_newTable, m_recover, m_wipe, m_secureErase, m_openImage, m_detachImage,
-                       m_writeImage, m_windowsUsb, m_rescueUsb, m_restore, m_clone, m_badSectors, m_checkStick, m_safelyRemove,
-                       m_cleanup, m_optimize})
+    // so far it reads drives and partitions them (tables, partitions, formatting, resizing,
+    // checking), through Windows' own storage commands.
+    for (QAction *a : {m_lock, m_changePass, m_startup, m_raidCheck, m_snapshots, m_typeFlags, m_recover, m_wipe, m_secureErase,
+                       m_openImage, m_detachImage, m_writeImage, m_windowsUsb, m_rescueUsb, m_restore, m_clone, m_badSectors,
+                       m_checkStick, m_safelyRemove, m_cleanup, m_optimize})
         a->setVisible(false);
 #endif
 
@@ -1627,7 +1629,7 @@ void MainWindow::formatVolume()
 
     QMessageBox confirm(QMessageBox::Warning, tr("Format %1").arg(device),
                         tr("Formatting will erase ALL data on %1. This can't be undone.\n\nFormat it as %2?")
-                            .arg(what, dialog.fsType()),
+                            .arg(what, m_udisks->filesystem(dialog.fsType()) ? m_udisks->filesystem(dialog.fsType())->name : dialog.fsType()),
                         QMessageBox::Cancel, this);
     QAbstractButton *format = confirm.addButton(tr("Format"), QMessageBox::DestructiveRole);
     confirm.setDefaultButton(QMessageBox::Cancel);
@@ -1722,16 +1724,25 @@ void MainWindow::resizeVolume()
     if (!d || !v || !m_resize->isEnabled())
         return;
     const QString path = v->objectPath;
-    ResizeDialog dialog(*d, *v, m_udisks->resizeLimits(*v), m_udisks->resizeNeedsRemount(*v, true),
-                        m_udisks->resizeNeedsRemount(*v, false), this);
-    if (dialog.exec() != QDialog::Accepted)
-        return;
-    const Volume *fresh = volumeByPath(path);
-    if (!fresh)
-        return gone();
-    statusBar()->showMessage(tr("Resizing %1…").arg(shortDevice(fresh->device)));
-    m_udisks->resize(*fresh, dialog.newSize());
-    updateActions();
+    statusBar()->showMessage(tr("Working out how far %1 can shrink and grow…").arg(shortDevice(v->device)));
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    m_udisks->resizeLimitsThen(*v, this, [this, path](const ResizeLimits &limits) {
+        QApplication::restoreOverrideCursor();
+        statusBar()->clearMessage();
+        const Volume *v = volumeByPath(path);
+        const Disk *d = v ? m_udisks->diskOf(*v) : nullptr;
+        if (!v || !d)
+            return gone();
+        ResizeDialog dialog(*d, *v, limits, m_udisks->resizeNeedsRemount(*v, true), m_udisks->resizeNeedsRemount(*v, false), this);
+        if (dialog.exec() != QDialog::Accepted)
+            return;
+        const Volume *fresh = volumeByPath(path);
+        if (!fresh)
+            return gone();
+        statusBar()->showMessage(tr("Resizing %1…").arg(shortDevice(fresh->device)));
+        m_udisks->resize(*fresh, dialog.newSize());
+        updateActions();
+    });
 }
 
 void MainWindow::checkForUpdates()

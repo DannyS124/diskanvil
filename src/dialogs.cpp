@@ -105,7 +105,7 @@ FsPicker::FsPicker(const QVector<FsType> &filesystems, const Disk &disk, QComboB
     for (int i = 0; i < m_filesystems.size(); ++i) {
         const FsType &fs = m_filesystems[i];
         QString text = QStringLiteral("%1 (%2)").arg(fs.name, fs.hint);
-        if (!fs.available)
+        if (!fs.available && !fs.package.isEmpty())
             text += QObject::tr(", needs %1").arg(fs.package);
         combo->addItem(text, fs.id);
         if (!fs.available && model)

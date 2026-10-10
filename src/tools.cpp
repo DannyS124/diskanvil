@@ -133,6 +133,9 @@ EncryptionFields::EncryptionFields(QWidget *parent)
     layout->setContentsMargins(0, 0, 0, 0);
     layout->addWidget(m_box);
     layout->addWidget(m_fields);
+#ifdef Q_OS_WIN
+    setVisible(false); // LUKS is Linux's; Windows can't make it (BitLocker is set up in Windows itself)
+#endif
 
     auto update = [this] {
         const bool mismatch = !m_confirm->text().isEmpty() && m_pass->text() != m_confirm->text();

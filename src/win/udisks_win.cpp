@@ -23,6 +23,7 @@
 #include "winutil.h"
 
 #include <QCollator>
+#include <QCoreApplication>
 #include <QDir>
 #include <QHash>
 #include <QSysInfo>
@@ -61,6 +62,73 @@ QString partitionPath(DWORD disk, DWORD partition)
 {
     return QStringLiteral("\\\\?\\GLOBALROOT\\Device\\Harddisk%1\\Partition%2").arg(disk).arg(partition);
 }
+
+// What a storage cmdlet said, without its trimmings: the sentence after "Extended information",
+// when there's one, and no "Activity ID".
+QString windowsWords(QString said)
+{
+    said = said.simplified();
+    const qsizetype extended = said.indexOf(QLatin1String("Extended information:"));
+    if (extended >= 0)
+        said = said.mid(extended + 21);
+    static const QRegularExpression activity(QStringLiteral("\\s*Activity ID: \\{[^}]*\\}"));
+    return said.remove(activity).trimmed();
+}
+
+// Windows' own storage cmdlets (New-Partition, Format-Volume...: the Storage Management API that
+// Disk Management uses too), each in a PowerShell of its own. The script goes in encoded, and the
+// values as environment variables, so nothing in them can change what runs. `done` gets whether
+// it worked, and Windows' own words when it didn't.
+void storage(QObject *owner, const QString &script, const QHash<QString, QString> &values, const std::function<void(bool, const QString &)> &done)
+{
+    auto *ps = new QProcess(owner);
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    for (auto it = values.cbegin(); it != values.cend(); ++it)
+        env.insert(it.key(), it.value());
+    ps->setProcessEnvironment(env);
+    QObject::connect(ps, &QProcess::finished, owner, [ps, done](int code, QProcess::ExitStatus status) {
+        ps->deleteLater();
+        done(status == QProcess::NormalExit && code == 0, windowsWords(QString::fromUtf8(ps->readAllStandardOutput())));
+    });
+    // Progress records (modules being set up the first time) would come out as XML.
+    const QString wrapped = QStringLiteral("[Console]::OutputEncoding = [Text.Encoding]::UTF8; $ErrorActionPreference = 'Stop'; "
+                                           "$ProgressPreference = 'SilentlyContinue'; "
+                                           "try { %1 } catch { Write-Output $_.Exception.Message; exit 1 }")
+                                .arg(script);
+    QByteArray utf16;
+    for (const QChar c : wrapped) {
+        utf16 += char(c.unicode() & 0xff);
+        utf16 += char(c.unicode() >> 8);
+    }
+    ps->start(QStringLiteral("powershell.exe"), {QStringLiteral("-NoProfile"), QStringLiteral("-NonInteractive"), QStringLiteral("-ExecutionPolicy"),
+                                                 QStringLiteral("Bypass"), QStringLiteral("-EncodedCommand"), QString::fromLatin1(utf16.toBase64())});
+}
+
+int diskNumber(const QString &blockPath)
+{
+    return blockPath.section(QStringLiteral("PhysicalDrive"), 1).toInt();
+}
+
+// Windows' name for a file system DiskForge knows by its Linux one; empty when Windows can't make it.
+QString windowsFs(const QString &fsType)
+{
+    if (fsType == QLatin1String("ntfs"))
+        return QStringLiteral("NTFS");
+    if (fsType == QLatin1String("vfat"))
+        return QStringLiteral("FAT32");
+    if (fsType == QLatin1String("exfat"))
+        return QStringLiteral("exFAT");
+    return {};
+}
+
+// What DiskForge Live can do and Windows can't, in the words for it.
+QString onlyOnLive(const QString &fsName)
+{
+    return QCoreApplication::translate("UDisks", "Windows can't make %1 file systems; DiskForge Live can").arg(fsName);
+}
+
+constexpr quint64 kFat32Most = 32ull * 1024 * 1024 * 1024; // Windows makes FAT32 only this big
+
 
 bool elevated()
 {
@@ -307,11 +375,13 @@ UDisks::UDisks(QObject *parent)
 void UDisks::detectFilesystems()
 {
     // Windows formats these itself. FAT32 only up to 32 GB; the rest can't be made here.
+    // Windows grows and shrinks NTFS (in use or not), not FAT or exFAT; chkdsk checks and repairs all three.
     const QString linuxOnly = tr("Windows can't make this; DiskForge Live can");
+    const int both = OfflineShrink | OfflineGrow | OnlineShrink | OnlineGrow;
     m_filesystems = {
-        {QStringLiteral("exfat"), tr("exFAT"), tr("USB drives, works everywhere"), 15, {}, true},
-        {QStringLiteral("vfat"), tr("FAT32"), tr("old devices, max 4 GB per file"), 11, {}, true},
-        {QStringLiteral("ntfs"), tr("NTFS"), tr("Windows"), 32, {}, true},
+        {QStringLiteral("exfat"), tr("exFAT"), tr("USB drives, works everywhere"), 15, {}, true, 0, false, true, true},
+        {QStringLiteral("vfat"), tr("FAT32"), tr("old devices, max 4 GB per file"), 11, {}, true, 0, false, true, true},
+        {QStringLiteral("ntfs"), tr("NTFS"), tr("Windows"), 32, {}, true, both, true, true, true},
         {QStringLiteral("ext4"), tr("ext4"), linuxOnly, 16, {}, false},
         {QStringLiteral("btrfs"), tr("Btrfs"), linuxOnly, 255, {}, false},
         {QStringLiteral("xfs"), tr("XFS"), linuxOnly, 12, {}, false},
@@ -847,56 +917,260 @@ void UDisks::forgetProbes(const Disk *disk)
     m_windows->probed.removeIf([&prefix](const QHash<QString, fsprobe::Result>::iterator it) { return it.key().startsWith(prefix); });
 }
 
-void UDisks::format(const Volume &volume, const QString &, const QString &, const QString &)
+void UDisks::createPartitionTable(const Disk &disk, const QString &tableType)
 {
-    notOnWindows(tr("Couldn't format %1").arg(shortDevice(volume.device)));
+    const QString name = shortDevice(disk.device);
+    const QString failure = tr("Couldn't initialize %1").arg(name);
+    if (refuseSystem(&disk, failure))
+        return;
+    const QString style = tableType == QLatin1String("gpt") ? QStringLiteral("GPT") : QStringLiteral("MBR");
+    // A drive with a table is emptied first, the way Disk Management's "clean" does.
+    storage(this,
+            QStringLiteral("$n = [int]$env:DF_DISK; $d = Get-Disk -Number $n; "
+                           "if ($d.IsOffline) { Set-Disk -Number $n -IsOffline $false }; if ($d.IsReadOnly) { Set-Disk -Number $n -IsReadOnly $false }; "
+                           "if ($d.PartitionStyle -ne 'RAW') { Clear-Disk -Number $n -RemoveData -RemoveOEM -Confirm:$false }; "
+                           "Initialize-Disk -Number $n -PartitionStyle $env:DF_STYLE"),
+            {{QStringLiteral("DF_DISK"), QString::number(diskNumber(disk.blockPath))}, {QStringLiteral("DF_STYLE"), style}},
+            [this, path = disk.blockPath, name, failure, style](bool ok, const QString &said) {
+                forgetProbes(diskByPath(path));
+                refresh();
+                // Windows puts its small reserved partition on every GPT drive it sets up.
+                emit operationFinished(ok, !ok ? failure + QStringLiteral(": ") + said
+                                           : style == QLatin1String("GPT") ? tr("%1 now has a GPT partition table, with the small reserved partition Windows keeps on every GPT drive").arg(name)
+                                                                           : tr("%1 now has an empty %2 partition table").arg(name, style));
+            });
+}
+
+void UDisks::createPartition(const Disk &disk, quint64 offset, quint64 size, const QString &fsType, const QString &label,
+                             const QString &passphrase)
+{
+    const QString name = shortDevice(disk.device);
+    const QString failure = tr("Couldn't create a partition on %1").arg(name);
+    if (refuseSystem(&disk, failure))
+        return;
+    const FsType *fs = filesystem(fsType);
+    const QString windows = windowsFs(fsType);
+    auto refuse = [this, failure](const QString &why) {
+        QTimer::singleShot(0, this, [this, failure, why] { emit operationFinished(false, failure + QStringLiteral(": ") + why); });
+    };
+    if (!passphrase.isEmpty())
+        return refuse(tr("Windows can't make LUKS encrypted partitions; DiskForge Live can"));
+    if (!fsType.isEmpty() && windows.isEmpty())
+        return refuse(onlyOnLive(fs ? fs->name : fsType));
+
+    // 1 MiB aligned, as on Linux; the last MiB kept free for GPT's backup.
+    constexpr quint64 MiB = 1024 * 1024;
+    quint64 freeEnd = 0;
+    for (const Span &s : diskSpans(disk)) {
+        if (s.isFree() && offset >= s.offset && offset < s.offset + s.size)
+            freeEnd = s.offset + s.size;
+    }
+    freeEnd = std::min<quint64>(freeEnd, disk.size > MiB ? disk.size - MiB : 0) / MiB * MiB;
+    const quint64 start = std::max<quint64>((offset + MiB - 1) / MiB * MiB, MiB);
+    const quint64 end = std::min<quint64>(start + (size + MiB - 1) / MiB * MiB, freeEnd);
+    if (end <= start)
+        return refuse(tr("not enough space"));
+    if (windows == QLatin1String("FAT32") && end - start > kFat32Most)
+        return refuse(tr("Windows only makes FAT32 up to 32 GB; exFAT works on almost everything made since 2010"));
+
+    QString script = QStringLiteral("$p = New-Partition -DiskNumber ([int]$env:DF_DISK) -Offset ([uint64]$env:DF_OFFSET) -Size ([uint64]$env:DF_SIZE)");
+    if (disk.tableType == QLatin1String("dos"))
+        script += windows == QLatin1String("FAT32") ? QStringLiteral(" -MbrType FAT32") : QStringLiteral(" -MbrType IFS");
+    script += QStringLiteral("; ");
+    if (!windows.isEmpty())
+        script += label.isEmpty() ? QStringLiteral("$p | Format-Volume -FileSystem $env:DF_FS -Confirm:$false -Force | Out-Null; ")
+                                  : QStringLiteral("$p | Format-Volume -FileSystem $env:DF_FS -NewFileSystemLabel $env:DF_LABEL -Confirm:$false -Force | Out-Null; ");
+    script += QStringLiteral("$p | Add-PartitionAccessPath -AssignDriveLetter -ErrorAction SilentlyContinue");
+    storage(this, script,
+            {{QStringLiteral("DF_DISK"), QString::number(diskNumber(disk.blockPath))}, {QStringLiteral("DF_OFFSET"), QString::number(start)},
+             {QStringLiteral("DF_SIZE"), QString::number(end - start)}, {QStringLiteral("DF_FS"), windows}, {QStringLiteral("DF_LABEL"), label}},
+            [this, path = disk.blockPath, name, failure, fsName = fs ? fs->name : fsType, start, end](bool ok, const QString &said) {
+                forgetProbes(diskByPath(path));
+                refresh();
+                emit operationFinished(ok, ok ? tr("Created a %1 %2 partition on %3").arg(formatSize(end - start), fsName, name)
+                                              : failure + QStringLiteral(": ") + said);
+            });
 }
 
 void UDisks::deletePartition(const Volume &volume)
 {
-    notOnWindows(tr("Couldn't delete %1").arg(shortDevice(volume.device)));
+    const QString name = shortDevice(volume.device);
+    const QString failure = tr("Couldn't delete %1").arg(name);
+    const Disk *disk = diskOf(volume);
+    if (refuseSystem(disk, failure))
+        return;
+    if (!disk || volume.number == 0) {
+        QTimer::singleShot(0, this, [this, failure] { emit operationFinished(false, failure + QStringLiteral(": ") + tr("it isn't a partition")); });
+        return;
+    }
+    storage(this, QStringLiteral("Remove-Partition -DiskNumber ([int]$env:DF_DISK) -PartitionNumber ([int]$env:DF_PART) -Confirm:$false"),
+            {{QStringLiteral("DF_DISK"), QString::number(diskNumber(disk->blockPath))}, {QStringLiteral("DF_PART"), QString::number(volume.number)}},
+            [this, path = disk->blockPath, name, failure](bool ok, const QString &said) {
+                forgetProbes(diskByPath(path));
+                refresh();
+                emit operationFinished(ok, ok ? tr("Deleted %1").arg(name) : failure + QStringLiteral(": ") + said);
+            });
 }
 
-void UDisks::createPartition(const Disk &disk, quint64, quint64, const QString &, const QString &, const QString &)
+void UDisks::format(const Volume &volume, const QString &fsType, const QString &label, const QString &passphrase)
 {
-    notOnWindows(tr("Couldn't create a partition on %1").arg(shortDevice(disk.device)));
+    const QString name = shortDevice(volume.device);
+    const QString failure = tr("Couldn't format %1").arg(name);
+    const Disk *disk = diskOf(volume);
+    if (refuseSystem(disk, failure))
+        return;
+    const FsType *fs = filesystem(fsType);
+    const QString windows = windowsFs(fsType);
+    auto refuse = [this, failure](const QString &why) {
+        QTimer::singleShot(0, this, [this, failure, why] { emit operationFinished(false, failure + QStringLiteral(": ") + why); });
+    };
+    if (!passphrase.isEmpty())
+        return refuse(tr("Windows can't make LUKS encrypted partitions; DiskForge Live can"));
+    if (windows.isEmpty())
+        return refuse(onlyOnLive(fs ? fs->name : fsType));
+    if (windows == QLatin1String("FAT32") && volume.size > kFat32Most)
+        return refuse(tr("Windows only makes FAT32 up to 32 GB; exFAT works on almost everything made since 2010"));
+    // A partition by its number; a file system on the whole drive (no table) by its volume.
+    const QString volumeName = m_windows->volumeNames.value(volume.objectPath);
+    QString target;
+    if (disk && volume.number > 0)
+        target = QStringLiteral("(Get-Partition -DiskNumber ([int]$env:DF_DISK) -PartitionNumber ([int]$env:DF_PART))");
+    else if (!volumeName.isEmpty())
+        target = QStringLiteral("(Get-Volume -Path $env:DF_VOLUME)");
+    else
+        return refuse(tr("Windows can't reach it to format it"));
+    const QString script = target + (label.isEmpty() ? QStringLiteral(" | Format-Volume -FileSystem $env:DF_FS -Confirm:$false -Force | Out-Null")
+                                                     : QStringLiteral(" | Format-Volume -FileSystem $env:DF_FS -NewFileSystemLabel $env:DF_LABEL "
+                                                                      "-Confirm:$false -Force | Out-Null"));
+    storage(this, script,
+            {{QStringLiteral("DF_DISK"), disk ? QString::number(diskNumber(disk->blockPath)) : QString()},
+             {QStringLiteral("DF_PART"), QString::number(volume.number)}, {QStringLiteral("DF_VOLUME"), volumeName},
+             {QStringLiteral("DF_FS"), windows}, {QStringLiteral("DF_LABEL"), label}},
+            [this, path = disk ? disk->blockPath : QString(), name, failure, fsName = fs ? fs->name : fsType](bool ok, const QString &said) {
+                forgetProbes(diskByPath(path));
+                refresh();
+                emit operationFinished(ok, ok ? tr("Formatted %1 as %2").arg(name, fsName) : failure + QStringLiteral(": ") + said);
+            });
 }
 
-void UDisks::createPartitionTable(const Disk &disk, const QString &)
+void UDisks::resizeLimitsThen(const Volume &volume, QObject *context, const std::function<void(const ResizeLimits &)> &then)
 {
-    notOnWindows(tr("Couldn't create a partition table on %1").arg(shortDevice(disk.device)));
+    ResizeLimits limits = resizeLimits(volume);
+    const Disk *disk = diskOf(volume);
+    if (!limits.possible || !disk || volume.number == 0) {
+        QTimer::singleShot(0, context, [limits, then] { then(limits); });
+        return;
+    }
+    // Windows' own answer: NTFS can't shrink past the files it can't move.
+    storage(context,
+            QStringLiteral("$s = Get-PartitionSupportedSize -DiskNumber ([int]$env:DF_DISK) -PartitionNumber ([int]$env:DF_PART); "
+                           "Write-Output \"$($s.SizeMin) $($s.SizeMax)\""),
+            {{QStringLiteral("DF_DISK"), QString::number(diskNumber(disk->blockPath))}, {QStringLiteral("DF_PART"), QString::number(volume.number)}},
+            [limits, then, size = volume.size](bool ok, const QString &said) mutable {
+                constexpr quint64 MiB = 1024 * 1024;
+                const QStringList sizes = said.split(QLatin1Char(' '));
+                if (ok && sizes.size() == 2) {
+                    const quint64 least = (sizes[0].toULongLong() + MiB - 1) / MiB * MiB, most = sizes[1].toULongLong() / MiB * MiB;
+                    limits.minSize = std::min(size, std::max(limits.minSize, least));
+                    if (most >= size)
+                        limits.maxSize = std::min(limits.maxSize, most);
+                    limits.possible = limits.minSize < size || limits.maxSize > size;
+                    if (!limits.possible)
+                        limits.reason = QCoreApplication::translate("UDisks", "Windows can't move what's at its end, and there's no unallocated space after it");
+                }
+                then(limits);
+            });
 }
 
-void UDisks::resize(const Volume &volume, quint64)
+void UDisks::resize(const Volume &volume, quint64 newSize)
 {
-    notOnWindows(tr("Couldn't resize %1").arg(shortDevice(volume.device)));
+    constexpr quint64 MiB = 1024 * 1024;
+    const QString name = shortDevice(volume.device);
+    const QString failure = tr("Couldn't resize %1").arg(name);
+    const Disk *disk = diskOf(volume);
+    if (refuseSystem(disk, failure))
+        return;
+    const ResizeLimits limits = resizeLimits(volume);
+    newSize = newSize / MiB * MiB;
+    if (!disk || !limits.possible || newSize < limits.minSize || newSize > limits.maxSize || newSize == volume.size) {
+        const QString why = limits.possible ? tr("size out of range") : limits.reason;
+        QTimer::singleShot(0, this, [this, failure, why] { emit operationFinished(false, failure + QStringLiteral(": ") + why); });
+        return;
+    }
+    // Windows moves NTFS's end along with the partition's, either way.
+    storage(this, QStringLiteral("Resize-Partition -DiskNumber ([int]$env:DF_DISK) -PartitionNumber ([int]$env:DF_PART) -Size ([uint64]$env:DF_SIZE)"),
+            {{QStringLiteral("DF_DISK"), QString::number(diskNumber(disk->blockPath))}, {QStringLiteral("DF_PART"), QString::number(volume.number)},
+             {QStringLiteral("DF_SIZE"), QString::number(newSize)}},
+            [this, path = disk->blockPath, name, failure, newSize](bool ok, const QString &said) {
+                forgetProbes(diskByPath(path));
+                refresh();
+                emit operationFinished(ok, ok ? tr("Resized %1 to %2").arg(name, formatSize(newSize)) : failure + QStringLiteral(": ") + said);
+            });
 }
 
-ResizeLimits UDisks::resizeLimits(const Volume &) const
+// chkdsk, by its exit code (its words are in the console's own language): 0 nothing wrong, 1
+// fixed, 2 tidied up (or would have been, asked to), 3 errors left.
+void UDisks::check(const Volume &volume)
 {
-    ResizeLimits limits;
-    limits.reason = tr("this isn't in the Windows version of DiskForge yet");
-    return limits;
+    const QString name = shortDevice(volume.device);
+    const QString failure = tr("Couldn't check %1").arg(name);
+    if (refuseSystem(diskOf(volume), failure))
+        return;
+    const QString target = chkdskTarget(volume);
+    if (target.isEmpty()) {
+        QTimer::singleShot(0, this, [this, failure] { emit operationFinished(false, failure + QStringLiteral(": ") + tr("no file system Windows can check")); });
+        return;
+    }
+    auto *chkdsk = new QProcess(this);
+    connect(chkdsk, &QProcess::finished, this, [this, chkdsk, id = volume.objectPath, name, failure](int code, QProcess::ExitStatus status) {
+        chkdsk->deleteLater();
+        if (status != QProcess::NormalExit) {
+            emit operationFinished(false, failure);
+            return;
+        }
+        const bool clean = code == 0;
+        emit checkFinished(id, clean);
+        emit operationFinished(true, clean ? tr("No problems found on %1").arg(name) : tr("%1 has errors").arg(name));
+    });
+    chkdsk->start(QStringLiteral("chkdsk.exe"), {target});
 }
 
-bool UDisks::resizeNeedsRemount(const Volume &, bool) const
+void UDisks::repair(const Volume &volume)
 {
-    return false;
+    const QString name = shortDevice(volume.device);
+    const QString failure = tr("Couldn't repair %1").arg(name);
+    if (refuseSystem(diskOf(volume), failure))
+        return;
+    const QString target = chkdskTarget(volume);
+    if (target.isEmpty()) {
+        QTimer::singleShot(0, this, [this, failure] { emit operationFinished(false, failure + QStringLiteral(": ") + tr("no file system Windows can check")); });
+        return;
+    }
+    // /x takes it out of use first, as unmounting does on Linux.
+    auto *chkdsk = new QProcess(this);
+    connect(chkdsk, &QProcess::finished, this, [this, chkdsk, name, failure](int code, QProcess::ExitStatus status) {
+        chkdsk->deleteLater();
+        const bool repaired = status == QProcess::NormalExit && code >= 0 && code <= 2;
+        refresh();
+        emit operationFinished(repaired, repaired ? tr("Repaired %1").arg(name) : tr("Some errors on %1 couldn't be repaired").arg(name));
+    });
+    chkdsk->start(QStringLiteral("chkdsk.exe"), {target, QStringLiteral("/f"), QStringLiteral("/x")});
+}
+
+QString UDisks::chkdskTarget(const Volume &volume) const
+{
+    // Its letter, or its volume name without the closing backslash, for one without a letter.
+    if (!volume.mountPoints.isEmpty() && volume.mountPoints.first().size() <= 3)
+        return volume.mountPoints.first().left(2);
+    QString name = m_windows->volumeNames.value(volume.objectPath);
+    if (name.endsWith(QLatin1Char('\\')))
+        name.chop(1);
+    return name;
 }
 
 void UDisks::powerOff(const Disk &disk)
 {
     notOnWindows(tr("Couldn't power off %1").arg(shortDevice(disk.device)));
-}
-
-void UDisks::check(const Volume &volume)
-{
-    notOnWindows(tr("Couldn't check %1").arg(shortDevice(volume.device)));
-}
-
-void UDisks::repair(const Volume &volume)
-{
-    notOnWindows(tr("Couldn't repair %1").arg(shortDevice(volume.device)));
 }
 
 void UDisks::setMountAtStartup(const Volume &volume, bool)

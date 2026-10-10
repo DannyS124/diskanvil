@@ -277,6 +277,9 @@ public:
     // shrink: fs then partition; grow: partition then fs
     void resize(const Volume &volume, quint64 newSize);
     ResizeLimits resizeLimits(const Volume &volume) const;
+    // The same, worked out fully before `then` gets them: on Windows with its own (slower) answer
+    // about how far NTFS can shrink, which its unmovable files decide.
+    void resizeLimitsThen(const Volume &volume, QObject *context, const std::function<void(const ResizeLimits &)> &then);
     // Btrfs only resizes mounted, ext4 only shrinks unmounted
     bool resizeNeedsRemount(const Volume &volume, bool shrink) const;
     const FsType *filesystem(const QString &id) const;
@@ -381,6 +384,7 @@ private:
     struct Windows;
     std::shared_ptr<Windows> m_windows;
     void forgetProbes(const Disk *disk);
+    QString chkdskTarget(const Volume &volume) const;
     // Reports, a moment later, that something isn't in the Windows version yet.
     void notOnWindows(const QString &failure);
 #endif

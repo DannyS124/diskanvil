@@ -775,10 +775,11 @@ void UDisks::format(const Volume &volume, const QString &fsType, const QString &
     const QString failure = tr("Couldn't format %1").arg(name);
     const QString path = volume.objectPath;
     const bool encrypted = !passphrase.isEmpty();
-    unmountThen({volume}, failure, [this, path, fsType, o, name, failure, encrypted] {
+    const QString fsName = filesystem(fsType) ? filesystem(fsType)->name : fsType; // exFAT, not exfat
+    unmountThen({volume}, failure, [this, path, fsType, fsName, o, name, failure, encrypted] {
         call(path, kBlock, QStringLiteral("Format"), {fsType, options(o)},
-             [name, fsType, encrypted](const QDBusMessage &) {
-                 return encrypted ? tr("Formatted %1 as encrypted %2").arg(name, fsType) : tr("Formatted %1 as %2").arg(name, fsType);
+             [name, fsName, encrypted](const QDBusMessage &) {
+                 return encrypted ? tr("Formatted %1 as encrypted %2").arg(name, fsName) : tr("Formatted %1 as %2").arg(name, fsName);
              },
              failure);
     }, true);
@@ -824,8 +825,8 @@ void UDisks::createPartition(const Disk &disk, quint64 offset, quint64 size, con
     call(disk.blockPath, kPartitionTable, QStringLiteral("CreatePartitionAndFormat"),
          {start, end - start, partitionTypeFor(disk.tableType, fsType, !passphrase.isEmpty()), partName, options(),
           fsType, options(formatOptions(fsType, label, passphrase))},
-         [name, fsType, start, end](const QDBusMessage &) {
-             return tr("Created a %1 %2 partition on %3").arg(formatSize(end - start), fsType, name);
+         [name, fsName = filesystem(fsType) ? filesystem(fsType)->name : fsType, start, end](const QDBusMessage &) {
+             return tr("Created a %1 %2 partition on %3").arg(formatSize(end - start), fsName, name);
          },
          failure);
 }
@@ -905,70 +906,10 @@ void UDisks::detectFilesystems()
     }
 }
 
-ResizeLimits UDisks::resizeLimits(const Volume &v) const
+void UDisks::resizeLimitsThen(const Volume &volume, QObject *context, const std::function<void(const ResizeLimits &)> &then)
 {
-    constexpr quint64 MiB = 1024 * 1024;
-    ResizeLimits limits;
-    limits.minSize = limits.maxSize = v.size;
-
-    const Disk *disk = diskOf(v);
-    const FsType *fs = filesystem(v.fsType);
-    if (!disk || disk->isSystem) {
-        limits.reason = tr("Disk holds the running system");
-        return limits;
-    }
-    if (v.number == 0 || v.isContainer) {
-        limits.reason = tr("Only partitions can be resized");
-        return limits;
-    }
-    if (!fs || fs->resizeModes == 0) {
-        limits.reason = v.fsType.isEmpty() ? tr("No file system to resize")
-                                           : tr("%1 can't be resized").arg(fs ? fs->name : v.fsType);
-        return limits;
-    }
-    if (!fs->resizeAvailable) {
-        limits.reason = tr("Install %1 to resize %2").arg(fs->package, fs->name);
-        return limits;
-    }
-
-    const bool canShrink = fs->resizeModes & (OfflineShrink | OnlineShrink);
-    const bool canGrow = fs->resizeModes & (OfflineGrow | OnlineGrow);
-    if (v.fsTotal)
-        limits.used = v.fsTotal - v.fsFree;
-
-    if (canGrow) {
-        // only into free space directly after it
-        const QVector<Span> spans = diskSpans(*disk);
-        for (int i = 0; i + 1 < spans.size(); ++i) {
-            if (!spans[i].isFree() && disk->volumes[spans[i].volume].objectPath == v.objectPath && spans[i + 1].isFree()) {
-                const quint64 end = std::min<quint64>(spans[i + 1].offset + spans[i + 1].size, disk->size - MiB);
-                limits.maxSize = std::max<quint64>(v.size, (end - v.offset) / MiB * MiB);
-            }
-        }
-    }
-    if (canShrink) {
-        // unmounted: usage unknown, the resize tool refuses if too small
-        quint64 floor = limits.used ? limits.used + std::max<quint64>(limits.used / 10, 32 * MiB) : 32 * MiB;
-        if (v.fsType == QLatin1String("btrfs"))
-            floor = std::max<quint64>(floor, 256 * MiB); // kernel minimum
-        limits.minSize = std::min<quint64>(v.size, (floor + MiB - 1) / MiB * MiB);
-    }
-
-    limits.possible = limits.minSize < v.size || limits.maxSize > v.size;
-    if (!limits.possible)
-        limits.reason = canGrow ? tr("No unallocated space right after it, and %1 can't shrink").arg(fs->name)
-                                : tr("%1 can only grow, and there's no unallocated space after it").arg(fs->name);
-    return limits;
-}
-
-bool UDisks::resizeNeedsRemount(const Volume &v, bool shrink) const
-{
-    const FsType *fs = filesystem(v.fsType);
-    const int modes = fs ? fs->resizeModes : 0;
-    const bool mounted = !v.mountPoints.isEmpty();
-    const bool online = modes & (shrink ? OnlineShrink : OnlineGrow);
-    const bool offline = modes & (shrink ? OfflineShrink : OfflineGrow);
-    return mounted ? !online : !offline;
+    const ResizeLimits limits = resizeLimits(volume);
+    QTimer::singleShot(0, context, [limits, then] { then(limits); });
 }
 
 void UDisks::resize(const Volume &volume, quint64 newSize)

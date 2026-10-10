@@ -15,7 +15,7 @@
 <context>
     <name>BadSectorsDialog</name>
     <message numerus="yes">
-        <location filename="../src/tools.cpp" line="1430"/>
+        <location filename="../src/tools.cpp" line="1433"/>
         <source>%n area(s) read slowly. Slow spots often turn into bad sectors later, so keep a backup.</source>
         <translation>
             <numerusform>%n area read slowly. Slow spots often turn into bad sectors later, so keep a backup.</numerusform>
@@ -23,7 +23,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/tools.cpp" line="1458"/>
+        <location filename="../src/tools.cpp" line="1461"/>
         <source>Repair %n bad sector(s) on %1?</source>
         <translation>
             <numerusform>Repair %n bad sector on %1?</numerusform>
@@ -31,7 +31,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/tools.cpp" line="1505"/>
+        <location filename="../src/tools.cpp" line="1508"/>
         <source>%n block(s)</source>
         <translation>
             <numerusform>%n block</numerusform>
@@ -102,7 +102,7 @@
 <context>
     <name>MainWindow</name>
     <message numerus="yes">
-        <location filename="../src/mainwindow.cpp" line="939"/>
+        <location filename="../src/mainwindow.cpp" line="941"/>
         <source>%n more drive(s) need a look; their health is in the Status column.</source>
         <translation>
             <numerusform>%n more drive need a look; their health is in the Status column.</numerusform>
@@ -110,7 +110,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/mainwindow.cpp" line="1951"/>
+        <location filename="../src/mainwindow.cpp" line="1962"/>
         <source>%n add-on command(s) still running. Stop them and quit?</source>
         <translation>
             <numerusform>%n add-on command still running. Stop them and quit?</numerusform>
