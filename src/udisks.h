@@ -100,6 +100,7 @@ struct Health {
     double warningTempC = -1;   // NVMe: the drive's own limits
     double criticalTempC = -1;
     bool usbNoData = false;     // a USB adapter that doesn't pass health data through
+    bool smartOff = false;      // the drive can do SMART, but it's switched off
 };
 
 struct Disk {
@@ -149,8 +150,17 @@ struct Disk {
     bool ataApm = false;
     bool ataWriteCache = false;
     bool ataWriteCacheEnabled = false;
+    bool ataAam = false;          // how loud a hard drive seeks (Automatic Acoustic Management)
+    int ataAamRecommended = 0;
+    bool ataLookahead = false;    // reading ahead of what was asked for
+    bool ataLookaheadEnabled = false;
     QVariantMap driveConfiguration;
     bool nvmeNamespace = false; // NVMe drive that can do a secure format
+    QString nvmeSanitizeStatus; // "never_sanitized", "success", "inprogress", "failure"...
+    int nvmeSanitizePercent = -1; // left to do while it's running
+    quint64 nvmeUnallocated = 0;  // capacity no namespace uses
+    QVector<int> nvmeSectorSizes; // the sector sizes the namespace can be formatted with
+    int nvmeSectorSize = 0;       // the one it has
     Health health;
     QVector<Volume> volumes;   // sorted by offset
 };
@@ -290,8 +300,9 @@ public:
     void wipe(const Disk &disk);
     // The drive's own erase command: ATA Security Erase (normal or enhanced) or an NVMe
     // format with secure erase (user data or crypto). Reaches spare areas a wipe can't.
-    enum class EraseMethod { AtaNormal, AtaEnhanced, NvmeUserData, NvmeCrypto };
-    void secureErase(const Disk &disk, EraseMethod method);
+    enum class EraseMethod { AtaNormal, AtaEnhanced, NvmeUserData, NvmeCrypto, NvmeSanitizeBlock, NvmeSanitizeCrypto };
+    // nvmeSectorSize: an NVMe drive formatted with another sector size (0 keeps the one it has).
+    void secureErase(const Disk &disk, EraseMethod method, int nvmeSectorSize = 0);
     // What it means when an ATA drive refuses Secure Erase (UDisks' error text), in plain words.
     static QString secureEraseRefused(const QString &error, bool usb);
     // Gets a drive ready to have its power pulled: unmounts (and locks) what's on it, then spins
@@ -304,6 +315,7 @@ public:
     void smartUpdate(const Disk &disk);
     void smartSelftest(const Disk &disk, const QString &type); // "short" or "extended"
     void smartSelftestAbort(const Disk &disk);
+    void smartSetEnabled(const Disk &disk, bool enabled);
     // A RAID array: "check" reads it all and compares the copies, "idle" stops that.
     void raidSyncAction(const Disk &array, const QString &action);
     // Fresh health data (the temperature) without a message either way; never asks for a

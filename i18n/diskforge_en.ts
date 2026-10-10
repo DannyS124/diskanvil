@@ -15,7 +15,7 @@
 <context>
     <name>BadSectorsDialog</name>
     <message numerus="yes">
-        <location filename="../src/tools.cpp" line="1406"/>
+        <location filename="../src/tools.cpp" line="1430"/>
         <source>%n area(s) read slowly. Slow spots often turn into bad sectors later, so keep a backup.</source>
         <translation>
             <numerusform>%n area read slowly. Slow spots often turn into bad sectors later, so keep a backup.</numerusform>
@@ -23,7 +23,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/tools.cpp" line="1434"/>
+        <location filename="../src/tools.cpp" line="1458"/>
         <source>Repair %n bad sector(s) on %1?</source>
         <translation>
             <numerusform>Repair %n bad sector on %1?</numerusform>
@@ -31,7 +31,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/tools.cpp" line="1481"/>
+        <location filename="../src/tools.cpp" line="1505"/>
         <source>%n block(s)</source>
         <translation>
             <numerusform>%n block</numerusform>
@@ -75,7 +75,7 @@
 <context>
     <name>MainWindow</name>
     <message numerus="yes">
-        <location filename="../src/mainwindow.cpp" line="920"/>
+        <location filename="../src/mainwindow.cpp" line="922"/>
         <source>%n more drive(s) need a look; their health is in the Status column.</source>
         <translation>
             <numerusform>%n more drive need a look; their health is in the Status column.</numerusform>
@@ -83,7 +83,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/mainwindow.cpp" line="1860"/>
+        <location filename="../src/mainwindow.cpp" line="1931"/>
         <source>%n add-on command(s) still running. Stop them and quit?</source>
         <translation>
             <numerusform>%n add-on command still running. Stop them and quit?</numerusform>
@@ -142,7 +142,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/health.cpp" line="118"/>
+        <location filename="../src/health.cpp" line="119"/>
         <source>%n of its health numbers is past the limit its maker set. Copy what you want to keep to another drive now.</source>
         <translation>
             <numerusform>%n of its health numbers is past the limit its maker set. Copy what you want to keep to another drive now.</numerusform>
@@ -150,7 +150,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/health.cpp" line="125"/>
+        <location filename="../src/health.cpp" line="126"/>
         <source>%n unreadable sector(s). Scan for Bad Sectors can repair them; what was stored there is already lost.</source>
         <translation>
             <numerusform>%n unreadable sector. Scan for Bad Sectors can repair them; what was stored there is already lost.</numerusform>
@@ -158,7 +158,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/health.cpp" line="127"/>
+        <location filename="../src/health.cpp" line="128"/>
         <source>%n sector(s) its own scan couldn&apos;t read. Keep backups.</source>
         <translation>
             <numerusform>%n sector its own scan couldn't read. Keep backups.</numerusform>
@@ -166,7 +166,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/health.cpp" line="130"/>
+        <location filename="../src/health.cpp" line="131"/>
         <source>%n read error(s) it couldn&apos;t fix. Drives that have had these fail far more often: keep backups and think about replacing it.</source>
         <translation>
             <numerusform>%n read error it couldn't fix. Drives that have had these fail far more often: keep backups and think about replacing it.</numerusform>
@@ -174,7 +174,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/health.cpp" line="134"/>
+        <location filename="../src/health.cpp" line="135"/>
         <source>%n sector(s) replaced. That&apos;s what drives are built to do, but keep backups and watch whether the number grows.</source>
         <translation>
             <numerusform>%n sector replaced. That's what drives are built to do, but keep backups and watch whether the number grows.</numerusform>
@@ -182,7 +182,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/health.cpp" line="137"/>
+        <location filename="../src/health.cpp" line="138"/>
         <source>%n spin-up retry(s): a mechanical or power problem.</source>
         <translation>
             <numerusform>%n spin-up retry: a mechanical or power problem.</numerusform>
@@ -190,7 +190,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/health.cpp" line="144"/>
+        <location filename="../src/health.cpp" line="145"/>
         <source>%n end-to-end error(s): data damaged inside the drive.</source>
         <translation>
             <numerusform>%n end-to-end error: data damaged inside the drive.</numerusform>
@@ -198,7 +198,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/health.cpp" line="147"/>
+        <location filename="../src/health.cpp" line="148"/>
         <source>Connection problems: %n new error(s) between the drive and the PC. Check the cable or try another port; the drive itself may be fine.</source>
         <translation>
             <numerusform>Connection problems: %n new error between the drive and the PC. Check the cable or try another port; the drive itself may be fine.</numerusform>
@@ -206,7 +206,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/health.cpp" line="149"/>
+        <location filename="../src/health.cpp" line="150"/>
         <source>%n connection error(s) in the past (cable or port).</source>
         <translation>
             <numerusform>%n connection error in the past (cable or port).</numerusform>
@@ -214,7 +214,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/health.cpp" line="152"/>
+        <location filename="../src/health.cpp" line="153"/>
         <source>%n command timeout(s).</source>
         <translation>
             <numerusform>%n command timeout.</numerusform>
@@ -222,7 +222,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/health.cpp" line="193"/>
+        <location filename="../src/health.cpp" line="194"/>
         <source>%n media error(s): data it couldn&apos;t read back correctly. Keep backups.</source>
         <translation>
             <numerusform>%n media error: data it couldn't read back correctly. Keep backups.</numerusform>
@@ -270,9 +270,9 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/drivepower.cpp" line="40"/>
-        <location filename="../src/drivepower.cpp" line="44"/>
-        <location filename="../src/drivepower.cpp" line="47"/>
+        <location filename="../src/drivepower.cpp" line="48"/>
+        <location filename="../src/drivepower.cpp" line="52"/>
+        <location filename="../src/drivepower.cpp" line="55"/>
         <source>%n minute(s)</source>
         <translation>
             <numerusform>%n minute</numerusform>
@@ -280,7 +280,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/drivepower.cpp" line="40"/>
+        <location filename="../src/drivepower.cpp" line="48"/>
         <source>%n second(s)</source>
         <translation>
             <numerusform>%n second</numerusform>
@@ -288,7 +288,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/drivepower.cpp" line="44"/>
+        <location filename="../src/drivepower.cpp" line="52"/>
         <source>%n hour(s)</source>
         <translation>
             <numerusform>%n hour</numerusform>
@@ -396,7 +396,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/udisks.cpp" line="419"/>
+        <location filename="../src/udisks.cpp" line="457"/>
         <source>The volume group %1 is missing %n of its drives. What was on them can&apos;t be read.</source>
         <translation>
             <numerusform>The volume group %1 is missing %n of its drives. What was on them can't be read.</numerusform>

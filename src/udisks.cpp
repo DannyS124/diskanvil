@@ -327,6 +327,14 @@ void UDisks::refresh()
         d.ataApm = ata.value(QStringLiteral("ApmSupported")).toBool();
         d.ataWriteCache = ata.value(QStringLiteral("WriteCacheSupported")).toBool();
         d.ataWriteCacheEnabled = ata.value(QStringLiteral("WriteCacheEnabled")).toBool();
+        d.ataAam = ata.value(QStringLiteral("AamSupported")).toBool();
+        d.ataAamRecommended = ata.value(QStringLiteral("AamVendorRecommendedValue")).toInt();
+        d.ataLookahead = ata.value(QStringLiteral("ReadLookaheadSupported")).toBool();
+        d.ataLookaheadEnabled = ata.value(QStringLiteral("ReadLookaheadEnabled")).toBool();
+        const QVariantMap nvme = driveIfaces.value(kNvme);
+        d.nvmeSanitizeStatus = nvme.value(QStringLiteral("SanitizeStatus")).toString();
+        d.nvmeSanitizePercent = nvme.value(QStringLiteral("SanitizePercentRemaining"), -1).toInt();
+        d.nvmeUnallocated = nvme.value(QStringLiteral("UnallocatedCapacity")).toULongLong();
         {
             const QVariant config = drive.value(QStringLiteral("Configuration"));
             if (config.canConvert<QDBusArgument>())
@@ -335,6 +343,35 @@ void UDisks::refresh()
                 d.driveConfiguration = config.toMap();
         }
         d.nvmeNamespace = ifaces.contains(kNvmeNamespace);
+        if (d.nvmeNamespace) {
+            // LBAFormats a(qqy) and FormattedLBASize (qqy): data size, metadata size, performance.
+            const QVariantMap ns = ifaces.value(kNvmeNamespace);
+            const QVariant formats = ns.value(QStringLiteral("LBAFormats"));
+            if (formats.canConvert<QDBusArgument>()) {
+                const QDBusArgument arg = formats.value<QDBusArgument>();
+                arg.beginArray();
+                while (!arg.atEnd()) {
+                    quint16 size = 0, metadata = 0;
+                    uchar performance = 0;
+                    arg.beginStructure();
+                    arg >> size >> metadata >> performance;
+                    arg.endStructure();
+                    if (metadata == 0 && size >= 512 && !d.nvmeSectorSizes.contains(size))
+                        d.nvmeSectorSizes << size;
+                }
+                arg.endArray();
+            }
+            const QVariant formatted = ns.value(QStringLiteral("FormattedLBASize"));
+            if (formatted.canConvert<QDBusArgument>()) {
+                const QDBusArgument arg = formatted.value<QDBusArgument>();
+                quint16 size = 0, metadata = 0;
+                uchar performance = 0;
+                arg.beginStructure();
+                arg >> size >> metadata >> performance;
+                arg.endStructure();
+                d.nvmeSectorSize = size;
+            }
+        }
         {
             QFile discard(QStringLiteral("/sys/class/block/%1/queue/discard_max_bytes").arg(shortDevice(d.device)));
             d.discard = discard.open(QIODevice::ReadOnly) && discard.readAll().trimmed().toULongLong() > 0;
@@ -344,6 +381,7 @@ void UDisks::refresh()
         }
         if (!d.isLoop)
             d.health = readHealth(d.drivePath, drive, driveIfaces.value(kAta), driveIfaces.value(kNvme));
+        health::noteSelftestStatus(d.health.key, d.health.selftestStatus);
 
         if (ifaces.contains(kPartitionTable)) {
             d.tableType = ifaces.value(kPartitionTable).value(QStringLiteral("Type")).toString();

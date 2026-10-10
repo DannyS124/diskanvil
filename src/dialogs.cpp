@@ -7,6 +7,7 @@
 #include "theme.h"
 #include "tools.h"
 
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QFormLayout>
@@ -184,6 +185,33 @@ NewPartitionDialog::NewPartitionDialog(const Disk &disk, const Span &free, const
     auto *form = new QFormLayout;
     form->addRow(tr("Free space:"), new QLabel(formatSize(free.size)));
     form->addRow(tr("Size:"), m_size);
+    // An SSD runs faster and lasts longer with part of it never used: spare room for moving
+    // things around. Offered when this space reaches the end of the drive.
+    const bool ssd = !disk.isLoop && (disk.rotationRate == 0 || disk.nvmeNamespace);
+    const bool atEnd = free.offset + free.size + 4 * kMiB >= disk.size;
+    if (ssd && atEnd && disk.size > 0) {
+        auto *spare = new QCheckBox(tr("Leave part of the SSD unused, so it stays fast and lasts longer:"));
+        spare->setObjectName(QStringLiteral("spare"));
+        spare->setToolTip(tr("Works best on a new or Secure Erased SSD, where that part was never written to."));
+        auto *percent = new QSpinBox;
+        percent->setObjectName(QStringLiteral("sparePercent"));
+        percent->setRange(1, 40);
+        percent->setValue(kSparePercent);
+        percent->setSuffix(QStringLiteral(" %"));
+        percent->setEnabled(false);
+        auto *row = new QHBoxLayout;
+        row->addWidget(spare, 1);
+        row->addWidget(percent);
+        form->addRow(row);
+        const quint64 diskSize = disk.size;
+        auto apply = [this, spare, percent, maxMiB, diskSize] {
+            percent->setEnabled(spare->isChecked());
+            const qint64 spareMiB = spare->isChecked() ? qint64(diskSize / kMiB) * percent->value() / 100 : 0;
+            m_size->setValue(int(std::max<qint64>(1, maxMiB - spareMiB)));
+        };
+        connect(spare, &QCheckBox::toggled, this, apply);
+        connect(percent, &QSpinBox::valueChanged, this, apply);
+    }
     form->addRow(tr("Volume label:"), m_label);
     form->addRow(tr("File system:"), m_fs);
 

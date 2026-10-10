@@ -100,6 +100,21 @@ QByteArray byteString(const QString &s)
 
 } // namespace
 
+namespace {
+
+// FormatNamespace's options: how to erase, and the sector size when it changes.
+QVariantMap nvmeFormatOptions(bool crypto, int sectorSize)
+{
+    QVariantMap o{{QStringLiteral("secure_erase"), crypto ? QStringLiteral("crypto_erase") : QStringLiteral("user_data")}};
+    if (sectorSize > 0) {
+        o.insert(QStringLiteral("lba_data_size"), QVariant::fromValue(quint16(sectorSize)));
+        o.insert(QStringLiteral("metadata_size"), QVariant::fromValue(quint16(0)));
+    }
+    return o;
+}
+
+} // namespace
+
 Health UDisks::readHealth(const QString &drivePath, const QVariantMap &drive, const QVariantMap &ata, const QVariantMap &nvme)
 {
     Health h;
@@ -110,6 +125,7 @@ Health UDisks::readHealth(const QString &drivePath, const QVariantMap &drive, co
     if (!ata.isEmpty() && ata.value(QStringLiteral("SmartSupported")).toBool()) {
         if (!ata.value(QStringLiteral("SmartEnabled")).toBool()) {
             h.summary = tr("SMART is turned off");
+            h.smartOff = true;
             return h;
         }
         h.updated = ata.value(QStringLiteral("SmartUpdated")).toULongLong();
@@ -272,6 +288,14 @@ void UDisks::smartSelftest(const Disk &disk, const QString &type)
     call(disk.drivePath, disk.health.nvme ? kNvme : kAta, QStringLiteral("SmartSelftestStart"), {type, options()},
          [name](const QDBusMessage &) { return tr("Self-test started on %1").arg(name); },
          tr("Couldn't start a self-test on %1").arg(name));
+}
+
+void UDisks::smartSetEnabled(const Disk &disk, bool enabled)
+{
+    const QString name = shortDevice(disk.device);
+    call(disk.drivePath, kAta, QStringLiteral("SmartSetEnabled"), {enabled, options()},
+         [name, enabled](const QDBusMessage &) { return enabled ? tr("SMART is on for %1").arg(name) : tr("SMART is off for %1").arg(name); },
+         tr("Couldn't change SMART on %1").arg(name));
 }
 
 void UDisks::raidSyncAction(const Disk &array, const QString &action)
@@ -536,7 +560,7 @@ void UDisks::wipe(const Disk &disk)
     }, true);
 }
 
-void UDisks::secureErase(const Disk &disk, EraseMethod method)
+void UDisks::secureErase(const Disk &disk, EraseMethod method, int nvmeSectorSize)
 {
     const QString name = shortDevice(disk.device);
     const QString failure = tr("Couldn't erase %1").arg(name);
@@ -561,7 +585,7 @@ void UDisks::secureErase(const Disk &disk, EraseMethod method)
     }
     const QString blockPath = d->blockPath, drivePath = d->drivePath;
     const bool usb = d->bus == QLatin1String("usb");
-    unmountThen(d->volumes, failure, [this, method, ata, blockPath, drivePath, name, failure, usb] {
+    unmountThen(d->volumes, failure, [this, method, ata, blockPath, drivePath, name, failure, usb, nvmeSectorSize] {
         // The drive erased itself, so the system still has the old partitions in mind until it
         // reads the drive again. Whatever that says, the erase itself worked.
         auto done = [this, blockPath, name](const QDBusMessage &) {
@@ -578,10 +602,15 @@ void UDisks::secureErase(const Disk &disk, EraseMethod method)
             callThen(drivePath, kAta, QStringLiteral("SecurityEraseUnit"),
                      {options({{QStringLiteral("enhanced"), method == EraseMethod::AtaEnhanced}})}, failure, done, {},
                      [usb](const QString &error) { return secureEraseRefused(error, usb); });
+        else if (method == EraseMethod::NvmeSanitizeBlock || method == EraseMethod::NvmeSanitizeCrypto)
+            // Sanitize: the controller erases everything, spare areas and caches too, and keeps
+            // at it after a power cut until it's done.
+            callThen(drivePath, kNvme, QStringLiteral("SanitizeStart"),
+                     {method == EraseMethod::NvmeSanitizeCrypto ? QStringLiteral("crypto-erase") : QStringLiteral("block-erase"), options()},
+                     failure, done);
         else
             callThen(blockPath, kNvmeNamespace, QStringLiteral("FormatNamespace"),
-                     {options({{QStringLiteral("secure_erase"),
-                                method == EraseMethod::NvmeCrypto ? QStringLiteral("crypto_erase") : QStringLiteral("user_data")}})},
+                     {options(nvmeFormatOptions(method == EraseMethod::NvmeCrypto, nvmeSectorSize))},
                      failure, done);
     }, true);
 }

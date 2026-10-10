@@ -9,6 +9,7 @@
 #include <QElapsedTimer>
 
 class QFrame;
+class QComboBox;
 class QLabel;
 class QLineEdit;
 class QPushButton;
@@ -24,6 +25,7 @@ class SecureEraseDialog : public QDialog
 public:
     SecureEraseDialog(UDisks *udisks, const QString &blockPath, int diskNumber, QWidget *parent = nullptr);
     UDisks::EraseMethod method() const;
+    int sectorSize() const; // NVMe: the sector size to format with; 0 keeps the one it has
     // The drive to erase. It can change: unplugged and plugged back in, a drive can get a new name.
     QString blockPath() const { return m_blockPath; }
     // For the preview: shows a step of Unplug and Replug (1 unplug, 2 plug back in, 3 not back)
@@ -42,6 +44,9 @@ private:
     QLabel *m_intro;
     QRadioButton *m_first;
     QRadioButton *m_second;
+    QRadioButton *m_sanitize = nullptr;       // NVMe: sanitize, erasing every block
+    QRadioButton *m_sanitizeCrypto = nullptr; // and its crypto erase
+    QComboBox *m_sectors = nullptr;
     QLabel *m_frozen;
     QLabel *m_howTo;
     QPushButton *m_sleep;

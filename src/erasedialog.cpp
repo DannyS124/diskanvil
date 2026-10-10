@@ -30,6 +30,7 @@
 #include <QMessageBox>
 #include <QPointer>
 #include <QPushButton>
+#include <QComboBox>
 #include <QRadioButton>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -102,6 +103,20 @@ SecureEraseDialog::SecureEraseDialog(UDisks *udisks, const QString &blockPath, i
         } else {
             m_first->setText(tr("Erase all data"));
             m_second->setText(tr("Crypto erase: instant, if the drive encrypts what it stores (many do)"));
+            // Sanitize goes further: spare areas and caches too, and it carries on after a
+            // power cut until it's done. Not every drive has it; the drive says so if not.
+            m_sanitize = new QRadioButton(tr("Sanitize: every block erased, spare areas too (the most thorough; a few minutes)"));
+            m_sanitizeCrypto = new QRadioButton(tr("Sanitize with a crypto erase: the same, done by throwing the drive's key away"));
+            m_sanitize->setObjectName(QStringLiteral("sanitize"));
+            m_sanitizeCrypto->setObjectName(QStringLiteral("sanitizeCrypto"));
+            // Some drives can be formatted with bigger sectors, which are often faster.
+            if (d->nvmeSectorSizes.size() > 1) {
+                m_sectors = new QComboBox;
+                m_sectors->setObjectName(QStringLiteral("sectors"));
+                for (int size : d->nvmeSectorSizes)
+                    m_sectors->addItem(size == d->nvmeSectorSize ? tr("%1 bytes (as it is now)").arg(size) : tr("%1 bytes").arg(size), size);
+                m_sectors->setCurrentIndex(std::max<qsizetype>(0, d->nvmeSectorSizes.indexOf(d->nvmeSectorSize)));
+            }
         }
     }
     m_frozen->setText(redText(tr("The drive is frozen: the PC locks erasing when it starts, and the drive refuses until it's had its "
@@ -149,6 +164,19 @@ SecureEraseDialog::SecureEraseDialog(UDisks *udisks, const QString &blockPath, i
     layout->addWidget(m_intro);
     layout->addWidget(m_first);
     layout->addWidget(m_second);
+    for (QRadioButton *b : {m_sanitize, m_sanitizeCrypto}) {
+        if (b)
+            layout->addWidget(b);
+    }
+    if (m_sectors) {
+        auto *row = new QHBoxLayout;
+        row->addWidget(new QLabel(tr("Sector size afterwards:")));
+        row->addWidget(m_sectors, 1);
+        auto *note = new QLabel(tr("(the first two only; a different size changes how the drive is set up)"));
+        note->setWordWrap(true);
+        row->addWidget(note, 2);
+        layout->addLayout(row);
+    }
     layout->addWidget(m_frozen);
     layout->addLayout(frozenRow);
     layout->addWidget(m_replugBox);
@@ -341,7 +369,20 @@ UDisks::EraseMethod SecureEraseDialog::method() const
 {
     if (m_ata)
         return m_second->isChecked() ? UDisks::EraseMethod::AtaEnhanced : UDisks::EraseMethod::AtaNormal;
+    if (m_sanitize && m_sanitize->isChecked())
+        return UDisks::EraseMethod::NvmeSanitizeBlock;
+    if (m_sanitizeCrypto && m_sanitizeCrypto->isChecked())
+        return UDisks::EraseMethod::NvmeSanitizeCrypto;
     return m_second->isChecked() ? UDisks::EraseMethod::NvmeCrypto : UDisks::EraseMethod::NvmeUserData;
+}
+
+int SecureEraseDialog::sectorSize() const
+{
+    // Sanitize keeps the drive's format; only a format can change it.
+    const bool formats = method() == UDisks::EraseMethod::NvmeUserData || method() == UDisks::EraseMethod::NvmeCrypto;
+    const Disk *d = m_udisks->diskByPath(m_blockPath);
+    const int size = m_sectors && formats ? m_sectors->currentData().toInt() : 0;
+    return d && size != d->nvmeSectorSize ? size : 0;
 }
 
 void SecureEraseDialog::updateState()

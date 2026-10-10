@@ -4,6 +4,7 @@
 #include "health.h"
 
 #include <QObject>
+#include <QHash>
 #include <QSettings>
 
 #include <algorithm>
@@ -294,3 +295,86 @@ bool health::hasUnreadableSpots(const Health &h)
     }
     return false;
 }
+
+namespace health {
+
+namespace {
+
+QString historyKey(const QString &key)
+{
+    return QStringLiteral("selftests/") + key;
+}
+
+} // namespace
+
+void noteSelftestStarted(const QString &key, const QString &kind)
+{
+    if (!key.isEmpty())
+        settings().setValue(QStringLiteral("selftest-started/") + key, kind);
+}
+
+void noteSelftestStatus(const QString &key, const QString &status)
+{
+    if (key.isEmpty() || status.isEmpty())
+        return;
+    QSettings s = settings();
+    const QString running = QStringLiteral("selftest-running/") + key;
+    if (status == QLatin1String("inprogress")) {
+        if (!s.value(running).toBool())
+            s.setValue(running, true);
+        return;
+    }
+    if (!s.value(running).toBool())
+        return;
+    s.remove(running);
+    const QString started = QStringLiteral("selftest-started/") + key;
+    const QString kind = s.value(started).toString();
+    s.remove(started);
+    QStringList history = s.value(historyKey(key)).toStringList();
+    history.prepend(QStringLiteral("%1|%2|%3").arg(QDateTime::currentDateTimeUtc().toString(Qt::ISODate), kind, status));
+    s.setValue(historyKey(key), history.mid(0, 20));
+}
+
+QVector<SelftestRecord> selftestHistory(const QString &key)
+{
+    QVector<SelftestRecord> out;
+    for (const QString &line : settings().value(historyKey(key)).toStringList()) {
+        const QStringList parts = line.split(QLatin1Char('|'));
+        if (parts.size() == 3)
+            out.push_back({QDateTime::fromString(parts[0], Qt::ISODate), parts[1], parts[2]});
+    }
+    return out;
+}
+
+QString selftestResult(const QString &status)
+{
+    if (status == QLatin1String("success"))
+        return QObject::tr("passed");
+    if (status.startsWith(QLatin1String("abort")) || status == QLatin1String("interrupted"))
+        return QObject::tr("stopped before it finished");
+    static const QHash<QString, const char *> failures = {
+        {QStringLiteral("error_read"), QT_TR_NOOP("failed: it couldn't read part of the drive")},
+        {QStringLiteral("error_electrical"), QT_TR_NOOP("failed: an electrical fault")},
+        {QStringLiteral("error_servo"), QT_TR_NOOP("failed: the heads couldn't be positioned")},
+        {QStringLiteral("error_handling"), QT_TR_NOOP("failed: the drive handled something wrong")},
+        {QStringLiteral("known_seg_fail"), QT_TR_NOOP("failed: a part of the test didn't pass")},
+        {QStringLiteral("unknown_seg_fail"), QT_TR_NOOP("failed: a part of the test didn't pass")},
+        {QStringLiteral("fatal"), QT_TR_NOOP("failed")},
+        {QStringLiteral("fatal_error"), QT_TR_NOOP("failed")},
+    };
+    const char *words = failures.value(status);
+    return words ? QObject::tr(words) : QObject::tr("failed (%1)").arg(status);
+}
+
+QString selftestKind(const QString &kind)
+{
+    if (kind == QLatin1String("short"))
+        return QObject::tr("short");
+    if (kind == QLatin1String("extended"))
+        return QObject::tr("long");
+    if (kind == QLatin1String("conveyance"))
+        return QObject::tr("conveyance");
+    return QObject::tr("a self-test");
+}
+
+} // namespace health

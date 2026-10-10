@@ -16,6 +16,8 @@
 #include "snapper.h"
 #include "systemtools.h"
 #include "usagedialog.h"
+#include "applog.h"
+#include "drivepower.h"
 #include "newids.h"
 #include "newidsdialog.h"
 #include "virusdialog.h"
@@ -476,7 +478,7 @@ void MainWindow::createActions()
                 rescue::rescanDrives({QStringLiteral("scan")}, this);
             });
         }
-        m_udisks->secureErase(*fresh, dialog.method());
+        m_udisks->secureErase(*fresh, dialog.method(), dialog.sectorSize());
     });
 
     m_health = new QAction(themeIcon("dialog-information", "help-about"), tr("Disk &Health…"), this);
@@ -1466,6 +1468,28 @@ void MainWindow::showProperties()
             add(tr("Temperature"), QStringLiteral("%1 °C").arg(qRound(d->health.temperatureC)));
         if (d->isSystem)
             add(tr("System disk"), tr("%1. This app won't modify it.").arg(d->systemReason));
+        if (d->nvmeNamespace) {
+            if (d->nvmeSectorSize > 0) {
+                QStringList others;
+                for (int size : d->nvmeSectorSizes) {
+                    if (size != d->nvmeSectorSize)
+                        others << QString::number(size);
+                }
+                add(tr("Sector size"), others.isEmpty() ? tr("%1 bytes").arg(d->nvmeSectorSize)
+                                                        : tr("%1 bytes (it can also do %2; Secure Erase can change it)")
+                                                              .arg(d->nvmeSectorSize)
+                                                              .arg(others.join(QStringLiteral(", "))));
+            }
+            const QString &sanitized = d->nvmeSanitizeStatus;
+            add(tr("Sanitize"), sanitized == QLatin1String("never_sanitized") ? tr("Never done")
+                                : sanitized == QLatin1String("success")       ? tr("The last one finished")
+                                : sanitized == QLatin1String("inprogress")
+                                    ? (d->nvmeSanitizePercent >= 0 ? tr("Running, %1% left").arg(d->nvmeSanitizePercent) : tr("Running"))
+                                : sanitized == QLatin1String("failure") ? tr("The last one failed")
+                                                                        : sanitized);
+            if (d->nvmeUnallocated > 0)
+                add(tr("Not in any namespace"), bytes(d->nvmeUnallocated));
+        }
 #ifdef Q_OS_WIN
         add(tr("Windows path"), d->blockPath);
 #else
@@ -1489,6 +1513,53 @@ void MainWindow::showProperties()
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     auto *layout = new QVBoxLayout(&dialog);
     layout->addWidget(tree);
+    // The hidden area (HPA): the end of an ATA drive its own settings hide, where malware and
+    // some makers' recovery tools keep things. Only hdparm sees it, so only DiskForge Live.
+    const bool ataDrive = !v && sel.kind != DiskMap::Selection::Kind::Free && !d->isLoop && !d->nvmeNamespace && !d->isRaid
+                       && d->bus != QLatin1String("usb") && (d->ataPm || d->ataApm || d->ataWriteCache || d->ataLookahead);
+    if (ataDrive) {
+        drivepower::HiddenArea hidden;
+        if (rescue::runningInRescue()) {
+            QProcess hdparm;
+            hdparm.setProcessChannelMode(QProcess::MergedChannels);
+            hdparm.start(QStringLiteral("sudo"), {QStringLiteral("-n"), QStringLiteral("hdparm"), QStringLiteral("-N"), d->device});
+            if (hdparm.waitForFinished(10000))
+                hidden = drivepower::parseHdparmN(QString::fromLocal8Bit(hdparm.readAll()));
+        }
+        auto *row = new QTreeWidgetItem(tree, {tr("Hidden area (HPA)"),
+                                               !rescue::runningInRescue() ? tr("Only DiskForge Live can look")
+                                               : !hidden.known            ? tr("The drive didn't say")
+                                               : hidden.hidden() == 0     ? tr("None")
+                                                                          : tr("%1 hidden by the drive's own settings").arg(formatSize(hidden.hidden() * 512))});
+        Q_UNUSED(row)
+        if (hidden.known && hidden.hidden() > 0) {
+            auto *show = new QPushButton(tr("Show the Hidden Area…"));
+            show->setToolTip(tr("Makes the drive show all of itself again. Nothing on the part you see now changes."));
+            const QString device = d->device;
+            const quint64 native = hidden.native;
+            connect(show, &QPushButton::clicked, &dialog, [this, &dialog, device, native] {
+                if (QMessageBox::question(&dialog, dialog.windowTitle(),
+                                          tr("Make %1 show all of itself again? What's in the hidden part (a maker's recovery copy, or "
+                                             "something hiding) becomes part of the drive. Nothing on the part you see now changes; "
+                                             "some drives only show the rest after being switched off and on again.")
+                                              .arg(shortDevice(device)),
+                                          QMessageBox::Yes | QMessageBox::No, QMessageBox::No)
+                    != QMessageBox::Yes)
+                    return;
+                QProcess hdparm;
+                hdparm.setProcessChannelMode(QProcess::MergedChannels);
+                hdparm.start(QStringLiteral("sudo"), {QStringLiteral("-n"), QStringLiteral("hdparm"), QStringLiteral("--yes-i-know-what-i-am-doing"),
+                                                      QStringLiteral("-N"), QStringLiteral("p%1").arg(native), device});
+                const bool ok = hdparm.waitForFinished(30000) && hdparm.exitStatus() == QProcess::NormalExit && hdparm.exitCode() == 0;
+                qCInfo(lcOps).noquote() << "hdparm -N p" << native << device << (ok ? "done" : "failed");
+                QMessageBox::information(&dialog, dialog.windowTitle(),
+                                         ok ? tr("Done. The drive shows all of itself now (if not yet, switch the PC off and on).")
+                                            : tr("The drive wouldn't: %1").arg(QString::fromLocal8Bit(hdparm.readAll()).trimmed()));
+                m_udisks->rescan(m_udisks->diskByPath(device) ? m_udisks->diskByPath(device)->blockPath : QString());
+            });
+            layout->addWidget(show, 0, Qt::AlignRight);
+        }
+    }
     // Hard drives: spin-down, power saving and the write cache.
     const bool power = !v && sel.kind != DiskMap::Selection::Kind::Free && PowerBox::applies(*d);
     if (power)

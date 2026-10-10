@@ -935,7 +935,7 @@ void UDisks::wipe(const Disk &disk)
     notOnWindows(tr("Couldn't wipe %1").arg(shortDevice(disk.device)));
 }
 
-void UDisks::secureErase(const Disk &disk, EraseMethod)
+void UDisks::secureErase(const Disk &disk, EraseMethod, int)
 {
     notOnWindows(tr("Couldn't erase %1").arg(shortDevice(disk.device)));
 }
@@ -954,6 +954,11 @@ void UDisks::smartUpdate(const Disk &)
 void UDisks::smartSelftest(const Disk &disk, const QString &)
 {
     notOnWindows(tr("Couldn't start a self-test on %1").arg(shortDevice(disk.device)));
+}
+
+void UDisks::smartSetEnabled(const Disk &disk, bool)
+{
+    notOnWindows(tr("Couldn't change SMART on %1").arg(shortDevice(disk.device)));
 }
 
 void UDisks::smartSelftestAbort(const Disk &disk)

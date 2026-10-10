@@ -3,8 +3,9 @@
 
 #pragma once
 
-// The Power part of a hard drive's Properties: what it's doing now, Sleep Now, when to spin
-// down, how hard to save power, and the write cache.
+// The drive settings part of an ATA drive's Properties (hard drives and SSDs): what it's doing
+// now and Sleep Now (hard drives), when to spin down, how hard to save power, how quietly to
+// seek, the write cache, and reading ahead. Only what the drive can do is shown.
 
 #include <QGroupBox>
 #include <QVariantMap>
@@ -21,7 +22,7 @@ class PowerBox : public QGroupBox
     Q_OBJECT
 public:
     PowerBox(UDisks *udisks, const Disk &disk, QWidget *parent = nullptr);
-    static bool applies(const Disk &disk); // a hard drive (ATA, spinning) that has any of these
+    static bool applies(const Disk &disk); // an ATA drive that has any of these
     QVariantMap configuration() const;      // what Save would set
 
 private:
@@ -32,10 +33,13 @@ private:
     QString m_blockPath;
     QVariantMap m_current;
     bool m_cacheWas = false;
+    bool m_lookaheadWas = false;
     QLabel *m_state;
     QPushButton *m_sleep;
     QComboBox *m_standby = nullptr;
     QComboBox *m_apm = nullptr;
+    QComboBox *m_aam = nullptr;
     QCheckBox *m_cache = nullptr;
+    QCheckBox *m_lookahead = nullptr;
     QPushButton *m_save;
 };

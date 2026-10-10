@@ -266,14 +266,25 @@ HealthDialog::HealthDialog(UDisks *udisks, const QString &blockPath, QWidget *pa
         if (const Disk *d = m_udisks->diskByPath(m_blockPath))
             m_udisks->smartUpdate(*d);
     });
-    connect(m_selftest, &QPushButton::clicked, this, [this] {
-        if (const Disk *d = m_udisks->diskByPath(m_blockPath))
-            m_udisks->smartSelftest(*d, QStringLiteral("short"));
-    });
+    auto test = [this](const QString &kind) {
+        if (const Disk *d = m_udisks->diskByPath(m_blockPath)) {
+            health::noteSelftestStarted(d->health.key, kind);
+            m_udisks->smartSelftest(*d, kind);
+        }
+    };
+    connect(m_selftest, &QPushButton::clicked, this, [test] { test(QStringLiteral("short")); });
     auto *longTest = new QPushButton(tr("Run Long Self-Test"));
-    connect(longTest, &QPushButton::clicked, this, [this] {
+    connect(longTest, &QPushButton::clicked, this, [test] { test(QStringLiteral("extended")); });
+    // A test made for after a hard drive was moved or posted: it looks for damage from knocks.
+    m_conveyance = new QPushButton(tr("Run Conveyance Test"));
+    m_conveyance->setToolTip(tr("A short test made for after a drive was moved or shipped: it looks for damage from knocks. "
+                                "Not every drive has it."));
+    connect(m_conveyance, &QPushButton::clicked, this, [test] { test(QStringLiteral("conveyance")); });
+    m_smartOn = new QPushButton(tr("Turn SMART On"));
+    m_smartOn->setToolTip(tr("SMART is the drive's own health record. It's off on this drive, so its health can't be told."));
+    connect(m_smartOn, &QPushButton::clicked, this, [this] {
         if (const Disk *d = m_udisks->diskByPath(m_blockPath))
-            m_udisks->smartSelftest(*d, QStringLiteral("extended"));
+            m_udisks->smartSetEnabled(*d, true);
     });
     auto *scan = new QPushButton(tr("Scan for Bad Sectors…"));
     connect(scan, &QPushButton::clicked, this, [this] {
@@ -287,9 +298,11 @@ HealthDialog::HealthDialog(UDisks *udisks, const QString &blockPath, QWidget *pa
             m_udisks->smartSelftestAbort(*d);
     });
     auto *buttons = new QHBoxLayout;
+    buttons->addWidget(m_smartOn);
     buttons->addWidget(m_selftest);
     buttons->addWidget(m_stopTest);
     buttons->addWidget(longTest);
+    buttons->addWidget(m_conveyance);
     buttons->addWidget(scan);
     buttons->addWidget(refresh);
     buttons->addStretch();
@@ -376,6 +389,13 @@ void HealthDialog::reload()
     if (!h.criticalWarnings.isEmpty())
         row(tr("Warnings:"), h.criticalWarnings.join(QStringLiteral(", ")));
     row(tr("Self-test:"), selftestText(h));
+    // The ones DiskForge saw finish, newest first.
+    QStringList earlier;
+    for (const health::SelftestRecord &r : health::selftestHistory(h.key).mid(0, 5))
+        earlier << tr("%1, %2: %3").arg(QLocale().toString(r.finished.toLocalTime(), QLocale::ShortFormat), health::selftestKind(r.kind),
+                                        health::selftestResult(r.status));
+    if (!earlier.isEmpty())
+        row(tr("Earlier tests:"), earlier.join(QLatin1Char('\n')));
     if (!disk->isLoop && !disk->revision.isEmpty()) {
         // The version from the drive, then what fwupd says about it, with what can be done.
         auto *firmwareBox = new QWidget;
@@ -403,8 +423,12 @@ void HealthDialog::reload()
         auto *firmwareName = new QLabel(tr("Firmware:"));
         m_form->addRow(firmwareName, firmwareBox);
     }
-    m_selftest->setEnabled(h.selftestStatus != QLatin1String("inprogress"));
-    m_stopTest->setVisible(h.selftestStatus == QLatin1String("inprogress"));
+    const bool running = h.selftestStatus == QLatin1String("inprogress");
+    m_selftest->setEnabled(!running && !h.smartOff);
+    m_stopTest->setVisible(running);
+    m_conveyance->setVisible(!h.nvme && !disk->isLoop && disk->rotationRate != 0);
+    m_conveyance->setEnabled(!running && !h.smartOff);
+    m_smartOn->setVisible(h.smartOff);
 
     const QVector<SmartAttribute> attrs = m_udisks->smartAttributes(*disk);
     m_attributes->clear();

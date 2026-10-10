@@ -11,6 +11,7 @@
 
 #include "udisks.h"
 
+#include <QDateTime>
 #include <QMap>
 #include <QString>
 #include <QVector>
@@ -77,5 +78,20 @@ QList<int> watchedCounters();
 QMap<int, qint64> seen(const QString &driveKey);
 void remember(const QString &driveKey, const QVector<SmartAttribute> &attributes);
 void acknowledge(const QString &driveKey, const QVector<SmartAttribute> &attributes);
+
+// Self-tests, kept with the drive: a test DiskForge saw finish goes into its history (the
+// newest 20), as drives keep only their last few results and NVMe drives show none of them.
+struct SelftestRecord {
+    QDateTime finished;
+    QString kind;   // "short", "extended", "conveyance"; empty when DiskForge didn't start it
+    QString status; // as the drive put it: "success", "aborted", "error_read"...
+};
+void noteSelftestStarted(const QString &key, const QString &kind);
+// Every time the drive's self-test status is seen: a test that was running and isn't now is
+// recorded.
+void noteSelftestStatus(const QString &key, const QString &status);
+QVector<SelftestRecord> selftestHistory(const QString &key);
+QString selftestResult(const QString &status); // in plain words: "passed", "stopped", "failed (read error)"
+QString selftestKind(const QString &kind);     // "short", "long", "conveyance"
 
 } // namespace health

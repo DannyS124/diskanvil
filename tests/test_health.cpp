@@ -44,8 +44,27 @@ QStringList codes(const health::Verdict &v)
 
 } // namespace
 
+void hiddenArea()
+{
+    using drivepower::parseHdparmN;
+    const auto none = parseHdparmN(QStringLiteral("\n/dev/sda:\n max sectors   = 976773168/976773168, HPA is disabled\n"));
+    const auto some = parseHdparmN(QStringLiteral("/dev/sdb:\n max sectors   = 976771055/976773168, HPA is enabled\n"));
+    const auto odd = parseHdparmN(QStringLiteral("/dev/sdc:\n SG_IO: bad/missing sense data\n"));
+    report(none.known && none.hidden() == 0 && some.known && some.hidden() == 2113 && !odd.known,
+           QStringLiteral("hidden area: hdparm -N's answer is read, and what's hidden worked out"));
+    drivepower::Changes c;
+    c.aam = 128;
+    c.lookahead = 0;
+    c.writeCache = drivepower::kDriveDefault;
+    const QVariantMap next = drivepower::configuration({{QStringLiteral("ata-write-cache-enabled"), true}}, c);
+    report(next.value(QStringLiteral("ata-aam-level")).toInt() == 128 && next.value(QStringLiteral("ata-read-lookahead-enabled")) == QVariant(false)
+               && !next.contains(QStringLiteral("ata-write-cache-enabled")),
+           QStringLiteral("drive settings: seek noise, reading ahead, and a switch back to the drive's own"));
+}
+
 void healthTests()
 {
+    hiddenArea();
     QTemporaryDir config;
     qputenv("XDG_CONFIG_HOME", QFile::encodeName(config.path()));
 
@@ -308,8 +327,11 @@ void healthTests()
     flash.nvmeNamespace = true;
     Disk bare = hdd;
     bare.ataPm = false;
-    report(PowerBox::applies(hdd) && !PowerBox::applies(solid) && !PowerBox::applies(image) && !PowerBox::applies(flash) && !PowerBox::applies(bare),
-           QStringLiteral("power settings show for hard drives that have them, not for SSDs or images"));
+    Disk solidCache = solid;
+    solidCache.ataWriteCache = true;
+    report(PowerBox::applies(hdd) && !PowerBox::applies(solid) && PowerBox::applies(solidCache) && !PowerBox::applies(image) && !PowerBox::applies(flash)
+               && !PowerBox::applies(bare),
+           QStringLiteral("drive settings show for drives that have them (an SSD's write cache too), not for an SSD's spin-down, images or NVMe"));
 
     int described = 0;
     for (const int id : {1, 3, 4, 5, 7, 9, 10, 12, 177, 184, 187, 188, 190, 194, 196, 197, 198, 199, 231, 241})

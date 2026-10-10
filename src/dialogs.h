@@ -74,6 +74,10 @@ public:
     QString label() const;
     QString passphrase() const; // empty = not encrypted
 
+    // Over-provisioning: on an SSD, the end of the drive left unused, as spare room for the
+    // drive's own housekeeping. kSparePercent is the usual suggestion.
+    static constexpr int kSparePercent = 10;
+
 private:
     QSpinBox *m_size;
     QComboBox *m_fs;
