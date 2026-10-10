@@ -390,6 +390,7 @@ private:
     void wipeOffline(const QString &path, quint64 size, int number, const QString &name, const QString &failure);
     void showWipe(const QString &id, quint64 done);
     bool smartSend(const Disk &disk, unsigned char feature, unsigned char sector);
+    void ownFat32(const Volume &volume, const QString &label, const std::function<void(bool ok, const QString &error)> &done);
     void finishSmart(const Disk &disk, bool ok, const QString &message);
     // Reports, a moment later, that something isn't in the Windows version yet.
     void notOnWindows(const QString &failure);

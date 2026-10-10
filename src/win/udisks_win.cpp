@@ -16,6 +16,7 @@
 #include "udisks.h"
 
 #include "applog.h"
+#include "fat32format.h"
 #include "format.h"
 #include "fsprobe.h"
 #include "health.h"
@@ -1213,25 +1214,51 @@ void UDisks::createPartition(const Disk &disk, quint64 offset, quint64 size, con
     const quint64 end = std::min<quint64>(start + (size + MiB - 1) / MiB * MiB, freeEnd);
     if (end <= start)
         return refuse(tr("not enough space"));
-    if (windows == QLatin1String("FAT32") && end - start > kFat32Most)
-        return refuse(tr("Windows only makes FAT32 up to 32 GB; exFAT works on almost everything made since 2010"));
+    // Windows won't make FAT32 this big: the partition is made bare, DiskForge formats it, and only
+    // then does it get a letter (as raw, it would have Windows ask to format it).
+    const bool ownFormat = windows == QLatin1String("FAT32") && end - start > kFat32Most;
 
     QString script = QStringLiteral("$p = New-Partition -DiskNumber ([int]$env:DF_DISK) -Offset ([uint64]$env:DF_OFFSET) -Size ([uint64]$env:DF_SIZE)");
     if (disk.tableType == QLatin1String("dos"))
         script += windows == QLatin1String("FAT32") ? QStringLiteral(" -MbrType FAT32") : QStringLiteral(" -MbrType IFS");
     script += QStringLiteral("; ");
-    if (!windows.isEmpty())
+    if (ownFormat)
+        script += QStringLiteral("Write-Output $p.PartitionNumber");
+    else if (!windows.isEmpty())
         script += label.isEmpty() ? QStringLiteral("$p | Format-Volume -FileSystem $env:DF_FS -Confirm:$false -Force | Out-Null; ")
                                   : QStringLiteral("$p | Format-Volume -FileSystem $env:DF_FS -NewFileSystemLabel $env:DF_LABEL -Confirm:$false -Force | Out-Null; ");
-    script += QStringLiteral("$p | Add-PartitionAccessPath -AssignDriveLetter -ErrorAction SilentlyContinue");
+    if (!ownFormat)
+        script += QStringLiteral("$p | Add-PartitionAccessPath -AssignDriveLetter -ErrorAction SilentlyContinue");
     storage(this, script,
             {{QStringLiteral("DF_DISK"), QString::number(diskNumber(disk.blockPath))}, {QStringLiteral("DF_OFFSET"), QString::number(start)},
              {QStringLiteral("DF_SIZE"), QString::number(end - start)}, {QStringLiteral("DF_FS"), windows}, {QStringLiteral("DF_LABEL"), label}},
-            [this, path = disk.blockPath, name, failure, fsName = fs ? fs->name : fsType, start, end](bool ok, const QString &said) {
+            [this, path = disk.blockPath, name, failure, fsName = fs ? fs->name : fsType, start, end, ownFormat, label](bool ok, const QString &said) {
                 forgetProbes(diskByPath(path));
                 refresh();
-                emit operationFinished(ok, ok ? tr("Created a %1 %2 partition on %3").arg(formatSize(end - start), fsName, name)
-                                              : failure + QStringLiteral(": ") + said);
+                const QString done = tr("Created a %1 %2 partition on %3").arg(formatSize(end - start), fsName, name);
+                if (!ok || !ownFormat) {
+                    emit operationFinished(ok, ok ? done : failure + QStringLiteral(": ") + said);
+                    return;
+                }
+                const Disk *d = diskByPath(path);
+                const Volume *made = nullptr;
+                for (const Volume &v : d ? d->volumes : QVector<Volume>()) {
+                    if (v.number == said.toInt())
+                        made = &v;
+                }
+                if (!made) {
+                    emit operationFinished(false, failure + QStringLiteral(": ") + tr("the new partition didn't show up"));
+                    return;
+                }
+                ownFat32(*made, label, [this, path, number = made->number, done, failure](bool formatted, const QString &error) {
+                    storage(this, QStringLiteral("Add-PartitionAccessPath -DiskNumber ([int]$env:DF_DISK) -PartitionNumber ([int]$env:DF_PART) -AssignDriveLetter"),
+                            {{QStringLiteral("DF_DISK"), QString::number(diskNumber(path))}, {QStringLiteral("DF_PART"), QString::number(number)}},
+                            [this, path, done, failure, formatted, error](bool, const QString &) {
+                                forgetProbes(diskByPath(path));
+                                refresh();
+                                emit operationFinished(formatted, formatted ? done : failure + QStringLiteral(": ") + error);
+                            });
+                });
             });
 }
 
@@ -1271,8 +1298,15 @@ void UDisks::format(const Volume &volume, const QString &fsType, const QString &
         return refuse(tr("Windows can't make LUKS encrypted partitions; DiskForge Live can"));
     if (windows.isEmpty())
         return refuse(onlyOnLive(fs ? fs->name : fsType));
-    if (windows == QLatin1String("FAT32") && volume.size > kFat32Most)
-        return refuse(tr("Windows only makes FAT32 up to 32 GB; exFAT works on almost everything made since 2010"));
+    if (windows == QLatin1String("FAT32") && volume.size > kFat32Most) {
+        // Windows won't make FAT32 this big; DiskForge's own formatter will.
+        ownFat32(volume, label, [this, path = disk ? disk->blockPath : QString(), name, failure](bool ok, const QString &error) {
+            forgetProbes(diskByPath(path));
+            refresh();
+            emit operationFinished(ok, ok ? tr("Formatted %1 as %2").arg(name, QStringLiteral("FAT32")) : failure + QStringLiteral(": ") + error);
+        });
+        return;
+    }
     // A partition by its number; a file system on the whole drive (no table) by its volume.
     const QString volumeName = m_windows->volumeNames.value(volume.objectPath);
     QString target;
@@ -1294,6 +1328,58 @@ void UDisks::format(const Volume &volume, const QString &fsType, const QString &
                 refresh();
                 emit operationFinished(ok, ok ? tr("Formatted %1 as %2").arg(name, fsName) : failure + QStringLiteral(": ") + said);
             });
+}
+
+// FAT32 made by DiskForge's own formatter (fat32format.cpp), where Windows won't: over 32 GB. The
+// volume is locked and taken out of use, written through, and let go; Windows reads it afresh.
+// It's on a thread of its own, since a big volume's FATs take a while to write.
+void UDisks::ownFat32(const Volume &volume, const QString &label, const std::function<void(bool, const QString &)> &done)
+{
+    const Disk *disk = diskOf(volume);
+    QString path = m_windows->volumeNames.value(volume.objectPath);
+    if (path.endsWith(QLatin1Char('\\')))
+        path.chop(1);
+    if (path.isEmpty())
+        path = volume.objectPath;
+    fat32::Options options;
+    options.label = label;
+    options.sectorSize = disk ? std::max(512, disk->sectorSize) : 512;
+    options.hiddenSectors = volume.offset / quint64(options.sectorSize);
+    const bool mbr = disk && disk->tableType == QLatin1String("dos");
+    QThread *thread = QThread::create([this, path, size = volume.size, options, done, mbr, number = volume.number, diskPath = disk ? disk->blockPath : QString()] {
+        QString error;
+        win::Handle h = win::openDevice(path, GENERIC_READ | GENERIC_WRITE);
+        bool ok = h.valid();
+        if (!ok)
+            error = win::lastErrorText();
+        else if (!win::ioctl(h.get(), FSCTL_LOCK_VOLUME, nullptr, 0, nullptr, 0) && GetLastError() != ERROR_INVALID_FUNCTION) {
+            ok = false; // (a partition with no volume on it can't be locked, nor needs to be)
+            error = tr("something has files open on it; close them and try again");
+        }
+        if (ok) {
+            win::ioctl(h.get(), FSCTL_DISMOUNT_VOLUME, nullptr, 0, nullptr, 0);
+            const int fd = _open_osfhandle(intptr_t(h.release()), _O_RDWR | _O_BINARY);
+            ok = fd >= 0 && fat32::format(fd, 0, size, options, &error);
+            if (fd >= 0) {
+                win::ioctl(reinterpret_cast<HANDLE>(_get_osfhandle(fd)), FSCTL_UNLOCK_VOLUME, nullptr, 0, nullptr, 0);
+                _close(fd);
+            }
+        }
+        QMetaObject::invokeMethod(this, [this, ok, error, done, mbr, number, diskPath] {
+            if (!ok || !mbr)
+                return done(ok, error);
+            // On an MBR drive, its type says FAT32 too, for cameras and old PCs that look.
+            storage(this, QStringLiteral("Set-Partition -DiskNumber ([int]$env:DF_DISK) -PartitionNumber ([int]$env:DF_PART) -MbrType FAT32"),
+                    {{QStringLiteral("DF_DISK"), QString::number(diskNumber(diskPath))}, {QStringLiteral("DF_PART"), QString::number(number)}},
+                    [done](bool, const QString &) { done(true, {}); });
+        }, Qt::QueuedConnection);
+    });
+    m_windows->workers << thread;
+    connect(thread, &QThread::finished, this, [this, thread] {
+        m_windows->workers.removeOne(thread);
+        thread->deleteLater();
+    });
+    thread->start();
 }
 
 void UDisks::resizeLimitsThen(const Volume &volume, QObject *context, const std::function<void(const ResizeLimits &)> &then)
