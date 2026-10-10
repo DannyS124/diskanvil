@@ -496,14 +496,16 @@ void fileSystems(const QString &dir)
             expected[QString::fromUtf8(f[0])].push_back({QString::fromUtf8(f[1]), f[2] == "yes", f[3].toULongLong(), f[4]});
     }
     const QHash<QString, QString> labels = {{QStringLiteral("fat12"), QStringLiteral("TESTFAT12")}, {QStringLiteral("fat16"), QStringLiteral("TESTFAT16")},
-                                            {QStringLiteral("fat32"), QStringLiteral("TESTFAT32")}, {QStringLiteral("exfat"), QStringLiteral("TESTEXFAT")}};
-    for (const QString &name : {QStringLiteral("fat12"), QStringLiteral("fat16"), QStringLiteral("fat32"), QStringLiteral("exfat")}) {
+                                            {QStringLiteral("fat32"), QStringLiteral("TESTFAT32")}, {QStringLiteral("exfat"), QStringLiteral("TESTEXFAT")},
+                                            {QStringLiteral("ntfs"), QStringLiteral("TESTNTFS")}};
+    for (const QString &name : {QStringLiteral("fat12"), QStringLiteral("fat16"), QStringLiteral("fat32"), QStringLiteral("exfat"), QStringLiteral("ntfs")}) {
         const QByteArray image = unpack(data + name + QStringLiteral(".img.zst"));
         report(!image.isEmpty(), QStringLiteral("%1: the test image unpacks").arg(name));
         auto source = lost::Source::fromMemory(image);
         QVector<lost::Volume> volumes;
         const QVector<lost::Found> found = quickScan(source, &volumes);
-        report(volumes.size() == 1 && volumes.value(0).label == labels[name] && volumes.value(0).type == (name == QLatin1String("exfat") ? QLatin1String("exfat") : QLatin1String("vfat")),
+        const QString type = name.startsWith(QLatin1String("fat")) ? QStringLiteral("vfat") : name;
+        report(volumes.size() == 1 && volumes.value(0).label == labels[name] && volumes.value(0).type == type,
                QStringLiteral("%1: the file system and its label are found").arg(name),
                volumes.isEmpty() ? QStringLiteral("none") : volumes[0].type + QLatin1Char(' ') + volumes[0].label);
 
@@ -539,11 +541,14 @@ void fileSystems(const QString &dir)
                        QStringLiteral("checked %1, condition %2").arg(match->checked).arg(int(match->condition)));
             // A short name with no long one loses its first letter for good on FAT; a long name
             // gives it back.
-            if (e.deleted && file == QLatin1String("README.TXT") && name != QLatin1String("exfat"))
+            if (e.deleted && file == QLatin1String("README.TXT") && name.startsWith(QLatin1String("fat")))
                 report(match->nameGuessed && match->name == QLatin1String("_EADME.TXT"), what + QStringLiteral(": the lost first letter is said to be a guess"),
                        match->name);
             if (e.deleted && file == QLatin1String("notes.txt"))
                 report(!match->nameGuessed && match->name == file, what + QStringLiteral(": its whole name comes back"), match->name);
+            if (e.path.startsWith(QLatin1String("Recycle Bin/")))
+                report(match->note.contains(QLatin1String("C:\\Users\\Test\\Pictures")), what + QStringLiteral(": it says where it was before the bin"),
+                       match->note);
         }
 
         // Saving keeps the folders the files were in.
@@ -572,6 +577,28 @@ void fileSystems(const QString &dir)
         QObject::connect(&deep, &lost::DeepScan::found, [&carved](const QVector<lost::Found> &files) { carved += int(files.size()); });
         deep.run();
         report(carved == 0, QStringLiteral("%1: the deep scan doesn't find them again").arg(name), QString::number(carved));
+    }
+
+    // Deleted by Linux's own NTFS driver, which takes the names away: the files are still all
+    // there, named after what's in them.
+    {
+        auto source = lost::Source::fromMemory(unpack(data + QStringLiteral("ntfs-linux.img.zst")));
+        QSet<QByteArray> nameless;
+        QStringList names;
+        for (const lost::Found &f : quickScan(source)) {
+            if (f.deleted && f.nameGuessed && f.name.startsWith(QLatin1String("Nameless file"))) {
+                lost::FileReader reader(source, f);
+                nameless.insert(QCryptographicHash::hash(reader.head(qint64(f.size)), QCryptographicHash::Sha256).toHex());
+                names << f.name;
+            }
+        }
+        int missing = 0;
+        for (const Expected &e : expected.value(QStringLiteral("ntfs-linux"))) {
+            if (e.deleted && !e.path.startsWith(QLatin1String("Recycle Bin/")))
+                missing += !nameless.contains(e.sha256);
+        }
+        report(missing == 0 && names.size() == 6, QStringLiteral("ntfs: files Linux deleted come back without their names"),
+               QStringLiteral("%1 missing; %2").arg(missing).arg(names.join(QStringLiteral(", "))));
     }
 
     // Partition tables: the same file system inside an MBR and a GPT drive.
@@ -622,7 +649,7 @@ void fileSystemFuzz()
     // DISKFORGE_FUZZ_ROUNDS=1000 for a longer run by hand.
     const int rounds = qEnvironmentVariableIsSet("DISKFORGE_FUZZ_ROUNDS") ? qEnvironmentVariableIntValue("DISKFORGE_FUZZ_ROUNDS") : 60;
     int runs = 0;
-    for (const QString &name : {QStringLiteral("fat12"), QStringLiteral("fat32"), QStringLiteral("exfat")}) {
+    for (const QString &name : {QStringLiteral("fat12"), QStringLiteral("fat32"), QStringLiteral("exfat"), QStringLiteral("ntfs")}) {
         const QByteArray clean = unpack(data + name + QStringLiteral(".img.zst"));
         // Where the boot sector, the tables and the folders are: the first few hundred KiB.
         const qsizetype hot = std::min<qsizetype>(clean.size(), 640 * 1024);
@@ -636,7 +663,7 @@ void fileSystemFuzz()
             ++runs;
         }
     }
-    report(runs == 3 * rounds, QStringLiteral("file systems: %1 damaged images read without a crash").arg(3 * rounds));
+    report(runs == 4 * rounds, QStringLiteral("file systems: %1 damaged images read without a crash").arg(4 * rounds));
 }
 
 void lostFilesTests()

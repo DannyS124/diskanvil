@@ -40,6 +40,8 @@ struct Found {
     bool nameGuessed = false;   // FAT lost the first letter, and nothing said what it was
     bool piecesGuessed = false; // where its bytes are is worked out, not known
     bool checked = false;       // its contents were checked, start to end
+    QByteArray data;            // a small file kept in the file system's own records (NTFS): its bytes
+    QString note;               // anything else worth saying about it, in plain words
 };
 
 // A found file's bytes, read from where they are on the source.
@@ -54,6 +56,7 @@ public:
 private:
     std::shared_ptr<Source> m_source;
     QVector<Extent> m_extents;
+    QByteArray m_data;
     quint64 m_size;
 };
 
@@ -95,6 +98,8 @@ Q_SIGNALS:
     void finished(bool stopped);
 
 private:
+    void addRanges(const Found &file);
+
     std::shared_ptr<Source> m_source;
     std::atomic<bool> m_cancel{false};
     QVector<Volume> m_volumes;

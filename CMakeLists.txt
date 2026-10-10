@@ -58,7 +58,7 @@ add_library(diskforge-core STATIC
     src/imagesource.cpp src/imagesource.h
     src/lostsource.cpp src/lostsource.h
     src/lostscan.cpp src/lostscan.h
-    src/lostfs.cpp src/lostfs.h
+    src/lostfs.cpp src/lostfs.h src/lostntfs.cpp src/lostraw.h
     src/filetypes.cpp src/filetypes.h
     src/checksums.cpp src/checksums.h
     src/benchmark.cpp src/benchmark.h

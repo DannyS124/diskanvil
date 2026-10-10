@@ -16,9 +16,11 @@
 namespace lost {
 
 struct Extent {
-    quint64 start = 0;  // where it starts in the source, in bytes
+    quint64 start = 0;  // where it starts in the source, in bytes; kZeros: nothing stored, reads as zeros
     quint64 length = 0;
     quint64 end() const { return start + length; }
+    static constexpr quint64 kZeros = ~quint64(0); // a sparse part of an NTFS file
+    bool zeros() const { return start == kZeros; }
 };
 
 class Source

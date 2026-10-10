@@ -5,6 +5,7 @@
 
 #include "filetypes.h"
 #include "format.h"
+#include "lostraw.h"
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -33,43 +34,15 @@ QString tr(const char *text)
     return QCoreApplication::translate("lostfiles", text);
 }
 
-quint16 le16(const uchar *p)
-{
-    return qFromLittleEndian<quint16>(p);
-}
-
-quint32 le32(const uchar *p)
-{
-    return qFromLittleEndian<quint32>(p);
-}
-
-quint64 le64(const uchar *p)
-{
-    return qFromLittleEndian<quint64>(p);
-}
-
-QString utf16le(const uchar *p, int count)
-{
-    QString out;
-    out.reserve(count);
-    for (int i = 0; i < count; ++i)
-        out += QChar(char16_t(le16(p + 2 * i)));
-    return out;
-}
+using raw::bytes;
+using raw::le16;
+using raw::le32;
+using raw::le64;
+using raw::utf16le;
 
 QByteArray readBytes(Source &source, quint64 at, quint64 len)
 {
-    if (at >= source.size())
-        return {};
-    len = std::min(len, source.size() - at);
-    QByteArray data(qsizetype(len), Qt::Uninitialized);
-    source.read(at, data.data(), len);
-    return data;
-}
-
-const uchar *bytes(const QByteArray &data)
-{
-    return reinterpret_cast<const uchar *>(data.constData());
+    return raw::read(source, at, len);
 }
 
 // What a folder entry says, whichever file system it came from.
@@ -918,7 +891,8 @@ QVector<Extent> partitionsOf(Source &source)
 
 bool readFileSystem(Source &source, const Extent &where, const Batch &out, const std::atomic<bool> &cancel, Volume *volume)
 {
-    return walkExfat(source, where, out, cancel, volume) || walkFat(source, where, out, cancel, volume);
+    return walkExfat(source, where, out, cancel, volume) || readNtfs(source, where, out, cancel, volume)
+        || walkFat(source, where, out, cancel, volume);
 }
 
 void checkContents(const std::shared_ptr<Source> &source, Found &file, bool full)
@@ -954,7 +928,7 @@ void checkContents(const std::shared_ptr<Source> &source, Found &file, bool full
         file.condition = Condition::MaybeDamaged;
     if (source->unreadable(0, source->size()) && file.condition == Condition::Good) {
         for (const Extent &e : std::as_const(file.extents)) {
-            if (source->unreadable(e.start, e.length))
+            if (!e.zeros() && source->unreadable(e.start, e.length))
                 file.condition = Condition::Unreadable;
         }
     }

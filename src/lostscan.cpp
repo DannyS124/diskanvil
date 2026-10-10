@@ -49,6 +49,7 @@ QString conditionText(lost::Condition condition)
 lost::FileReader::FileReader(std::shared_ptr<Source> source, const Found &file)
     : m_source(std::move(source))
     , m_extents(file.extents)
+    , m_data(file.data)
     , m_size(file.size)
 {
 }
@@ -58,6 +59,14 @@ qint64 lost::FileReader::read(quint64 at, char *buf, qint64 len)
     if (at >= m_size || len <= 0)
         return 0;
     len = qint64(std::min<quint64>(quint64(len), m_size - at));
+    if (!m_data.isEmpty()) {
+        const qint64 n = std::max<qint64>(0, std::min<qint64>(len, m_data.size() - qint64(at)));
+        if (n > 0)
+            memcpy(buf, m_data.constData() + at, size_t(n));
+        if (n < len)
+            memset(buf + n, 0, size_t(len - n));
+        return len;
+    }
     qint64 done = 0;
     quint64 passed = 0; // bytes of the file in the extents before this one
     for (const Extent &e : std::as_const(m_extents)) {
@@ -67,7 +76,7 @@ qint64 lost::FileReader::read(quint64 at, char *buf, qint64 len)
         if (want < passed + e.length) {
             const quint64 inside = want - passed;
             const quint64 n = std::min<quint64>(e.length - inside, quint64(len - done));
-            const quint64 got = m_source->read(e.start + inside, buf + done, n);
+            const quint64 got = e.zeros() ? 0 : m_source->read(e.start + inside, buf + done, n);
             if (got < n)
                 memset(buf + done + got, 0, n - got);
             done += qint64(n);
@@ -92,6 +101,14 @@ lost::QuickScan::QuickScan(std::shared_ptr<Source> source)
 {
 }
 
+void lost::QuickScan::addRanges(const Found &file)
+{
+    for (const Extent &e : file.extents) {
+        if (!e.zeros())
+            m_ranges.push_back(e);
+    }
+}
+
 void lost::QuickScan::run()
 {
     qCInfo(lcOps).noquote() << "Find Lost Files: reading the file systems";
@@ -103,13 +120,13 @@ void lost::QuickScan::run()
         const bool read = readFileSystem(*m_source, where, [&](QVector<Found> &&batch) {
             QVector<Found> shown;
             for (Found &f : batch) {
-                if (!f.extents.isEmpty())
+                if (!f.extents.isEmpty() && !f.extents.first().zeros())
                     m_starts.push_back(f.extents.first().start);
                 // What's still in use is there for sure; what's deleted waits for its check.
                 if (f.deleted) {
                     deleted.push_back(std::move(f));
                 } else {
-                    m_ranges += f.extents;
+                    addRanges(f);
                     shown.push_back(std::move(f));
                 }
             }
@@ -137,7 +154,7 @@ void lost::QuickScan::run()
             budget -= f.size;
         checkContents(m_source, f, full);
         if (f.checked && f.condition == Condition::Good)
-            m_ranges += f.extents;
+            addRanges(f);
         batch.push_back(std::move(f));
         if (sinceBatch.elapsed() > 250) {
             Q_EMIT found(std::exchange(batch, {}));

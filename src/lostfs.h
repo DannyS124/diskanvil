@@ -11,8 +11,8 @@
 #include <atomic>
 #include <functional>
 
-// Find Lost Files' own readers for the file systems of USB sticks and memory cards: FAT (12,
-// 16 and 32) and exFAT. They list what a file system still knows about, deleted files and
+// Find Lost Files' own readers for the file systems of USB sticks, memory cards and Windows:
+// FAT (12, 16 and 32), exFAT and NTFS (lostntfs.cpp). They list what a file system still knows about, deleted files and
 // folders included, with their names. Our own code: The Sleuth Kit's licence doesn't mix with
 // GPL-3. Everything read from the drive is checked before it's used, every walk has a limit,
 // and nothing is ever written.
@@ -37,6 +37,8 @@ using Batch = std::function<void(QVector<Found> &&files)>;
 // the volume's label (or its type and place, when it has none). False when there's neither
 // there; `volume` says what was.
 bool readFileSystem(Source &source, const Extent &where, const Batch &out, const std::atomic<bool> &cancel, Volume *volume);
+// The NTFS part of that (lostntfs.cpp).
+bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::atomic<bool> &cancel, Volume *volume);
 
 // How whole a deleted file looks from what's in it: the start against what its name says it
 // is, and when `full`, the whole structure (the deep scan's checks). Sets condition and checked.
