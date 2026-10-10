@@ -428,8 +428,14 @@ void MainWindow::createActions()
     m_openImage = new QAction(themeIcon("document-open", "document-open"), tr("&Open Disk Image…"), this);
     m_openImage->setShortcut(QKeySequence::Open);
     connect(m_openImage, &QAction::triggered, this, [this] {
+#ifdef Q_OS_WIN
+        // What Windows itself opens as a drive.
+        const QString file = QFileDialog::getOpenFileName(this, tr("Open Disk Image"), QDir::homePath(),
+                                                          tr("Virtual disks (*.vhd *.vhdx);;All files (*)"));
+#else
         const QString file = QFileDialog::getOpenFileName(this, tr("Open Disk Image"), QDir::homePath(),
                                                           tr("Disk images (*.iso *.img *.raw);;All files (*)"));
+#endif
         if (!file.isEmpty())
             m_udisks->openImage(file);
     });
@@ -759,11 +765,10 @@ void MainWindow::createActions()
 
 #ifdef Q_OS_WIN
     // Linux's own things (LUKS, fstab, RAID, Btrfs), and what the Windows version can't do yet:
-    // so far it reads drives and partitions them (tables, partitions, formatting, resizing,
-    // checking), through Windows' own storage commands.
-    for (QAction *a : {m_lock, m_changePass, m_startup, m_raidCheck, m_snapshots, m_typeFlags, m_recover, m_wipe, m_secureErase,
-                       m_openImage, m_detachImage, m_writeImage, m_windowsUsb, m_rescueUsb, m_restore, m_clone, m_badSectors,
-                       m_checkStick, m_safelyRemove, m_cleanup, m_optimize})
+    // so far it reads drives, partitions them (tables, partitions, formatting, resizing,
+    // checking), wipes them, opens virtual disks and removes drives safely.
+    for (QAction *a : {m_lock, m_changePass, m_startup, m_raidCheck, m_snapshots, m_typeFlags, m_recover, m_secureErase,
+                       m_writeImage, m_windowsUsb, m_rescueUsb, m_restore, m_clone, m_badSectors, m_checkStick, m_cleanup, m_optimize})
         a->setVisible(false);
 #endif
 
@@ -1478,7 +1483,7 @@ void MainWindow::showProperties()
         add(tr("Capacity"), bytes(d->size));
         if (d->rotationRate > 1) // 1: it spins, but the drive didn't say how fast
             add(tr("Rotation rate"), tr("%1 rpm").arg(d->rotationRate));
-        add(tr("Image file"), d->backingFile);
+        add(tr("Image file"), QDir::toNativeSeparators(d->backingFile));
         add(tr("Removable"), d->removable ? tr("Yes") : tr("No"));
         if (d->health.state != Health::State::Unknown) {
             add(tr("Health"), d->health.summary);

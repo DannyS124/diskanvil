@@ -24,12 +24,16 @@
 
 #include <QCollator>
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
+#include <QElapsedTimer>
+#include <QFileInfo>
 #include <QHash>
-#include <QSysInfo>
+#include <QProcess>
 #include <QRandomGenerator>
 #include <QRegularExpression>
-#include <QProcess>
+#include <QSysInfo>
+#include <QThread>
 #include <QTimer>
 
 #include <algorithm>
@@ -40,6 +44,7 @@
 #include <windows.h>
 #include <winioctl.h>
 #include <cfgmgr32.h>
+#include <virtdisk.h>
 #include <setupapi.h>
 
 namespace {
@@ -269,6 +274,37 @@ struct DriveInfo {
     QString instanceId; // the device's ID in Windows' device tree
 };
 
+// The file a virtual disk (a .vhd or .vhdx Windows opened) is kept in, by the volume it's on and
+// where on it.
+QString imageOf(HANDLE disk)
+{
+    QByteArray buffer(16384, '\0');
+    auto *info = reinterpret_cast<STORAGE_DEPENDENCY_INFO *>(buffer.data());
+    info->Version = STORAGE_DEPENDENCY_INFO_VERSION_2;
+    ULONG used = 0;
+    const auto flags = GET_STORAGE_DEPENDENCY_FLAG(GET_STORAGE_DEPENDENCY_FLAG_HOST_VOLUMES | GET_STORAGE_DEPENDENCY_FLAG_DISK_HANDLE);
+    if (GetStorageDependencyInformation(disk, flags, ULONG(buffer.size()), info, &used) != ERROR_SUCCESS || info->NumberEntries == 0)
+        return {};
+    const STORAGE_DEPENDENCY_INFO_TYPE_2 &e = info->Version2Entries[0];
+    if (!e.HostVolumeName || !e.DependentVolumeRelativePath)
+        return {};
+    // Windows names the volume without the \\?\ and the closing backslash its letter is looked up by.
+    QString volume = QString::fromWCharArray(e.HostVolumeName);
+    if (volume.startsWith(QLatin1String("Volume{")))
+        volume.prepend(QStringLiteral("\\\\?\\"));
+    if (!volume.endsWith(QLatin1Char('\\')))
+        volume += QLatin1Char('\\');
+    QString root = volume;
+    wchar_t names[1024] = {};
+    DWORD length = 0;
+    if (GetVolumePathNamesForVolumeNameW(win::wide(volume).c_str(), names, 1024, &length) && names[0])
+        root = QString::fromWCharArray(names);
+    QString relative = QString::fromWCharArray(e.DependentVolumeRelativePath);
+    while (relative.startsWith(QLatin1Char('\\')))
+        relative.remove(0, 1);
+    return QDir::fromNativeSeparators(root + relative);
+}
+
 QVector<DriveInfo> listDrives()
 {
     QVector<DriveInfo> out;
@@ -330,9 +366,20 @@ struct UDisks::Windows {
     QHash<QString, fsprobe::Result> probed;
     // Each partition's volume, \\?\Volume{...}\, for the ones Windows mounted.
     QHash<QString, QString> volumeNames;
+    // DiskForge's own long jobs (wiping), shown like UDisks' ones; how to stop each, what to say
+    // when it's been stopped, and the threads doing them.
+    QVector<Job> jobs;
+    QHash<QString, std::shared_ptr<std::atomic<bool>>> stops;
+    QHash<QString, QString> stopMessages;
+    QList<QThread *> workers;
 
     ~Windows()
     {
+        // A wipe still going is stopped, and waited for: its thread reports back to UDisks.
+        for (const auto &stop : std::as_const(stops))
+            *stop = true;
+        for (QThread *t : std::as_const(workers))
+            t->wait(10000);
         for (HCMNOTIFICATION n : notifications) {
             if (n)
                 CM_Unregister_Notification(n);
@@ -463,6 +510,8 @@ void UDisks::refresh()
 
         // The partition table takes read access.
         const win::Handle disk = win::openDevice(d.blockPath, GENERIC_READ);
+        if (d.isLoop && disk.valid())
+            d.backingFile = imageOf(disk.get());
         const QByteArray layout = disk.valid() ? win::ioctl(disk.get(), IOCTL_DISK_GET_DRIVE_LAYOUT_EX, nullptr, 0, 16384) : QByteArray();
         auto probeAt = [&](quint64 offset, quint64 size, const QString &key) {
             const auto cached = m_windows->probed.constFind(key);
@@ -608,7 +657,7 @@ void UDisks::refresh()
     m_windows->probed = probed;
 
     m_disks = disks;
-    m_jobs = m_testJobs;
+    m_jobs = m_testJobs + m_windows->jobs;
     for (Disk &d : m_disks) {
         if (m_testHealth.contains(d.blockPath))
             d.health = m_testHealth.value(d.blockPath);
@@ -1168,11 +1217,6 @@ QString UDisks::chkdskTarget(const Volume &volume) const
     return name;
 }
 
-void UDisks::powerOff(const Disk &disk)
-{
-    notOnWindows(tr("Couldn't power off %1").arg(shortDevice(disk.device)));
-}
-
 void UDisks::setMountAtStartup(const Volume &volume, bool)
 {
     notOnWindows(tr("Couldn't change how %1 is mounted").arg(shortDevice(volume.device)));
@@ -1181,16 +1225,6 @@ void UDisks::setMountAtStartup(const Volume &volume, bool)
 QString UDisks::startupMountPoint(const Volume &)
 {
     return {};
-}
-
-void UDisks::openImage(const QString &path, bool)
-{
-    notOnWindows(tr("Couldn't open %1").arg(QDir::toNativeSeparators(path)));
-}
-
-void UDisks::detachImage(const Disk &disk)
-{
-    notOnWindows(tr("Couldn't close %1").arg(shortDevice(disk.device)));
 }
 
 // BitLocker, through Windows' own Unlock-BitLocker. The password or recovery key goes in an
@@ -1243,20 +1277,223 @@ void UDisks::changePassphrase(const Volume &volume, const QString &, const QStri
     notOnWindows(tr("Couldn't change the passphrase of %1").arg(shortDevice(volume.device)));
 }
 
-void UDisks::wipe(const Disk &disk)
-{
-    notOnWindows(tr("Couldn't wipe %1").arg(shortDevice(disk.device)));
-}
-
 void UDisks::secureErase(const Disk &disk, EraseMethod, int)
 {
     notOnWindows(tr("Couldn't erase %1").arg(shortDevice(disk.device)));
 }
 
-void UDisks::prepareUnplug(const Disk &disk, const std::function<void(bool ready)> &done)
+// Windows' own Safely Remove Hardware: it writes out what's waiting and lets go of the drive, or
+// says what still uses it. It can wait on programs, so it runs off the window's thread.
+void UDisks::powerOff(const Disk &disk)
 {
-    notOnWindows(tr("Couldn't get %1 ready to unplug").arg(shortDevice(disk.device)));
-    QTimer::singleShot(0, this, [done] { done(false); });
+    const QString name = shortDevice(disk.device);
+    const QString failure = tr("Couldn't safely remove %1").arg(name);
+    if (refuseSystem(&disk, failure))
+        return;
+    if (!disk.canPowerOff) {
+        QTimer::singleShot(0, this, [this, failure] { emit operationFinished(false, failure + QStringLiteral(": ") + tr("this drive can't be removed while the PC is on")); });
+        return;
+    }
+    QThread *thread = QThread::create([this, instance = disk.drivePath, name, failure] {
+        DEVINST node = 0;
+        std::wstring id = win::wide(instance);
+        bool ok = false;
+        QString why = tr("Windows can't find it anymore");
+        if (CM_Locate_DevNodeW(&node, id.data(), CM_LOCATE_DEVNODE_NORMAL) == CR_SUCCESS) {
+            // What's removed is the device the disk belongs to: the stick, or the USB box it's in.
+            for (int i = 0; i < 6; ++i) {
+                ULONG caps = 0, size = sizeof caps;
+                if (CM_Get_DevNode_Registry_PropertyW(node, CM_DRP_CAPABILITIES, nullptr, &caps, &size, 0) == CR_SUCCESS && (caps & CM_DEVCAP_REMOVABLE))
+                    break;
+                DEVINST parent = 0;
+                if (CM_Get_Parent(&parent, node, 0) != CR_SUCCESS)
+                    break;
+                node = parent;
+            }
+            PNP_VETO_TYPE veto = PNP_VetoTypeUnknown;
+            wchar_t vetoName[MAX_PATH] = {};
+            ok = CM_Request_Device_EjectW(node, &veto, vetoName, MAX_PATH, 0) == CR_SUCCESS && veto == PNP_VetoTypeUnknown;
+            why = veto == PNP_VetoOutstandingOpen ? tr("a program still has something open on it. Close it, and any File Explorer window showing "
+                                                       "it, then try again")
+                                                  : tr("Windows won't let go of it (%1)").arg(QString::fromWCharArray(vetoName));
+        }
+        QMetaObject::invokeMethod(this, [this, ok, name, failure, why] {
+            refresh();
+            emit operationFinished(ok, ok ? tr("%1 can be unplugged now").arg(name) : failure + QStringLiteral(": ") + why);
+        }, Qt::QueuedConnection);
+    });
+    m_windows->workers << thread;
+    connect(thread, &QThread::finished, this, [this, thread] {
+        m_windows->workers.removeOne(thread);
+        thread->deleteLater();
+    });
+    thread->start();
+}
+
+// Removing it from Windows does all that's needed first, so it's ready as it is.
+void UDisks::prepareUnplug(const Disk &, const std::function<void(bool ready)> &done)
+{
+    QTimer::singleShot(0, this, [done] { done(true); });
+}
+
+// Windows itself opens .vhd and .vhdx files as drives, the way File Explorer's "Mount" does.
+void UDisks::openImage(const QString &path, bool readOnly)
+{
+    const QString name = QFileInfo(path).fileName();
+    const QString failure = tr("Couldn't open %1").arg(name);
+    const QString suffix = QFileInfo(path).suffix().toLower();
+    QString refusal;
+    if (suffix == QLatin1String("iso"))
+        refusal = tr("Windows opens ISO images itself: double-click it in File Explorer and it gets a drive letter");
+    else if (suffix != QLatin1String("vhd") && suffix != QLatin1String("vhdx"))
+        refusal = tr("Windows only opens .vhd and .vhdx images as drives. Find Lost Files reads the others, and DiskForge Live opens them all");
+    if (!refusal.isEmpty()) {
+        QTimer::singleShot(0, this, [this, failure, refusal] { emit operationFinished(false, failure + QStringLiteral(": ") + refusal); });
+        return;
+    }
+    storage(this,
+            QStringLiteral("Mount-DiskImage -ImagePath $env:DF_IMAGE -Access $env:DF_ACCESS | Out-Null; "
+                           "Write-Output (Get-DiskImage -ImagePath $env:DF_IMAGE | Get-Disk).Number"),
+            {{QStringLiteral("DF_IMAGE"), QDir::toNativeSeparators(QFileInfo(path).absoluteFilePath())},
+             {QStringLiteral("DF_ACCESS"), readOnly ? QStringLiteral("ReadOnly") : QStringLiteral("ReadWrite")}},
+            [this, name, failure](bool ok, const QString &said) {
+                bool numbered = false;
+                const int number = said.toInt(&numbered);
+                refresh();
+                if (ok && numbered)
+                    emit imageOpened(diskPath(DWORD(number)));
+                emit operationFinished(ok, ok ? tr("Opened %1").arg(name) : failure + QStringLiteral(": ") + said);
+            });
+}
+
+void UDisks::detachImage(const Disk &disk)
+{
+    const QString name = !disk.backingFile.isEmpty() ? QFileInfo(disk.backingFile).fileName() : shortDevice(disk.device);
+    const QString failure = tr("Couldn't close %1").arg(name);
+    if (!disk.isLoop) {
+        QTimer::singleShot(0, this, [this, failure] { emit operationFinished(false, failure + QStringLiteral(": ") + tr("not a disk image")); });
+        return;
+    }
+    storage(this, QStringLiteral("Dismount-DiskImage -DevicePath $env:DF_DEVICE | Out-Null"),
+            {{QStringLiteral("DF_DEVICE"), QStringLiteral("\\\\.\\PHYSICALDRIVE%1").arg(diskNumber(disk.blockPath))}},
+            [this, name, failure](bool ok, const QString &said) {
+                refresh();
+                emit operationFinished(ok, ok ? tr("Closed %1").arg(name) : failure + QStringLiteral(": ") + said);
+            });
+}
+
+void UDisks::wipe(const Disk &disk)
+{
+    const QString name = shortDevice(disk.device);
+    const QString failure = tr("Couldn't wipe %1").arg(name);
+    if (refuseSystem(&disk, failure))
+        return;
+    const int number = diskNumber(disk.blockPath);
+    // Offline, Windows lets go of everything on the drive, so all of it can be written.
+    storage(this, QStringLiteral("Set-Disk -Number ([int]$env:DF_DISK) -IsOffline $true"), {{QStringLiteral("DF_DISK"), QString::number(number)}},
+            [this, path = disk.blockPath, size = disk.size, number, name, failure](bool ok, const QString &said) {
+                if (!ok) {
+                    emit operationFinished(false, failure + QStringLiteral(": ") + said);
+                    return;
+                }
+                wipeOffline(path, size, number, name, failure);
+            });
+}
+
+void UDisks::wipeOffline(const QString &path, quint64 size, int number, const QString &name, const QString &failure)
+{
+    Job job;
+    job.path = QStringLiteral("wipe:") + path;
+    job.operation = QStringLiteral("format-erase"); // shown as Linux shows UDisks' wiping
+    job.objects = {path};
+    job.cancelable = true;
+    job.progressValid = true;
+    job.bytes = size;
+    job.started = quint64(QDateTime::currentMSecsSinceEpoch()) * 1000;
+    m_windows->jobs.push_back(job);
+    auto stop = std::make_shared<std::atomic<bool>>(false);
+    m_windows->stops.insert(job.path, stop);
+    m_jobs = m_testJobs + m_windows->jobs;
+    emit changed();
+
+    QThread *thread = QThread::create([this, path, size, number, name, failure, stop, id = job.path] {
+        QString error;
+        const win::Handle drive = win::openDevice(path, GENERIC_READ | GENERIC_WRITE, FILE_FLAG_NO_BUFFERING | FILE_FLAG_WRITE_THROUGH);
+        constexpr DWORD kChunk = 4 * 1024 * 1024;
+        void *zeros = VirtualAlloc(nullptr, kChunk, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE); // page-aligned, and zeros
+        quint64 done = 0;
+        QElapsedTimer sinceShown;
+        sinceShown.start();
+        if (!drive.valid() || !zeros)
+            error = win::lastErrorText();
+        while (error.isEmpty() && done < size && !*stop) {
+            const DWORD n = DWORD(std::min<quint64>(kChunk, size - done));
+            OVERLAPPED at {};
+            at.Offset = DWORD(done & 0xFFFFFFFF);
+            at.OffsetHigh = DWORD(done >> 32);
+            DWORD written = 0;
+            if (!WriteFile(drive.get(), zeros, n, &written, &at) || written != n) {
+                error = win::lastErrorText();
+                break;
+            }
+            done += n;
+            if (sinceShown.elapsed() > 500) {
+                sinceShown.restart();
+                QMetaObject::invokeMethod(this, [this, id, done] { showWipe(id, done); }, Qt::QueuedConnection);
+            }
+        }
+        if (drive.valid())
+            FlushFileBuffers(drive.get());
+        if (zeros)
+            VirtualFree(zeros, 0, MEM_RELEASE);
+        const bool stopped = *stop;
+        QMetaObject::invokeMethod(this, [this, id, number, name, failure, error, stopped] {
+            const QString stoppedMessage = m_windows->stopMessages.take(id);
+            m_windows->stops.remove(id);
+            m_windows->jobs.removeIf([&id](const Job &j) { return j.path == id; });
+            // Back online, it reads as the empty drive it is now.
+            storage(this, QStringLiteral("Set-Disk -Number ([int]$env:DF_DISK) -IsOffline $false"), {{QStringLiteral("DF_DISK"), QString::number(number)}},
+                    [this, name, failure, error, stopped, stoppedMessage](bool, const QString &) {
+                        refresh();
+                        if (!error.isEmpty())
+                            emit operationFinished(false, failure + QStringLiteral(": ") + error);
+                        else if (stopped)
+                            emit operationFinished(true, stoppedMessage.isEmpty() ? tr("Stopped wiping %1.").arg(name) : stoppedMessage);
+                        else
+                            emit operationFinished(true, tr("%1 has been wiped").arg(name));
+                    });
+        }, Qt::QueuedConnection);
+    });
+    m_windows->workers << thread;
+    connect(thread, &QThread::finished, this, [this, thread] {
+        m_windows->workers.removeOne(thread);
+        thread->deleteLater();
+    });
+    thread->start();
+}
+
+void UDisks::showWipe(const QString &id, quint64 done)
+{
+    for (Job &j : m_windows->jobs) {
+        if (j.path != id)
+            continue;
+        const quint64 now = quint64(QDateTime::currentMSecsSinceEpoch()) * 1000;
+        j.progress = j.bytes ? double(done) / double(j.bytes) : 0;
+        j.rate = now > j.started ? quint64(double(done) * 1e6 / double(now - j.started)) : 0;
+    }
+    m_jobs = m_testJobs + m_windows->jobs;
+    emit changed();
+}
+
+void UDisks::cancelJob(const QString &jobPath, const QString &stoppedMessage)
+{
+    const auto stop = m_windows->stops.value(jobPath);
+    if (!stop) {
+        QTimer::singleShot(0, this, [this] { emit jobStopFailed(tr("It had already finished.")); });
+        return;
+    }
+    m_windows->stopMessages.insert(jobPath, stoppedMessage);
+    *stop = true;
 }
 
 void UDisks::smartUpdate(const Disk &)
@@ -1304,10 +1541,6 @@ int UDisks::powerState(const Disk &)
     return -1;
 }
 
-void UDisks::cancelJob(const QString &, const QString &)
-{
-    QTimer::singleShot(0, this, [this] { emit jobStopFailed(tr("It had already finished.")); });
-}
 
 QVector<SmartAttribute> UDisks::smartAttributes(const Disk &)
 {

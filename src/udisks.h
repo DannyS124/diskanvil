@@ -385,6 +385,10 @@ private:
     std::shared_ptr<Windows> m_windows;
     void forgetProbes(const Disk *disk);
     QString chkdskTarget(const Volume &volume) const;
+    // Wiping, once Windows has let go of the drive: zeros written by DiskForge itself, shown as
+    // a job (with progress and Stop) like UDisks' own.
+    void wipeOffline(const QString &path, quint64 size, int number, const QString &name, const QString &failure);
+    void showWipe(const QString &id, quint64 done);
     // Reports, a moment later, that something isn't in the Windows version yet.
     void notOnWindows(const QString &failure);
 #endif
