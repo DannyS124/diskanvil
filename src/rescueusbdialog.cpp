@@ -275,6 +275,7 @@ void RescueUsbDialog::updateState()
     QString warning;
     // Copying a rescue stick: not onto itself.
     bool isSource = false;
+    bool asked = false;
     if (d && QFileInfo(m_inspectedPath).isDir()) {
         const QString source = QFileInfo(m_inspectedPath).canonicalFilePath();
         for (const Volume &v : d->volumes) {
@@ -284,6 +285,9 @@ void RescueUsbDialog::updateState()
     }
     if (isSource) {
         warning = redText(tr("That's the stick being copied. Plug in another one."));
+        ok = false;
+    } else if (d && QFileInfo(m_inspectedPath).isFile() && blockio::pathIsOnDisk(QFileInfo(m_inspectedPath).absoluteFilePath(), d->device)) {
+        warning = redText(tr("The ISO is on this stick. Pick another stick, or copy the ISO somewhere else first."));
         ok = false;
     } else if (d && m_inspected.error.isEmpty()) {
         const quint64 needed = m_inspected.bytes + kRoomForLogs;
@@ -300,10 +304,11 @@ void RescueUsbDialog::updateState()
             warning += QStringLiteral("<br>") + tr("Type <b>%1</b> to confirm:").arg(name.toHtmlEscaped());
             m_confirm->setPlaceholderText(name);
             ok = ok && m_confirm->text().trimmed() == name;
+            asked = true;
         }
     }
     m_warning->setText(warning);
-    m_confirm->setVisible(d && m_inspected.error.isEmpty() && !isSource);
+    m_confirm->setVisible(asked);
     m_make->setEnabled(ok);
 }
 

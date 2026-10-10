@@ -4,6 +4,7 @@
 #include "tools.h"
 
 #include "applog.h"
+#include "blockio.h"
 #include "blockmapwidget.h"
 #include "jobui.h"
 
@@ -1076,13 +1077,22 @@ void WriteImageDialog::updateState()
     const bool copy = m_isIso && m_copyMode->isChecked();
     m_verify->setEnabled(!copy); // copying always checks every file
     const quint64 room = d && d->size > m_analysis.bytes * 21 / 20 + 256 * 1024 * 1024 ? d->size - m_analysis.bytes * 21 / 20 - 256 * 1024 * 1024 : 0;
+#ifdef Q_OS_WIN
+    // The changes are kept on an ext4 partition, which Windows can't make.
+    const bool canPersist = false;
+#else
     const bool canPersist = copy && m_analysis.persistence != isomode::Persistence::None && room >= 1000000000ULL;
+#endif
     m_persist->setEnabled(canPersist);
     m_persistGb->setMaximum(std::max<int>(1, int(room / 1000000000ULL)));
     m_persistGb->setEnabled(canPersist && m_persist->isChecked());
     QString note = m_isIso && !m_analysis.canCopy() && !m_analysis.windows ? m_analysis.whyNot() : QString();
     if (copy && m_analysis.persistence == isomode::Persistence::None)
         note = tr("This one doesn't keep changes between starts.");
+#ifdef Q_OS_WIN
+    else if (copy)
+        note = tr("Keeping changes between starts needs an ext4 partition, which Windows can't make; DiskForge Live can.");
+#endif
     else if (copy && !canPersist)
         note = tr("There's no room on this stick to keep changes between starts.");
     m_modeNote->setText(note);
@@ -1101,12 +1111,17 @@ void WriteImageDialog::updateState()
         ok = false;
     }
     m_toWindows->setVisible(m_isIso && m_analysis.windows);
+    bool asked = false;
     if (d) {
         // Compressed and not saying its size: at least the file itself has to fit.
         quint64 needed = m_unpacked ? m_unpacked : quint64(image.size());
         if (copy)
             needed = m_analysis.bytes + 64 * 1024 * 1024 + (m_persist->isChecked() && canPersist ? quint64(m_persistGb->value()) * 1000000000ULL : 0);
-        if (image.isFile() && needed > d->size) {
+        if (image.isFile() && blockio::pathIsOnDisk(image.absoluteFilePath(), d->device)) {
+            warning += redText(tr("The image is on this drive, so writing it there would destroy it on the way. "
+                                  "Pick another drive, or copy the image somewhere else first."));
+            ok = false;
+        } else if (image.isFile() && needed > d->size) {
             warning += redText(tr("The image (%1) is bigger than this drive.").arg(formatSize(needed)));
             ok = false;
         } else {
@@ -1117,10 +1132,11 @@ void WriteImageDialog::updateState()
             warning += QStringLiteral("<br>") + tr("Type <b>%1</b> to confirm:").arg(name);
             m_confirm->setPlaceholderText(name);
             ok = ok && m_confirm->text().trimmed() == name;
+            asked = true;
         }
     }
     m_warning->setText(warning);
-    m_confirm->setVisible(d != nullptr);
+    m_confirm->setVisible(asked);
     m_write->setEnabled(ok);
 }
 

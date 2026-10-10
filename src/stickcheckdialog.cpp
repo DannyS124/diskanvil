@@ -221,6 +221,7 @@ void StickCheckDialog::start()
     m_progress->setVisible(true);
     m_phase->setText(tr("Opening the stick…"));
     adjustSize();
+    keepOnScreen(this);
     qCInfo(lcOps).noquote() << "Check a USB Stick on" << d->device << d->model << formatSize(d->size);
 
     const stickcheck::Mode chosen = mode();
@@ -236,10 +237,10 @@ void StickCheckDialog::start()
         });
         connect(m_checker, &stickcheck::Checker::marks, this, [this](const QVector<stickcheck::Mark> &marks) {
             for (const stickcheck::Mark &m : marks) {
-                const BlockMapData::State state = m.state == stickcheck::Mark::Good  ? BlockMapData::State::Good
-                                                 : m.state == stickcheck::Mark::Bad ? BlockMapData::State::Bad
-                                                                                     : BlockMapData::State::Pending;
-                m_map->data().mark(m.offset, m.length, state);
+                if (m.state == stickcheck::Mark::Good)
+                    m_map->data().markChecked(m.offset, m.length);
+                else
+                    m_map->data().mark(m.offset, m.length, m.state == stickcheck::Mark::Bad ? BlockMapData::State::Bad : BlockMapData::State::Pending);
             }
             m_map->refresh();
         });

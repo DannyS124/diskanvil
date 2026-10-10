@@ -28,8 +28,11 @@ QString jobProgress(const Job &job, quint64 nowUsec); // "34%, 49.00 MB/s, about
 QString jobStopQuestion(const Job &job, const QString &name, bool wholeDrive);
 QString jobStopButton(const Job &job);                // "Stop Wiping"
 QString jobStoppedMessage(const Job &job, const QString &name);
-// Long messages wrap onto more lines: make the dialog tall enough instead of squashing it.
+// Long messages wrap onto more lines: make the dialog tall enough instead of squashing it (up to
+// what the screen has room for), and keep it on the screen.
 void fitHeight(QWidget *dialog);
+// After a window has grown: back onto its screen if it went past the bottom or the right edge.
+void keepOnScreen(QWidget *window);
 QString diskTitle(const Disk &d);     // "SanDisk Ultra (sdb, 32.00 GB)"
 
 // Fills a progress bar and a "Phase, 120 MB/s, about 5 minutes left" label. Speed and

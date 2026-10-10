@@ -92,6 +92,15 @@ void BlockMapData::mark(quint64 offset, quint64 length, State state)
     });
 }
 
+void BlockMapData::markChecked(quint64 offset, quint64 length)
+{
+    forCells(offset, length, [&](Cell &c) {
+        c.read = true;
+        if (c.marked == State::Pending)
+            c.marked = State::Unread;
+    });
+}
+
 BlockMapData::State BlockMapData::state(int cell) const
 {
     const Cell &c = m_cells[cell];

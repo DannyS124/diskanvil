@@ -100,9 +100,7 @@ bool confirmMatches(QLabel *warning, QLineEdit *confirm, const QString &erases, 
         text += QStringLiteral("<br>") + redText(diskWarning(disk));
     text += QStringLiteral("<br>") + QObject::tr("Type <b>%1</b> to confirm:").arg(name);
     warning->setText(text);
-    warning->setVisible(true);
     confirm->setPlaceholderText(name);
-    confirm->setVisible(true);
     return confirm->text().trimmed() == name;
 }
 
@@ -149,8 +147,13 @@ CloneDialog::CloneDialog(UDisks *udisks, const QString &sourceBlockPath, QWidget
     layout->addWidget(m_plan);
     layout->addSpacing(6);
     layout->addWidget(m_replace);
+#ifdef Q_OS_WIN
+    layout->addWidget(noteLabel(tr("An exact copy, IDs included. Afterwards, don't keep both plugged in at the same time: "
+                                   "Windows takes one of two drives with the same IDs offline.")));
+#else
     layout->addWidget(noteLabel(tr("An exact copy, IDs included. Afterwards, don't keep both plugged in at the same time: "
                                    "Linux can't tell them apart and may use the wrong one.")));
+#endif
     layout->addWidget(m_keepBoth);
     layout->addWidget(noteLabel(tr("The copy gets new IDs, so both drives can be plugged in at once. "
                                    "Encrypted partitions keep theirs.")));
@@ -212,9 +215,9 @@ void CloneDialog::fillTargets()
 
 void CloneDialog::updateState()
 {
-    m_warning->setVisible(false);
-    m_confirm->setVisible(false);
-    m_grow->setVisible(false);
+    // Shown or hidden once, at the end: a box hidden while it has the keyboard loses it.
+    bool asked = false;
+    bool grow = false;
     const Disk *source = m_udisks->diskByPath(m_source);
     const Disk *target = m_udisks->diskByPath(m_targets->currentData().toString());
     bool ok = false;
@@ -237,12 +240,16 @@ void CloneDialog::updateState()
                                       .arg(formatSize(plan.bytes), durationText(seconds)));
             if (!source->tableType.isEmpty() && target->size > source->size + MiB) {
                 m_grow->setText(tr("Let the last partition use the extra %1").arg(formatSize(target->size - source->size)));
-                m_grow->setVisible(true);
+                grow = true;
             }
             ok = confirmMatches(m_warning, m_confirm, tr("Everything on %1 will be erased.").arg(diskTitle(*target)), *target,
                                 shortDevice(target->device));
+            asked = true;
         }
     }
+    m_grow->setVisible(grow);
+    m_warning->setVisible(asked);
+    m_confirm->setVisible(asked);
     m_start->setEnabled(ok && !m_running);
     fitHeight(this);
 }
@@ -449,8 +456,13 @@ void CloneDialog::finish(bool ok, const QString &message)
     setRunning(false);
     m_udisks->refresh();
     QString text = message;
+#ifdef Q_OS_WIN
+    if (ok && !m_newIds)
+        text += QStringLiteral("\n\n") + tr("Unplug one of the two drives: with the same IDs, Windows switches one of them off.");
+#else
     if (ok && !m_newIds)
         text += QStringLiteral("\n\n") + tr("Unplug one of the two drives before the next restart, or Linux may mix them up.");
+#endif
     if (!m_notes.isEmpty())
         text += QStringLiteral("\n\n") + m_notes.join(QLatin1Char('\n'));
     if (ok) {
@@ -725,8 +737,7 @@ void RestoreDialog::updateState()
 {
     if (m_running)
         return;
-    m_warning->setVisible(false);
-    m_confirm->setVisible(false);
+    bool asked = false; // the box is shown or hidden once, at the end (see CloneDialog)
     const Found f = lookUp(m_udisks, m_object);
     const QString file = m_file->text().trimmed();
     QString problem, info;
@@ -769,9 +780,12 @@ void RestoreDialog::updateState()
             if (problem.isEmpty()) {
                 const QString name = shortDevice(f.volume ? f.volume->device : f.disk->device);
                 ok = confirmMatches(m_warning, m_confirm, tr("Everything on %1 will be replaced by the backup.").arg(name), *f.disk, name);
+                asked = true;
             }
         }
     }
+    m_warning->setVisible(asked);
+    m_confirm->setVisible(asked);
     m_info->setText(problem.isEmpty() ? info : (info.isEmpty() ? QString() : info + QStringLiteral("<br>")) + redText(problem));
     m_checkFirst->setEnabled(!m_backup.sha256.isEmpty() || m_backup.compressed);
     m_start->setEnabled(ok);
@@ -1118,8 +1132,7 @@ void RescueDialog::updateState()
     m_file->setEnabled(m_toFile->isChecked());
     m_browse->setEnabled(m_toFile->isChecked());
     m_targets->setEnabled(m_toDrive->isChecked());
-    m_warning->setVisible(false);
-    m_confirm->setVisible(false);
+    bool asked = false; // the box is shown or hidden once, at the end (see CloneDialog)
     const Disk *source = m_udisks->diskByPath(m_source);
     QString problem, info;
     bool ok = false;
@@ -1149,10 +1162,14 @@ void RescueDialog::updateState()
         }
     } else {
         const Disk *target = m_udisks->diskByPath(m_targets->currentData().toString());
-        if (target)
+        if (target) {
             ok = confirmMatches(m_warning, m_confirm, tr("Everything on %1 will be erased.").arg(diskTitle(*target)), *target,
                                 shortDevice(target->device));
+            asked = true;
+        }
     }
+    m_warning->setVisible(asked);
+    m_confirm->setVisible(asked);
     if (source && !source->isSystem) {
         for (const Volume &v : source->volumes) {
             if (!v.mounts().isEmpty()) {

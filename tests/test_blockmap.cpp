@@ -81,6 +81,18 @@ QString states(const BlockMapData &map)
 
 void blockMapTests()
 {
+    // Check a USB Stick: written, then read back fine, except one bad megabyte.
+    constexpr quint64 kMiB = 1024 * 1024;
+    BlockMapData stick(32 * kMiB, false);
+    stick.mark(0, 32 * kMiB, BlockMapData::State::Pending);
+    stick.mark(5 * kMiB, kMiB, BlockMapData::State::Bad);
+    stick.markChecked(0, 16 * kMiB);
+    report(stick.count(BlockMapData::State::Good) == 15 && stick.count(BlockMapData::State::Bad) == 1
+               && stick.count(BlockMapData::State::Pending) == 16,
+           QStringLiteral("read back fine, written blocks turn checked; bad ones stay bad"),
+           QStringLiteral("%1 good, %2 bad, %3 written").arg(stick.count(BlockMapData::State::Good)).arg(stick.count(BlockMapData::State::Bad))
+               .arg(stick.count(BlockMapData::State::Pending)));
+
     sh(QStringLiteral("modprobe"), {QStringLiteral("dm-delay")});
     QTemporaryDir dir;
 

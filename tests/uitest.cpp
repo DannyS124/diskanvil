@@ -291,8 +291,18 @@ void cloneThroughWindow(MainWindow &window, UDisks &udisks, const QTemporaryDir 
             return true; // not listed yet; try again next tick
         targets->setCurrentIndex(index);
         for (QLineEdit *e : dialog->findChildren<QLineEdit *>()) {
-            if (e->placeholderText() == shortDevice(target))
-                e->setText(shortDevice(target));
+            if (e->placeholderText() != shortDevice(target))
+                continue;
+            // Typed a letter at a time, the box keeps the keyboard (hidden for a moment, it lost it
+            // to Cancel, and a space in "Disk 4" pressed it).
+            e->setFocus();
+            const QString name = shortDevice(target);
+            bool kept = true;
+            for (int n = 1; n <= name.size(); ++n) {
+                e->setText(name.left(n));
+                kept = kept && dialog->focusWidget() == e;
+            }
+            report(kept, QStringLiteral("typing the drive's name keeps the keyboard in the box"));
         }
         // Keep the layout identical so it can be compared (growing is tested in --clone).
         for (QCheckBox *box : dialog->findChildren<QCheckBox *>()) {

@@ -36,6 +36,8 @@ public:
     // Rescue Copy paints its whole map; a cell takes its worst state.
     void clearStates();
     void mark(quint64 offset, quint64 length, State state);
+    // Read back fine after it was written (Check a USB Stick): no longer Pending there.
+    void markChecked(quint64 offset, quint64 length);
 
     quint64 size() const { return m_size; }
     int cells() const { return int(m_cells.size()); }

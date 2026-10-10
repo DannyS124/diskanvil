@@ -10,6 +10,7 @@
 #include <QLayout>
 #include <QPointer>
 #include <QProgressBar>
+#include <QScreen>
 
 #include <algorithm>
 #include <memory>
@@ -137,10 +138,34 @@ void fitHeight(QWidget *dialog)
     if (!l)
         return;
     l->activate();
-    const int needed = l->hasHeightForWidth() ? l->totalHeightForWidth(dialog->width()) : l->totalSizeHint().height();
+    int needed = l->hasHeightForWidth() ? l->totalHeightForWidth(dialog->width()) : l->totalSizeHint().height();
+    // On a small screen, what can shrink does (a block map).
+    if (const QScreen *screen = dialog->screen()) {
+        const int frame = dialog->frameGeometry().height() - dialog->height();
+        needed = std::min(needed, std::max(l->totalMinimumSize().height(), screen->availableGeometry().height() - frame));
+    }
     dialog->setMinimumHeight(needed);
     if (needed > dialog->height())
         dialog->resize(dialog->width(), needed);
+    keepOnScreen(dialog);
+}
+
+void keepOnScreen(QWidget *window)
+{
+    const QScreen *screen = window->screen();
+    if (!screen)
+        return;
+    const QRect room = screen->availableGeometry();
+    const QRect frame = window->frameGeometry();
+    QPoint to = frame.topLeft();
+    if (frame.bottom() > room.bottom())
+        to.ry() -= frame.bottom() - room.bottom();
+    if (frame.right() > room.right())
+        to.rx() -= frame.right() - room.right();
+    to.setX(std::max(to.x(), room.left()));
+    to.setY(std::max(to.y(), room.top()));
+    if (to != frame.topLeft())
+        window->move(to);
 }
 
 PhaseProgress::PhaseProgress(QProgressBar *bar, QLabel *label)
