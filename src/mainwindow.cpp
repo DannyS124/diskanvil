@@ -382,8 +382,18 @@ void MainWindow::createActions()
                                         "printout or USB stick from back then. A company PC's IT department has it.")
                                          .arg(volumeTitle(*v))
                                    : tr("Passphrase for %1:").arg(volumeTitle(*v));
-        const QString pass = QInputDialog::getText(this, tr("Unlock %1").arg(shortDevice(v->device)), Qt::convertFromPlainText(prompt),
-                                                   QLineEdit::Password, {}, &ok);
+        // Its own dialog, so the explanation wraps instead of stretching it off the screen.
+        QInputDialog ask(this);
+        ask.setWindowTitle(tr("Unlock %1").arg(shortDevice(v->device)));
+        ask.setLabelText(prompt);
+        ask.setTextEchoMode(QLineEdit::Password);
+        for (QLabel *label : ask.findChildren<QLabel *>()) {
+            label->setWordWrap(true);
+            label->setTextFormat(Qt::PlainText);
+        }
+        ask.resize(480, ask.sizeHint().height());
+        ok = ask.exec() == QDialog::Accepted;
+        const QString pass = ask.textValue();
         if (!ok || pass.isEmpty())
             return;
         if (const Volume *fresh = volumeByPath(path))
