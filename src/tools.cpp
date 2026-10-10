@@ -176,25 +176,46 @@ ChangePassphraseDialog::ChangePassphraseDialog(const QString &device, QWidget *p
     , m_new(new QLineEdit)
     , m_confirm(new QLineEdit)
 {
-    setWindowTitle(tr("Change Passphrase of %1").arg(device));
     for (QLineEdit *e : {m_old, m_new, m_confirm})
         e->setEchoMode(QLineEdit::Password);
     auto *form = new QFormLayout;
+#ifdef Q_OS_WIN
+    // BitLocker: Windows doesn't ask for the old password while the drive is unlocked, and wants
+    // at least 8 characters.
+    setWindowTitle(tr("Change BitLocker Password of %1").arg(device));
+    form->addRow(tr("New password:"), m_new);
+    form->addRow(tr("New password again:"), m_confirm);
+    constexpr int least = 8;
+#else
+    setWindowTitle(tr("Change Passphrase of %1").arg(device));
     form->addRow(tr("Current passphrase:"), m_old);
     form->addRow(tr("New passphrase:"), m_new);
     form->addRow(tr("New passphrase again:"), m_confirm);
+    constexpr int least = 1;
+#endif
 
     QPushButton *ok;
     QDialogButtonBox *box = dialogButtons(this, tr("Change"), &ok);
-    auto update = [this, ok] {
-        ok->setEnabled(!m_old->text().isEmpty() && !m_new->text().isEmpty() && m_new->text() == m_confirm->text());
+    auto update = [this, ok, least] {
+#ifdef Q_OS_WIN
+        const bool old = true;
+#else
+        const bool old = !m_old->text().isEmpty();
+#endif
+        ok->setEnabled(old && m_new->text().size() >= least && m_new->text() == m_confirm->text());
     };
     for (QLineEdit *e : {m_old, m_new, m_confirm})
         connect(e, &QLineEdit::textChanged, this, update);
     update();
 
+    setMinimumWidth(440);
     auto *layout = new QVBoxLayout(this);
     layout->addLayout(form);
+#ifdef Q_OS_WIN
+    m_old->hide();
+    layout->addWidget(wrappingLabel(tr("<small>At least 8 characters. While the drive is unlocked, Windows doesn't need the old one. "
+                                       "Its recovery key keeps opening it either way.</small>")));
+#endif
     layout->addWidget(box);
 }
 

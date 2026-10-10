@@ -410,7 +410,11 @@ void MainWindow::createActions()
             m_udisks->lock(*v);
     });
 
+#ifdef Q_OS_WIN
+    m_changePass = new QAction(themeIcon("document-encrypt", "dialog-password"), tr("Change BitLocker &Password…"), this);
+#else
     m_changePass = new QAction(themeIcon("document-encrypt", "dialog-password"), tr("Change &Passphrase…"), this);
+#endif
     connect(m_changePass, &QAction::triggered, this, [this] {
         const Volume *v = selectedVolume();
         if (!v)
@@ -765,7 +769,7 @@ void MainWindow::createActions()
 
 #ifdef Q_OS_WIN
     // Linux's own things (LUKS, fstab, RAID, Btrfs), and what the Windows version can't do yet.
-    for (QAction *a : {m_lock, m_changePass, m_startup, m_raidCheck, m_snapshots, m_secureErase})
+    for (QAction *a : {m_startup, m_raidCheck, m_snapshots, m_secureErase})
         a->setVisible(false);
 #endif
 
@@ -1229,7 +1233,12 @@ void MainWindow::updateActions()
     m_safelyRemove->setEnabled(d && !d->isSystem && !d->isLoop && d->canPowerOff && !busy);
     m_unlock->setEnabled(v && v->encrypted && v->cleartextPath.isEmpty() && !busy);
     m_lock->setEnabled(v && v->encrypted && !v->cleartextPath.isEmpty() && !v->isSystem && !busy);
+#ifdef Q_OS_WIN
+    // BitLocker's password changes while it's unlocked; Windows' own drive uses the TPM.
+    m_changePass->setEnabled(changeable && v && v->encrypted && !v->cleartextPath.isEmpty() && !v->isSystem);
+#else
     m_changePass->setEnabled(changeable && v && v->encrypted);
+#endif
     m_newPartition->setEnabled(tableChangeable && kind == DiskMap::Selection::Kind::Free && !d->tableType.isEmpty());
     m_format->setEnabled(tableChangeable && v && !v->isContainer);
     m_rename->setEnabled(changeable && v && v->canMount());

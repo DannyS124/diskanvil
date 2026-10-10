@@ -83,6 +83,12 @@ void storage(QObject *owner, const QString &script, const QHash<QString, QString
     win::powerShell(owner, script, values, done);
 }
 
+// What comes between "Couldn't lock J:" and why: no second colon after a drive letter.
+QString reasonAfter(const QString &failure)
+{
+    return failure.endsWith(QLatin1Char(':')) ? QStringLiteral(" ") : QStringLiteral(": ");
+}
+
 int diskNumber(const QString &blockPath)
 {
     return blockPath.section(QStringLiteral("PhysicalDrive"), 1).toInt();
@@ -810,6 +816,17 @@ void UDisks::refresh()
                         v.label = r.label;
                         // BitLocker that Windows can't read is locked; unlocked, it's NTFS to Windows.
                         v.encrypted = r.type == QLatin1String("BitLocker");
+                    } else if (r.type == QLatin1String("BitLocker")) {
+                        // Unlocked BitLocker: Windows reads the file system inside, the drive holds
+                        // BitLocker. The volume is its own cleartext side, the way LUKS has one.
+                        v.cleartextPath = v.objectPath;
+                        v.cleartextDevice = v.device;
+                        v.cleartextFsType = v.fsType;
+                        v.cleartextHasFilesystem = v.hasFilesystem;
+                        v.cleartextMountPoints = v.mountPoints;
+                        v.fsType = r.type;
+                        v.fsUsage = r.usage;
+                        v.encrypted = true;
                     }
                     if (v.fsType == r.type)
                         v.uuid = r.uuid;
@@ -911,7 +928,7 @@ QString UDisks::daemonVersion() const
 void UDisks::notOnWindows(const QString &failure)
 {
     QTimer::singleShot(0, this, [this, failure] {
-        emit operationFinished(false, failure + QStringLiteral(": ") + tr("this isn't in the Windows version of DiskForge yet"));
+        emit operationFinished(false, failure + reasonAfter(failure) + tr("this isn't in the Windows version of DiskForge yet"));
     });
 }
 
@@ -926,7 +943,7 @@ void UDisks::unmountThen(const QVector<Volume> &volumes, const QString &failure,
             if (!DeleteVolumeMountPointW(path.c_str())) {
                 const QString error = win::lastErrorText();
                 QTimer::singleShot(0, this, [this, failure, error, failed] {
-                    emit operationFinished(false, failure + QStringLiteral(": ") + error);
+                    emit operationFinished(false, failure + reasonAfter(failure) + error);
                     if (failed)
                         failed();
                 });
@@ -944,7 +961,7 @@ void UDisks::mount(const Volume &volume, bool readOnly)
     const QString failure = tr("Couldn't mount %1").arg(name);
     const QString volumeName = m_windows->volumeNames.value(volume.objectPath);
     if (volumeName.isEmpty()) {
-        QTimer::singleShot(0, this, [this, failure] { emit operationFinished(false, failure + QStringLiteral(": ") + tr("Windows can't read what's on it")); });
+        QTimer::singleShot(0, this, [this, failure] { emit operationFinished(false, failure + reasonAfter(failure) + tr("Windows can't read what's on it")); });
         return;
     }
     // The first free letter from D on, the way Windows picks one.
@@ -955,7 +972,7 @@ void UDisks::mount(const Volume &volume, bool readOnly)
             letter = QChar(u'A' + i);
     }
     if (letter.isNull()) {
-        QTimer::singleShot(0, this, [this, failure] { emit operationFinished(false, failure + QStringLiteral(": ") + tr("every drive letter is taken")); });
+        QTimer::singleShot(0, this, [this, failure] { emit operationFinished(false, failure + reasonAfter(failure) + tr("every drive letter is taken")); });
         return;
     }
     const QString root = QStringLiteral("%1:\\").arg(letter);
@@ -963,7 +980,7 @@ void UDisks::mount(const Volume &volume, bool readOnly)
     const QString error = ok ? QString() : win::lastErrorText();
     QTimer::singleShot(0, this, [this, ok, name, root, failure, error] {
         refresh();
-        emit operationFinished(ok, ok ? tr("Mounted %1 at %2").arg(name, root) : failure + QStringLiteral(": ") + error);
+        emit operationFinished(ok, ok ? tr("Mounted %1 at %2").arg(name, root) : failure + reasonAfter(failure) + error);
     });
 }
 
@@ -992,7 +1009,7 @@ void UDisks::setLabel(const Volume &volume, const QString &label)
     const QString error = ok ? QString() : win::lastErrorText();
     QTimer::singleShot(0, this, [this, ok, name, label, failure, error] {
         refresh();
-        emit operationFinished(ok, ok ? tr("Renamed %1 to \"%2\"").arg(name, label) : failure + QStringLiteral(": ") + error);
+        emit operationFinished(ok, ok ? tr("Renamed %1 to \"%2\"").arg(name, label) : failure + reasonAfter(failure) + error);
     });
 }
 
@@ -1015,7 +1032,7 @@ void UDisks::openBlock(const QString &objectPath, OpenMode mode)
     const QString failure = tr("Couldn't open %1").arg(name);
     auto fail = [this, objectPath, failure](const QString &why) {
         QTimer::singleShot(0, this, [this, objectPath, failure, why] {
-            emit operationFinished(false, failure + QStringLiteral(": ") + why);
+            emit operationFinished(false, failure + reasonAfter(failure) + why);
             emit deviceOpened(objectPath, -1);
         });
     };
@@ -1148,7 +1165,7 @@ void UDisks::setPartitionTypeAndFlags(const Volume &volume, const QString &type,
     if (refuseSystem(disk, failure))
         return;
     auto refuse = [this, failure](const QString &why) {
-        QTimer::singleShot(0, this, [this, failure, why] { emit operationFinished(false, failure + QStringLiteral(": ") + why); });
+        QTimer::singleShot(0, this, [this, failure, why] { emit operationFinished(false, failure + reasonAfter(failure) + why); });
     };
     if (!disk || volume.number == 0)
         return refuse(tr("it isn't a partition"));
@@ -1191,7 +1208,7 @@ void UDisks::setPartitionTypeAndFlags(const Volume &volume, const QString &type,
         }
         forgetProbes(diskByPath(path));
         refresh();
-        emit operationFinished(ok, !ok ? failure + QStringLiteral(": ") + why
+        emit operationFinished(ok, !ok ? failure + reasonAfter(failure) + why
                                    : setFlags ? tr("Changed the type and flags of %1").arg(name) : tr("Changed the type of %1").arg(name));
     };
     if (script.isEmpty()) {
@@ -1260,7 +1277,7 @@ void UDisks::setUuid(const Volume &volume, const QString &uuid)
     forgetProbes(disk);
     QTimer::singleShot(0, this, [this, ok, name, failure, error] {
         refresh();
-        emit operationFinished(ok, ok ? tr("Gave %1 a new ID").arg(name) : failure + QStringLiteral(": ") + error);
+        emit operationFinished(ok, ok ? tr("Gave %1 a new ID").arg(name) : failure + reasonAfter(failure) + error);
     });
 }
 
@@ -1315,7 +1332,7 @@ void UDisks::giveNewDiskIds(const Disk &disk)
     forgetProbes(&disk);
     QTimer::singleShot(0, this, [this, ok, name, failure, error] {
         refresh();
-        emit operationFinished(ok, ok ? tr("Gave %1 new IDs").arg(name) : failure + QStringLiteral(": ") + error);
+        emit operationFinished(ok, ok ? tr("Gave %1 new IDs").arg(name) : failure + reasonAfter(failure) + error);
     });
 }
 
@@ -1374,7 +1391,7 @@ void UDisks::createPartitionTable(const Disk &disk, const QString &tableType)
         forgetProbes(diskByPath(disk.blockPath));
         QTimer::singleShot(0, this, [this, name, failure, style, why] {
             refresh();
-            emit operationFinished(why.isEmpty(), why.isEmpty() ? tr("%1 now has an empty %2 partition table").arg(name, style) : failure + QStringLiteral(": ") + why);
+            emit operationFinished(why.isEmpty(), why.isEmpty() ? tr("%1 now has an empty %2 partition table").arg(name, style) : failure + reasonAfter(failure) + why);
         });
         return;
     }
@@ -1389,7 +1406,7 @@ void UDisks::createPartitionTable(const Disk &disk, const QString &tableType)
                 forgetProbes(diskByPath(path));
                 refresh();
                 // Windows puts its small reserved partition on every GPT drive it sets up.
-                emit operationFinished(ok, !ok ? failure + QStringLiteral(": ") + said
+                emit operationFinished(ok, !ok ? failure + reasonAfter(failure) + said
                                            : style == QLatin1String("GPT") ? tr("%1 now has a GPT partition table, with the small reserved partition Windows keeps on every GPT drive").arg(name)
                                                                            : tr("%1 now has an empty %2 partition table").arg(name, style));
             });
@@ -1405,7 +1422,7 @@ void UDisks::createPartition(const Disk &disk, quint64 offset, quint64 size, con
     const FsType *fs = filesystem(fsType);
     const QString windows = windowsFs(fsType);
     auto refuse = [this, failure](const QString &why) {
-        QTimer::singleShot(0, this, [this, failure, why] { emit operationFinished(false, failure + QStringLiteral(": ") + why); });
+        QTimer::singleShot(0, this, [this, failure, why] { emit operationFinished(false, failure + reasonAfter(failure) + why); });
     };
     if (!passphrase.isEmpty())
         return refuse(tr("Windows can't make LUKS encrypted partitions; DiskForge Live can"));
@@ -1447,7 +1464,7 @@ void UDisks::createPartition(const Disk &disk, quint64 offset, quint64 size, con
                 refresh();
                 const QString done = tr("Created a %1 %2 partition on %3").arg(formatSize(end - start), fsName, name);
                 if (!ok || !ownFormat) {
-                    emit operationFinished(ok, ok ? done : failure + QStringLiteral(": ") + said);
+                    emit operationFinished(ok, ok ? done : failure + reasonAfter(failure) + said);
                     return;
                 }
                 const Disk *d = diskByPath(path);
@@ -1457,7 +1474,7 @@ void UDisks::createPartition(const Disk &disk, quint64 offset, quint64 size, con
                         made = &v;
                 }
                 if (!made) {
-                    emit operationFinished(false, failure + QStringLiteral(": ") + tr("the new partition didn't show up"));
+                    emit operationFinished(false, failure + reasonAfter(failure) + tr("the new partition didn't show up"));
                     return;
                 }
                 ownFat32(*made, label, [this, path, number = made->number, done, failure](bool formatted, const QString &error) {
@@ -1466,7 +1483,7 @@ void UDisks::createPartition(const Disk &disk, quint64 offset, quint64 size, con
                             [this, path, done, failure, formatted, error](bool, const QString &) {
                                 forgetProbes(diskByPath(path));
                                 refresh();
-                                emit operationFinished(formatted, formatted ? done : failure + QStringLiteral(": ") + error);
+                                emit operationFinished(formatted, formatted ? done : failure + reasonAfter(failure) + error);
                             });
                 });
             });
@@ -1480,7 +1497,7 @@ void UDisks::deletePartition(const Volume &volume)
     if (refuseSystem(disk, failure))
         return;
     if (!disk || volume.number == 0) {
-        QTimer::singleShot(0, this, [this, failure] { emit operationFinished(false, failure + QStringLiteral(": ") + tr("it isn't a partition")); });
+        QTimer::singleShot(0, this, [this, failure] { emit operationFinished(false, failure + reasonAfter(failure) + tr("it isn't a partition")); });
         return;
     }
     storage(this, QStringLiteral("Remove-Partition -DiskNumber ([int]$env:DF_DISK) -PartitionNumber ([int]$env:DF_PART) -Confirm:$false"),
@@ -1488,7 +1505,7 @@ void UDisks::deletePartition(const Volume &volume)
             [this, path = disk->blockPath, name, failure](bool ok, const QString &said) {
                 forgetProbes(diskByPath(path));
                 refresh();
-                emit operationFinished(ok, ok ? tr("Deleted %1").arg(name) : failure + QStringLiteral(": ") + said);
+                emit operationFinished(ok, ok ? tr("Deleted %1").arg(name) : failure + reasonAfter(failure) + said);
             });
 }
 
@@ -1502,7 +1519,7 @@ void UDisks::format(const Volume &volume, const QString &fsType, const QString &
     const FsType *fs = filesystem(fsType);
     const QString windows = windowsFs(fsType);
     auto refuse = [this, failure](const QString &why) {
-        QTimer::singleShot(0, this, [this, failure, why] { emit operationFinished(false, failure + QStringLiteral(": ") + why); });
+        QTimer::singleShot(0, this, [this, failure, why] { emit operationFinished(false, failure + reasonAfter(failure) + why); });
     };
     if (!passphrase.isEmpty())
         return refuse(tr("Windows can't make LUKS encrypted partitions; DiskForge Live can"));
@@ -1513,7 +1530,7 @@ void UDisks::format(const Volume &volume, const QString &fsType, const QString &
         ownFat32(volume, label, [this, path = disk ? disk->blockPath : QString(), name, failure](bool ok, const QString &error) {
             forgetProbes(diskByPath(path));
             refresh();
-            emit operationFinished(ok, ok ? tr("Formatted %1 as %2").arg(name, QStringLiteral("FAT32")) : failure + QStringLiteral(": ") + error);
+            emit operationFinished(ok, ok ? tr("Formatted %1 as %2").arg(name, QStringLiteral("FAT32")) : failure + reasonAfter(failure) + error);
         });
         return;
     }
@@ -1536,7 +1553,7 @@ void UDisks::format(const Volume &volume, const QString &fsType, const QString &
             [this, path = disk ? disk->blockPath : QString(), name, failure, fsName = fs ? fs->name : fsType](bool ok, const QString &said) {
                 forgetProbes(diskByPath(path));
                 refresh();
-                emit operationFinished(ok, ok ? tr("Formatted %1 as %2").arg(name, fsName) : failure + QStringLiteral(": ") + said);
+                emit operationFinished(ok, ok ? tr("Formatted %1 as %2").arg(name, fsName) : failure + reasonAfter(failure) + said);
             });
 }
 
@@ -1633,7 +1650,7 @@ void UDisks::resize(const Volume &volume, quint64 newSize)
     newSize = newSize / MiB * MiB;
     if (!disk || !limits.possible || newSize < limits.minSize || newSize > limits.maxSize || newSize == volume.size) {
         const QString why = limits.possible ? tr("size out of range") : limits.reason;
-        QTimer::singleShot(0, this, [this, failure, why] { emit operationFinished(false, failure + QStringLiteral(": ") + why); });
+        QTimer::singleShot(0, this, [this, failure, why] { emit operationFinished(false, failure + reasonAfter(failure) + why); });
         return;
     }
     // Windows moves NTFS's end along with the partition's, either way.
@@ -1643,7 +1660,7 @@ void UDisks::resize(const Volume &volume, quint64 newSize)
             [this, path = disk->blockPath, name, failure, newSize](bool ok, const QString &said) {
                 forgetProbes(diskByPath(path));
                 refresh();
-                emit operationFinished(ok, ok ? tr("Resized %1 to %2").arg(name, formatSize(newSize)) : failure + QStringLiteral(": ") + said);
+                emit operationFinished(ok, ok ? tr("Resized %1 to %2").arg(name, formatSize(newSize)) : failure + reasonAfter(failure) + said);
             });
 }
 
@@ -1657,7 +1674,7 @@ void UDisks::check(const Volume &volume)
         return;
     const QString target = chkdskTarget(volume);
     if (target.isEmpty()) {
-        QTimer::singleShot(0, this, [this, failure] { emit operationFinished(false, failure + QStringLiteral(": ") + tr("no file system Windows can check")); });
+        QTimer::singleShot(0, this, [this, failure] { emit operationFinished(false, failure + reasonAfter(failure) + tr("no file system Windows can check")); });
         return;
     }
     auto *chkdsk = new QProcess(this);
@@ -1682,7 +1699,7 @@ void UDisks::repair(const Volume &volume)
         return;
     const QString target = chkdskTarget(volume);
     if (target.isEmpty()) {
-        QTimer::singleShot(0, this, [this, failure] { emit operationFinished(false, failure + QStringLiteral(": ") + tr("no file system Windows can check")); });
+        QTimer::singleShot(0, this, [this, failure] { emit operationFinished(false, failure + reasonAfter(failure) + tr("no file system Windows can check")); });
         return;
     }
     // /x takes it out of use first, as unmounting does on Linux.
@@ -1728,43 +1745,85 @@ void UDisks::unlock(const Volume &volume, const QString &passphrase)
     const QString letter = volume.mountPoints.value(0).left(2);
     if (letter.size() != 2 || letter[1] != QLatin1Char(':')) {
         QTimer::singleShot(0, this, [this, failure] {
-            emit operationFinished(false, failure + QStringLiteral(": ") + tr("it has no drive letter; mount it first"));
+            emit operationFinished(false, failure + reasonAfter(failure) + tr("it has no drive letter; mount it first"));
         });
         return;
     }
     static const QRegularExpression recoveryKey(QStringLiteral("^\\d{6}(-\\d{6}){7}$"));
     const bool recovery = recoveryKey.match(passphrase.trimmed()).hasMatch();
-    auto *ps = new QProcess(this);
-    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-    env.insert(QStringLiteral("DF_MOUNT"), letter);
-    env.insert(QStringLiteral("DF_SECRET"), recovery ? passphrase.trimmed() : passphrase);
-    ps->setProcessEnvironment(env);
-    ps->setProcessChannelMode(QProcess::MergedChannels);
-    const QString script = recovery ? QStringLiteral("Unlock-BitLocker -MountPoint $env:DF_MOUNT -RecoveryPassword $env:DF_SECRET -ErrorAction Stop | Out-Null")
-                                    : QStringLiteral("Unlock-BitLocker -MountPoint $env:DF_MOUNT -Password (ConvertTo-SecureString $env:DF_SECRET -AsPlainText "
-                                                     "-Force) -ErrorAction Stop | Out-Null");
-    connect(ps, &QProcess::finished, this, [this, ps, name, failure](int code, QProcess::ExitStatus status) {
-        ps->deleteLater();
-        const bool ok = status == QProcess::NormalExit && code == 0;
-        const QString said = QString::fromLocal8Bit(ps->readAll()).simplified();
-        m_windows->probed.clear(); // unlocked, it reads as NTFS now
-        refresh();
-        emit operationFinished(ok, ok ? tr("Unlocked %1").arg(name)
-                                      : failure + QStringLiteral(": ") + (said.contains(QLatin1String("incorrect"), Qt::CaseInsensitive)
-                                                                              ? tr("that isn't its password or recovery key")
-                                                                              : said.right(200)));
-    });
-    ps->start(QStringLiteral("powershell.exe"), {QStringLiteral("-NoProfile"), QStringLiteral("-NonInteractive"), QStringLiteral("-Command"), script});
+    const QString script = recovery ? QStringLiteral("Unlock-BitLocker -MountPoint $env:DF_MOUNT -RecoveryPassword $env:DF_SECRET | Out-Null")
+                                    : QStringLiteral("Unlock-BitLocker -MountPoint $env:DF_MOUNT "
+                                                     "-Password (ConvertTo-SecureString $env:DF_SECRET -AsPlainText -Force) | Out-Null");
+    storage(this, script, {{QStringLiteral("DF_MOUNT"), letter}, {QStringLiteral("DF_SECRET"), recovery ? passphrase.trimmed() : passphrase}},
+            [this, name, failure](bool ok, const QString &said) {
+                m_windows->probed.clear(); // unlocked, it reads as NTFS now
+                refresh();
+                // 0x80310027: BitLocker's "the drive cannot be unlocked with the key provided".
+                emit operationFinished(ok, ok ? tr("Unlocked %1").arg(name)
+                                              : failure + reasonAfter(failure)
+                                                    + (said.contains(QLatin1String("0x80310027")) ? tr("that isn't its password or recovery key") : said));
+            });
 }
 
+// BitLocker's own Lock-BitLocker; something with files open on it is left alone, as on Linux.
 void UDisks::lock(const Volume &volume)
 {
-    notOnWindows(tr("Couldn't lock %1").arg(shortDevice(volume.device)));
+    const QString name = shortDevice(volume.device);
+    const QString failure = tr("Couldn't lock %1").arg(name);
+    const QString letter = volume.mountPoints.value(0).left(2);
+    QString refusal;
+    if (volume.fsType != QLatin1String("BitLocker") || volume.cleartextPath.isEmpty())
+        refusal = tr("it isn't an unlocked BitLocker drive");
+    else if (volume.isSystem)
+        refusal = tr("Windows is running from it");
+    else if (letter.size() != 2 || letter[1] != QLatin1Char(':'))
+        refusal = tr("it has no drive letter; mount it first");
+    if (!refusal.isEmpty()) {
+        QTimer::singleShot(0, this, [this, failure, refusal] { emit operationFinished(false, failure + reasonAfter(failure) + refusal); });
+        return;
+    }
+    storage(this, QStringLiteral("Lock-BitLocker -MountPoint $env:DF_MOUNT | Out-Null"), {{QStringLiteral("DF_MOUNT"), letter}},
+            [this, name, failure](bool ok, const QString &said) {
+                refresh();
+                emit operationFinished(ok, ok ? tr("Locked %1").arg(name) : failure + reasonAfter(failure) + said);
+            });
 }
 
-void UDisks::changePassphrase(const Volume &volume, const QString &, const QString &)
+// BitLocker's password, replaced in one go (Win32_EncryptableVolume's ChangePassphrase, what
+// manage-bde -changepassword uses: a drive has one password at most), or added when it has none.
+// While the drive is unlocked, Windows doesn't ask for the old one; its recovery key keeps
+// opening it either way.
+void UDisks::changePassphrase(const Volume &volume, const QString &, const QString &newPassphrase)
 {
-    notOnWindows(tr("Couldn't change the passphrase of %1").arg(shortDevice(volume.device)));
+    const QString name = shortDevice(volume.device);
+    const QString failure = tr("Couldn't change the password of %1").arg(name);
+    const QString letter = volume.mountPoints.value(0).left(2);
+    QString refusal;
+    if (volume.fsType != QLatin1String("BitLocker"))
+        refusal = tr("it isn't a BitLocker drive");
+    else if (volume.cleartextPath.isEmpty())
+        refusal = tr("unlock it first");
+    else if (volume.isSystem)
+        refusal = tr("Windows starts from it, and opens it with the PC's own security chip (TPM), not a password");
+    else if (letter.size() != 2 || letter[1] != QLatin1Char(':'))
+        refusal = tr("it has no drive letter; mount it first");
+    if (!refusal.isEmpty()) {
+        QTimer::singleShot(0, this, [this, failure, refusal] { emit operationFinished(false, failure + reasonAfter(failure) + refusal); });
+        return;
+    }
+    storage(this,
+            QStringLiteral("$v = Get-CimInstance -Namespace root/CIMV2/Security/MicrosoftVolumeEncryption -ClassName Win32_EncryptableVolume "
+                           "-Filter \"DriveLetter='$env:DF_MOUNT'\"; "
+                           "$ids = @((Invoke-CimMethod -InputObject $v -MethodName GetKeyProtectors -Arguments @{KeyProtectorType = [uint32]8}).VolumeKeyProtectorID); "
+                           "if ($ids.Count -eq 0) { Add-BitLockerKeyProtector -MountPoint $env:DF_MOUNT -PasswordProtector "
+                           "-Password (ConvertTo-SecureString $env:DF_SECRET -AsPlainText -Force) | Out-Null } "
+                           "else { $r = Invoke-CimMethod -InputObject $v -MethodName ChangePassphrase "
+                           "-Arguments @{VolumeKeyProtectorID = $ids[0]; NewPassphrase = $env:DF_SECRET}; "
+                           "if ($r.ReturnValue -ne 0) { throw ('BitLocker said 0x{0:X8}' -f $r.ReturnValue) } }"),
+            {{QStringLiteral("DF_MOUNT"), letter}, {QStringLiteral("DF_SECRET"), newPassphrase}},
+            [this, name, failure](bool ok, const QString &said) {
+                emit operationFinished(ok, ok ? tr("Changed the password of %1").arg(name) : failure + reasonAfter(failure) + said);
+            });
 }
 
 void UDisks::secureErase(const Disk &disk, EraseMethod, int)
@@ -1781,7 +1840,7 @@ void UDisks::powerOff(const Disk &disk)
     if (refuseSystem(&disk, failure))
         return;
     if (!disk.canPowerOff) {
-        QTimer::singleShot(0, this, [this, failure] { emit operationFinished(false, failure + QStringLiteral(": ") + tr("this drive can't be removed while the PC is on")); });
+        QTimer::singleShot(0, this, [this, failure] { emit operationFinished(false, failure + reasonAfter(failure) + tr("this drive can't be removed while the PC is on")); });
         return;
     }
     QThread *thread = QThread::create([this, instance = disk.drivePath, name, failure] {
@@ -1809,7 +1868,7 @@ void UDisks::powerOff(const Disk &disk)
         }
         QMetaObject::invokeMethod(this, [this, ok, name, failure, why] {
             refresh();
-            emit operationFinished(ok, ok ? tr("%1 can be unplugged now").arg(name) : failure + QStringLiteral(": ") + why);
+            emit operationFinished(ok, ok ? tr("%1 can be unplugged now").arg(name) : failure + reasonAfter(failure) + why);
         }, Qt::QueuedConnection);
     });
     m_windows->workers << thread;
@@ -1838,7 +1897,7 @@ void UDisks::openImage(const QString &path, bool readOnly)
     else if (suffix != QLatin1String("vhd") && suffix != QLatin1String("vhdx"))
         refusal = tr("Windows only opens .vhd and .vhdx images as drives. Find Lost Files reads the others, and DiskForge Live opens them all");
     if (!refusal.isEmpty()) {
-        QTimer::singleShot(0, this, [this, failure, refusal] { emit operationFinished(false, failure + QStringLiteral(": ") + refusal); });
+        QTimer::singleShot(0, this, [this, failure, refusal] { emit operationFinished(false, failure + reasonAfter(failure) + refusal); });
         return;
     }
     storage(this,
@@ -1852,7 +1911,7 @@ void UDisks::openImage(const QString &path, bool readOnly)
                 refresh();
                 if (ok && numbered)
                     emit imageOpened(diskPath(DWORD(number)));
-                emit operationFinished(ok, ok ? tr("Opened %1").arg(name) : failure + QStringLiteral(": ") + said);
+                emit operationFinished(ok, ok ? tr("Opened %1").arg(name) : failure + reasonAfter(failure) + said);
             });
 }
 
@@ -1872,9 +1931,9 @@ void UDisks::openIso(const QString &path, QObject *context, const std::function<
             {{QStringLiteral("DF_IMAGE"), QDir::toNativeSeparators(QFileInfo(path).absoluteFilePath())}},
             [failure, done](bool ok, const QString &said) {
                 if (!ok)
-                    return done({}, false, failure + QStringLiteral(": ") + said);
+                    return done({}, false, failure + reasonAfter(failure) + said);
                 if (said == QLatin1String("none") || said.size() != 2)
-                    return done({}, false, failure + QStringLiteral(": ") + tr("Windows gave it no drive letter"));
+                    return done({}, false, failure + reasonAfter(failure) + tr("Windows gave it no drive letter"));
                 done(said.mid(1) + QStringLiteral(":/"), said.startsWith(QLatin1Char('1')), {});
             });
 }
@@ -1891,14 +1950,14 @@ void UDisks::detachImage(const Disk &disk)
     const QString name = !disk.backingFile.isEmpty() ? QFileInfo(disk.backingFile).fileName() : shortDevice(disk.device);
     const QString failure = tr("Couldn't close %1").arg(name);
     if (!disk.isLoop) {
-        QTimer::singleShot(0, this, [this, failure] { emit operationFinished(false, failure + QStringLiteral(": ") + tr("not a disk image")); });
+        QTimer::singleShot(0, this, [this, failure] { emit operationFinished(false, failure + reasonAfter(failure) + tr("not a disk image")); });
         return;
     }
     storage(this, QStringLiteral("Dismount-DiskImage -DevicePath $env:DF_DEVICE | Out-Null"),
             {{QStringLiteral("DF_DEVICE"), QStringLiteral("\\\\.\\PHYSICALDRIVE%1").arg(diskNumber(disk.blockPath))}},
             [this, name, failure](bool ok, const QString &said) {
                 refresh();
-                emit operationFinished(ok, ok ? tr("Closed %1").arg(name) : failure + QStringLiteral(": ") + said);
+                emit operationFinished(ok, ok ? tr("Closed %1").arg(name) : failure + reasonAfter(failure) + said);
             });
 }
 
@@ -1913,7 +1972,7 @@ void UDisks::wipe(const Disk &disk)
     storage(this, QStringLiteral("Set-Disk -Number ([int]$env:DF_DISK) -IsOffline $true"), {{QStringLiteral("DF_DISK"), QString::number(number)}},
             [this, path = disk.blockPath, size = disk.size, number, name, failure](bool ok, const QString &said) {
                 if (!ok) {
-                    emit operationFinished(false, failure + QStringLiteral(": ") + said);
+                    emit operationFinished(false, failure + reasonAfter(failure) + said);
                     return;
                 }
                 wipeOffline(path, size, number, name, failure);
@@ -1976,7 +2035,7 @@ void UDisks::wipeOffline(const QString &path, quint64 size, int number, const QS
                     [this, name, failure, error, stopped, stoppedMessage](bool, const QString &) {
                         refresh();
                         if (!error.isEmpty())
-                            emit operationFinished(false, failure + QStringLiteral(": ") + error);
+                            emit operationFinished(false, failure + reasonAfter(failure) + error);
                         else if (stopped)
                             emit operationFinished(true, stoppedMessage.isEmpty() ? tr("Stopped wiping %1.").arg(name) : stoppedMessage);
                         else
@@ -2046,7 +2105,7 @@ void UDisks::smartSelftest(const Disk &disk, const QString &type)
         why = tr("there's no such test");
     else if (!smartSend(disk, EXECUTE_OFFLINE_DIAGS, kinds.value(type)))
         why = win::lastErrorText();
-    finishSmart(disk, why.isEmpty(), why.isEmpty() ? tr("Self-test started on %1").arg(name) : failure + QStringLiteral(": ") + why);
+    finishSmart(disk, why.isEmpty(), why.isEmpty() ? tr("Self-test started on %1").arg(name) : failure + reasonAfter(failure) + why);
 }
 
 void UDisks::smartSelftestAbort(const Disk &disk)
