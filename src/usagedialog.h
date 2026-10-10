@@ -66,6 +66,7 @@ private:
     std::shared_ptr<UsageNode> m_tree;
     QVector<const UsageNode *> m_stack; // the folders clicked into, from the top
     int m_unreadable = 0;
+    bool m_completed = false;
     QLabel *m_crumbs;
     QPushButton *m_up;
     TreemapWidget *m_map;

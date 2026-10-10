@@ -23,6 +23,7 @@
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSplitter>
+#include <QStorageInfo>
 #include <QToolTip>
 #include <QTreeWidget>
 #include <QUrl>
@@ -31,6 +32,8 @@
 
 #include <climits>
 #include <cmath>
+
+#include <algorithm>
 
 namespace {
 
@@ -271,7 +274,7 @@ void UsageDialog::scan()
     connect(m_scan, &UsageScan::progress, this, [this](quint64 bytes, quint64 files) {
         m_status->setText(tr("Adding up %1… %2 in %3 so far").arg(m_root, formatSize(bytes), countText(files)));
     });
-    connect(m_scan, &UsageScan::finished, this, [this](bool, std::shared_ptr<UsageNode> tree, int unreadable) {
+    connect(m_scan, &UsageScan::finished, this, [this](bool completed, std::shared_ptr<UsageNode> tree, int unreadable) {
         m_thread->quit();
         m_thread->wait();
         m_thread = nullptr;
@@ -279,6 +282,7 @@ void UsageDialog::scan()
         m_busy->setVisible(false);
         m_tree = tree;
         m_unreadable = unreadable;
+        m_completed = completed;
         m_stack = {m_tree.get()};
         showLevel(0);
     });
@@ -336,6 +340,19 @@ void UsageDialog::showLevel(int depth)
     if (m_unreadable > 0)
         status += QLatin1Char(' ') + tr("%n folder(s) couldn't be opened (they belong to the system or other users), so the total may be a little low.",
                                         nullptr, m_unreadable);
+    // At the top: what the drive itself counts as used, when that's a good deal more, says why.
+    const QStorageInfo drive(m_root);
+    const quint64 inUse = drive.isValid() && drive.bytesTotal() > drive.bytesFree() ? quint64(drive.bytesTotal() - drive.bytesFree()) : 0;
+    if (depth == 0 && m_completed && inUse > node->size + std::max<quint64>(quint64(1) << 30, inUse / 10)) {
+#ifdef Q_OS_WIN
+        status += QLatin1Char(' ') + tr("Windows counts %1 as used: the rest is its own, mostly room it keeps free for updates, and the file system's tables.")
+                                         .arg(formatSize(inUse));
+#else
+        status += QLatin1Char(' ') + tr("The drive counts %1 as used: the rest isn't in its folders (the file system's own tables, snapshots, "
+                                        "deleted files that are still open).")
+                                         .arg(formatSize(inUse));
+#endif
+    }
     m_status->setText(status);
 }
 
