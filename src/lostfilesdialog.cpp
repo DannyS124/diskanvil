@@ -773,7 +773,10 @@ void LostFilesDialog::scanSource(std::shared_ptr<lost::Source> source, const QSt
         refreshCategories();
     });
     connect(m_quick, &lost::QuickScan::progress, this, [this](quint64 done, quint64 total) {
-        m_meter.update(tr("Checking what's in the deleted files"), done, total);
+        // A count of files, not bytes: the meter's speed and time left don't fit here.
+        m_bar->setRange(0, 100);
+        m_bar->setValue(total ? int(done * 100 / total) : 0);
+        m_phase->setText(tr("Checking what's in the deleted files: %1 of %2").arg(done).arg(total));
     });
     connect(m_quick, &lost::QuickScan::finished, this, [this](bool stopped) {
         // The scan's thread is idle now: what it found is safe to read until it's let go.
