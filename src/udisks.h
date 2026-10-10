@@ -295,6 +295,13 @@ public:
     // Disk images: attach as a loop device (read-only by default), detach again.
     void openImage(const QString &path, bool readOnly = true);
     void detachImage(const Disk &disk);
+#ifdef Q_OS_WIN
+    // An ISO opened the way File Explorer does it, read-only with a drive letter: `done` gets its
+    // root ("E:/") and whether it was opened here (one that's open already is used as it is), or
+    // why not. closeIso() closes one that was opened here.
+    void openIso(const QString &path, QObject *context, const std::function<void(const QString &root, bool openedHere, const QString &error)> &done);
+    void closeIso(const QString &path, QObject *context, const std::function<void()> &done);
+#endif
     // LUKS
     void unlock(const Volume &volume, const QString &passphrase);
     void lock(const Volume &volume);

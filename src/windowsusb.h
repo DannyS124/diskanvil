@@ -4,6 +4,9 @@
 #pragma once
 
 #include <QString>
+#include <QStringList>
+
+#include <functional>
 
 // Make a Windows USB: a Windows 10 or 11 install stick from Microsoft's ISO. The stick gets a
 // FAT32 partition with the ISO's files. FAT32 can't hold a file of 4 GB or more, and install.wim
@@ -58,6 +61,14 @@ QByteArray unattendXml(const Options &options, const QString &arch);
 // A Windows account name from what was typed: characters Windows refuses become "_", names
 // it keeps for itself are refused (error says why).
 QString userName(const QString &typed, QString *error);
+// install.wim's parts (install.swm, install2.swm...) against install.wim itself, the way a split
+// leaves them: each part's resources, still compressed, compared byte for byte with the same
+// ones in the original (found by their SHA-1 in both tables), and every one of them in some
+// part. The parts are read from the drive, not the cache. `progress` hears how far along it is
+// and stops it by giving back false. Empty when they match, otherwise what's wrong.
+QString checkParts(const QString &original, const QStringList &parts,
+                   const std::function<bool(quint64 done, quint64 total)> &progress = {});
+
 // This PC's region, in Windows' terms, into `options`.
 void fillRegionFromThisPc(Options &options);
 // An IANA time zone ("Europe/Berlin", or an old name like "US/Central" when `tzdataLinks`,

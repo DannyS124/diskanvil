@@ -7,6 +7,7 @@
 
 #include <QObject>
 
+#include <atomic>
 #include <functional>
 #include <memory>
 
@@ -64,6 +65,7 @@ private:
     std::unique_ptr<filecopy::Source> m_source;
     QThread *m_thread = nullptr;
     QObject *m_copier = nullptr;
-    QProcess *m_wimlib = nullptr;
+    QProcess *m_wimlib = nullptr; // DISM on Windows
+    std::shared_ptr<std::atomic_bool> m_stopCheck; // while the parts are checked (Windows)
     bool m_cancelled = false;
 };

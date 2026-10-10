@@ -3,6 +3,7 @@
 
 #include "windowsusbdialog.h"
 
+#include "blockio.h"
 #include "dialogs.h"
 #include "format.h"
 #include "hostprocess.h"
@@ -97,7 +98,11 @@ WindowsUsbDialog::WindowsUsbDialog(UDisks *udisks, const QString &preferredDisk,
     m_skipChecks->setChecked(s.value(QStringLiteral("skipChecks"), true).toBool());
     m_noAccount->setChecked(s.value(QStringLiteral("noAccount"), true).toBool());
     m_localUser->setChecked(s.value(QStringLiteral("localUser"), false).toBool());
+#ifdef Q_OS_WIN
+    QString user = qEnvironmentVariable("USERNAME");
+#else
     QString user = qEnvironmentVariable("USER");
+#endif
     if (!user.isEmpty())
         user[0] = user[0].toUpper();
     m_userName->setText(s.value(QStringLiteral("userName"), user).toString());
@@ -288,7 +293,11 @@ void WindowsUsbDialog::updateState()
 {
     if (m_job)
         return;
+#ifdef Q_OS_WIN
+    const bool wimlib = true; // Windows' own DISM splits it there
+#else
     const bool wimlib = host::programExists(QStringLiteral("wimlib-imagex"));
+#endif
     bool ok = !m_mounted.isEmpty() && m_info.windows;
     QString info;
     if (!m_isoError.isEmpty()) {
@@ -332,9 +341,13 @@ void WindowsUsbDialog::updateState()
         }
     }
     const Disk *d = target();
+    bool asked = false;
     if (d && m_info.windows) {
         const quint64 needed = m_info.bytes + 64 * 1024 * 1024;
-        if (d->size < needed) {
+        if (blockio::pathIsOnDisk(QFileInfo(m_iso->text().trimmed()).absoluteFilePath(), d->device)) {
+            warning += redText(tr("The ISO is on this stick. Pick another stick, or copy the ISO somewhere else first."));
+            ok = false;
+        } else if (d->size < needed) {
             warning += redText(tr("This stick is too small: it needs at least %1.").arg(formatSize(needed)));
             ok = false;
         } else {
@@ -345,9 +358,10 @@ void WindowsUsbDialog::updateState()
             warning += QStringLiteral("<br>") + tr("Type <b>%1</b> to confirm:").arg(name.toHtmlEscaped());
             m_confirm->setPlaceholderText(name);
             ok = ok && m_confirm->text().trimmed() == name;
+            asked = true;
         }
     }
-    m_confirm->setVisible(d && m_info.windows);
+    m_confirm->setVisible(asked);
     m_warning->setText(warning);
     m_make->setEnabled(ok && d);
 }

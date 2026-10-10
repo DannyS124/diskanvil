@@ -764,11 +764,8 @@ void MainWindow::createActions()
     help->addAction(themeIcon("qtcreator", "help-about"), tr("About &Qt"), qApp, &QApplication::aboutQt);
 
 #ifdef Q_OS_WIN
-    // Linux's own things (LUKS, fstab, RAID, Btrfs), and what the Windows version can't do yet:
-    // so far it reads drives, partitions them (tables, partitions, formatting, resizing,
-    // checking), wipes them, opens virtual disks and removes drives safely.
-    for (QAction *a : {m_lock, m_changePass, m_startup, m_raidCheck, m_snapshots, m_typeFlags, m_recover, m_secureErase,
-                       m_writeImage, m_windowsUsb, m_rescueUsb, m_restore, m_clone, m_badSectors, m_checkStick, m_cleanup, m_optimize})
+    // Linux's own things (LUKS, fstab, RAID, Btrfs), and what the Windows version can't do yet.
+    for (QAction *a : {m_lock, m_changePass, m_startup, m_raidCheck, m_snapshots, m_recover, m_secureErase, m_cleanup, m_optimize})
         a->setVisible(false);
 #endif
 
@@ -833,10 +830,16 @@ void MainWindow::updateCloneNotices()
         // The one to give new IDs: never the system drive; a USB drive before an inner one.
         const Disk *copy = b->isSystem || (!a->isSystem && a->bus == QLatin1String("usb") && b->bus != QLatin1String("usb")) ? a : b;
         auto name = [](const Disk *d) { return QStringLiteral("%1 (%2)").arg(d->model.isEmpty() ? tr("A drive") : d->model, shortDevice(d->device)); };
+#ifdef Q_OS_WIN
+        auto *bar = new NoticeBar(NoticeBar::Level::Warning,
+                                  tr("%1 and %2 are copies of each other: they share %3. Windows switches one of them off.")
+                                      .arg(name(a), name(b), c.ids.join(QStringLiteral(", "))));
+#else
         auto *bar = new NoticeBar(NoticeBar::Level::Warning,
                                   tr("%1 and %2 are copies of each other: they share %3. Linux may use the wrong one at the next start, "
                                      "and Windows switches one of them off.")
                                       .arg(name(a), name(b), c.ids.join(QStringLiteral(", "))));
+#endif
         bar->setObjectName(QStringLiteral("clone"));
         const QString device = copy->device;
         if (!copy->isSystem) {

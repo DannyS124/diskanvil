@@ -11,6 +11,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QRandomGenerator>
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTimeZone>
@@ -104,6 +105,77 @@ void wimHeader(const QString &dir)
                                          QStringLiteral("Windows 11 Test")}, &code);
     const windowsusb::WimInfo real = windowsusb::readWim(dir + QStringLiteral("/real.wim"));
     report(code == 0 && real.error.isEmpty() && real.name == QLatin1String("Windows 11 Test"), QStringLiteral("a real WIM made by wimlib is read"), real.error);
+}
+
+// install.wim's parts checked against it, with parts split by wimlib: the same, damaged, one
+// missing, another WIM's.
+void splitParts(const QString &dir)
+{
+    if (QStandardPaths::findExecutable(QStringLiteral("wimlib-imagex")).isEmpty()) {
+        out << "SKIP  wimlib isn't installed, so there's no WIM to split" << Qt::endl;
+        return;
+    }
+    // Some files too big to squeeze, so there are several parts of a MiB.
+    auto content = [&dir](const QString &name, quint32 seed) {
+        QDir().mkpath(dir + QLatin1Char('/') + name + QStringLiteral("/sub"));
+        QRandomGenerator random(seed);
+        for (int i = 0; i < 6; ++i) {
+            QByteArray data(700 * 1024, Qt::Uninitialized);
+            random.fillRange(reinterpret_cast<quint32 *>(data.data()), data.size() / 4);
+            QFile f(QStringLiteral("%1/%2/big%3.bin").arg(dir, name).arg(i));
+            if (f.open(QIODevice::WriteOnly))
+                f.write(data);
+        }
+        for (int i = 0; i < 40; ++i) {
+            QFile f(QStringLiteral("%1/%2/sub/small%3.txt").arg(dir, name).arg(i));
+            if (f.open(QIODevice::WriteOnly))
+                f.write(QByteArray("line of text ").repeated(i * 20 + 1));
+        }
+        int code = -1;
+        sh(QStringLiteral("wimlib-imagex"), {QStringLiteral("capture"), dir + QLatin1Char('/') + name, dir + QLatin1Char('/') + name + QStringLiteral(".wim"),
+                                             QStringLiteral("Windows 11 Test")}, &code);
+        QDir().mkpath(dir + QLatin1Char('/') + name + QStringLiteral("-parts"));
+        int split = -1;
+        sh(QStringLiteral("wimlib-imagex"), {QStringLiteral("split"), dir + QLatin1Char('/') + name + QStringLiteral(".wim"),
+                                             dir + QLatin1Char('/') + name + QStringLiteral("-parts/install.swm"), QStringLiteral("1")}, &split);
+        QStringList parts;
+        for (const QString &part : QDir(dir + QLatin1Char('/') + name + QStringLiteral("-parts")).entryList({QStringLiteral("*.swm")}, QDir::Files))
+            parts << dir + QLatin1Char('/') + name + QStringLiteral("-parts/") + part;
+        return code == 0 && split == 0 ? parts : QStringList();
+    };
+    const QStringList parts = content(QStringLiteral("splitme"), 1);
+    const QString original = dir + QStringLiteral("/splitme.wim");
+    quint64 seen = 0, all = 0;
+    const QString same = windowsusb::checkParts(original, parts, [&](quint64 done, quint64 total) {
+        seen = done;
+        all = total;
+        return true;
+    });
+    report(parts.size() >= 3 && same.isEmpty() && seen == all && all > 4000000,
+           QStringLiteral("install.wim's parts match it, every resource of it compared (%1 parts)").arg(parts.size()), same);
+
+    QStringList fewer = parts;
+    fewer.removeLast();
+    report(!windowsusb::checkParts(original, fewer).isEmpty(), QStringLiteral("a part missing is found"));
+
+    // One byte changed in the second part, in its first resource (right after the header).
+    const QString damaged = dir + QStringLiteral("/damaged.swm");
+    QFile::copy(parts.value(1), damaged);
+    QFile d(damaged);
+    if (d.open(QIODevice::ReadWrite) && d.seek(208 + 1000)) {
+        char c = 0;
+        d.peek(&c, 1);
+        c = char(c ^ 0x55);
+        d.write(&c, 1);
+    }
+    d.close();
+    QStringList withDamage = parts;
+    withDamage[1] = damaged;
+    report(windowsusb::checkParts(original, withDamage).contains(QLatin1String("different")), QStringLiteral("a byte changed on the stick is found"));
+
+    const QStringList others = content(QStringLiteral("another"), 2);
+    report(!others.isEmpty() && !windowsusb::checkParts(original, others).isEmpty(), QStringLiteral("another WIM's parts don't match it"));
+    report(!windowsusb::checkParts(original, parts, [](quint64, quint64) { return false; }).isEmpty(), QStringLiteral("the check stops when asked"));
 }
 
 void answerFile()
@@ -202,6 +274,7 @@ void windowsTests()
 {
     QTemporaryDir dir;
     wimHeader(dir.path());
+    splitParts(dir.path());
     answerFile();
     names();
     recognizing(dir.path());

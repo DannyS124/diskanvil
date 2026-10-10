@@ -16,6 +16,7 @@
 #include "udisks.h"
 
 #include "applog.h"
+#include "blockio.h"
 #include "fat32format.h"
 #include "format.h"
 #include "fsprobe.h"
@@ -38,8 +39,12 @@
 #include <QSysInfo>
 #include <QThread>
 #include <QTimer>
+#include <QUuid>
 
 #include <algorithm>
+#include <cstring>
+#include <memory>
+#include <vector>
 
 #include <fcntl.h>
 #include <io.h>
@@ -137,6 +142,78 @@ QString onlyOnLive(const QString &fsName)
 
 constexpr quint64 kFat32Most = 32ull * 1024 * 1024 * 1024; // Windows makes FAT32 only this big
 
+
+// IOCTL_DISK_SET_DISK_ATTRIBUTES and its SET_DISK_ATTRIBUTES, from ntddisk.h, which MinGW's
+// headers don't have.
+constexpr DWORD kSetDiskAttributes = CTL_CODE(IOCTL_DISK_BASE, 0x003d, METHOD_BUFFERED, FILE_READ_ACCESS | FILE_WRITE_ACCESS);
+constexpr DWORDLONG kDiskOffline = 0x1;
+struct SetDiskAttributes {
+    DWORD version;
+    BOOLEAN persist;
+    BYTE reserved1[3];
+    DWORDLONG attributes;
+    DWORDLONG mask;
+    DWORD reserved2[4];
+};
+
+// IOCTL_DISK_GET_DISK_ATTRIBUTES and its answer, the same.
+constexpr DWORD kGetDiskAttributes = CTL_CODE(IOCTL_DISK_BASE, 0x003c, METHOD_BUFFERED, FILE_ANY_ACCESS);
+struct GetDiskAttributes {
+    DWORD version;
+    DWORD reserved1;
+    DWORDLONG attributes;
+};
+
+bool isOffline(const QString &blockPath)
+{
+    const win::Handle h = win::openDevice(blockPath, GENERIC_READ);
+    GetDiskAttributes attributes = {};
+    return h.valid() && win::ioctl(h.get(), kGetDiskAttributes, nullptr, 0, &attributes, sizeof attributes)
+        && (attributes.attributes & kDiskOffline);
+}
+
+// Locks volumes and takes them out of use, for as long as the handles in `locks` are kept:
+// writing over them through the drive needs that, and reading them so nothing changes halfway.
+// With `force`, something with files open on one (a File Explorer window) gets them taken away:
+// for erasing the whole drive, which was confirmed. The device of one that can't be locked, if any.
+QString lockVolumes(const QVector<Volume> &volumes, const QHash<QString, QString> &volumeNames, std::vector<win::Handle> &locks, bool force)
+{
+    for (const Volume &v : volumes) {
+        QString path = volumeNames.value(v.objectPath);
+        if (path.endsWith(QLatin1Char('\\')))
+            path.chop(1);
+        win::Handle volume = path.isEmpty() ? win::Handle() : win::openDevice(path, GENERIC_READ | GENERIC_WRITE);
+        if (!volume.valid())
+            continue;
+        // Something like File Explorer can have it open for a moment.
+        bool locked = false;
+        for (int tries = 0; tries < (force ? 6 : 5) && !locked; ++tries) {
+            if (tries == 5)
+                win::ioctl(volume.get(), FSCTL_DISMOUNT_VOLUME, nullptr, 0, nullptr, 0);
+            locked = win::ioctl(volume.get(), FSCTL_LOCK_VOLUME, nullptr, 0, nullptr, 0) || GetLastError() == ERROR_INVALID_FUNCTION;
+            if (!locked && tries < 4)
+                Sleep(200);
+        }
+        if (!locked)
+            return v.device;
+        win::ioctl(volume.get(), FSCTL_DISMOUNT_VOLUME, nullptr, 0, nullptr, 0);
+        locks.push_back(std::move(volume));
+    }
+    return {};
+}
+
+// Takes a drive offline (Windows lets go of everything on it, and leaves it alone) or back
+// online; only until the PC restarts.
+bool setOffline(const QString &blockPath, bool offline)
+{
+    const win::Handle h = win::openDevice(blockPath, GENERIC_READ | GENERIC_WRITE);
+    SetDiskAttributes attributes = {};
+    attributes.version = sizeof attributes;
+    attributes.persist = FALSE;
+    attributes.attributes = offline ? kDiskOffline : 0;
+    attributes.mask = kDiskOffline;
+    return h.valid() && win::ioctl(h.get(), kSetDiskAttributes, &attributes, sizeof attributes, nullptr, 0);
+}
 
 bool elevated()
 {
@@ -979,11 +1056,83 @@ void UDisks::openBlock(const QString &objectPath, OpenMode mode)
     if (!disk)
         return fail(tr("it isn't there anymore"));
     const bool writes = mode == OpenMode::ReadWrite || mode == OpenMode::ReadWriteDirect || mode == OpenMode::BenchmarkWritable;
-    if (writes)
-        return fail(tr("writing to drives isn't in the Windows version of DiskForge yet"));
+    if (writes) {
+        if (disk->isSystem)
+            return fail(disk->systemReason.isEmpty() ? tr("Windows is running from it") : disk->systemReason);
+        const DWORD flags = FILE_FLAG_NO_BUFFERING | (mode == OpenMode::ReadWriteDirect ? FILE_FLAG_WRITE_THROUGH : 0);
+        const bool whole = objectPath == disk->blockPath;
+        bool offline = false;
+        auto locks = std::make_shared<std::vector<win::Handle>>();
+        win::Handle h;
+        if (whole) {
+            // A whole drive: offline, Windows lets go of everything on it and leaves it alone,
+            // until it's back online when what was opened here is closed. USB sticks can't go
+            // offline: their volumes are locked and taken out of use instead, for as long.
+            offline = setOffline(disk->blockPath, true) && isOffline(disk->blockPath);
+            if (!offline) {
+                if (const QString busy = lockVolumes(disk->volumes, m_windows->volumeNames, *locks, true); !busy.isEmpty())
+                    return fail(tr("something has files open on %1; close them and try again").arg(shortDevice(busy)));
+            }
+            h = win::openDevice(objectPath, GENERIC_READ | GENERIC_WRITE, flags);
+            if (!h.valid()) {
+                const QString why = win::lastErrorText();
+                if (offline)
+                    setOffline(disk->blockPath, false);
+                return fail(why);
+            }
+        } else {
+            // A partition: its volume locked and taken out of use for as long as it's open.
+            QString path = m_windows->volumeNames.value(objectPath);
+            if (path.endsWith(QLatin1Char('\\')))
+                path.chop(1);
+            h = win::openDevice(path.isEmpty() ? objectPath : path, GENERIC_READ | GENERIC_WRITE, flags);
+            if (!h.valid())
+                return fail(win::lastErrorText());
+            if (!win::ioctl(h.get(), FSCTL_LOCK_VOLUME, nullptr, 0, nullptr, 0) && GetLastError() != ERROR_INVALID_FUNCTION)
+                return fail(tr("something has files open on it; close them and try again"));
+            win::ioctl(h.get(), FSCTL_DISMOUNT_VOLUME, nullptr, 0, nullptr, 0);
+        }
+        const int fd = _open_osfhandle(intptr_t(h.get()), _O_RDWR | _O_BINARY);
+        if (fd < 0) {
+            if (offline)
+                setOffline(disk->blockPath, false);
+            return fail(tr("too many files open"));
+        }
+        h.release();
+        // Closed (blockio::close), the drive comes back, and Windows reads what's on it now.
+        blockio::whenClosed(fd, [this, path = disk->blockPath, offline, locks] {
+            QMetaObject::invokeMethod(this, [this, path, offline, locks] {
+                locks->clear();
+                if (offline)
+                    setOffline(path, false);
+                forgetProbes(diskByPath(path));
+                // Quietly: whoever wrote to it may be waiting for an answer of its own.
+                if (const win::Handle disk = win::openDevice(path, GENERIC_READ | GENERIC_WRITE); disk.valid())
+                    win::ioctl(disk.get(), IOCTL_DISK_UPDATE_PROPERTIES, nullptr, 0, nullptr, 0);
+                refresh();
+            }, Qt::QueuedConnection);
+        });
+        qCInfo(lcOps).noquote() << "open" << objectPath << "mode" << int(mode) << "for writing";
+        QTimer::singleShot(0, this, [this, objectPath, fd] { emit deviceOpened(objectPath, fd); });
+        return;
+    }
 
     // Windows reads drives and partitions straight from the drive anyway, never through the
-    // cache, so every reading mode is the same here.
+    // cache. Read (a backup, a clone's source) keeps what's on it still while it's read, the way
+    // Linux unmounts it first: its volumes are locked for as long as it's open. Benchmark reads
+    // it as it is.
+    auto locks = std::make_shared<std::vector<win::Handle>>();
+    if (mode == OpenMode::Read) {
+        if (disk->isSystem)
+            return fail(disk->systemReason.isEmpty() ? tr("Windows is running from it") : disk->systemReason);
+        QVector<Volume> volumes;
+        for (const Volume &v : disk->volumes) {
+            if (objectPath == disk->blockPath || v.objectPath == objectPath)
+                volumes << v;
+        }
+        if (const QString busy = lockVolumes(volumes, m_windows->volumeNames, *locks, false); !busy.isEmpty())
+            return fail(tr("something has files open on %1; close them and try again").arg(shortDevice(busy)));
+    }
     win::Handle h = win::openDevice(objectPath, GENERIC_READ, FILE_FLAG_NO_BUFFERING);
     if (!h.valid())
         return fail(win::lastErrorText());
@@ -991,6 +1140,15 @@ void UDisks::openBlock(const QString &objectPath, OpenMode mode)
     if (fd < 0)
         return fail(tr("too many files open"));
     h.release();
+    if (!locks->empty()) {
+        // Closed (blockio::close), the volumes are let go and Windows mounts them again.
+        blockio::whenClosed(fd, [this, locks] {
+            QMetaObject::invokeMethod(this, [this, locks] {
+                locks->clear();
+                refresh();
+            }, Qt::QueuedConnection);
+        });
+    }
     qCInfo(lcOps).noquote() << "open" << objectPath << "mode" << int(mode) << "done";
     QTimer::singleShot(0, this, [this, objectPath, fd] { emit deviceOpened(objectPath, fd); });
 }
@@ -1005,16 +1163,76 @@ void UDisks::rescan(const QString &objectPath)
         }
     }
     const win::Handle h = win::openDevice(path, GENERIC_READ | GENERIC_WRITE);
-    if (h.valid())
-        win::ioctl(h.get(), IOCTL_DISK_UPDATE_PROPERTIES, nullptr, 0, nullptr, 0);
+    const bool ok = h.valid() && win::ioctl(h.get(), IOCTL_DISK_UPDATE_PROPERTIES, nullptr, 0, nullptr, 0);
+    const QString why = ok ? QString() : win::lastErrorText();
     m_debounce.start();
+    // Answered like every operation (Clone and Restore wait for it), with nothing to say when it worked.
+    QTimer::singleShot(0, this, [this, ok, why] {
+        emit operationFinished(ok, ok ? QString() : tr("Couldn't re-read the partition table") + QStringLiteral(": ") + why);
+    });
 }
 
 // Not on Windows yet. Each reports so, the way a failed operation does.
 
-void UDisks::setPartitionTypeAndFlags(const Volume &volume, const QString &, bool, quint64)
+void UDisks::setPartitionTypeAndFlags(const Volume &volume, const QString &type, bool setFlags, quint64 flags)
 {
-    notOnWindows(tr("Couldn't change the type of %1").arg(shortDevice(volume.device)));
+    const QString name = shortDevice(volume.device);
+    const QString failure = tr("Couldn't change the type and flags of %1").arg(name);
+    const Disk *disk = diskOf(volume);
+    if (refuseSystem(disk, failure))
+        return;
+    auto refuse = [this, failure](const QString &why) {
+        QTimer::singleShot(0, this, [this, failure, why] { emit operationFinished(false, failure + QStringLiteral(": ") + why); });
+    };
+    if (!disk || volume.number == 0)
+        return refuse(tr("it isn't a partition"));
+    const bool mbr = disk->tableType == QLatin1String("dos");
+    // The type, and an MBR partition's active flag, through Windows' own Set-Partition.
+    QString script;
+    QHash<QString, QString> values = {{QStringLiteral("DF_DISK"), QString::number(diskNumber(disk->blockPath))},
+                                      {QStringLiteral("DF_PART"), QString::number(volume.number)}};
+    const QString partition = QStringLiteral("Set-Partition -DiskNumber ([int]$env:DF_DISK) -PartitionNumber ([int]$env:DF_PART)");
+    if (!type.isEmpty()) {
+        bool hex = false;
+        const uint code = QString(type).remove(QStringLiteral("0x")).toUInt(&hex, 16);
+        if (mbr && (!hex || code > 0xFF))
+            return refuse(tr("%1 isn't a partition type").arg(type));
+        script += partition + (mbr ? QStringLiteral(" -MbrType ([byte]$env:DF_TYPE); ") : QStringLiteral(" -GptType $env:DF_TYPE; "));
+        values.insert(QStringLiteral("DF_TYPE"), mbr ? QString::number(code) : QStringLiteral("{%1}").arg(type));
+    }
+    if (setFlags && mbr) {
+        script += partition + QStringLiteral(" -IsActive ([bool][int]$env:DF_ACTIVE); ");
+        values.insert(QStringLiteral("DF_ACTIVE"), (flags & 0x80) ? QStringLiteral("1") : QStringLiteral("0"));
+    }
+    const bool gptFlags = setFlags && !mbr;
+    auto finish = [this, path = disk->blockPath, partitionPath = volume.objectPath, gptFlags, flags, name, failure, setFlags](bool ok, const QString &said) {
+        QString why = said;
+        if (ok && gptFlags) {
+            // A GPT partition's attributes, set on the partition itself (its type, ID and name kept).
+            const win::Handle h = win::openDevice(partitionPath, GENERIC_READ | GENERIC_WRITE);
+            PARTITION_INFORMATION_EX info {};
+            ok = h.valid() && win::ioctl(h.get(), IOCTL_DISK_GET_PARTITION_INFO_EX, nullptr, 0, &info, sizeof info)
+              && info.PartitionStyle == PARTITION_STYLE_GPT;
+            if (ok) {
+                SET_PARTITION_INFORMATION_EX set {};
+                set.PartitionStyle = PARTITION_STYLE_GPT;
+                set.Gpt = info.Gpt;
+                set.Gpt.Attributes = flags;
+                ok = win::ioctl(h.get(), IOCTL_DISK_SET_PARTITION_INFO_EX, &set, sizeof set, nullptr, 0);
+            }
+            if (!ok)
+                why = win::lastErrorText();
+        }
+        forgetProbes(diskByPath(path));
+        refresh();
+        emit operationFinished(ok, !ok ? failure + QStringLiteral(": ") + why
+                                   : setFlags ? tr("Changed the type and flags of %1").arg(name) : tr("Changed the type of %1").arg(name));
+    };
+    if (script.isEmpty()) {
+        QTimer::singleShot(0, this, [finish] { finish(true, {}); });
+        return;
+    }
+    storage(this, script, values, finish);
 }
 
 // A file system's serial number, written into its boot sectors with the volume locked, so
@@ -1079,23 +1297,6 @@ void UDisks::setUuid(const Volume &volume, const QString &uuid)
         emit operationFinished(ok, ok ? tr("Gave %1 a new ID").arg(name) : failure + QStringLiteral(": ") + error);
     });
 }
-
-namespace {
-
-// IOCTL_DISK_SET_DISK_ATTRIBUTES and its SET_DISK_ATTRIBUTES, from ntddisk.h, which MinGW's
-// headers don't have.
-constexpr DWORD kSetDiskAttributes = CTL_CODE(IOCTL_DISK_BASE, 0x003d, METHOD_BUFFERED, FILE_READ_ACCESS | FILE_WRITE_ACCESS);
-constexpr DWORDLONG kDiskOffline = 0x1;
-struct SetDiskAttributes {
-    DWORD version;
-    BOOLEAN persist;
-    BYTE reserved1[3];
-    DWORDLONG attributes;
-    DWORDLONG mask;
-    DWORD reserved2[4];
-};
-
-} // namespace
 
 void UDisks::giveNewDiskIds(const Disk &disk)
 {
@@ -1168,6 +1369,49 @@ void UDisks::createPartitionTable(const Disk &disk, const QString &tableType)
     if (refuseSystem(&disk, failure))
         return;
     const QString style = tableType == QLatin1String("gpt") ? QStringLiteral("GPT") : QStringLiteral("MBR");
+    if (disk.removable) {
+        // A USB stick: to Windows' Clear-Disk and Initialize-Disk a blank one is one partition
+        // that's always there, so the empty table is written here (the way Rufus does it too).
+        QString why;
+        std::vector<win::Handle> locks;
+        if (const QString busy = lockVolumes(disk.volumes, m_windows->volumeNames, locks, true); !busy.isEmpty()) {
+            why = tr("something has files open on %1; close them and try again").arg(shortDevice(busy));
+        } else if (win::Handle h = win::openDevice(disk.blockPath, GENERIC_READ | GENERIC_WRITE); !h.valid()) {
+            why = win::lastErrorText();
+        } else {
+            // What was at both ends goes first (old tables, file systems' backups), as Clear-Disk does.
+            constexpr DWORD kEnd = 1024 * 1024;
+            blockio::Buffer zeros = blockio::alignedBuffer(kEnd);
+            memset(zeros.get(), 0, kEnd);
+            for (const quint64 at : {quint64(0), disk.size > 2 * kEnd ? disk.size - kEnd : quint64(0)}) {
+                OVERLAPPED where = {};
+                where.Offset = DWORD(at);
+                where.OffsetHigh = DWORD(at >> 32);
+                DWORD done = 0;
+                if (!WriteFile(h.get(), zeros.get(), kEnd, &done, &where) && why.isEmpty())
+                    why = win::lastErrorText();
+            }
+            CREATE_DISK create = {};
+            if (style == QLatin1String("GPT")) {
+                create.PartitionStyle = PARTITION_STYLE_GPT;
+                create.Gpt.DiskId = QUuid::createUuid();
+                create.Gpt.MaxPartitionCount = 128;
+            } else {
+                create.PartitionStyle = PARTITION_STYLE_MBR;
+                create.Mbr.Signature = QRandomGenerator::system()->generate() | 1;
+            }
+            if (why.isEmpty() && !win::ioctl(h.get(), IOCTL_DISK_CREATE_DISK, &create, sizeof create, nullptr, 0))
+                why = win::lastErrorText();
+            win::ioctl(h.get(), IOCTL_DISK_UPDATE_PROPERTIES, nullptr, 0, nullptr, 0);
+        }
+        locks.clear();
+        forgetProbes(diskByPath(disk.blockPath));
+        QTimer::singleShot(0, this, [this, name, failure, style, why] {
+            refresh();
+            emit operationFinished(why.isEmpty(), why.isEmpty() ? tr("%1 now has an empty %2 partition table").arg(name, style) : failure + QStringLiteral(": ") + why);
+        });
+        return;
+    }
     // A drive with a table is emptied first, the way Disk Management's "clean" does.
     storage(this,
             QStringLiteral("$n = [int]$env:DF_DISK; $d = Get-Disk -Number $n; "
@@ -1644,6 +1888,36 @@ void UDisks::openImage(const QString &path, bool readOnly)
                     emit imageOpened(diskPath(DWORD(number)));
                 emit operationFinished(ok, ok ? tr("Opened %1").arg(name) : failure + QStringLiteral(": ") + said);
             });
+}
+
+void UDisks::openIso(const QString &path, QObject *context, const std::function<void(const QString &, bool, const QString &)> &done)
+{
+    const QString failure = tr("Couldn't open %1").arg(QFileInfo(path).fileName());
+    storage(context,
+            QStringLiteral("$here = 0; "
+                           "if (-not (Get-DiskImage -ImagePath $env:DF_IMAGE).Attached) { "
+                           "  Mount-DiskImage -ImagePath $env:DF_IMAGE -Access ReadOnly -StorageType ISO | Out-Null; $here = 1 }; "
+                           "$letter = $null; "
+                           "for ($n = 0; $n -lt 20 -and -not $letter; $n++) { "
+                           "  $letter = (Get-DiskImage -ImagePath $env:DF_IMAGE | Get-Volume -ErrorAction SilentlyContinue).DriveLetter; "
+                           "  if (-not $letter) { Start-Sleep -Milliseconds 500 } }; "
+                           "if (-not $letter) { if ($here) { Dismount-DiskImage -ImagePath $env:DF_IMAGE | Out-Null }; Write-Output 'none'; exit 0 }; "
+                           "Write-Output \"$here$letter\""),
+            {{QStringLiteral("DF_IMAGE"), QDir::toNativeSeparators(QFileInfo(path).absoluteFilePath())}},
+            [failure, done](bool ok, const QString &said) {
+                if (!ok)
+                    return done({}, false, failure + QStringLiteral(": ") + said);
+                if (said == QLatin1String("none") || said.size() != 2)
+                    return done({}, false, failure + QStringLiteral(": ") + tr("Windows gave it no drive letter"));
+                done(said.mid(1) + QStringLiteral(":/"), said.startsWith(QLatin1Char('1')), {});
+            });
+}
+
+void UDisks::closeIso(const QString &path, QObject *context, const std::function<void()> &done)
+{
+    storage(context, QStringLiteral("Dismount-DiskImage -ImagePath $env:DF_IMAGE | Out-Null"),
+            {{QStringLiteral("DF_IMAGE"), QDir::toNativeSeparators(QFileInfo(path).absoluteFilePath())}},
+            [done](bool, const QString &) { done(); });
 }
 
 void UDisks::detachImage(const Disk &disk)

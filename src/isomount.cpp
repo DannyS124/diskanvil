@@ -32,6 +32,19 @@ const Volume *IsoMount::volume() const
 
 void IsoMount::open()
 {
+#ifdef Q_OS_WIN
+    // Windows opens ISOs itself, UDF and all, with a drive letter of their own.
+    m_opening = true;
+    emit phase(tr("Opening %1…").arg(QFileInfo(m_iso).fileName()));
+    m_udisks->openIso(m_iso, this, [this](const QString &root, bool openedHere, const QString &error) {
+        if (!error.isEmpty())
+            return fail(error);
+        m_openedHere = openedHere;
+        m_mountPoint = root;
+        opened();
+    });
+    return;
+#endif
     m_opening = true;
     followResults();
     emit phase(tr("Opening %1…").arg(QFileInfo(m_iso).fileName()));
@@ -66,7 +79,9 @@ void IsoMount::open()
 
 void IsoMount::opened()
 {
+#ifndef Q_OS_WIN
     stopFollowing();
+#endif
     m_opening = false;
     if (m_closeWhenOpen)
         return close();
@@ -80,6 +95,16 @@ void IsoMount::close()
         m_closeWhenOpen = true;
         return;
     }
+#ifdef Q_OS_WIN
+    // One the user had open already stays open.
+    if (!m_openedHere || m_mountPoint.isEmpty()) {
+        emit closed();
+        return;
+    }
+    m_mountPoint.clear();
+    m_udisks->closeIso(m_iso, this, [this] { emit closed(); });
+    return;
+#endif
     const Disk *d = m_loop.isEmpty() ? nullptr : m_udisks->diskByPath(m_loop);
     if (!d) {
         emit closed();

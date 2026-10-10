@@ -6,6 +6,8 @@
 #include "applog.h"
 #include "udisks.h"
 
+#include <QTimer>
+
 #include <algorithm>
 
 namespace {
@@ -156,8 +158,14 @@ void UsbPrep::mountNext(int index)
 
 void UsbPrep::finish()
 {
-    followResults();
     emit phase(tr("Finishing up…"));
+#ifdef Q_OS_WIN
+    // The stick keeps its drive letter there, so it shows in File Explorer: what was written is
+    // on it already, and Windows lets USB sticks go without being told.
+    QTimer::singleShot(0, this, [this] { emit done(true, QString()); });
+    return;
+#endif
+    followResults();
     unmountNext(0);
 }
 

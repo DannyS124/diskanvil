@@ -11,12 +11,13 @@
 #include "usbprep.h"
 
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QProcess>
 #include <QRegularExpression>
 #include <QThread>
 
-#include <unistd.h>
+#include <atomic>
 
 int WindowsUsbJob::splitMiB = windowsusb::kSplitMiB;
 
@@ -47,7 +48,7 @@ WindowsUsbJob::~WindowsUsbJob()
 
 bool WindowsUsbJob::canCancel() const
 {
-    return m_copier || m_wimlib;
+    return m_copier || m_wimlib || m_stopCheck;
 }
 
 void WindowsUsbJob::cancel()
@@ -55,6 +56,8 @@ void WindowsUsbJob::cancel()
     m_cancelled = true;
     if (auto *copier = qobject_cast<filecopy::Copier *>(m_copier))
         copier->cancel();
+    if (m_stopCheck)
+        *m_stopCheck = true;
     if (m_wimlib)
         m_wimlib->terminate();
 }
@@ -121,7 +124,8 @@ void WindowsUsbJob::copy(const QString &stick)
 
 void WindowsUsbJob::runWimlib(const QStringList &args, const QString &phaseText, const std::function<void()> &next)
 {
-    // wimlib says how far along it is as "... (52%) ...", over and over on one line.
+    // wimlib says how far along it is as "... (52%) ...", over and over on one line; Windows'
+    // DISM as "[====   52.0%   ]".
     m_wimlib = new QProcess(this);
     m_wimlib->setProcessChannelMode(QProcess::MergedChannels);
     auto *log = new QString;
@@ -130,7 +134,7 @@ void WindowsUsbJob::runWimlib(const QStringList &args, const QString &phaseText,
         log->append(text);
         if (log->size() > 64 * 1024)
             log->remove(0, log->size() - 32 * 1024);
-        static const QRegularExpression percent(QStringLiteral("\\((\\d+)%\\)"));
+        static const QRegularExpression percent(QStringLiteral("(\\d+)(?:\\.\\d+)?%"));
         QRegularExpressionMatchIterator it = percent.globalMatch(text);
         int last = -1;
         while (it.hasNext())
@@ -143,8 +147,13 @@ void WindowsUsbJob::runWimlib(const QStringList &args, const QString &phaseText,
         delete log;
         m_wimlib->deleteLater();
         m_wimlib = nullptr;
-        if (status != QProcess::NormalExit || code != 0)
+        if (status != QProcess::NormalExit || code != 0) {
+#ifdef Q_OS_WIN
+            return fail(tr("Windows couldn't split install.wim: %1").arg(output.isEmpty() ? tr("it stopped") : output));
+#else
             return fail(tr("wimlib couldn't finish: %1").arg(output.isEmpty() ? tr("it stopped") : output));
+#endif
+        }
         next();
     });
     connect(m_wimlib, &QProcess::errorOccurred, this, [this, log](QProcess::ProcessError error) {
@@ -155,21 +164,71 @@ void WindowsUsbJob::runWimlib(const QStringList &args, const QString &phaseText,
         m_wimlib = nullptr;
         fail(tr("wimlib isn't installed (it's called wimlib, or wimtools on Debian and Ubuntu)."));
     });
-    qCInfo(lcOps).noquote() << "wimlib-imagex" << args.join(QLatin1Char(' '));
-    m_wimlib->start(QStringLiteral("wimlib-imagex"), args);
+#ifdef Q_OS_WIN
+    const QString program = QDir(qEnvironmentVariable("SystemRoot", QStringLiteral("C:\\Windows"))).filePath(QStringLiteral("System32/dism.exe"));
+#else
+    const QString program = QStringLiteral("wimlib-imagex");
+#endif
+    qCInfo(lcOps).noquote() << program << args.join(QLatin1Char(' '));
+    emit progress(phaseText, 0, 100);
+    m_wimlib->start(program, args);
 }
 
 void WindowsUsbJob::split()
 {
     // Straight onto the stick: install.swm, install2.swm... Windows Setup reads them as they are.
-    const QString target = m_stick + QStringLiteral("/sources/install.swm");
-    QDir().mkpath(m_stick + QStringLiteral("/sources"));
-    runWimlib({QStringLiteral("split"), m_iso + QLatin1Char('/') + m_info.install, target, QString::number(splitMiB)},
+    // (Joined with QDir: on Windows the stick's root is "F:/", with its slash.)
+    const QString target = QDir(m_stick).filePath(QStringLiteral("sources/install.swm"));
+    QDir(m_stick).mkpath(QStringLiteral("sources"));
+#ifdef Q_OS_WIN
+    // With Windows' own DISM, which is always there.
+    runWimlib({QStringLiteral("/Split-Image"), QStringLiteral("/ImageFile:") + QDir::toNativeSeparators(QDir(m_iso).filePath(m_info.install)),
+               QStringLiteral("/SWMFile:") + QDir::toNativeSeparators(target), QStringLiteral("/FileSize:%1").arg(splitMiB)},
               tr("Splitting install.wim onto the stick"), [this] { verify(); });
+#else
+    runWimlib({QStringLiteral("split"), QDir(m_iso).filePath(m_info.install), target, QString::number(splitMiB)},
+              tr("Splitting install.wim onto the stick"), [this] { verify(); });
+#endif
 }
 
 void WindowsUsbJob::verify()
 {
+#ifdef Q_OS_WIN
+    // DISM has no check of its own: the parts are compared with install.wim, read back from the
+    // stick itself.
+    QStringList parts;
+    const QDir sources(QDir(m_stick).filePath(QStringLiteral("sources")));
+    for (const QString &part : sources.entryList({QStringLiteral("install*.swm")}, QDir::Files))
+        parts << sources.filePath(part);
+    const QString original = QDir(m_iso).filePath(m_info.install);
+    const QString phaseText = tr("Checking install.wim's parts on the stick");
+    auto stop = std::make_shared<std::atomic_bool>(false);
+    m_stopCheck = stop;
+    qCInfo(lcOps).noquote() << "Checking" << parts.size() << "parts against" << original;
+    m_thread = QThread::create([this, original, parts, phaseText, stop] {
+        QElapsedTimer since;
+        since.start();
+        const QString error = windowsusb::checkParts(original, parts, [this, phaseText, stop, &since](quint64 done, quint64 total) {
+            if (since.elapsed() > 200 || done == total) {
+                since.restart();
+                QMetaObject::invokeMethod(this, [this, phaseText, done, total] { emit progress(phaseText, done, total); }, Qt::QueuedConnection);
+            }
+            return !stop->load();
+        });
+        QMetaObject::invokeMethod(this, [this, error] {
+            m_thread->wait();
+            m_thread->deleteLater();
+            m_thread = nullptr;
+            m_stopCheck.reset();
+            if (!error.isEmpty())
+                return fail(error);
+            qCInfo(lcOps).noquote() << "The parts match install.wim";
+            writeAnswers();
+        }, Qt::QueuedConnection);
+    });
+    m_thread->setParent(this);
+    m_thread->start();
+#else
     // Flushed and out of the page cache first, so the check reads the stick itself.
     const QStringList parts = QDir(m_stick + QStringLiteral("/sources")).entryList({QStringLiteral("install*.swm")}, QDir::Files);
     for (const QString &part : parts) {
@@ -183,13 +242,14 @@ void WindowsUsbJob::verify()
     runWimlib({QStringLiteral("verify"), m_stick + QStringLiteral("/sources/install.swm"),
                QStringLiteral("--ref=%1/sources/install*.swm").arg(m_stick)},
               tr("Checking install.wim's parts on the stick"), [this] { writeAnswers(); });
+#endif
 }
 
 void WindowsUsbJob::writeAnswers()
 {
     const QByteArray xml = windowsusb::unattendXml(m_options, m_info.wim.arch);
     if (!xml.isEmpty()) {
-        QFile f(m_stick + QStringLiteral("/autounattend.xml"));
+        QFile f(QDir(m_stick).filePath(QStringLiteral("autounattend.xml")));
         if (!f.open(QIODevice::WriteOnly) || f.write(xml) != xml.size())
             return fail(tr("Couldn't write autounattend.xml: %1").arg(f.errorString()));
         f.close();

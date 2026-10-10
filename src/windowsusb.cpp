@@ -3,6 +3,8 @@
 
 #include "windowsusb.h"
 
+#include "blockio.h"
+
 #include <QCoreApplication>
 #include <QDir>
 #include <QDirIterator>
@@ -17,6 +19,16 @@
 #include <QTimeZone>
 #include <QXmlStreamReader>
 #include <QXmlStreamWriter>
+#include <QtEndian>
+
+#include <algorithm>
+#include <cstring>
+#include <memory>
+#include <vector>
+
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
 
 namespace {
 
@@ -137,6 +149,180 @@ windowsusb::WimInfo windowsusb::readWim(const QString &path)
     return parseWimXml(f.read(qint64(size)));
 }
 
+namespace {
+
+// A WIM's lookup table: 50 bytes for each resource, its size as stored (7 bytes), flags, where
+// it is, its size unpacked, the part it's in (2 bytes), how often it's used (4) and its SHA-1.
+constexpr int kWimHeader = 208;
+constexpr int kEntry = 50;
+constexpr uchar kMetadata = 0x02;
+constexpr uchar kCompressed = 0x04;
+constexpr uchar kSolid = 0x10;
+constexpr quint64 kPiece = 4 * 1024 * 1024;
+constexpr quint64 kMaxTable = 512 * 1024 * 1024;
+
+struct Resource {
+    QByteArray hash;
+    quint64 offset = 0;
+    quint64 size = 0;
+    uchar flags = 0;
+};
+
+struct Wim {
+    int fd = -1;
+    quint64 size = 0;
+    QByteArray guid;
+    int part = 0;
+    int parts = 0;
+    bool solid = false;
+    QVector<Resource> resources; // the ones in this part
+
+    ~Wim()
+    {
+        if (fd >= 0)
+            blockio::close(fd);
+    }
+};
+
+// Header and lookup table; empty when it isn't a WIM that can be read.
+QString readTable(const QString &path, blockio::FileMode mode, Wim &wim)
+{
+    wim.fd = blockio::openFile(path, mode);
+    if (wim.fd < 0)
+        return tr("Couldn't open %1.").arg(QFileInfo(path).fileName());
+    wim.size = blockio::deviceSize(wim.fd);
+    blockio::Buffer buf = blockio::alignedBuffer(kPiece);
+    if (!buf || !blockio::readAt(wim.fd, buf.get(), kWimHeader, 0) || !QByteArrayView(buf.get(), 8).startsWith(QByteArrayView("MSWIM\0\0\0", 8)))
+        return tr("%1 isn't a WIM file.").arg(QFileInfo(path).fileName());
+    const auto *h = reinterpret_cast<const uchar *>(buf.get());
+    wim.solid = qFromLittleEndian<quint32>(h + 12) == 0xE00;
+    wim.guid = QByteArray(buf.get() + 24, 16);
+    wim.part = qFromLittleEndian<quint16>(h + 40);
+    wim.parts = qFromLittleEndian<quint16>(h + 42);
+    const quint64 tableSize = le64(h + 48, 7);
+    const uchar tableFlags = h[55];
+    const quint64 tableAt = le64(h + 56, 8);
+    if ((tableFlags & kCompressed) || tableSize % kEntry || tableSize > kMaxTable || tableAt + tableSize > wim.size)
+        return tr("Couldn't read what's in %1.").arg(QFileInfo(path).fileName());
+    for (quint64 done = 0; done < tableSize;) {
+        const quint64 n = std::min(tableSize - done, kPiece / kEntry * kEntry);
+        if (!blockio::readAt(wim.fd, buf.get(), n, tableAt + done))
+            return tr("Couldn't read what's in %1.").arg(QFileInfo(path).fileName());
+        for (quint64 at = 0; at < n; at += kEntry) {
+            const auto *e = reinterpret_cast<const uchar *>(buf.get() + at);
+            Resource r;
+            r.size = le64(e, 7);
+            r.flags = e[7];
+            r.offset = le64(e + 8, 8);
+            r.hash = QByteArray(reinterpret_cast<const char *>(e + 30), 20);
+            if (r.flags & kSolid)
+                wim.solid = true;
+            // A part's table can list other parts' resources too; only its own are in it.
+            if (r.size == 0 || qFromLittleEndian<quint16>(e + 24) != wim.part)
+                continue;
+            if (r.offset + r.size > wim.size)
+                return tr("%1 is cut short.").arg(QFileInfo(path).fileName());
+            wim.resources.push_back(r);
+        }
+        done += n;
+    }
+    return {};
+}
+
+} // namespace
+
+QString windowsusb::checkParts(const QString &original, const QStringList &parts,
+                               const std::function<bool(quint64, quint64)> &progress)
+{
+    Wim whole;
+    if (const QString error = readTable(original, blockio::FileMode::Read, whole); !error.isEmpty())
+        return error;
+    QHash<QByteArray, qsizetype> byHash;
+    for (qsizetype i = 0; i < whole.resources.size(); ++i)
+        byHash.insert(whole.resources[i].hash, i);
+
+    std::vector<std::unique_ptr<Wim>> pieces;
+    quint64 total = 0;
+    QSet<int> numbers;
+    for (const QString &path : parts) {
+        auto wim = std::make_unique<Wim>();
+        if (const QString error = readTable(path, blockio::FileMode::ReadBack, *wim); !error.isEmpty())
+            return error;
+        if (wim->parts != int(parts.size()) || wim->part < 1 || wim->part > wim->parts || numbers.contains(wim->part)
+            || (!pieces.empty() && wim->guid != pieces.front()->guid))
+            return tr("install.wim's parts don't belong together.");
+        numbers.insert(wim->part);
+        // Read front to back, as the stick has them.
+        std::sort(wim->resources.begin(), wim->resources.end(), [](const Resource &a, const Resource &b) { return a.offset < b.offset; });
+        for (const Resource &r : wim->resources)
+            total += whole.solid ? 0 : r.size;
+        if (whole.solid)
+            total += wim->size;
+        pieces.push_back(std::move(wim));
+    }
+
+    blockio::Buffer mine = blockio::alignedBuffer(2 * kPiece);
+    blockio::Buffer theirs = blockio::alignedBuffer(kPiece);
+    if (!mine || !theirs)
+        return tr("Not enough memory to check install.wim's parts.");
+    quint64 done = 0;
+    if (whole.solid) {
+        // Packed together (an ESD's way), the resources can't be told apart: every byte of the
+        // parts read back is the check then.
+        for (const auto &wim : pieces) {
+            for (quint64 at = 0; at < wim->size;) {
+                const quint64 n = std::min(kPiece, wim->size - at);
+                if (!blockio::readAt(wim->fd, mine.get(), (n + blockio::kAlign - 1) / blockio::kAlign * blockio::kAlign, at)
+                    && !blockio::readAt(wim->fd, mine.get(), n, at))
+                    return tr("Couldn't read install.wim's parts back from the stick. It may be failing; try another one.");
+                at += n;
+                done += n;
+                if (progress && !progress(done, total))
+                    return tr("Stopped.");
+            }
+        }
+        return {};
+    }
+
+    QSet<QByteArray> seen;
+    for (const auto &wim : pieces) {
+        // What's been read of the part: [from, to) in `mine`, in pieces at the sector edge.
+        quint64 from = 0, to = 0;
+        for (const Resource &r : wim->resources) {
+            const qsizetype i = byHash.value(r.hash, -1);
+            if (i < 0 || whole.resources[i].size != r.size || (whole.resources[i].flags & (kCompressed | kMetadata)) != (r.flags & (kCompressed | kMetadata)))
+                return tr("install.wim's parts don't match it.");
+            seen.insert(r.hash);
+            for (quint64 at = 0; at < r.size;) {
+                const quint64 n = std::min(kPiece, r.size - at);
+                const quint64 offset = r.offset + at;
+                if (offset < from || offset + n > to) {
+                    from = offset / blockio::kAlign * blockio::kAlign;
+                    const quint64 want = std::min(2 * kPiece, (wim->size - from + blockio::kAlign - 1) / blockio::kAlign * blockio::kAlign);
+                    const qint64 got = blockio::readSome(wim->fd, mine.get(), want, from);
+                    if (got < 0 || from + quint64(got) < offset + n)
+                        return tr("Couldn't read install.wim's parts back from the stick. It may be failing; try another one.");
+                    to = from + quint64(got);
+                }
+                if (!blockio::readAt(whole.fd, theirs.get(), n, whole.resources[i].offset + at))
+                    return tr("Couldn't read %1.").arg(QFileInfo(original).fileName());
+                if (memcmp(mine.get() + (offset - from), theirs.get(), n) != 0)
+                    return tr("The stick gave back something different from what was written to install.wim's parts. "
+                              "It may be failing; try another one.");
+                at += n;
+                done += n;
+                if (progress && !progress(done, total))
+                    return tr("Stopped.");
+            }
+        }
+    }
+    for (const Resource &r : whole.resources) {
+        if (!seen.contains(r.hash))
+            return tr("Some of install.wim is missing from its parts.");
+    }
+    return {};
+}
+
 windowsusb::Info windowsusb::inspect(const QString &root)
 {
     Info info;
@@ -247,6 +433,22 @@ QString windowsusb::windowsTimeZone(const QByteArray &ianaId, const QByteArray &
     return {};
 }
 
+#ifdef Q_OS_WIN
+void windowsusb::fillRegionFromThisPc(Options &options)
+{
+    // Windows names its own time zone and keyboard the way the answer file wants them.
+    options.userLocale = QLocale::system().name().replace(QLatin1Char('_'), QLatin1Char('-'));
+    DYNAMIC_TIME_ZONE_INFORMATION zone = {};
+    if (GetDynamicTimeZoneInformation(&zone) != TIME_ZONE_ID_INVALID)
+        options.timeZone = QString::fromWCharArray(zone.TimeZoneKeyName);
+    // The keyboard as "0809:00000809": its language, then the layout.
+    wchar_t layout[KL_NAMELENGTH] = {};
+    if (GetKeyboardLayoutNameW(layout)) {
+        const uint language = uint(quintptr(GetKeyboardLayout(0)) & 0xFFFF);
+        options.inputLocale = QStringLiteral("%1:%2").arg(language, 4, 16, QLatin1Char('0')).arg(QString::fromWCharArray(layout)).toLower();
+    }
+}
+#else
 void windowsusb::fillRegionFromThisPc(Options &options)
 {
     options.userLocale = QLocale::system().name().replace(QLatin1Char('_'), QLatin1Char('-'));
@@ -267,6 +469,7 @@ void windowsusb::fillRegionFromThisPc(Options &options)
     }
     options.inputLocale = inputLocaleFor(layout);
 }
+#endif
 
 QByteArray windowsusb::unattendXml(const Options &o, const QString &archIn)
 {
