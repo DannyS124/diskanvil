@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "bootcheck.h"
 #include "jobui.h"
 #include "virusscan.h"
 #include "winstartup.h"
@@ -41,6 +42,13 @@ public:
     void deleteTicked();
     // Switches the ticked startup entries off after asking, with a backup first.
     void switchOffTicked();
+    // Checks the EFI partition mounted at `esp`, with `windows` where that Windows is (the
+    // tests' way in; a scan finds the partition itself).
+    void checkEfiPartition(const QString &esp, const QString &windows);
+    // Puts Windows' own copies back over the ticked boot files, after asking.
+    void putBackTicked();
+    // The tests leave fwupd out: its answer is about the PC they run on.
+    static inline bool askFwupd = true;
     // Closing stops the scan and unmounts what this window mounted.
     void reject() override;
 
@@ -55,6 +63,11 @@ private:
     void runScan(const QStringList &alsoScan);
     void showStartup();
     void showStartupDetails();
+    void checkBoot(bool running);
+    void showBoot();
+    void showBootDetails();
+    // Unmounts the volume and mounts it again, writable; `then` gets where it is now.
+    void remountWritable(const QString &objectPath, const std::function<void(const QString &mount)> &then);
     void addHit(const virus::Detection &d);
     void scanFinished(bool completed, int scanned, int unreadable, const QString &problem);
     QString shownPath(const QString &path) const;
@@ -97,6 +110,17 @@ private:
     QSet<int> m_ticked;    // startup entries ticked to switch off
     QHash<int, QPair<bool, QString>> m_switched; // what happened when they were: done, and how
     QPushButton *m_switchOff;
+    // What starts the PC before Windows
+    QTreeWidget *m_bootList;
+    QLabel *m_bootInfo;
+    QLabel *m_bootDetails;
+    QPushButton *m_putBack;
+    boot::Report m_boot;
+    QSet<int> m_bootTicked;
+    QHash<int, QPair<bool, QString>> m_putBackDone;
+    QString m_espPath;  // the EFI partition looked at, and where it's mounted
+    QString m_espMount;
+    bool m_espReadOnly = false;
     QThread *m_startupThread = nullptr;
     bool m_stopped = false;
 

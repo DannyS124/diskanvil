@@ -30,7 +30,7 @@ cmake -S /src -B /build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTA
 cmake --build /build >>/build.log 2>&1 || { grep -E "error" /build.log | head -30; exit 1; }
 echo "build OK, $(grep -c 'warning:' /build.log) warnings"
 failed=0
-for suite in addons gpt copy usage backup rescuemap catalog fuzz health jobs recover rescueusb stickcheck images isomode windows lostfiles viruses registry startup; do
+for suite in addons gpt copy usage backup rescuemap catalog fuzz health jobs recover rescueusb stickcheck images isomode windows lostfiles viruses registry startup boot; do
     if QT_QPA_PLATFORM=offscreen /build/diskforge-selftest --$suite >/tmp/$suite.log 2>&1; then
         echo "  $suite: passed"
     else

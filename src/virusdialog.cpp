@@ -4,6 +4,7 @@
 #include "virusdialog.h"
 
 #include "applog.h"
+#include "blockio.h"
 #include "dialogs.h"
 #include "format.h"
 #include "rescuestick.h"
@@ -36,6 +37,12 @@
 #include <QThread>
 #include <QTreeWidget>
 #include <QVBoxLayout>
+
+#ifndef Q_OS_WIN
+#include <unistd.h>
+#else
+#include <io.h>
+#endif
 
 namespace {
 
@@ -127,6 +134,10 @@ VirusDialog::VirusDialog(UDisks *udisks, QWidget *parent)
     , m_startupDetails(new QLabel)
     , m_showAll(new QCheckBox(tr("Show everything that starts with Windows")))
     , m_switchOff(new QPushButton(tr("Switch Off Ticked…")))
+    , m_bootList(new QTreeWidget)
+    , m_bootInfo(new QLabel)
+    , m_bootDetails(new QLabel)
+    , m_putBack(new QPushButton(tr("Put Back Windows' Own…")))
 {
     setWindowTitle(tr("Scan for Viruses"));
     setObjectName(QStringLiteral("virusScan"));
@@ -226,6 +237,36 @@ VirusDialog::VirusDialog(UDisks *udisks, QWidget *parent)
     startupLayout->addLayout(startupButtons);
     m_tabs->addTab(startupPage, tr("Starts with Windows"));
     m_tabs->setTabVisible(1, false);
+    // What starts the PC before Windows does: where bootkits hide.
+    auto *bootPage = new QWidget;
+    auto *bootLayout = new QVBoxLayout(bootPage);
+    m_bootInfo->setWordWrap(true);
+    m_bootInfo->setTextFormat(Qt::RichText);
+    m_bootInfo->setObjectName(QStringLiteral("bootInfo"));
+    bootLayout->addWidget(m_bootInfo);
+    m_bootList->setObjectName(QStringLiteral("boot"));
+    m_bootList->setHeaderLabels({tr("Name"), tr("What it is"), tr("What the check says")});
+    m_bootList->setRootIsDecorated(false);
+    m_bootList->setUniformRowHeights(true);
+    m_bootList->header()->resizeSection(0, 200);
+    m_bootList->header()->resizeSection(1, 280);
+    bootLayout->addWidget(m_bootList, 2);
+    m_bootDetails->setObjectName(QStringLiteral("bootDetails"));
+    m_bootDetails->setWordWrap(true);
+    m_bootDetails->setTextFormat(Qt::RichText);
+    m_bootDetails->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    m_bootDetails->setAlignment(Qt::AlignTop | Qt::AlignLeft);
+    m_bootDetails->setMinimumHeight(90);
+    bootLayout->addWidget(m_bootDetails, 1);
+    auto *bootButtons = new QHBoxLayout;
+    bootButtons->addStretch();
+    m_putBack->setAutoDefault(false);
+    m_putBack->setEnabled(false);
+    m_putBack->setToolTip(tr("Copies Windows' own boot manager (kept in Windows\\Boot\\EFI) over the ticked ones, keeping the old ones in a backup"));
+    bootButtons->addWidget(m_putBack);
+    bootLayout->addLayout(bootButtons);
+    m_tabs->addTab(bootPage, tr("Boot"));
+    m_tabs->setTabVisible(2, false);
     resultsLayout->addWidget(m_tabs, 1);
     auto *bottom = new QHBoxLayout;
     m_hitInfo->setWordWrap(true);
@@ -267,6 +308,16 @@ VirusDialog::VirusDialog(UDisks *udisks, QWidget *parent)
         m_switchOff->setText(m_ticked.isEmpty() ? tr("Switch Off Ticked…") : tr("Switch Off %n Ticked…", nullptr, int(m_ticked.size())));
     });
     connect(m_switchOff, &QPushButton::clicked, this, &VirusDialog::switchOffTicked);
+    connect(m_bootList, &QTreeWidget::currentItemChanged, this, &VirusDialog::showBootDetails);
+    connect(m_bootList, &QTreeWidget::itemChanged, this, [this](QTreeWidgetItem *item) {
+        const int index = item->data(0, Qt::UserRole).toInt();
+        if (item->checkState(0) == Qt::Checked)
+            m_bootTicked.insert(index);
+        else
+            m_bootTicked.remove(index);
+        m_putBack->setEnabled(!m_bootTicked.isEmpty() && !m_busy);
+    });
+    connect(m_putBack, &QPushButton::clicked, this, &VirusDialog::putBackTicked);
     connect(m_again, &QPushButton::clicked, this, [this] {
         m_pages->setCurrentIndex(0);
         fillTargets();
@@ -534,6 +585,10 @@ void VirusDialog::mountThenScan(const QString &objectPath, const QString &title)
 
 void VirusDialog::scanFolder(const QString &folder)
 {
+    if (m_engine.kind == virus::Engine::Kind::None || (m_engine.kind == virus::Engine::Kind::ClamAV && !m_engine.listDate.isValid())) {
+        m_pickNote->setText(redText(m_engine.kind == virus::Engine::Kind::None ? tr("There's nothing to scan with.") : tr("Download the list first.")));
+        return;
+    }
     m_volumePath.clear();
     m_mountedReadOnly = false;
     startScan({folder}, QDir::toNativeSeparators(folder));
@@ -568,6 +623,11 @@ void VirusDialog::startScan(const QStringList &folders, const QString &title)
     m_tabs->setCurrentIndex(0);
     m_tabs->setTabText(0, tr("Files"));
     updateButtons();
+    m_boot = {};
+    m_bootTicked.clear();
+    m_putBackDone.clear();
+    m_bootList->clear();
+    m_tabs->setTabVisible(2, false);
 
     // What starts with Windows comes first: those programs are scanned whatever else is.
     QString windows;
@@ -592,6 +652,9 @@ void VirusDialog::startScan(const QStringList &folders, const QString &title)
         windows.clear();
 #endif
     m_windowsRoot = windows;
+    // What starts the PC before Windows: alongside the rest, it's quick.
+    if (!windows.isEmpty() || running)
+        checkBoot(running);
     if (windows.isEmpty() && !running) {
         runScan({});
         return;
@@ -878,11 +941,24 @@ void VirusDialog::whenWritable(const std::function<void(const QString &from, con
         then(from, from);
         return;
     }
-    // The drive was mounted read-only for the scan: unmounted, and mounted again so it can change.
+    remountWritable(m_volumePath, [this, from, then](const QString &to) {
+        m_mountedReadOnly = false;
+        for (QString &folder : m_folders) {
+            if (folder == from)
+                folder = to;
+        }
+        if (m_windowsRoot == from)
+            m_windowsRoot = to;
+        then(from, to);
+    });
+}
+
+void VirusDialog::remountWritable(const QString &objectPath, const std::function<void(const QString &mount)> &then)
+{
     const Volume *volume = nullptr;
     for (const Disk &d : m_udisks->disks()) {
         for (const Volume &v : d.volumes) {
-            if (v.objectPath == m_volumePath)
+            if (v.objectPath == objectPath)
                 volume = &v;
         }
     }
@@ -893,11 +969,10 @@ void VirusDialog::whenWritable(const std::function<void(const QString &from, con
     m_busy = true;
     updateButtons();
     m_status->setText(tr("Making the drive writable…"));
-    const QString objectPath = m_volumePath;
     auto changed = std::make_shared<QMetaObject::Connection>();
     auto failed = std::make_shared<QMetaObject::Connection>();
     auto step = std::make_shared<int>(volume->mounts().isEmpty() ? 1 : 0); // 0: unmounting, 1: mounting again
-    *changed = connect(m_udisks, &UDisks::changed, this, [this, objectPath, changed, failed, step, from, then] {
+    *changed = connect(m_udisks, &UDisks::changed, this, [this, objectPath, changed, failed, step, then] {
         for (const Disk &d : m_udisks->disks()) {
             for (const Volume &v : d.volumes) {
                 if (v.objectPath != objectPath)
@@ -908,16 +983,9 @@ void VirusDialog::whenWritable(const std::function<void(const QString &from, con
                 } else if (*step == 1 && !v.mounts().isEmpty()) {
                     disconnect(*changed);
                     disconnect(*failed);
-                    m_mountedReadOnly = false;
                     m_busy = false;
-                    const QString to = v.mounts().first();
-                    for (QString &folder : m_folders) {
-                        if (folder == from)
-                            folder = to;
-                    }
-                    if (m_windowsRoot == from)
-                        m_windowsRoot = to;
-                    then(from, to);
+                    then(v.mounts().first());
+                    updateButtons();
                 }
                 return;
             }
@@ -940,6 +1008,233 @@ void VirusDialog::whenWritable(const std::function<void(const QString &from, con
         m_udisks->mount(*volume, false);
     else
         m_udisks->unmount(*volume);
+}
+
+void VirusDialog::checkBoot(bool running)
+{
+    // The drive being scanned: the volume picked, or the one Windows is running from.
+    const Disk *disk = nullptr;
+    for (const Disk &d : m_udisks->disks()) {
+        for (const Volume &v : d.volumes) {
+            bool match = v.objectPath == m_volumePath;
+#ifdef Q_OS_WIN
+            const QString systemDrive = qEnvironmentVariable("SystemDrive").toLower();
+            for (const QString &mount : v.mounts())
+                match = match || (running && QDir::fromNativeSeparators(mount).toLower().startsWith(systemDrive));
+#else
+            Q_UNUSED(running)
+#endif
+            if (match)
+                disk = &d;
+        }
+    }
+    if (!disk)
+        return;
+    const QString windows = running ? QDir::fromNativeSeparators(qEnvironmentVariable("SystemDrive")) + QLatin1Char('/') : m_windowsRoot;
+    // The old BIOS way: what's in the first sector matters only on a drive without a GPT.
+    if (disk->tableType == QLatin1String("dos")) {
+        openBlockThen(m_udisks, this, disk->blockPath, UDisks::OpenMode::Benchmark, [this](int fd) {
+            if (fd < 0)
+                return;
+            blockio::Buffer sector = blockio::alignedBuffer(4096);
+            const int size = std::max(512, blockio::logicalSize(fd));
+            if (blockio::readAt(fd, sector.get(), quint64(size), 0)) {
+                m_boot.findings.prepend(boot::checkFirstSector(QByteArray(sector.get(), 512), false));
+                showBoot();
+            }
+            ::close(fd);
+        });
+    }
+    const Volume *esp = nullptr;
+    for (const Volume &v : disk->volumes) {
+        if (v.isEfi && v.canMount())
+            esp = &v;
+    }
+    if (!esp)
+        return;
+    m_espPath = esp->objectPath;
+    const QString partition = esp->partUuid;
+    if (!esp->mounts().isEmpty()) {
+        m_espReadOnly = false;
+        checkEfiPartition(esp->mounts().first(), windows);
+        return;
+    }
+    // Mounted read-only to look at, like the drive itself.
+    const QString objectPath = esp->objectPath;
+    auto mounted = std::make_shared<QMetaObject::Connection>();
+    *mounted = connect(m_udisks, &UDisks::changed, this, [this, objectPath, windows, mounted] {
+        for (const Disk &d : m_udisks->disks()) {
+            for (const Volume &v : d.volumes) {
+                if (v.objectPath != objectPath || v.mounts().isEmpty())
+                    continue;
+                disconnect(*mounted);
+                if (!m_mountedHere.contains(objectPath))
+                    m_mountedHere << objectPath;
+                m_espReadOnly = kReadOnlyMounts;
+                checkEfiPartition(v.mounts().first(), windows);
+                return;
+            }
+        }
+    });
+    m_udisks->mount(*esp, kReadOnlyMounts);
+    Q_UNUSED(partition)
+}
+
+void VirusDialog::checkEfiPartition(const QString &esp, const QString &windows)
+{
+    m_espMount = esp;
+    m_pages->setCurrentIndex(1);
+    QString partition;
+    for (const Disk &d : m_udisks->disks()) {
+        for (const Volume &v : d.volumes) {
+            if (v.objectPath == m_espPath)
+                partition = v.partUuid;
+        }
+    }
+    const efi::Trust trust = efi::trust();
+    boot::Report report = boot::checkEfiPartition(esp, windows, trust);
+    report.findings += boot::checkFirmware(trust, {});
+    // This PC's boot entries for that partition: when the drive is this PC's own.
+    if (!partition.isEmpty())
+        report.findings += boot::checkBootEntries(efi::bootEntries(), partition, esp);
+    for (const boot::Finding &f : std::as_const(m_boot.findings)) {
+        if (f.where == tr("Sector 0") || f.name == QLatin1String("The first sector"))
+            report.findings.prepend(f);
+    }
+    m_boot = report;
+    for (int i = 0; i < m_boot.findings.size(); ++i) {
+        if (!m_boot.findings[i].cleanCopy.isEmpty())
+            m_bootTicked.insert(i);
+    }
+    // fwupd, where there is one, says how well the firmware itself is protected; it takes a
+    // few seconds, so it's added when it answers.
+    const QString fwupd = askFwupd ? QStandardPaths::findExecutable(QStringLiteral("fwupdmgr")) : QString();
+    if (!fwupd.isEmpty()) {
+        auto *p = new QProcess(this);
+        connect(p, &QProcess::finished, this, [this, p] {
+            p->deleteLater();
+            m_boot.findings += boot::checkFirmware(efi::Trust(), p->readAllStandardOutput());
+            showBoot();
+        });
+        p->start(fwupd, {QStringLiteral("security"), QStringLiteral("--json")});
+    }
+    QStringList lines{QStringLiteral("  boot: %1 things looked at on %2").arg(m_boot.findings.size()).arg(esp)};
+    for (const boot::Finding &f : std::as_const(m_boot.findings)) {
+        if (f.severity > 0)
+            lines << QStringLiteral("  boot, looks wrong (%1): %2 %3 - %4").arg(f.severity).arg(f.where, f.verdict, f.reasons.join(QStringLiteral(" / ")));
+    }
+    log(lines);
+    showBoot();
+}
+
+void VirusDialog::showBoot()
+{
+    m_bootList->clear();
+    int odd = 0;
+    QVector<int> order;
+    for (int i = 0; i < m_boot.findings.size(); ++i) {
+        order << i;
+        odd += m_boot.findings[i].severity > 0;
+    }
+    std::stable_sort(order.begin(), order.end(), [this](int a, int b) { return m_boot.findings[a].severity > m_boot.findings[b].severity; });
+    for (int i : std::as_const(order)) {
+        const boot::Finding &f = m_boot.findings[i];
+        auto *item = new QTreeWidgetItem({f.name, f.kind, f.reasons.isEmpty() ? f.verdict : f.reasons.first()});
+        item->setData(0, Qt::UserRole, i);
+        if (f.severity > 0) {
+            item->setIcon(0, severityIcon(f.severity));
+            item->setForeground(2, severityColor(f.severity));
+        }
+        const auto done = m_putBackDone.constFind(i);
+        if (done != m_putBackDone.constEnd() && done->first) {
+            item->setText(2, done->second);
+            item->setForeground(2, QColor(0x2b, 0xee, 0x8a));
+        } else if (!f.cleanCopy.isEmpty()) {
+            item->setCheckState(0, m_bootTicked.contains(i) ? Qt::Checked : Qt::Unchecked);
+            if (done != m_putBackDone.constEnd())
+                item->setText(2, done->second);
+        }
+        m_bootList->addTopLevelItem(item);
+    }
+    if (m_bootList->topLevelItemCount() > 0)
+        m_bootList->setCurrentItem(m_bootList->topLevelItem(0));
+    showBootDetails();
+    m_tabs->setTabVisible(2, !m_boot.findings.isEmpty());
+    m_tabs->setTabText(2, odd ? tr("Boot (%n wrong)", nullptr, odd) : tr("Boot"));
+    QString info = odd ? tr("Something that starts the PC before Windows looks wrong. Pick it to see why.")
+                       : tr("What starts the PC before Windows looks as it should.");
+    for (const QString &note : std::as_const(m_boot.notes))
+        info += QStringLiteral("<br><small>") + note.toHtmlEscaped() + QStringLiteral("</small>");
+    m_bootInfo->setText(info);
+    m_putBack->setEnabled(!m_bootTicked.isEmpty() && !m_busy);
+}
+
+void VirusDialog::showBootDetails()
+{
+    const QTreeWidgetItem *item = m_bootList->currentItem();
+    if (!item) {
+        m_bootDetails->clear();
+        return;
+    }
+    const boot::Finding &f = m_boot.findings.at(item->data(0, Qt::UserRole).toInt());
+    QString html = QStringLiteral("<b>%1</b>: %2<br>%3").arg(f.where.toHtmlEscaped(), f.kind.toHtmlEscaped(), f.verdict.toHtmlEscaped());
+    if (!f.reasons.isEmpty()) {
+        html += QStringLiteral("<ul style=\"margin: 4px 0\">");
+        for (const QString &reason : f.reasons)
+            html += QStringLiteral("<li>%1</li>").arg(reason.toHtmlEscaped());
+        html += QStringLiteral("</ul>");
+    }
+    if (!f.cleanCopy.isEmpty())
+        html += tr("Windows' own copy, which checks out, can be put back: %1").arg(QDir::toNativeSeparators(f.cleanCopy).toHtmlEscaped());
+    m_bootDetails->setText(html);
+}
+
+void VirusDialog::putBackTicked()
+{
+    QVector<int> picked(m_bootTicked.cbegin(), m_bootTicked.cend());
+    picked.removeIf([this](int i) { return m_putBackDone.value(i).first || m_boot.findings.at(i).cleanCopy.isEmpty(); });
+    std::sort(picked.begin(), picked.end());
+    if (picked.isEmpty())
+        return;
+    QStringList shown;
+    for (int i : std::as_const(picked))
+        shown << QStringLiteral("• ") + m_boot.findings.at(i).where;
+    const QString question = tr("Put Windows' own boot manager back over these?") + QStringLiteral("\n\n") + shown.join(QLatin1Char('\n'))
+                           + QStringLiteral("\n\n") + tr("The ones there now are kept in a \"DiskForge backups\" folder on the EFI partition.");
+    if (QMessageBox::question(this, windowTitle(), question, QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
+        return;
+    auto apply = [this, picked](const QString &mount) {
+        const QString from = m_espMount;
+        m_espMount = mount;
+        const QString backup = mount + QStringLiteral("/DiskForge backups/") + QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH.mm.ss"));
+        int done = 0;
+        QStringList lines;
+        for (int i : picked) {
+            boot::Finding f = m_boot.findings.at(i);
+            if (from != mount && f.file.startsWith(from + QLatin1Char('/')))
+                f.file = mount + f.file.mid(from.size());
+            QString message;
+            const bool ok = boot::putBack(f, backup, &message);
+            m_putBackDone.insert(i, {ok, message});
+            if (ok) {
+                ++done;
+                m_bootTicked.remove(i);
+            }
+            lines << QStringLiteral("  boot: %1 %2: %3").arg(ok ? QStringLiteral("put back") : QStringLiteral("not put back"), f.where, message);
+        }
+        log(lines);
+        showBoot();
+        m_status->setText(done == picked.size() ? tr("Put back %n of Windows' boot files. The old ones are in %1.", nullptr, done).arg(QDir::toNativeSeparators(backup))
+                                                : redText(tr("Put back %1 of %2; the list says why not the others.").arg(done).arg(picked.size())));
+    };
+    if (!m_espReadOnly) {
+        apply(m_espMount);
+        return;
+    }
+    remountWritable(m_espPath, [this, apply](const QString &mount) {
+        m_espReadOnly = false;
+        apply(mount);
+    });
 }
 
 void VirusDialog::switchOffTicked()

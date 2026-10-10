@@ -32,6 +32,8 @@
 #include "../src/noticebar.h"
 #include "../src/typedialog.h"
 #include "../src/virusdialog.h"
+#include "../src/efivars.h"
+#include "testsign.h"
 #include "../src/windowsusbjob.h"
 #include "../src/windowsusbdialog.h"
 #include "slowdisk.h"
@@ -2625,6 +2627,71 @@ void virusScanWindowsDrive()
            QStringLiteral("scanned again, what was switched off isn't odd any more"), still.join(QStringLiteral(", ")));
 }
 
+// The Boot tab: an EFI partition whose Windows boot manager a "bootkit" replaced with an unsigned
+// one, checked against made-up Secure Boot lists, and Windows' own copy put back.
+void virusScanBoot()
+{
+    using namespace testsign;
+    QTemporaryDir dir;
+    const Signer root = makeCertificate("DiskForge Test Root", nullptr, true);
+    const Signer windows = makeCertificate("Microsoft Windows (DiskForge test)", &root, false);
+    const QByteArray good = sign(makeProgram("Windows' boot manager"), windows, {windows.cert, root.cert});
+    const QByteArray bad = makeProgram("a bootkit's boot manager");
+    const QString vars = dir.filePath(QStringLiteral("efivars"));
+    QDir().mkpath(vars);
+    putVariable(vars, QStringLiteral("SecureBoot"), efi::kGlobal, QByteArray(1, '\1'));
+    putVariable(vars, QStringLiteral("db"), efi::kSecurity, signatureList(kX509List, {derOf(root.cert)}));
+    auto put = [](const QString &path, const QByteArray &data) {
+        QDir().mkpath(QFileInfo(path).absolutePath());
+        QFile f(path);
+        if (f.open(QIODevice::WriteOnly))
+            f.write(data);
+    };
+    const QString esp = dir.filePath(QStringLiteral("esp")), win = dir.filePath(QStringLiteral("windows"));
+    put(esp + QStringLiteral("/EFI/Microsoft/Boot/bootmgfw.efi"), bad);
+    put(esp + QStringLiteral("/EFI/Boot/bootx64.efi"), good);
+    put(win + QStringLiteral("/Windows/Boot/EFI/bootmgfw.efi"), good);
+    const QString realVars = efi::varsDir;
+    efi::varsDir = vars;
+    VirusDialog::askFwupd = false;
+
+    UDisks udisks;
+    VirusDialog dialog(&udisks);
+    dialog.show();
+    auto *status = dialog.findChild<QLabel *>(QStringLiteral("status"));
+    dialog.checkEfiPartition(esp, win);
+    auto *tabs = dialog.findChild<QTabWidget *>(QStringLiteral("tabs"));
+    auto *list = dialog.findChild<QTreeWidget *>(QStringLiteral("boot"));
+    QTreeWidgetItem *manager = list->topLevelItemCount() ? list->topLevelItem(0) : nullptr;
+    report(tabs->isTabVisible(2) && tabs->tabText(2) == QLatin1String("Boot (1 wrong)") && manager && manager->text(0) == QLatin1String("bootmgfw.efi")
+               && manager->checkState(0) == Qt::Checked && list->topLevelItemCount() == 3, // with Secure Boot's own state
+           QStringLiteral("Scan for Viruses: an unsigned Windows boot manager is found, ready to be put back"),
+           tabs->tabText(2) + (manager ? QStringLiteral(": ") + manager->text(0) + QLatin1Char(' ') + manager->text(2) : QString()));
+    if (qEnvironmentVariableIsSet("DISKFORGE_UITEST_SHOTS")) {
+        tabs->setCurrentIndex(2);
+        dialog.grab().save(qEnvironmentVariable("DISKFORGE_UITEST_SHOTS") + QStringLiteral("/virus-boot.png"));
+    }
+    Answerer answerer;
+    answerer.answer = [&](QWidget *modal) {
+        if (auto *box = qobject_cast<QMessageBox *>(modal)) {
+            box->button(QMessageBox::Yes)->click();
+            return true;
+        }
+        return false;
+    };
+    dialog.putBackTicked();
+    waitUntil([&] { return status->text().startsWith(QLatin1String("Put back")); }, 10000);
+    QFile now(esp + QStringLiteral("/EFI/Microsoft/Boot/bootmgfw.efi"));
+    const QByteArray after = now.open(QIODevice::ReadOnly) ? now.readAll() : QByteArray();
+    const QStringList backups = QDir(esp + QStringLiteral("/DiskForge backups")).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    report(after == good && backups.size() == 1 && QFile::exists(esp + QStringLiteral("/DiskForge backups/") + backups.value(0) + QStringLiteral("/EFI_Microsoft_Boot_bootmgfw.efi"))
+               && list->topLevelItem(0)->text(2).startsWith(QLatin1String("Windows' own copy is back")),
+           QStringLiteral("Windows' own boot manager is put back, the old one kept"), status->text().left(100));
+    efi::varsDir = realVars;
+    for (const Signer &s : {root, windows})
+        release(s);
+}
+
 // A drive that isn't mounted (an NTFS loop device standing in for Windows' drive): the window
 // mounts it read-only to scan, writable only to delete, and unmounts it again when it closes.
 void virusScanOnDrive()
@@ -2996,7 +3063,7 @@ int userScenarios(const QStringList &only)
         {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostfs", lostFilesFromFileSystem},
-        {"previews", previewsThroughHelper}, {"viruses", virusScanThroughWindow}, {"virusdrive", virusScanOnDrive}, {"viruswindows", virusScanWindowsDrive},
+        {"previews", previewsThroughHelper}, {"viruses", virusScanThroughWindow}, {"virusdrive", virusScanOnDrive}, {"viruswindows", virusScanWindowsDrive}, {"virusboot", virusScanBoot},
     };
     for (const auto &[name, run] : scenarios) {
         if (only.isEmpty() || only.contains(QLatin1String(name)))

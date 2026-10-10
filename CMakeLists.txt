@@ -66,6 +66,9 @@ add_library(diskforge-core STATIC
     src/reghive.cpp src/reghive.h
     src/winstartup.cpp src/winstartup.h
     src/shelllink.cpp src/shelllink.h
+    src/authenticode.cpp src/authenticode.h
+    src/efivars.cpp src/efivars.h
+    src/bootcheck.cpp src/bootcheck.h
     src/filetypes.cpp src/filetypes.h
     src/checksums.cpp src/checksums.h
     src/benchmark.cpp src/benchmark.h
@@ -207,8 +210,8 @@ if(DISKFORGE_SELFTEST)
         tests/test_gpt.cpp tests/test_copy.cpp tests/test_blockmap.cpp
         tests/test_usage.cpp tests/test_backup.cpp
         tests/test_rescue.cpp tests/test_clone.cpp tests/test_system.cpp
-        tests/test_catalog.cpp tests/test_fuzz.cpp tests/test_health.cpp tests/test_jobs.cpp tests/test_recover.cpp tests/test_rescueusb.cpp tests/test_stickcheck.cpp tests/test_images.cpp tests/test_isomode.cpp tests/test_windows.cpp tests/test_lostfiles.cpp tests/test_viruses.cpp tests/test_registry.cpp tests/test_startup.cpp tests/test_raid.cpp tests/test_lvm.cpp)
-    target_link_libraries(diskforge-selftest PRIVATE diskforge-ui)
+        tests/test_catalog.cpp tests/test_fuzz.cpp tests/test_health.cpp tests/test_jobs.cpp tests/test_recover.cpp tests/test_rescueusb.cpp tests/test_stickcheck.cpp tests/test_images.cpp tests/test_isomode.cpp tests/test_windows.cpp tests/test_lostfiles.cpp tests/test_viruses.cpp tests/test_registry.cpp tests/test_startup.cpp tests/test_boot.cpp tests/testsign.cpp tests/testsign.h tests/test_raid.cpp tests/test_lvm.cpp)
+    target_link_libraries(diskforge-selftest PRIVATE diskforge-ui OpenSSL::Crypto)
     target_compile_definitions(diskforge-selftest PRIVATE SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
     qt_add_executable(diskforge-preview tests/preview.cpp)
@@ -216,9 +219,9 @@ if(DISKFORGE_SELFTEST)
     target_link_libraries(diskforge-preview PRIVATE diskforge-ui)
     target_compile_definitions(diskforge-preview PRIVATE SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
-    qt_add_executable(diskforge-uitest tests/uitest.cpp)
+    qt_add_executable(diskforge-uitest tests/uitest.cpp tests/testsign.cpp tests/testsign.h)
     diskforge_add_data(diskforge-uitest)
-    target_link_libraries(diskforge-uitest PRIVATE diskforge-ui)
+    target_link_libraries(diskforge-uitest PRIVATE diskforge-ui OpenSSL::Crypto)
     target_compile_definitions(diskforge-uitest PRIVATE SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 endif()
 
