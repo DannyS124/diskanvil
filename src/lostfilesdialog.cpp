@@ -522,6 +522,18 @@ LostFilesDialog::LostFilesDialog(UDisks *udisks, const QString &preferredPath, Q
     resultsLayout->addLayout(top);
     resultsLayout->addWidget(m_bar);
     resultsLayout->addWidget(m_phase);
+    m_copiesBar = new QWidget;
+    auto *copies = new QHBoxLayout(m_copiesBar);
+    copies->setContentsMargins(0, 0, 0, 0);
+    m_copiesText = new QLabel;
+    m_copiesText->setObjectName(QStringLiteral("copies"));
+    m_copiesText->setWordWrap(true);
+    m_copiesLook = new QPushButton(QIcon::fromTheme(QStringLiteral("document-open-recent")), tr("Look in Them"));
+    m_copiesLook->setObjectName(QStringLiteral("lookInCopies"));
+    copies->addWidget(m_copiesText, 1);
+    copies->addWidget(m_copiesLook);
+    m_copiesBar->hide();
+    resultsLayout->addWidget(m_copiesBar);
 
     auto *split = new QSplitter;
     // On the left: kinds of file, and below them the folders the file systems still name.
@@ -532,6 +544,8 @@ LostFilesDialog::LostFilesDialog(UDisks *udisks, const QString &preferredPath, Q
     m_folders->setHeaderLabel(tr("Folders"));
     m_folders->setRootIsDecorated(true);
     m_folders->setUniformRowHeights(true);
+    // Long names lose their middle, not the end that tells them apart (a time, the count).
+    m_folders->setTextElideMode(Qt::ElideMiddle);
     left->addWidget(m_folders);
     left->setMaximumWidth(260);
     split->addWidget(left);
@@ -628,6 +642,7 @@ LostFilesDialog::LostFilesDialog(UDisks *udisks, const QString &preferredPath, Q
     connect(m_drives, &QTreeWidget::itemDoubleClicked, this, &LostFilesDialog::start);
     connect(m_look, &QPushButton::clicked, this, &LostFilesDialog::start);
     connect(image, &QPushButton::clicked, this, &LostFilesDialog::chooseImage);
+    connect(m_copiesLook, &QPushButton::clicked, this, &LostFilesDialog::lookInCopies);
     connect(m_stop, &QPushButton::clicked, this, [this] {
         if (m_quick)
             m_quick->cancel();
@@ -678,11 +693,13 @@ void LostFilesDialog::stopWorkers()
         m_quick->cancel();
     if (m_scan)
         m_scan->cancel();
+    if (m_copyScan)
+        m_copyScan->cancel();
     if (m_saver)
         m_saver->cancel();
     if (m_thumbs)
         m_thumbs->stop();
-    for (QThread *t : {m_quickThread, m_scanThread, m_saveThread, m_thumbThread}) {
+    for (QThread *t : {m_quickThread, m_scanThread, m_copyThread, m_saveThread, m_thumbThread}) {
         if (t) {
             t->quit();
             t->wait();
@@ -690,9 +707,10 @@ void LostFilesDialog::stopWorkers()
     }
     m_quick = nullptr;
     m_scan = nullptr;
+    m_copyScan = nullptr;
     m_saver = nullptr;
     m_thumbs = nullptr;
-    m_quickThread = m_scanThread = m_saveThread = m_thumbThread = nullptr;
+    m_quickThread = m_scanThread = m_copyThread = m_saveThread = m_thumbThread = nullptr;
 }
 
 void LostFilesDialog::fillDrives(const QString &preferredPath)
@@ -823,6 +841,7 @@ void LostFilesDialog::scanSource(std::shared_ptr<lost::Source> source, const QSt
     m_deletedInFolder.clear();
     m_contentsItem = nullptr;
     m_recentItem = nullptr;
+    m_copiesBar->hide();
     {
         const QSignalBlocker block(m_folders);
         auto *everywhere = new QTreeWidgetItem(m_folders, {tr("Everywhere")});
@@ -865,12 +884,91 @@ void LostFilesDialog::scanSource(std::shared_ptr<lost::Source> source, const QSt
             m_quickThread->quit();
         if (stopped)
             return scanDone(true);
+        offerCopies();
         startDeepScan(ranges, starts);
     });
     m_quickThread = startOnThread(this, m_quick);
     refreshCategories();
     filterChanged();
     updateTicked();
+}
+
+namespace {
+
+QString when(qint64 ms)
+{
+    return QLocale().toString(QDateTime::fromMSecsSinceEpoch(ms), QLocale::ShortFormat);
+}
+
+} // namespace
+
+void LostFilesDialog::offerCopies()
+{
+    int copies = 0;
+    qint64 newest = 0;
+    QStringList none, problems;
+    for (const lost::Volume &v : std::as_const(m_volumes)) {
+        if (v.type != QLatin1String("ntfs"))
+            continue; // only Windows' own file system has them
+        if (!v.copiesProblem.isEmpty())
+            problems << v.copiesProblem;
+        if (v.copies.isEmpty())
+            none << v.label;
+        copies += int(v.copies.size());
+        for (const vss::Copy &c : v.copies)
+            newest = std::max(newest, c.created);
+    }
+    if (copies > 0) {
+        m_copiesText->setText(tr("Windows kept %n earlier version(s) of this drive, the newest from %1. Files that have changed or gone since "
+                                 "can come back from them.", nullptr, copies)
+                                  .arg(when(newest)));
+        m_copiesLook->setText(tr("Look in Them"));
+        m_copiesLook->setEnabled(true);
+        m_copiesLook->show();
+    } else if (!none.isEmpty() || !problems.isEmpty()) {
+        m_copiesText->setText(problems.isEmpty() ? tr("Windows kept no earlier versions of %1: System Restore was off for it, or they've "
+                                                      "been deleted.")
+                                                       .arg(none.join(QStringLiteral(", ")))
+                                                 : problems.join(QLatin1Char(' ')));
+        m_copiesLook->hide();
+    } else {
+        return;
+    }
+    m_copiesBar->show();
+}
+
+void LostFilesDialog::lookInCopies()
+{
+    if (m_copyScan) { // the button stops it while it looks
+        m_copyScan->cancel();
+        m_copiesLook->setEnabled(false);
+        return;
+    }
+    m_copyScan = new lost::CopyScan(m_source, m_volumes);
+    m_copiesLook->setText(tr("Stop"));
+    connect(m_copyScan, &lost::CopyScan::found, this, [this](const QVector<lost::Found> &files) {
+        m_model->append(files);
+        addFolders(files);
+        refreshCategories();
+    });
+    connect(m_copyScan, &lost::CopyScan::progress, this, [this](int done, int total, qint64 taken) {
+        if (taken > 0)
+            m_copiesText->setText(tr("Looking in the drive as it was on %1 (%2 of %3)…").arg(when(taken)).arg(done + 1).arg(total));
+    });
+    connect(m_copyScan, &lost::CopyScan::finished, this, [this](bool stopped, int listed, const QString &problem) {
+        m_copyScan = nullptr;
+        if (m_copyThread)
+            m_copyThread->quit(); // stopWorkers() waits for it
+        m_copiesLook->hide();
+        QString text = stopped ? tr("Stopped looking in the earlier versions.")
+                     : listed == 0 ? tr("Everything in the earlier versions is the same on the drive now.")
+                                   : tr("%n file(s) from the earlier versions have changed or gone since: they're in the \"as it was on\" folders.", nullptr,
+                                        listed);
+        if (!problem.isEmpty())
+            text += QLatin1Char(' ') + problem;
+        m_copiesText->setText(text);
+    });
+    m_copyThread = startOnThread(this, m_copyScan);
 }
 
 void LostFilesDialog::startDeepScan(const QVector<lost::Extent> &knownRanges, const QVector<quint64> &knownStarts)

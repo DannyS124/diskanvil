@@ -118,6 +118,9 @@ private:
     void refreshFolderCounts();
     int chosenCategory() const;
     void startDeepScan(const QVector<lost::Extent> &knownRanges, const QVector<quint64> &knownStarts);
+    // Windows' earlier copies of the drive (shadow copies): offered once its file systems are read.
+    void offerCopies();
+    void lookInCopies();
     void scanDone(bool stopped);
     void showPreview();
     void showPreviewResult(const QImage &image, const QString &text, bool failed);
@@ -147,6 +150,9 @@ private:
     QLabel *m_previewImage;
     QLabel *m_details;
     QPlainTextEdit *m_hex;
+    QWidget *m_copiesBar = nullptr;
+    QLabel *m_copiesText = nullptr;
+    QPushButton *m_copiesLook = nullptr;
     QLabel *m_tickedInfo;
     QPushButton *m_save;
     // Saving
@@ -166,6 +172,8 @@ private:
     QThread *m_quickThread = nullptr;
     lost::DeepScan *m_scan = nullptr;
     QThread *m_scanThread = nullptr;
+    lost::CopyScan *m_copyScan = nullptr;
+    QThread *m_copyThread = nullptr;
     QVector<lost::Volume> m_volumes;
     // Folder tree: an item per folder path, and how many files (and deleted ones) are in each.
     QHash<QString, QTreeWidgetItem *> m_folderItems;

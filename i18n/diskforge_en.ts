@@ -73,6 +73,25 @@
     </message>
 </context>
 <context>
+    <name>LostFilesDialog</name>
+    <message numerus="yes">
+        <location filename="../src/lostfilesdialog.cpp" line="922"/>
+        <source>Windows kept %n earlier version(s) of this drive, the newest from %1. Files that have changed or gone since can come back from them.</source>
+        <translation>
+            <numerusform>Windows kept %n earlier version of this drive, the newest from %1. Files that have changed or gone since can come back from them.</numerusform>
+            <numerusform>Windows kept %n earlier versions of this drive, the newest from %1. Files that have changed or gone since can come back from them.</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/lostfilesdialog.cpp" line="965"/>
+        <source>%n file(s) from the earlier versions have changed or gone since: they&apos;re in the &quot;as it was on&quot; folders.</source>
+        <translation>
+            <numerusform>%n file from the earlier versions have changed or gone since: they're in the "as it was on" folders.</numerusform>
+            <numerusform>%n files from the earlier versions have changed or gone since: they're in the "as it was on" folders.</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
     <name>MainWindow</name>
     <message numerus="yes">
         <location filename="../src/mainwindow.cpp" line="939"/>

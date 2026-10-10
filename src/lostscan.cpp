@@ -47,7 +47,7 @@ QString conditionText(lost::Condition condition)
 } // namespace
 
 lost::FileReader::FileReader(std::shared_ptr<Source> source, const Found &file)
-    : m_source(std::move(source))
+    : m_source(file.from ? file.from : std::move(source))
     , m_extents(file.extents)
     , m_data(file.data)
     , m_size(file.size)
@@ -117,6 +117,10 @@ void lost::QuickScan::run()
         if (m_cancel)
             break;
         Volume volume;
+        // Windows' earlier copies of an NTFS volume: what its records hold now is kept, to tell
+        // the copies' files apart from today's.
+        volume.copies = vss::copies(*m_source, where, &volume.copiesProblem);
+        std::shared_ptr<RecordIndex> records = volume.copies.isEmpty() ? nullptr : std::make_shared<RecordIndex>();
         const bool read = readFileSystem(*m_source, where, [&](QVector<Found> &&batch) {
             QVector<Found> shown;
             for (Found &f : batch) {
@@ -132,7 +136,8 @@ void lost::QuickScan::run()
             }
             if (!shown.isEmpty())
                 Q_EMIT found(shown);
-        }, m_cancel, &volume);
+        }, m_cancel, &volume, records.get());
+        volume.records = records;
         if (read) {
             qCInfo(lcOps).noquote() << "Find Lost Files:" << volume.type << volume.label << "at" << where.start << "has"
                                     << volume.files << "files," << volume.deleted << "deleted";
@@ -275,6 +280,58 @@ void lost::DeepScan::run()
         Q_EMIT found(batch);
     qCInfo(lcOps).noquote() << "Find Lost Files: deep scan" << (m_cancel ? "stopped" : "done");
     Q_EMIT finished(m_cancel);
+}
+
+lost::CopyScan::CopyScan(std::shared_ptr<Source> source, QVector<Volume> volumes)
+    : m_source(std::move(source))
+    , m_volumes(std::move(volumes))
+{
+}
+
+void lost::CopyScan::run()
+{
+    int total = 0, done = 0, listed = 0;
+    for (const Volume &v : std::as_const(m_volumes))
+        total += int(v.copies.size());
+    QString problem;
+    for (const Volume &v : std::as_const(m_volumes)) {
+        for (int i = int(v.copies.size()) - 1; i >= 0 && !m_cancel; --i, ++done) {
+            const vss::Copy &copy = v.copies[i];
+            Q_EMIT progress(done, total, copy.created);
+            const auto source = vss::open(m_source, v.where, i, &problem);
+            if (!source)
+                continue;
+            qCInfo(lcOps).noquote() << "Find Lost Files: looking in Windows' copy" << copy.id << "of" << v.label;
+            CopyOptions options;
+            options.now = v.records.get();
+            options.taken = copy.created;
+            // Down to the second: Windows can take two copies within a minute.
+            options.top = tr("%1 as it was on %2").arg(v.label, QDateTime::fromMSecsSinceEpoch(copy.created).toString(QStringLiteral("yyyy-MM-dd HH.mm.ss")));
+            QVector<Found> files;
+            readNtfs(*source, {0, source->size()}, [&files, &source](QVector<Found> &&batch) {
+                for (Found &f : batch) {
+                    f.from = source;
+                    files.push_back(std::move(f));
+                }
+            }, m_cancel, nullptr, nullptr, &options);
+            // Checked like deleted files: an earlier copy keeps what's in them only as far as
+            // Windows kept the blocks.
+            QVector<Found> batch;
+            for (Found &f : files) {
+                if (m_cancel)
+                    break;
+                checkContents(source, f, f.size <= kFullCheckLimit);
+                batch.push_back(std::move(f));
+                if (batch.size() >= 500)
+                    Q_EMIT found(std::exchange(batch, {}));
+            }
+            if (!batch.isEmpty())
+                Q_EMIT found(batch);
+            listed += int(files.size());
+        }
+    }
+    Q_EMIT progress(done, total, 0);
+    Q_EMIT finished(m_cancel, listed, problem);
 }
 
 lost::Saver::Saver(std::shared_ptr<Source> source, QVector<Found> files, QString folder)

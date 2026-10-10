@@ -233,7 +233,8 @@ endif()
 # i18n/diskforge_<lang>.ts (see CONTRIBUTING.md).
 set(TRANSLATED_TARGETS diskforge)
 if(DISKFORGE_SELFTEST)
-    list(APPEND TRANSLATED_TARGETS diskforge-preview)
+    # The window tests see the real English plurals too.
+    list(APPEND TRANSLATED_TARGETS diskforge-preview diskforge-uitest)
 endif()
 qt_add_translations(TARGETS ${TRANSLATED_TARGETS}
     SOURCE_TARGETS diskforge-core diskforge-ui diskforge

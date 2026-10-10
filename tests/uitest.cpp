@@ -49,6 +49,7 @@
 #include "../src/theme.h"
 #include "../src/tools.h"
 #include "../src/udisks.h"
+#include "../src/translations.h"
 
 #include <QAbstractButton>
 #include <QAction>
@@ -2299,9 +2300,22 @@ QString unpackLostFsImage(const QString &name, const QTemporaryDir &dir)
         report(false, QStringLiteral("unpack the %1 test image").arg(name), error);
         return {};
     }
-    QByteArray buffer(1024 * 1024, Qt::Uninitialized);
-    for (qint64 n; (n = image->read(buffer.data(), buffer.size())) > 0;)
-        out.write(buffer.constData(), n);
+    // Sparse: what's only zeros is left as a hole, so a big, mostly empty image takes up little
+    // (in memory too, where the temporary folder is).
+    QByteArray buffer(64 * 1024, Qt::Uninitialized);
+    qint64 size = 0;
+    for (bool more = true; more;) {
+        qint64 filled = 0;
+        for (qint64 n = 1; filled < buffer.size() && n > 0; filled += std::max<qint64>(n, 0))
+            n = image->read(buffer.data() + filled, buffer.size() - filled);
+        more = filled == buffer.size();
+        if (buffer.left(filled).count('\0') != filled) {
+            out.seek(size);
+            out.write(buffer.constData(), filled);
+        }
+        size += filled;
+    }
+    out.resize(size);
     return path;
 }
 
@@ -2366,6 +2380,62 @@ void lostFilesFromFileSystem()
     deletedOnly->setChecked(false);
     report(view->model()->rowCount() == 8, QStringLiteral("and the files that weren't deleted show when asked"),
            QString::number(view->model()->rowCount()));
+}
+
+// Windows' earlier copies of a drive (tests/data/lostfs/shadow-job.ps1): once the drive's file
+// systems are read, the window says Windows kept two; looking in them adds what has changed or
+// gone since, in folders named after the copies, read from the copies themselves.
+void lostFilesFromShadowCopies()
+{
+    QTemporaryDir dir;
+    const QString path = unpackLostFsImage(QStringLiteral("ntfs-shadow"), dir);
+    if (path.isEmpty())
+        return;
+    UDisks udisks;
+    LostFilesDialog dialog(&udisks, QString());
+    dialog.show();
+    dialog.scanImage(path);
+    auto *copies = dialog.findChild<QLabel *>(QStringLiteral("copies"));
+    waitUntil([&] { return copies->isVisible(); }, 60000);
+    report(copies->text().startsWith(QLatin1String("Windows kept 2 earlier versions of this drive")),
+           QStringLiteral("Find Lost Files: it says Windows kept earlier versions of the drive"), copies->text());
+    dialog.findChild<QPushButton *>(QStringLiteral("lookInCopies"))->click();
+    waitUntil([&] { return copies->text().contains(QLatin1String("changed or gone since.")) || copies->text().contains(QLatin1String("the same")); },
+              60000);
+    report(copies->text().startsWith(QLatin1String("7 files from the earlier versions have changed or gone since")),
+           QStringLiteral("looking in them finds what's changed or gone since"), copies->text());
+
+    auto *status = dialog.findChild<QLabel *>(QStringLiteral("status"));
+    waitUntil([&] { return status->text().startsWith(QLatin1String("Done")); }, 180000);
+    auto *folders = dialog.findChild<QTreeWidget *>(QStringLiteral("folders"));
+    QList<QTreeWidgetItem *> roots;
+    for (int i = 0; i < folders->topLevelItemCount(); ++i) {
+        if (folders->topLevelItem(i)->data(0, Qt::UserRole).toString().startsWith(QLatin1String("WINVSS as it was on ")))
+            roots << folders->topLevelItem(i);
+    }
+    report(roots.size() == 2, QStringLiteral("each earlier version has its own folder"), QString::number(roots.size()));
+    if (roots.isEmpty())
+        return;
+    // The older one (its name sorts first): photo.jpg, gone from the drive since.
+    std::sort(roots.begin(), roots.end(), [](QTreeWidgetItem *a, QTreeWidgetItem *b) { return a->data(0, Qt::UserRole).toString() < b->data(0, Qt::UserRole).toString(); });
+    folders->setCurrentItem(roots.first());
+    auto *view = dialog.findChild<QListView *>(QStringLiteral("files"));
+    QStringList names;
+    for (int r = 0; r < view->model()->rowCount(); ++r) {
+        names << view->model()->index(r, 0).data().toString();
+        if (names.last() == QLatin1String("photo.jpg"))
+            view->setCurrentIndex(view->model()->index(r, 0));
+    }
+    names.sort();
+    report(names == QStringList({QStringLiteral("big.bin"), QStringLiteral("letter.pdf"), QStringLiteral("notes.txt"), QStringLiteral("photo.jpg")}),
+           QStringLiteral("the older version's folder has what's changed or gone since it"), names.join(QStringLiteral(", ")));
+    auto *details = dialog.findChild<QLabel *>(QStringLiteral("details"));
+    report(details->text().contains(QLatin1String("isn't on the drive anymore")), QStringLiteral("a file from an earlier version says where it's from"),
+           details->text().left(300));
+    if (qEnvironmentVariableIsSet("DISKFORGE_UITEST_SHOTS")) {
+        waitUntil([] { return false; }, 1500); // its picture
+        dialog.grab().save(qEnvironmentVariable("DISKFORGE_UITEST_SHOTS") + QStringLiteral("/lostfiles-copies.png"));
+    }
 }
 
 // NTFS's change journal (tests/data/lostfs/journal-job.cmd): "Deleted recently" lists what's known
@@ -3366,7 +3436,7 @@ int userScenarios(const QStringList &only)
         {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostfs", lostFilesFromFileSystem},
-        {"lostrecent", lostFilesDeletedRecently},
+        {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies},
         {"previews", previewsThroughHelper}, {"viruses", virusScanThroughWindow}, {"virusdrive", virusScanOnDrive}, {"viruswindows", virusScanWindowsDrive}, {"virusboot", virusScanBoot}, {"viruslookup", virusLookUpOnline}, {"newids", newIdsThroughWindow},
     };
     for (const auto &[name, run] : scenarios) {
@@ -3388,6 +3458,7 @@ int main(int argc, char *argv[])
         return preview::runHelper();
     }
     QApplication app(argc, argv);
+    installTranslations();
     // As the user: the add-on, menu and theme parts, which need no test disks.
     if (app.arguments().contains(QStringLiteral("--user"))) {
         QStringList only;

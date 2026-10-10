@@ -36,9 +36,19 @@ using Batch = std::function<void(QVector<Found> &&files)>;
 // Lists what a FAT or exFAT file system at `where` knows about, in batches. Folders start with
 // the volume's label (or its type and place, when it has none). False when there's neither
 // there; `volume` says what was.
-bool readFileSystem(Source &source, const Extent &where, const Batch &out, const std::atomic<bool> &cancel, Volume *volume);
+// index: for an NTFS volume, what its records hold now is put there too.
+bool readFileSystem(Source &source, const Extent &where, const Batch &out, const std::atomic<bool> &cancel, Volume *volume,
+                    RecordIndex *index = nullptr);
 // The NTFS part of that (lostntfs.cpp).
-bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::atomic<bool> &cancel, Volume *volume);
+// Reading one of Windows' earlier copies of a volume: only its files that aren't the same on the
+// drive now (`now`) are listed, under `top`.
+struct CopyOptions {
+    const RecordIndex *now = nullptr;
+    QString top;
+    qint64 taken = 0;
+};
+bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::atomic<bool> &cancel, Volume *volume,
+              RecordIndex *index = nullptr, const CopyOptions *copy = nullptr);
 
 // NTFS's change journal ($Extend\$UsnJrnl, its $J stream): what Windows did to which file,
 // with the file's name and folder at the time. It names deleted files whose own record is

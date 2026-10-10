@@ -911,6 +911,75 @@ void shadowCopies()
         report(digest.result().toHex() == e.digest, what + QStringLiteral(": every MiB is what Windows read"));
     }
 
+    // Find Lost Files: the drive's quick scan sees the copies; looking in them lists the files that
+    // aren't the same on the drive now, read from their copy, and saving brings back those bytes.
+    QVector<lost::Volume> volumes;
+    QHash<QString, QByteArray> now; // path on the drive -> SHA-256
+    for (const lost::Found &f : quickScan(source, &volumes)) {
+        if (!f.deleted) {
+            const QString folder = f.folder.section(QLatin1Char('/'), 1);
+            now.insert(folder.isEmpty() ? f.name : folder + QLatin1Char('/') + f.name,
+                       QCryptographicHash::hash(lost::FileReader(source, f).head(qint64(f.size)), QCryptographicHash::Sha256).toHex());
+        }
+    }
+    report(volumes.size() == 1 && volumes.value(0).copies.size() == 2 && volumes.value(0).records,
+           QStringLiteral("shadow copies: the drive's scan sees Windows' two copies of it"));
+    lost::CopyScan scan(source, volumes);
+    QVector<lost::Found> fromCopies;
+    QObject::connect(&scan, &lost::CopyScan::found, [&fromCopies](const QVector<lost::Found> &files) { fromCopies += files; });
+    int listed = -1;
+    QObject::connect(&scan, &lost::CopyScan::finished, [&listed](bool, int n, const QString &) { listed = n; });
+    scan.run();
+    for (int i = 0; i < std::min(copies.size(), expected.size()); ++i) {
+        const QString top = volumes.value(0).label + QStringLiteral(" as it was on ")
+                          + QDateTime::fromMSecsSinceEpoch(copies[i].created).toString(QStringLiteral("yyyy-MM-dd HH.mm.ss"));
+        QStringList want, got, wrong;
+        for (const auto &[path, sha256] : expected[i].files) {
+            if (sha256 != "missing" && now.value(path) != sha256)
+                want << path + (now.contains(path) ? QStringLiteral(" (changed)") : QStringLiteral(" (gone)"));
+        }
+        for (const lost::Found &f : std::as_const(fromCopies)) {
+            if (f.folder != top && !f.folder.startsWith(top + QLatin1Char('/')))
+                continue;
+            const QString folder = f.folder.mid(top.size() + 1);
+            const QString path = folder.isEmpty() ? f.name : folder + QLatin1Char('/') + f.name;
+            const bool changed = f.note.startsWith(QLatin1String("It's different on the drive now"));
+            got << path + (changed ? QStringLiteral(" (changed)") : QStringLiteral(" (gone)"));
+            QByteArray sha;
+            for (const auto &[p, h] : expected[i].files) {
+                if (p == path)
+                    sha = h;
+            }
+            const QByteArray bytes = lost::FileReader(source, f).head(qint64(f.size));
+            if (!f.from || !f.deleted || QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex() != sha)
+                wrong << path;
+        }
+        want.sort();
+        got.sort();
+        report(want == got && !want.isEmpty(), QStringLiteral("shadow copy %1: what's changed or gone since is listed, and only that").arg(i + 1),
+               got.join(QStringLiteral(", ")) + QStringLiteral(" / expected ") + want.join(QStringLiteral(", ")));
+        report(wrong.isEmpty(), QStringLiteral("shadow copy %1: each of them is read from the copy, as Windows read it").arg(i + 1), wrong.join(QStringLiteral(", ")));
+    }
+    report(listed == fromCopies.size(), QStringLiteral("shadow copies: the count adds up"));
+    {
+        QTemporaryDir out;
+        lost::Saver saver(source, fromCopies, out.path());
+        QString base;
+        int saved = -1;
+        QObject::connect(&saver, &lost::Saver::finished, [&](int n, int, const QString &folder, const QString &) {
+            saved = n;
+            base = folder;
+        });
+        saver.run();
+        int same = 0;
+        for (const lost::Found &f : std::as_const(fromCopies)) {
+            QFile back(base + QLatin1Char('/') + f.folder + QLatin1Char('/') + f.name);
+            same += back.open(QIODevice::ReadOnly) && back.readAll() == lost::FileReader(source, f).head(qint64(f.size));
+        }
+        report(saved == fromCopies.size() && same == saved, QStringLiteral("shadow copies: saved, their files come back from the copies"),
+               QStringLiteral("%1 saved, %2 the same").arg(saved).arg(same));
+    }
+
     // A volume with no copies has none, and says nothing's wrong.
     {
         auto plain = lost::Source::fromMemory(unpack(data + QStringLiteral("ntfs-windows.img.zst")));

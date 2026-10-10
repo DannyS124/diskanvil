@@ -110,7 +110,7 @@ public:
         while (at != 0) {
             const QByteArray block = read(at, kBlock);
             if (seen.contains(at) || !header(block, kCatalog)) {
-                *problem = tr("Windows' list of its earlier copies of the drive is damaged.");
+                *problem = tr("Windows' list of its earlier versions of the drive is damaged.");
                 break;
             }
             seen.insert(at);
@@ -363,7 +363,7 @@ std::shared_ptr<lost::Source> open(const std::shared_ptr<lost::Source> &source, 
     QVector<Store> stores = reader.stores(&why);
     if (index < 0 || index >= stores.size()) {
         if (why.isEmpty())
-            why = tr("That earlier copy of the drive isn't there anymore.");
+            why = tr("That earlier version of the drive isn't there anymore.");
         return {};
     }
     // Reading a copy goes through every newer one.

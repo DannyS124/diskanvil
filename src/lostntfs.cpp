@@ -42,6 +42,7 @@ constexpr int kListLiveFilesUpTo = 100000;            // past that, only deleted
 constexpr int kBatch = 2000;
 constexpr quint64 kRootRecord = 5;
 constexpr quint64 kExtendRecord = 11; // $Extend: NTFS's own files ($ObjId, $Quota, $UsnJrnl...)
+constexpr quint64 kMaxIndexed = 32ull * 1024 * 1024; // records whose state now is kept, for earlier copies
 
 QString tr(const char *text)
 {
@@ -437,11 +438,14 @@ QVector<JournalEntry> readJournal(const QByteArray &data)
     return out;
 }
 
-bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::atomic<bool> &cancel, Volume *volume)
+bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::atomic<bool> &cancel, Volume *volume, RecordIndex *index,
+              const CopyOptions *copy)
 {
     Ntfs fs(source, where);
     if (!fs.open())
         return false;
+    if (index)
+        index->resize(qsizetype(std::min<quint64>(fs.records, kMaxIndexed)));
 
     QString label;
     QHash<quint64, Node> nodes;
@@ -483,6 +487,20 @@ bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::
                 }
                 continue;
             }
+            RecordNow state;
+            state.known = true;
+            state.inUse = r.inUse;
+            state.sequence = r.sequence;
+            for (const Attribute &a : r.attributes) {
+                if (a.type == 0x10 && a.value.size() >= 24) {
+                    state.written = qint64(le64(bytes(a.value) + 8));
+                    state.changed = qint64(le64(bytes(a.value) + 16));
+                } else if (a.type == 0x80 && a.name.isEmpty() && a.startVcn == 0) {
+                    state.size = a.resident ? quint64(a.value.size()) : a.size;
+                }
+            }
+            if (index && n < quint64(index->size()))
+                (*index)[qsizetype(n)] = state;
             Node node;
             if (!pickName(r, &node.name, &node.parent, &node.parentSequence)) {
                 // Linux's NTFS driver takes the name away before it frees a record. The pieces
@@ -490,7 +508,7 @@ bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::
                 bool hasData = false;
                 for (const Attribute &a : r.attributes)
                     hasData = hasData || (a.type == 0x80 && a.name.isEmpty());
-                if (r.inUse || r.directory || n < 16 || !hasData)
+                if (r.inUse || r.directory || n < 16 || !hasData || copy)
                     continue;
                 node.parent = ~quint64(0);
             } else {
@@ -508,10 +526,19 @@ bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::
             }
             if (r.directory || n < 16 || node.parent == kExtendRecord)
                 continue; // folders, and NTFS's own files ($MFT, $LogFile...)
+            if (copy) {
+                // An earlier copy: what's in use in it and isn't the same on the drive now. (What was
+                // deleted before it was taken is no better kept in it than on the drive.)
+                const RecordNow now = copy->now && n < quint64(copy->now->size()) ? copy->now->at(qsizetype(n)) : RecordNow();
+                const bool same = now.known && now.inUse && now.sequence == state.sequence && now.size == state.size
+                               && now.written == state.written && now.changed == state.changed;
+                if (!r.inUse || same)
+                    continue;
+            }
             // On a big drive only deleted files are listed (and the Recycle Bin's): the rest
             // isn't even kept, so the memory goes as far as the drive does.
             const bool binName = node.name.startsWith(QLatin1String("$R")) || node.name.startsWith(QLatin1String("$I"));
-            if (r.inUse && ++liveFiles > kListLiveFilesUpTo && !binName) {
+            if (r.inUse && !copy && ++liveFiles > kListLiveFilesUpTo && !binName) {
                 if (liveFiles == kListLiveFilesUpTo + 1) {
                     candidates.erase(std::remove_if(candidates.begin(), candidates.end(), [](const Candidate &k) {
                                          return !k.deleted && !k.name.startsWith(QLatin1String("$R")) && !k.name.startsWith(QLatin1String("$I"));
@@ -546,7 +573,7 @@ bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::
 
     // The change journal: the allocated parts of $J (the rest is a hole that reads as zeros).
     QVector<JournalEntry> journal;
-    if (journalRecord) {
+    if (journalRecord && !copy) {
         QVector<Attribute> parts = journalData.value(journalRecord);
         std::sort(parts.begin(), parts.end(), [](const Attribute &a, const Attribute &b) { return a.startVcn < b.startVcn; });
         QVector<Run> runs;
@@ -567,7 +594,7 @@ bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::
     for (const JournalEntry &e : std::as_const(journal))
         lastSeen.insert(journalKey(e.record, e.sequence), e);
 
-    const QString top = !label.isEmpty() ? label : tr("NTFS partition at %1").arg(formatSize(where.start));
+    const QString top = copy ? copy->top : !label.isEmpty() ? label : tr("NTFS partition at %1").arg(formatSize(where.start));
     if (volume) {
         volume->type = QStringLiteral("ntfs");
         volume->label = top;
@@ -612,7 +639,8 @@ bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::
             recycled.insert(pathOf(n.parent, n.parentSequence, 0) + QStringLiteral("/$R") + n.name.mid(2), b);
     }
 
-    const bool listLive = liveFiles <= kListLiveFilesUpTo;
+    const bool listLive = copy || liveFiles <= kListLiveFilesUpTo;
+    const QString copyTaken = copy ? QLocale().toString(QDateTime::fromMSecsSinceEpoch(copy->taken), QLocale::ShortFormat) : QString();
     // NTFS's and Windows' own bookkeeping, deleted or not, is nobody's lost file.
     const QStringList internal = {top + QStringLiteral("/$Extend"), top + QStringLiteral("/System Volume Information")};
     QVector<Found> batch;
@@ -663,11 +691,19 @@ bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::
         if (!c.deleted && !binned && !listLive)
             continue;
 
+        if (copy) {
+            // Whether it's still on the drive, changed, decides which it is.
+            const RecordNow now = copy->now && c.record < quint64(copy->now->size()) ? copy->now->at(qsizetype(c.record)) : RecordNow();
+            const QString was = now.known && now.inUse && now.sequence == c.sequence
+                                    ? tr("It's different on the drive now: this is how it was on %1, from Windows' earlier version of the drive.")
+                                    : tr("It isn't on the drive anymore: this is it as it was on %1, from Windows' earlier version of the drive.");
+            note = note.isEmpty() ? was.arg(copyTaken) : was.arg(copyTaken) + QLatin1Char(' ') + note;
+        }
         Found f;
         f.name = name;
         f.folder = folder;
         f.origin = Origin::FileSystem;
-        f.deleted = c.deleted || binned;
+        f.deleted = c.deleted || binned || copy;
         f.modified = c.modified;
         f.deletedAt = deletedAt;
         f.note = note;
@@ -759,7 +795,7 @@ bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::
         }
         batch.push_back(std::move(f));
         ++listed;
-        deleted += c.deleted || binned;
+        deleted += c.deleted || binned || copy;
         if (batch.size() >= kBatch)
             out(std::exchange(batch, {}));
     }

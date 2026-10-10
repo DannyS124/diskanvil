@@ -4,6 +4,7 @@
 #pragma once
 
 #include "lostsource.h"
+#include "vshadow.h"
 
 #include <QObject>
 #include <QSet>
@@ -44,6 +45,7 @@ struct Found {
     bool checked = false;       // its contents were checked, start to end
     QByteArray data;            // a small file kept in the file system's own records (NTFS): its bytes
     QString note;               // anything else worth saying about it, in plain words
+    std::shared_ptr<Source> from; // where its bytes are, when not on what's looked through: an earlier copy of it
 };
 
 // A found file's bytes, read from where they are on the source.
@@ -63,12 +65,28 @@ private:
 };
 
 // A file system Find Lost Files read itself.
+// What an NTFS volume's MFT records hold now, by record number: enough to tell whether a file
+// in one of its earlier copies is the same as today's.
+struct RecordNow {
+    qint64 written = 0; // last written, and last changed in any way (NTFS's own times)
+    qint64 changed = 0;
+    quint64 size = 0;
+    quint16 sequence = 0;
+    bool inUse = false;
+    bool known = false;
+};
+using RecordIndex = QVector<RecordNow>;
+
 struct Volume {
-    QString type;  // "vfat" or "exfat"
+    QString type;  // "vfat", "exfat" or "ntfs"
     QString label; // or its type and place, when it has none
     Extent where;
     int files = 0;
     int deleted = 0;
+    // NTFS: Windows' earlier copies of it (shadow copies), and what its records hold now.
+    QVector<vss::Copy> copies;
+    QString copiesProblem;
+    std::shared_ptr<const RecordIndex> records;
 };
 
 // Lists what the file systems on the source know about, deleted files and folders included,
@@ -107,6 +125,29 @@ private:
     QVector<Volume> m_volumes;
     QVector<Extent> m_ranges;
     QVector<quint64> m_starts;
+};
+
+// The files in Windows' earlier copies of the volumes a quick scan found that aren't the same on
+// the drive now: changed since, or gone. The newest copy first; each file is read from its copy.
+class CopyScan : public QObject
+{
+    Q_OBJECT
+public:
+    CopyScan(std::shared_ptr<Source> source, QVector<Volume> volumes);
+    void cancel() { m_cancel = true; }
+
+public Q_SLOTS:
+    void run();
+
+Q_SIGNALS:
+    void found(const QVector<lost::Found> &files);
+    void progress(int done, int total, qint64 copyTaken);
+    void finished(bool stopped, int listed, const QString &problem);
+
+private:
+    std::shared_ptr<Source> m_source;
+    QVector<Volume> m_volumes;
+    std::atomic<bool> m_cancel{false};
 };
 
 // Looks through the source for files by their contents (carving): every sector is checked for
