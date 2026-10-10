@@ -169,7 +169,7 @@ public:
     }
     bool finish(QString *error) override
     {
-        if (::fdatasync(m_fd) == 0 || errno == EINVAL)
+        if (blockio::flush(m_fd))
             return true;
         *error = QObject::tr("Couldn't finish writing: %1").arg(errnoText());
         return false;
@@ -212,7 +212,7 @@ public:
             if (!step(&in, ZSTD_e_end, error, &remaining))
                 return false;
         }
-        if (::fdatasync(m_fd) != 0 && errno != EINVAL) {
+        if (!blockio::flush(m_fd)) {
             *error = QObject::tr("Couldn't finish writing: %1").arg(errnoText());
             return false;
         }
@@ -310,7 +310,7 @@ Result copy(const Options &o, const std::atomic<bool> &cancel, const Progress &p
 Result readBack(int fd, const QVector<Extent> &extents, const std::atomic<bool> &cancel, const Progress &progress)
 {
     // Make the reads come from the device, not from what we just wrote into the cache.
-    ::posix_fadvise(fd, 0, 0, POSIX_FADV_DONTNEED);
+    blockio::dropCache(fd);
     QVector<Extent> back;
     for (const Extent &e : extents)
         back.append({e.target, e.length, 0});

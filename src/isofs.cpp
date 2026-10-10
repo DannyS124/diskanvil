@@ -3,11 +3,10 @@
 
 #include "isofs.h"
 
+#include "blockio.h"
+
 #include <QCoreApplication>
 #include <QSet>
-
-#include <cerrno>
-#include <unistd.h>
 
 namespace {
 
@@ -28,16 +27,7 @@ quint32 le32(const uchar *p)
 
 bool readAt(int fd, quint64 offset, QByteArray &buffer)
 {
-    qsizetype done = 0;
-    while (done < buffer.size()) {
-        const ssize_t n = ::pread(fd, buffer.data() + done, size_t(buffer.size() - done), off_t(offset + done));
-        if (n < 0 && errno == EINTR)
-            continue;
-        if (n <= 0)
-            return false;
-        done += n;
-    }
-    return true;
+    return blockio::readAt(fd, buffer.data(), quint64(buffer.size()), offset);
 }
 
 // Joliet names are UCS-2, big-endian, with ";1" (the file's version) on the end.
@@ -150,12 +140,11 @@ struct Walker {
 isofs::Listing isofs::list(int fd)
 {
     Listing out;
-    const off_t end = ::lseek(fd, 0, SEEK_END);
-    if (end <= 0) {
+    const quint64 imageSize = blockio::deviceSize(fd);
+    if (imageSize == 0) {
         out.error = tr("Couldn't read the image.");
         return out;
     }
-    const quint64 imageSize = quint64(end);
 
     // The volume descriptors start at sector 16. The Joliet one has the names as they were; the
     // primary one has the full label (Joliet's only has room for 16 characters), which is the

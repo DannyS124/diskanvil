@@ -314,8 +314,7 @@ void RescueCopy::run()
         return;
     }
     // An image file grows to the drive's size up front; unreadable parts stay zeros.
-    struct stat st {};
-    if (::fstat(m_target, &st) == 0 && S_ISREG(st.st_mode) && quint64(st.st_size) < m_size && ::ftruncate(m_target, off_t(m_size)) != 0) {
+    if (blockio::isRegularFile(m_target) && blockio::deviceSize(m_target) < m_size && !blockio::setFileSize(m_target, m_size)) {
         emit finished(false, tr("Couldn't make the image file: %1").arg(QString::fromLocal8Bit(std::strerror(errno))));
         return;
     }
@@ -453,7 +452,7 @@ void RescueCopy::run()
                 return stopped();
         }
     }
-    if (::fdatasync(m_target) != 0 && errno != EINVAL) {
+    if (!blockio::flush(m_target)) {
         m_writeError = QString::fromLocal8Bit(std::strerror(errno));
         return stopped();
     }

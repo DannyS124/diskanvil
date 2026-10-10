@@ -41,7 +41,7 @@ std::shared_ptr<lost::Source> lost::Source::fromFd(int fd, bool direct)
 
 std::shared_ptr<lost::Source> lost::Source::fromImage(const QString &path, QString *error)
 {
-    const int fd = ::open(QFile::encodeName(path).constData(), O_RDONLY | O_CLOEXEC);
+    const int fd = blockio::openFile(path, blockio::FileMode::Read);
     if (fd < 0) {
         if (error)
             *error = QCoreApplication::translate("lostfiles", "Couldn't open %1: %2").arg(path, QString::fromLocal8Bit(strerror(errno)));

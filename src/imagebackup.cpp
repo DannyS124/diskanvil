@@ -161,7 +161,7 @@ void BackupJob::run()
         QFile::remove(imagebackup::infoPath(m_path));
         emit finished(false, message);
     };
-    const int out = ::open(QFile::encodeName(m_path).constData(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    const int out = blockio::openFile(m_path, blockio::FileMode::Replace);
     if (out < 0)
         return fail(tr("Couldn't create %1: %2").arg(m_path, QString::fromLocal8Bit(std::strerror(errno))));
 
@@ -212,7 +212,7 @@ void RestoreJob::run()
         return;
     }
 
-    auto openImage = [this]() { return ::open(QFile::encodeName(m_path).constData(), O_RDONLY | O_CLOEXEC); };
+    auto openImage = [this]() { return blockio::openFile(m_path, blockio::FileMode::Read); };
     if (m_checkFirst) {
         const int in = openImage();
         blockcopy::Options o;

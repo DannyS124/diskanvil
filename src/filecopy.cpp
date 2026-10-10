@@ -3,6 +3,7 @@
 
 #include "filecopy.h"
 
+#include "blockio.h"
 #include "isofs.h"
 
 #include <QCoreApplication>
@@ -16,7 +17,6 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
-#include <fcntl.h>
 #include <unistd.h>
 
 namespace {
@@ -53,7 +53,7 @@ class IsoSource : public filecopy::Source
 public:
     explicit IsoSource(const QString &path)
     {
-        m_fd = ::open(QFile::encodeName(path).constData(), O_RDONLY | O_CLOEXEC);
+        m_fd = blockio::openFile(path, blockio::FileMode::Read);
         if (m_fd < 0) {
             m_error = tr("Couldn't open %1.").arg(QFileInfo(path).fileName());
             return;
@@ -82,17 +82,7 @@ public:
         const auto found = m_offsets.constFind(entry.path);
         if (found == m_offsets.cend() || offset + quint64(length) > entry.size)
             return false;
-        const quint64 start = *found + offset;
-        qsizetype done = 0;
-        while (done < length) {
-            const ssize_t n = ::pread(m_fd, buffer + done, size_t(length - done), off_t(start + done));
-            if (n < 0 && errno == EINTR)
-                continue;
-            if (n <= 0)
-                return false;
-            done += n;
-        }
-        return true;
+        return blockio::readAt(m_fd, buffer, quint64(length), *found + offset);
     }
 
 private:
@@ -198,7 +188,7 @@ bool filecopy::Copier::copy(const Entry &entry, quint64 &done, quint64 total)
         replaced = m_options.transform(entry.path, data);
     }
 
-    const int out = ::open(QFile::encodeName(target).constData(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    const int out = blockio::openFile(target, blockio::FileMode::Replace);
     if (out < 0) {
         m_error = tr("Couldn't write %1 to the stick: %2").arg(entry.path, lastError());
         return false;
@@ -240,11 +230,11 @@ bool filecopy::Copier::copy(const Entry &entry, quint64 &done, quint64 total)
     if (!ok && m_error.isEmpty() && !m_cancel)
         m_error = tr("Couldn't write %1 to the stick: %2").arg(entry.path, lastError());
     // On the stick for real and out of the page cache, so the check reads the stick itself.
-    if (ok && ::fsync(out) != 0) {
+    if (ok && !blockio::flush(out)) {
         m_error = tr("Couldn't write %1 to the stick: %2").arg(entry.path, lastError());
         ok = false;
     }
-    ::posix_fadvise(out, 0, 0, POSIX_FADV_DONTNEED);
+    blockio::dropCache(out);
     ::close(out);
     const QByteArray expected = m_options.expected.value(entry.path);
     if (ok && !expected.isEmpty() && original.result().toHex() != expected) {
@@ -261,12 +251,12 @@ bool filecopy::Copier::copy(const Entry &entry, quint64 &done, quint64 total)
 
 bool filecopy::Copier::check(const QString &path, quint64 &done, quint64 total)
 {
-    const int in = ::open(QFile::encodeName(m_root + QLatin1Char('/') + path).constData(), O_RDONLY | O_CLOEXEC);
+    const int in = blockio::openFile(m_root + QLatin1Char('/') + path, blockio::FileMode::Read);
     if (in < 0) {
         m_error = tr("%1 isn't on the stick after writing it. The stick may be failing; try another one.").arg(path);
         return false;
     }
-    ::posix_fadvise(in, 0, 0, POSIX_FADV_DONTNEED);
+    blockio::dropCache(in);
     QCryptographicHash hash(QCryptographicHash::Sha256);
     QByteArray buffer(kChunk, Qt::Uninitialized);
     bool ok = true;
@@ -342,10 +332,6 @@ void filecopy::Copier::run()
         if (!check(e->path, done, total))
             return finish(false, m_cancel ? stoppedMessage() : m_error);
     }
-    const int rootFd = ::open(QFile::encodeName(m_root).constData(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    if (rootFd >= 0) {
-        ::syncfs(rootFd);
-        ::close(rootFd);
-    }
+    blockio::syncFileSystem(m_root);
     finish(true, tr("Copied and checked %1 files.").arg(m_files));
 }

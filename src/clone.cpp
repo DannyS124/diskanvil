@@ -197,7 +197,7 @@ void CloneJob::run()
         if (ok) {
             const quint32 signature = QRandomGenerator::system()->generate();
             std::memcpy(mbr.get() + 440, &signature, 4);
-            ok = blockio::writeAt(m_target, mbr.get(), sector, 0) && ::fdatasync(m_target) == 0;
+            ok = blockio::writeAt(m_target, mbr.get(), sector, 0) && blockio::flush(m_target);
         }
         if (!ok) {
             emit finished(false, tr("Copied, but the disk ID couldn't be changed."));

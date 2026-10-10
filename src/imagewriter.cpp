@@ -85,8 +85,7 @@ void ImageWriter::run()
         fail(tr("Couldn't open the image: %1").arg(error));
         return;
     }
-    const off_t end = ::lseek(m_fd, 0, SEEK_END);
-    const quint64 deviceSize = end < 0 ? 0 : quint64(end);
+    const quint64 deviceSize = blockio::deviceSize(m_fd);
     const quint64 size = image->size(); // 0: a compressed format that doesn't say
     if (deviceSize == 0 || size > deviceSize) {
         fail(tr("The image is bigger than the drive"));
@@ -106,7 +105,7 @@ void ImageWriter::run()
         return got;
     };
 
-    ::lseek(m_fd, 0, SEEK_SET);
+    blockio::seekTo(m_fd, 0);
     QCryptographicHash written(QCryptographicHash::Sha256);
     quint64 done = 0;
     const QString phase = image->compression().isEmpty() ? tr("Writing") : tr("Unpacking and writing");
@@ -139,15 +138,15 @@ void ImageWriter::run()
     }
 
     emit progress(tr("Finishing (flushing to the drive)"), 1, 1);
-    if (::fdatasync(m_fd) != 0) {
+    if (!blockio::flush(m_fd)) {
         fail(tr("Writing failed: %1").arg(QString::fromLocal8Bit(strerror(errno))));
         return;
     }
 
     if (m_verify) {
         // Drop the cached copy so the check reads what actually landed on the drive.
-        ::posix_fadvise(m_fd, 0, 0, POSIX_FADV_DONTNEED);
-        ::lseek(m_fd, 0, SEEK_SET);
+        blockio::dropCache(m_fd);
+        blockio::seekTo(m_fd, 0);
         QCryptographicHash readBack(QCryptographicHash::Sha256);
         quint64 checked = 0;
         while (checked < done) {

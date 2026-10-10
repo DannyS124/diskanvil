@@ -3,6 +3,8 @@
 
 #include "benchmark.h"
 
+#include "blockio.h"
+
 #include <QElapsedTimer>
 #include <QRandomGenerator>
 #include <QTemporaryFile>
@@ -41,12 +43,11 @@ void Benchmark::run()
 {
     BenchmarkResult r;
     const quint64 chunk = std::min<quint64>(kReadChunk, m_size / kAlign * kAlign);
-    void *raw = nullptr;
-    if (chunk == 0 || posix_memalign(&raw, kAlign, chunk) != 0) {
+    blockio::Buffer buffer = blockio::alignedBuffer(chunk);
+    if (chunk == 0 || !buffer) {
         emit finished(false, r, tr("The drive is too small to test"));
         return;
     }
-    std::unique_ptr<char, decltype(&free)> buffer(static_cast<char *>(raw), &free);
 
     // Sequential reads spread over the whole disk: outer and inner parts of a hard
     // drive differ a lot, so one spot would be misleading.
@@ -57,9 +58,9 @@ void Benchmark::run()
         const quint64 offset = (m_size - chunk) / (kReadSamples - 1) * i / kAlign * kAlign;
         QElapsedTimer t;
         t.start();
-        const ssize_t n = ::pread(m_fd, buffer.get(), chunk, off_t(offset));
+        const bool ok = blockio::readAt(m_fd, buffer.get(), chunk, offset);
         const double s = t.nsecsElapsed() / 1e9;
-        if (n != ssize_t(chunk))
+        if (!ok)
             return emit finished(false, r, tr("Reading the drive failed: %1").arg(QString::fromLocal8Bit(strerror(errno))));
         const double rate = chunk / s / 1e6;
         r.minReadMBps = r.minReadMBps < 0 ? rate : std::min(r.minReadMBps, rate);
@@ -77,7 +78,7 @@ void Benchmark::run()
         const quint64 offset = QRandomGenerator::global()->bounded(m_size / kAlign) * kAlign;
         QElapsedTimer t;
         t.start();
-        if (::pread(m_fd, buffer.get(), kAlign, off_t(offset)) != ssize_t(kAlign))
+        if (!blockio::readAt(m_fd, buffer.get(), kAlign, offset))
             return emit finished(false, r, tr("Reading the drive failed: %1").arg(QString::fromLocal8Bit(strerror(errno))));
         accessTotal += t.nsecsElapsed() / 1e6;
         emit progress(tr("Access time"), 60 + (i + 1) * 15 / kAccessSamples);
@@ -99,8 +100,7 @@ void Benchmark::run()
                 return emit finished(false, r, tr("Writing the test file failed: %1").arg(file.errorString()));
             emit progress(tr("Write speed"), 75 + int(done * 25 / kWriteSize));
         }
-        file.flush();
-        ::fsync(file.handle());
+        blockio::flushFile(file);
         r.writeMBps = kWriteSize / (t.nsecsElapsed() / 1e9) / 1e6;
     }
 

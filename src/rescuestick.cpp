@@ -14,7 +14,6 @@
 
 #include <cerrno>
 #include <cstring>
-#include <fcntl.h>
 #include <unistd.h>
 
 namespace {
@@ -30,16 +29,7 @@ QByteArray readEntry(int fd, const isofs::Entry &entry)
     if (entry.size > kMaxSmallFile)
         return {};
     QByteArray data(qsizetype(entry.size), '\0');
-    qsizetype done = 0;
-    while (done < data.size()) {
-        const ssize_t n = ::pread(fd, data.data() + done, size_t(data.size() - done), off_t(entry.offset + done));
-        if (n < 0 && errno == EINTR)
-            continue;
-        if (n <= 0)
-            return {};
-        done += n;
-    }
-    return data;
+    return blockio::readAt(fd, data.data(), entry.size, entry.offset) ? data : QByteArray();
 }
 
 } // namespace
@@ -164,7 +154,7 @@ rescue::Image rescue::inspect(const QString &isoPath)
             image.bytes += quint64(QFileInfo(isoPath + QLatin1Char('/') + it.key()).size());
         return image;
     }
-    const int fd = ::open(QFile::encodeName(isoPath).constData(), O_RDONLY | O_CLOEXEC);
+    const int fd = blockio::openFile(isoPath, blockio::FileMode::Read);
     if (fd < 0) {
         image.error = QObject::tr("Couldn't open %1.").arg(QFileInfo(isoPath).fileName());
         return image;
@@ -299,11 +289,7 @@ void rescue::StickWriter::run()
                    "named by the date and the PC's model. summary.txt in each one is the place to start.\n");
         note.close();
     }
-    const int rootFd = ::open(QFile::encodeName(m_root).constData(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    if (rootFd >= 0) {
-        ::syncfs(rootFd);
-        ::close(rootFd);
-    }
+    blockio::syncFileSystem(m_root);
     finish(true, message);
 }
 
@@ -341,8 +327,8 @@ bool rescue::writeBiosBoot(int fd, const QByteArray &bootImg, const QByteArray &
         return fail(QObject::tr("there's no room for it before the partition"));
     memcpy(sector.data(), bootImg.constData(), 440);
     // The core first: a stick with the new boot sector but no core behind it would hang.
-    if (!blockio::writeAt(fd, coreImg.constData(), quint64(coreImg.size()), 512) || ::fdatasync(fd) != 0
-        || !blockio::writeAt(fd, sector.constData(), 512, 0) || ::fdatasync(fd) != 0)
+    if (!blockio::writeAt(fd, coreImg.constData(), quint64(coreImg.size()), 512) || !blockio::flush(fd)
+        || !blockio::writeAt(fd, sector.constData(), 512, 0) || !blockio::flush(fd))
         return fail(QString::fromLocal8Bit(strerror(errno)));
     return true;
 }

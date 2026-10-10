@@ -160,7 +160,7 @@ Result relocateBackup(int fd, int sectorSize, bool newGuids)
 
     // Backup first: if anything stops halfway, the primary still describes a valid disk.
     if (!blockio::writeAt(fd, entries.get(), entriesSectors * sector, (lastLba - entriesSectors) * sector)
-        || !blockio::writeAt(fd, b, sector, lastLba * sector) || ::fdatasync(fd) != 0) {
+        || !blockio::writeAt(fd, b, sector, lastLba * sector) || !blockio::flush(fd)) {
         r.error = QObject::tr("Couldn't write the backup partition table");
         return r;
     }
@@ -184,7 +184,7 @@ Result relocateBackup(int fd, int sectorSize, bool newGuids)
         put32(mbr.get() + 458, quint32(std::min<quint64>(lastLba, 0xFFFFFFFFu)));
         blockio::writeAt(fd, mbr.get(), sector, 0);
     }
-    if (::fdatasync(fd) != 0) {
+    if (!blockio::flush(fd)) {
         r.error = QObject::tr("Couldn't write the partition table");
         return r;
     }
@@ -510,9 +510,9 @@ Result writeTable(int fd, int sectorSize, const QString &diskGuid, const QVector
     protectiveMbr(mbr.get(), lastLba);
 
     if (!blockio::writeAt(fd, list.get(), listSectors * sector, (lastLba - listSectors) * sector)
-        || !blockio::writeAt(fd, b, sector, lastLba * sector) || ::fdatasync(fd) != 0
+        || !blockio::writeAt(fd, b, sector, lastLba * sector) || !blockio::flush(fd)
         || !blockio::writeAt(fd, list.get(), listSectors * sector, 2 * sector) || !blockio::writeAt(fd, h, sector, sector)
-        || !blockio::writeAt(fd, mbr.get(), sector, 0) || ::fdatasync(fd) != 0) {
+        || !blockio::writeAt(fd, mbr.get(), sector, 0) || !blockio::flush(fd)) {
         r.error = QObject::tr("Couldn't write the partition table");
         return r;
     }
@@ -557,7 +557,7 @@ Result restoreFromBackup(int fd, int sectorSize)
         protectiveMbr(mbr.get(), report.lastLba);
     }
     if (!blockio::writeAt(fd, list.get(), listSectors * sector, 2 * sector) || !blockio::writeAt(fd, h, sector, sector)
-        || (fixMbr && !blockio::writeAt(fd, mbr.get(), sector, 0)) || ::fdatasync(fd) != 0) {
+        || (fixMbr && !blockio::writeAt(fd, mbr.get(), sector, 0)) || !blockio::flush(fd)) {
         r.error = QObject::tr("Couldn't write the partition table");
         return r;
     }
@@ -659,7 +659,7 @@ Result writeMbr(int fd, int sectorSize, quint32 diskSignature, const QVector<Mbr
     }
     buf.get()[510] = 0x55;
     buf.get()[511] = char(0xAA);
-    if (!blockio::writeAt(fd, buf.get(), sector, 0) || ::fdatasync(fd) != 0)
+    if (!blockio::writeAt(fd, buf.get(), sector, 0) || !blockio::flush(fd))
         return fail(QObject::tr("Couldn't write the partition table"));
     r.ok = true;
     return r;

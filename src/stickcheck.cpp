@@ -90,7 +90,7 @@ public:
     {
         return blockio::readAt(m_fd, data, size_t(length), offset);
     }
-    bool flush() override { return ::fdatasync(m_fd) == 0; }
+    bool flush() override { return blockio::flush(m_fd); }
 
 private:
     int m_fd;

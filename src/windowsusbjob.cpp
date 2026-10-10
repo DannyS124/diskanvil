@@ -4,6 +4,7 @@
 #include "windowsusbjob.h"
 
 #include "applog.h"
+#include "blockio.h"
 #include "filecopy.h"
 #include "jobui.h"
 #include "udisks.h"
@@ -15,7 +16,6 @@
 #include <QRegularExpression>
 #include <QThread>
 
-#include <fcntl.h>
 #include <unistd.h>
 
 int WindowsUsbJob::splitMiB = windowsusb::kSplitMiB;
@@ -173,11 +173,11 @@ void WindowsUsbJob::verify()
     // Flushed and out of the page cache first, so the check reads the stick itself.
     const QStringList parts = QDir(m_stick + QStringLiteral("/sources")).entryList({QStringLiteral("install*.swm")}, QDir::Files);
     for (const QString &part : parts) {
-        const int fd = ::open(QFile::encodeName(m_stick + QStringLiteral("/sources/") + part).constData(), O_RDONLY | O_CLOEXEC);
+        const int fd = blockio::openFile(m_stick + QStringLiteral("/sources/") + part, blockio::FileMode::Read);
         if (fd < 0)
             continue;
-        ::fsync(fd);
-        ::posix_fadvise(fd, 0, 0, POSIX_FADV_DONTNEED);
+        blockio::flush(fd);
+        blockio::dropCache(fd);
         ::close(fd);
     }
     runWimlib({QStringLiteral("verify"), m_stick + QStringLiteral("/sources/install.swm"),
@@ -194,10 +194,6 @@ void WindowsUsbJob::writeAnswers()
             return fail(tr("Couldn't write autounattend.xml: %1").arg(f.errorString()));
         f.close();
     }
-    const int fd = ::open(QFile::encodeName(m_stick).constData(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    if (fd >= 0) {
-        ::syncfs(fd);
-        ::close(fd);
-    }
+    blockio::syncFileSystem(m_stick);
     m_prep->finish();
 }

@@ -157,16 +157,12 @@ void SectorRepair::run()
                 ++r.zeroed;
             }
         }
-        ssize_t n;
-        do {
-            n = ::pwrite(m_fd, buf.get(), size_t(physical), off_t(block));
-        } while (n < 0 && errno == EINTR);
-        if (n != ssize_t(physical)) {
+        if (!blockio::writeAt(m_fd, buf.get(), quint64(physical), block)) {
             r.error = tr("Writing sector %1 failed: %2").arg(block / quint64(logical)).arg(QString::fromLocal8Bit(strerror(errno)));
             emit finished(r);
             return;
         }
-        ::fdatasync(m_fd);
+        blockio::flush(m_fd);
         ++r.blocks;
         for (quint64 s = block; s < block + quint64(physical); s += quint64(logical)) {
             if (!readAt(m_fd, buf.get(), quint64(logical), s))

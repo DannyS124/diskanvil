@@ -4,6 +4,7 @@
 #include "isocopy.h"
 
 #include "applog.h"
+#include "blockio.h"
 #include "filecopy.h"
 #include "jobui.h"
 #include "udisks.h"
@@ -12,8 +13,6 @@
 #include <QFile>
 #include <QThread>
 
-#include <fcntl.h>
-#include <unistd.h>
 
 namespace {
 
@@ -143,11 +142,7 @@ void IsoCopy::copy(const QStringList &mountPoints)
             if (!conf.open(QIODevice::WriteOnly) || conf.write(isomode::persistenceConf()) < 0)
                 m_failure = tr("Couldn't write persistence.conf: %1").arg(conf.errorString());
             conf.close();
-            const int fd = ::open(QFile::encodeName(mountPoints.value(1)).constData(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-            if (fd >= 0) {
-                ::syncfs(fd);
-                ::close(fd);
-            }
+            blockio::syncFileSystem(mountPoints.value(1));
         }
         // Unmounted either way, so it isn't left mounted after a failed copy.
         m_prep->finish();

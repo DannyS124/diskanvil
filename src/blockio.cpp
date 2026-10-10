@@ -8,26 +8,24 @@
 #include <QFileInfo>
 #include <QStringList>
 
+#include <algorithm>
 #include <cerrno>
+#ifndef Q_OS_WIN
+#include <fcntl.h>
 #include <linux/fs.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#else
+#include <io.h>
+#endif
 
 namespace blockio {
-
-Buffer alignedBuffer(size_t size)
-{
-    void *raw = nullptr;
-    if (posix_memalign(&raw, kAlign, size) != 0)
-        return Buffer(nullptr, &free);
-    return Buffer(static_cast<char *>(raw), &free);
-}
 
 bool readAt(int fd, char *buf, quint64 len, quint64 offset)
 {
     while (len > 0) {
-        const ssize_t n = ::pread(fd, buf, len, off_t(offset));
+        const qint64 n = readSome(fd, buf, len, offset);
         if (n < 0 && errno == EINTR)
             continue;
         if (n <= 0)
@@ -42,7 +40,7 @@ bool readAt(int fd, char *buf, quint64 len, quint64 offset)
 bool writeAt(int fd, const char *buf, quint64 len, quint64 offset)
 {
     while (len > 0) {
-        const ssize_t n = ::pwrite(fd, buf, len, off_t(offset));
+        const qint64 n = writeSome(fd, buf, len, offset);
         if (n < 0 && errno == EINTR)
             continue;
         if (n <= 0)
@@ -57,7 +55,7 @@ bool writeAt(int fd, const char *buf, quint64 len, quint64 offset)
 bool writeAll(int fd, const char *data, qint64 size)
 {
     while (size > 0) {
-        const ssize_t n = ::write(fd, data, size_t(size));
+        const auto n = ::write(fd, data, unsigned(std::min<qint64>(size, 1 << 30)));
         if (n < 0 && errno == EINTR)
             continue;
         if (n <= 0)
@@ -72,7 +70,7 @@ qint64 readFull(int fd, char *data, qint64 size)
 {
     qint64 total = 0;
     while (total < size) {
-        const ssize_t n = ::read(fd, data + total, size_t(size - total));
+        const auto n = ::read(fd, data + total, unsigned(std::min<qint64>(size - total, 1 << 30)));
         if (n < 0 && errno == EINTR)
             continue;
         if (n <= 0)
@@ -80,6 +78,36 @@ qint64 readFull(int fd, char *data, qint64 size)
         total += n;
     }
     return total;
+}
+
+#ifndef Q_OS_WIN
+
+void alignedFree(void *p)
+{
+    free(p);
+}
+
+Buffer alignedBuffer(size_t size)
+{
+    void *raw = nullptr;
+    if (posix_memalign(&raw, kAlign, size) != 0)
+        return Buffer(nullptr, &alignedFree);
+    return Buffer(static_cast<char *>(raw), &alignedFree);
+}
+
+qint64 readSome(int fd, char *buf, quint64 len, quint64 offset)
+{
+    return ::pread(fd, buf, len, off_t(offset));
+}
+
+qint64 writeSome(int fd, const char *buf, quint64 len, quint64 offset)
+{
+    return ::pwrite(fd, buf, len, off_t(offset));
+}
+
+bool seekTo(int fd, quint64 offset)
+{
+    return ::lseek(fd, off_t(offset), SEEK_SET) == off_t(offset);
 }
 
 int logicalSize(int fd)
@@ -101,6 +129,60 @@ quint64 deviceSize(int fd)
         return size;
     struct stat st {};
     return ::fstat(fd, &st) == 0 ? quint64(st.st_size) : 0;
+}
+
+bool isRegularFile(int fd)
+{
+    struct stat st {};
+    return ::fstat(fd, &st) == 0 && S_ISREG(st.st_mode);
+}
+
+bool setFileSize(int fd, quint64 size)
+{
+    return ::ftruncate(fd, off_t(size)) == 0;
+}
+
+bool setFileTime(int fd, qint64 msecs)
+{
+    const timespec time {msecs / 1000, long(msecs % 1000) * 1000000};
+    const timespec times[2] = {time, time};
+    return ::futimens(fd, times) == 0;
+}
+
+int openFile(const QString &path, FileMode mode)
+{
+    int flags = O_CLOEXEC;
+    switch (mode) {
+    case FileMode::Read: flags |= O_RDONLY; break;
+    case FileMode::Replace: flags |= O_WRONLY | O_CREAT | O_TRUNC; break;
+    case FileMode::Update: flags |= O_RDWR | O_CREAT; break;
+    case FileMode::CreateNew: flags |= O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW; break;
+    }
+    return ::open(QFile::encodeName(path).constData(), flags, 0644);
+}
+
+bool flush(int fd)
+{
+    return ::fdatasync(fd) == 0 || errno == EINVAL;
+}
+
+bool flushFile(QFile &file)
+{
+    return file.flush() && ::fsync(file.handle()) == 0;
+}
+
+void dropCache(int fd)
+{
+    ::posix_fadvise(fd, 0, 0, POSIX_FADV_DONTNEED);
+}
+
+void syncFileSystem(const QString &path)
+{
+    const int fd = ::open(QFile::encodeName(path).constData(), O_RDONLY | O_CLOEXEC);
+    if (fd >= 0) {
+        ::syncfs(fd);
+        ::close(fd);
+    }
 }
 
 namespace {
@@ -156,5 +238,7 @@ bool pathIsOnDisk(const QString &path, const QString &diskDevice)
     underlying(QFileInfo(source).canonicalFilePath().section(QLatin1Char('/'), -1), &names);
     return names.contains(diskDevice.section(QLatin1Char('/'), -1));
 }
+
+#endif // !Q_OS_WIN
 
 } // namespace blockio

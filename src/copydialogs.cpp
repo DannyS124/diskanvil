@@ -1248,7 +1248,7 @@ void RescueDialog::start()
         if (in < 0)
             return failed(tr("Couldn't open the drive."));
         if (toFile) {
-            const int out = ::open(QFile::encodeName(file).constData(), O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+            const int out = blockio::openFile(file, blockio::FileMode::Update);
             if (out < 0) {
                 ::close(in);
                 return failed(tr("Couldn't open %1: %2").arg(file, QString::fromLocal8Bit(std::strerror(errno))));

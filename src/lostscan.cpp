@@ -4,6 +4,7 @@
 #include "lostscan.h"
 
 #include "applog.h"
+#include "blockio.h"
 #include "filetypes.h"
 
 #include <QCoreApplication>
@@ -15,8 +16,6 @@
 
 #include <cerrno>
 #include <cstring>
-#include <fcntl.h>
-#include <sys/stat.h>
 #include <unistd.h>
 
 namespace {
@@ -204,7 +203,7 @@ void lost::Saver::run()
         QString path;
         for (int n = 1; n < 10000 && fd < 0; ++n) {
             path = folder + QLatin1Char('/') + (n == 1 ? name : QStringLiteral("%1 (%2)%3").arg(stem).arg(n).arg(ext));
-            fd = ::open(QFile::encodeName(path).constData(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0644);
+            fd = blockio::openFile(path, blockio::FileMode::CreateNew);
             if (fd < 0 && errno != EEXIST)
                 break;
         }
@@ -218,16 +217,14 @@ void lost::Saver::run()
         bool ok = true;
         for (quint64 at = 0; at < f.size && ok && !m_cancel;) {
             const qint64 n = reader.read(at, buffer.data(), buffer.size());
-            ok = n > 0 && ::write(fd, buffer.constData(), size_t(n)) == n;
+            ok = n > 0 && blockio::writeAll(fd, buffer.constData(), n);
             at += quint64(std::max<qint64>(n, 1));
             done += quint64(std::max<qint64>(n, 0));
             Q_EMIT progress(done, total);
         }
-        ok = ok && ::fsync(fd) == 0;
-        if (ok && f.modified > 0) {
-            const timespec times[2] = {{f.modified / 1000, long(f.modified % 1000) * 1000000}, {f.modified / 1000, long(f.modified % 1000) * 1000000}};
-            ::futimens(fd, times);
-        }
+        ok = ok && blockio::flush(fd);
+        if (ok && f.modified > 0)
+            blockio::setFileTime(fd, f.modified);
         ::close(fd);
         if (!ok || m_cancel) {
             ::unlink(QFile::encodeName(path).constData());
