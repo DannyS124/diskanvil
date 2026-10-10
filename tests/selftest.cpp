@@ -939,6 +939,8 @@ int main(int argc, char *argv[])
         bootTests();
     } else if (args.contains(QStringLiteral("--newids"))) {
         newIdsTests();
+    } else if (args.contains(QStringLiteral("--fat32"))) {
+        fat32Tests();
     } else if (args.contains(QStringLiteral("--shadow-image"))) {
         // The same for shadow copies: each one, its files and its volume a MiB at a time.
         return shadowImage(args.value(args.indexOf(QStringLiteral("--shadow-image")) + 1));

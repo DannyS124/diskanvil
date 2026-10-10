@@ -63,6 +63,7 @@ add_library(diskforge-core STATIC
     src/lostfs.cpp src/lostfs.h src/lostntfs.cpp src/lostraw.h
     src/vshadow.cpp src/vshadow.h
     src/vdisk.cpp src/vdisk.h
+    src/fat32format.cpp src/fat32format.h
     src/mediainfo.cpp src/mediainfo.h
     src/officetext.cpp src/officetext.h
     src/virusscan.cpp src/virusscan.h
@@ -213,7 +214,7 @@ else()
     option(DISKFORGE_SELFTEST "Build the loop-device self-test" ON)
 endif()
 if(DISKFORGE_SELFTEST)
-    qt_add_executable(diskforge-selftest tests/selftest.cpp tests/testkit.cpp tests/testkit.h
+    qt_add_executable(diskforge-selftest tests/selftest.cpp tests/testkit.cpp tests/testkit.h tests/test_fat32.cpp
         tests/test_gpt.cpp tests/test_copy.cpp tests/test_blockmap.cpp
         tests/test_usage.cpp tests/test_backup.cpp
         tests/test_rescue.cpp tests/test_clone.cpp tests/test_system.cpp
