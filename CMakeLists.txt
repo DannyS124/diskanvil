@@ -144,6 +144,7 @@ add_library(diskforge-ui STATIC
     src/copydialogs.cpp src/copydialogs.h
     src/usagedialog.cpp src/usagedialog.h
     src/virusdialog.cpp src/virusdialog.h
+    src/hashlookup.cpp src/hashlookup.h
     src/systemtools.cpp src/systemtools.h
     src/erasedialog.cpp src/erasedialog.h
     src/addonsdialog.cpp src/addonsdialog.h

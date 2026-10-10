@@ -418,7 +418,7 @@
 <context>
     <name>VirusDialog</name>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="75"/>
+        <location filename="../src/virusdialog.cpp" line="77"/>
         <source>%n day(s) ago</source>
         <translation>
             <numerusform>%n day ago</numerusform>
@@ -426,8 +426,8 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="308"/>
-        <location filename="../src/virusdialog.cpp" line="771"/>
+        <location filename="../src/virusdialog.cpp" line="314"/>
+        <location filename="../src/virusdialog.cpp" line="782"/>
         <source>Switch Off %n Ticked…</source>
         <translation>
             <numerusform>Switch Off %n Ticked…</numerusform>
@@ -435,7 +435,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="463"/>
+        <location filename="../src/virusdialog.cpp" line="470"/>
         <source>Delete %n Ticked File(s)…</source>
         <translation>
             <numerusform>Delete %n Ticked File…</numerusform>
@@ -443,7 +443,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="773"/>
+        <location filename="../src/virusdialog.cpp" line="788"/>
         <source>Starts with Windows (%n odd)</source>
         <translation>
             <numerusform>Starts with Windows (%n odd)</numerusform>
@@ -451,7 +451,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="774"/>
+        <location filename="../src/virusdialog.cpp" line="789"/>
         <source>%1 things start with Windows. Odd ones: %n. Pick one to see exactly where it&apos;s kept and what it runs.</source>
         <translation>
             <numerusform>%1 things start with Windows. Odd ones: %n. Pick one to see exactly where it's kept and what it runs.</numerusform>
@@ -459,7 +459,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="777"/>
+        <location filename="../src/virusdialog.cpp" line="792"/>
         <source>Nothing that starts with Windows looks odd (%n looked at).</source>
         <translation>
             <numerusform>Nothing that starts with Windows looks odd (%n looked at).</numerusform>
@@ -467,7 +467,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="843"/>
+        <location filename="../src/virusdialog.cpp" line="858"/>
         <source>Stopped. %n thing(s) found before that.</source>
         <translation>
             <numerusform>Stopped. %n thing found before that.</numerusform>
@@ -475,7 +475,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="849"/>
+        <location filename="../src/virusdialog.cpp" line="864"/>
         <source>Done: found %n thing(s) in %L1 files.</source>
         <translation>
             <numerusform>Done: found %n thing in %L1 files.</numerusform>
@@ -483,7 +483,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="849"/>
+        <location filename="../src/virusdialog.cpp" line="864"/>
         <source>Done: found %n thing(s).</source>
         <translation>
             <numerusform>Done: found %n thing.</numerusform>
@@ -491,7 +491,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="851"/>
+        <location filename="../src/virusdialog.cpp" line="866"/>
         <source>%n file(s) couldn&apos;t be read: another user&apos;s or the system&apos;s, or in use.</source>
         <translation>
             <numerusform>%n file couldn't be read: another user's or the system's, or in use.</numerusform>
@@ -499,7 +499,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="856"/>
+        <location filename="../src/virusdialog.cpp" line="871"/>
         <source>Starts with Windows: %n odd thing(s) to look at.</source>
         <translation>
             <numerusform>Starts with Windows: %n odd thing to look at.</numerusform>
@@ -507,8 +507,8 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="891"/>
-        <location filename="../src/virusdialog.cpp" line="1256"/>
+        <location filename="../src/virusdialog.cpp" line="906"/>
+        <location filename="../src/virusdialog.cpp" line="1337"/>
         <source>…and %n more</source>
         <translation>
             <numerusform>…and %n more</numerusform>
@@ -516,7 +516,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="892"/>
+        <location filename="../src/virusdialog.cpp" line="907"/>
         <source>Delete these %n file(s) for good?</source>
         <translation>
             <numerusform>Delete these %n file for good?</numerusform>
@@ -524,7 +524,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="928"/>
+        <location filename="../src/virusdialog.cpp" line="943"/>
         <source>Deleted %n file(s). The list of what was done is in %1.</source>
         <translation>
             <numerusform>Deleted %n file. The list of what was done is in %1.</numerusform>
@@ -532,7 +532,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="1163"/>
+        <location filename="../src/virusdialog.cpp" line="1178"/>
         <source>Boot (%n wrong)</source>
         <translation>
             <numerusform>Boot (%n wrong)</numerusform>
@@ -540,7 +540,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="1227"/>
+        <location filename="../src/virusdialog.cpp" line="1248"/>
         <source>Put back %n of Windows&apos; boot files. The old ones are in %1.</source>
         <translation>
             <numerusform>Put back %n of Windows' boot files. The old ones are in %1.</numerusform>
@@ -548,7 +548,15 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="1257"/>
+        <location filename="../src/virusdialog.cpp" line="1286"/>
+        <source>Look up %n program(s) online?</source>
+        <translation>
+            <numerusform>Look up %n program online?</numerusform>
+            <numerusform>Look up %n programs online?</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/virusdialog.cpp" line="1338"/>
         <source>Switch off these %n thing(s) that start with Windows?</source>
         <translation>
             <numerusform>Switch off these %n thing that start with Windows?</numerusform>
@@ -556,7 +564,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="1301"/>
+        <location filename="../src/virusdialog.cpp" line="1382"/>
         <source>Switched off %n thing(s). The backup, and how to undo it, is in %1.</source>
         <translation>
             <numerusform>Switched off %n thing. The backup, and how to undo it, is in %1.</numerusform>

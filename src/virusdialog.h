@@ -47,6 +47,8 @@ public:
     void checkEfiPartition(const QString &esp, const QString &windows);
     // Puts Windows' own copies back over the ticked boot files, after asking.
     void putBackTicked();
+    // Asks CIRCL's hashlookup whether it knows the programs that look odd, after asking.
+    void lookUpOnline();
     // The tests leave fwupd out: its answer is about the PC they run on.
     static inline bool askFwupd = true;
     // Closing stops the scan and unmounts what this window mounted.
@@ -115,6 +117,8 @@ private:
     QLabel *m_bootInfo;
     QLabel *m_bootDetails;
     QPushButton *m_putBack;
+    QPushButton *m_lookUp;
+    QHash<QString, QString> m_online; // a file here, and what the online check said about it
     boot::Report m_boot;
     QSet<int> m_bootTicked;
     QHash<int, QPair<bool, QString>> m_putBackDone;

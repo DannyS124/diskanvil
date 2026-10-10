@@ -7,6 +7,7 @@
 #include "blockio.h"
 #include "dialogs.h"
 #include "format.h"
+#include "hashlookup.h"
 #include "rescuestick.h"
 #include "udisks.h"
 
@@ -14,6 +15,7 @@
 #include <QButtonGroup>
 #include <QCheckBox>
 #include <QColor>
+#include <QCryptographicHash>
 #include <QDateTime>
 #include <QDialogButtonBox>
 #include <QDir>
@@ -138,6 +140,7 @@ VirusDialog::VirusDialog(UDisks *udisks, QWidget *parent)
     , m_bootInfo(new QLabel)
     , m_bootDetails(new QLabel)
     , m_putBack(new QPushButton(tr("Put Back Windows' Own…")))
+    , m_lookUp(new QPushButton(tr("Look Up Online…")))
 {
     setWindowTitle(tr("Scan for Viruses"));
     setObjectName(QStringLiteral("virusScan"));
@@ -272,7 +275,10 @@ VirusDialog::VirusDialog(UDisks *udisks, QWidget *parent)
     m_hitInfo->setWordWrap(true);
     m_hitInfo->setObjectName(QStringLiteral("hitInfo"));
     bottom->addWidget(m_hitInfo, 1);
-    for (QPushButton *b : {m_again, m_delete}) {
+    m_lookUp->setObjectName(QStringLiteral("lookUp"));
+    m_lookUp->setToolTip(tr("Asks a public list of known files whether it knows the programs that look odd. It asks first, every time."));
+    m_lookUp->hide();
+    for (QPushButton *b : {m_lookUp, m_again, m_delete}) {
         b->setAutoDefault(false);
         bottom->addWidget(b);
     }
@@ -318,6 +324,7 @@ VirusDialog::VirusDialog(UDisks *udisks, QWidget *parent)
         m_putBack->setEnabled(!m_bootTicked.isEmpty() && !m_busy);
     });
     connect(m_putBack, &QPushButton::clicked, this, &VirusDialog::putBackTicked);
+    connect(m_lookUp, &QPushButton::clicked, this, &VirusDialog::lookUpOnline);
     connect(m_again, &QPushButton::clicked, this, [this] {
         m_pages->setCurrentIndex(0);
         fillTargets();
@@ -628,6 +635,8 @@ void VirusDialog::startScan(const QStringList &folders, const QString &title)
     m_putBackDone.clear();
     m_bootList->clear();
     m_tabs->setTabVisible(2, false);
+    m_online.clear();
+    m_lookUp->hide();
 
     // What starts with Windows comes first: those programs are scanned whatever else is.
     QString windows;
@@ -729,6 +738,8 @@ void VirusDialog::showStartupDetails()
     html += tr("It runs: %1").arg(code(e.command)) + QStringLiteral("<br>");
     if (!e.program.isEmpty())
         html += tr("The program: %1").arg(code(e.program)) + (e.file.isEmpty() ? QLatin1Char(' ') + tr("(not there)") : QString());
+    if (m_online.contains(e.file))
+        html += QStringLiteral("<br>") + tr("Looked up online: %1").arg(m_online.value(e.file).toHtmlEscaped());
     m_startupDetails->setText(html);
 }
 
@@ -769,6 +780,10 @@ void VirusDialog::showStartup()
     showStartupDetails();
     m_switchOff->setEnabled(!m_ticked.isEmpty() && !m_busy);
     m_switchOff->setText(m_ticked.isEmpty() ? tr("Switch Off Ticked…") : tr("Switch Off %n Ticked…", nullptr, int(m_ticked.size())));
+    bool lookable = false;
+    for (const startup::Entry &e : std::as_const(m_startup.entries))
+        lookable = lookable || (e.severity > 0 && !e.file.isEmpty());
+    m_lookUp->setVisible(lookable || m_lookUp->isVisible());
     m_tabs->setTabVisible(1, m_startup.windows);
     m_tabs->setTabText(1, odd ? tr("Starts with Windows (%n odd)", nullptr, odd) : tr("Starts with Windows"));
     QString info = odd ? tr("%1 things start with Windows. Odd ones: %n. Pick one to see exactly where it's kept and what it runs.",
@@ -1167,6 +1182,10 @@ void VirusDialog::showBoot()
         info += QStringLiteral("<br><small>") + note.toHtmlEscaped() + QStringLiteral("</small>");
     m_bootInfo->setText(info);
     m_putBack->setEnabled(!m_bootTicked.isEmpty() && !m_busy);
+    bool lookable = false;
+    for (const boot::Finding &f : std::as_const(m_boot.findings))
+        lookable = lookable || (f.severity > 0 && !f.file.isEmpty());
+    m_lookUp->setVisible(lookable || m_lookUp->isVisible());
 }
 
 void VirusDialog::showBootDetails()
@@ -1186,6 +1205,8 @@ void VirusDialog::showBootDetails()
     }
     if (!f.cleanCopy.isEmpty())
         html += tr("Windows' own copy, which checks out, can be put back: %1").arg(QDir::toNativeSeparators(f.cleanCopy).toHtmlEscaped());
+    if (m_online.contains(f.file))
+        html += QStringLiteral("<br>") + tr("Looked up online: %1").arg(m_online.value(f.file).toHtmlEscaped());
     m_bootDetails->setText(html);
 }
 
@@ -1235,6 +1256,66 @@ void VirusDialog::putBackTicked()
         m_espReadOnly = false;
         apply(mount);
     });
+}
+
+void VirusDialog::lookUpOnline()
+{
+    // The odd ones whose file is here, by their fingerprint.
+    QHash<QString, QStringList> files; // SHA-256, the files with it
+    auto add = [&files](const QString &path) {
+        QFile f(path);
+        if (path.isEmpty() || f.size() > (512 << 20) || !f.open(QIODevice::ReadOnly))
+            return;
+        QCryptographicHash hash(QCryptographicHash::Sha256);
+        if (hash.addData(&f))
+            files[QString::fromLatin1(hash.result().toHex())] << path;
+    };
+    for (const startup::Entry &e : std::as_const(m_startup.entries)) {
+        if (e.severity > 0)
+            add(e.file);
+    }
+    for (const boot::Finding &f : std::as_const(m_boot.findings)) {
+        if (f.severity > 0)
+            add(f.file);
+    }
+    if (files.isEmpty()) {
+        m_status->setText(tr("There's nothing odd here to look up."));
+        return;
+    }
+    const QString question =
+        tr("Look up %n program(s) online?", nullptr, int(files.size())) + QStringLiteral("\n\n")
+        + tr("Only their fingerprints (SHA-256) are sent: not the files, their names, or anything about this PC. They go to "
+             "CIRCL, Luxembourg's computer emergency response team, whose free hashlookup service knows tens of millions of "
+             "files from software makers and Linux distributions.")
+        + QStringLiteral("\n\n") + tr("A program it knows is very likely what it says it is. One it doesn't know isn't proof of anything.");
+    if (QMessageBox::question(this, windowTitle(), question, QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
+        return;
+    m_lookUp->setEnabled(false);
+    m_status->setText(tr("Looking them up…"));
+    auto *lookup = new hashlookup::Lookup(this);
+    auto known = std::make_shared<int>(0), unknown = std::make_shared<int>(0), failed = std::make_shared<int>(0);
+    connect(lookup, &hashlookup::Lookup::answered, this, [this, files, known, unknown, failed](const hashlookup::Answer &a) {
+        const QString words = a.failed ? tr("couldn't be asked (%1)").arg(a.what)
+                            : a.known  ? tr("a known file: %1").arg(a.what)
+                                       : tr("not a file the list knows");
+        ++*(a.failed ? failed : a.known ? known : unknown);
+        for (const QString &path : files.value(a.sha256))
+            m_online.insert(path, words);
+        log({QStringLiteral("  online: %1 %2").arg(a.sha256, words)});
+    });
+    connect(lookup, &hashlookup::Lookup::finished, this, [this, lookup, known, unknown, failed] {
+        lookup->deleteLater();
+        m_lookUp->setEnabled(true);
+        showStartupDetails();
+        showBootDetails();
+        m_status->setText(*failed && !*known && !*unknown ? redText(tr("The lookup didn't work. Is there internet?"))
+                                                          : tr("Looked up online: %1 known, %2 not known%3. Pick one to see what was said.")
+                                                                .arg(*known)
+                                                                .arg(*unknown)
+                                                                .arg(*failed ? tr(", %1 couldn't be asked").arg(*failed) : QString()));
+    });
+    log({QStringLiteral("  online lookup of %1 files at %2").arg(files.size()).arg(hashlookup::server)});
+    lookup->ask(files.keys());
 }
 
 void VirusDialog::switchOffTicked()

@@ -32,6 +32,7 @@
 #include "../src/noticebar.h"
 #include "../src/typedialog.h"
 #include "../src/virusdialog.h"
+#include "../src/hashlookup.h"
 #include "../src/efivars.h"
 #include "testsign.h"
 #include "../src/windowsusbjob.h"
@@ -57,6 +58,9 @@
 #include <QPainter>
 #include <QPdfWriter>
 #include <QThread>
+#include <QRegularExpression>
+#include <QTcpSocket>
+#include <QTcpServer>
 #include <QListView>
 #include <QTabWidget>
 #include <QTreeWidget>
@@ -2627,6 +2631,100 @@ void virusScanWindowsDrive()
            QStringLiteral("scanned again, what was switched off isn't odd any more"), still.join(QStringLiteral(", ")));
 }
 
+// The online check: asked first, only fingerprints sent, answers shown. A server of our own
+// stands in for CIRCL's.
+void virusLookUpOnline()
+{
+    if (QStandardPaths::findExecutable(QStringLiteral("clamscan")).isEmpty() || QStandardPaths::findExecutable(QStringLiteral("sigtool")).isEmpty()) {
+        out << "SKIP  Scan for Viruses' online check: ClamAV isn't installed" << Qt::endl;
+        return;
+    }
+    QTemporaryDir dir;
+    QString problem;
+    if (!makeVirusList({{QByteArray("nothing on this drive matches this"), "Win.Trojan.DiskForgeTest-5"}}, dir.filePath(QStringLiteral("list")), &problem)) {
+        report(false, QStringLiteral("make a test virus list with sigtool"), problem);
+        return;
+    }
+    const QString root = dir.filePath(QStringLiteral("drive"));
+    auto put = [&root](const QString &path, const QByteArray &data) {
+        QDir().mkpath(QFileInfo(root + QLatin1Char('/') + path).absolutePath());
+        QFile f(root + QLatin1Char('/') + path);
+        if (f.open(QIODevice::WriteOnly))
+            f.write(data);
+    };
+    auto fixture = [](const char *name) {
+        QFile f(QStringLiteral(SOURCE_DIR "/tests/data/registry/") + QLatin1String(name));
+        return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
+    };
+    put(QStringLiteral("Windows/System32/config/SOFTWARE"), fixture("software.hiv"));
+    put(QStringLiteral("Windows/System32/config/SYSTEM"), fixture("system.hiv"));
+    put(QStringLiteral("Users/tester/NTUSER.DAT"), fixture("ntuser.hiv"));
+    const QByteArray knownFile = "a program the list knows";
+    put(QStringLiteral("Users/tester/AppData/Local/Temp/xkqzvbnw.exe"), knownFile); // Run: Updater
+    put(QStringLiteral("Users/tester/AppData/Roaming/abc.exe"), "a program it doesn't");  // Load
+    const QString knownHash = QString::fromLatin1(QCryptographicHash::hash(knownFile, QCryptographicHash::Sha256).toHex());
+
+    QTcpServer server;
+    QStringList asked;
+    QObject::connect(&server, &QTcpServer::newConnection, [&] {
+        QTcpSocket *socket = server.nextPendingConnection();
+        QObject::connect(socket, &QTcpSocket::readyRead, socket, [&, socket] {
+            const QByteArray request = socket->readAll();
+            const QString path = QString::fromLatin1(request.split(' ').value(1));
+            asked << path;
+            const bool known = path.endsWith(knownHash);
+            const QByteArray body = known ? QByteArray(R"({"FileName": "xkqzvbnw.exe", "ProductCode": {"ProductName": "Test Product", "ProductVersion": "1.0"}, "source": "NSRL", "hashlookup:trust": 60})")
+                                          : QByteArray(R"({"message": "Non existing SHA-256"})");
+            socket->write((known ? "HTTP/1.1 200 OK\r\n" : "HTTP/1.1 404 NOT FOUND\r\n") + QByteArray("Content-Type: application/json\r\nContent-Length: ")
+                          + QByteArray::number(body.size()) + "\r\nConnection: close\r\n\r\n" + body);
+            socket->disconnectFromHost();
+        });
+    });
+    server.listen(QHostAddress::LocalHost);
+    const QString realServer = hashlookup::server;
+    hashlookup::server = QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort());
+
+    UDisks udisks;
+    VirusDialog dialog(&udisks);
+    dialog.show();
+    dialog.scanFolder(root);
+    auto *status = dialog.findChild<QLabel *>(QStringLiteral("status"));
+    waitUntil([&] { return status->text().startsWith(QLatin1String("Done")); }, 60000);
+    auto *lookUp = dialog.findChild<QPushButton *>(QStringLiteral("lookUp"));
+    QStringList boxes;
+    Answerer answerer;
+    answerer.answer = [&](QWidget *modal) {
+        if (auto *box = qobject_cast<QMessageBox *>(modal)) {
+            boxes << box->text();
+            box->button(QMessageBox::Yes)->click();
+            return true;
+        }
+        return false;
+    };
+    dialog.lookUpOnline();
+    waitUntil([&] { return status->text().startsWith(QLatin1String("Looked up online")); }, 30000);
+    auto *list = dialog.findChild<QTreeWidget *>(QStringLiteral("startup"));
+    auto *details = dialog.findChild<QLabel *>(QStringLiteral("startupDetails"));
+    QString updater, load;
+    for (int i = 0; i < list->topLevelItemCount(); ++i) {
+        list->setCurrentItem(list->topLevelItem(i));
+        if (list->topLevelItem(i)->text(0) == QLatin1String("Updater"))
+            updater = details->text();
+        if (list->topLevelItem(i)->text(0) == QLatin1String("Load"))
+            load = details->text();
+    }
+    bool onlyHashes = asked.size() == 2;
+    for (const QString &path : std::as_const(asked))
+        onlyHashes = onlyHashes && QRegularExpression(QStringLiteral("^/lookup/sha256/[0-9a-f]{64}$")).match(path).hasMatch();
+    report(lookUp && lookUp->isVisible() && boxes.size() == 1 && boxes[0].contains(QLatin1String("CIRCL")) && boxes[0].contains(QLatin1String("fingerprints")),
+           QStringLiteral("Scan for Viruses: the online check asks first, and says what's sent and to whom"), boxes.value(0).left(60));
+    report(onlyHashes && status->text().contains(QLatin1String("1 known, 1 not known")),
+           QStringLiteral("only the two fingerprints are sent"), asked.join(QStringLiteral(", ")).left(160));
+    report(updater.contains(QLatin1String("a known file: xkqzvbnw.exe, part of Test Product 1.0 (NSRL)")) && load.contains(QLatin1String("not a file the list knows")),
+           QStringLiteral("and what the list said shows with each one"));
+    hashlookup::server = realServer;
+}
+
 // The Boot tab: an EFI partition whose Windows boot manager a "bootkit" replaced with an unsigned
 // one, checked against made-up Secure Boot lists, and Windows' own copy put back.
 void virusScanBoot()
@@ -3063,7 +3161,7 @@ int userScenarios(const QStringList &only)
         {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostfs", lostFilesFromFileSystem},
-        {"previews", previewsThroughHelper}, {"viruses", virusScanThroughWindow}, {"virusdrive", virusScanOnDrive}, {"viruswindows", virusScanWindowsDrive}, {"virusboot", virusScanBoot},
+        {"previews", previewsThroughHelper}, {"viruses", virusScanThroughWindow}, {"virusdrive", virusScanOnDrive}, {"viruswindows", virusScanWindowsDrive}, {"virusboot", virusScanBoot}, {"viruslookup", virusLookUpOnline},
     };
     for (const auto &[name, run] : scenarios) {
         if (only.isEmpty() || only.contains(QLatin1String(name)))
