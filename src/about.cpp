@@ -60,9 +60,11 @@ AboutDialog::AboutDialog(const QString &udisksVersion, QWidget *parent)
     tabs->addTab(richLabel(tr("<p>A disk manager for Linux that works like Windows Disk Management.</p>"
                               "<p>© 2026 %1<br>Released under the GNU General Public License, version 3 or later. "
                               "This program comes with absolutely no warranty.</p>"
-                              "<p>%2<br>%3</p>")
+                              "<p>%2<br>%3</p>"
+                              "<p>DiskForge is free. If it helped you and you'd like to say thanks: %4</p>")
                                .arg(QStringLiteral(APP_AUTHOR), link(homepage, tr("Project website")),
-                                    link(homepage + QStringLiteral("/issues"), tr("Report a bug")))),
+                                    link(homepage + QStringLiteral("/issues"), tr("Report a bug")),
+                                    link(QStringLiteral(APP_SUPPORT_URL), tr("buy me a coffee on Ko-fi")))),
                  tr("&About"));
     tabs->addTab(richLabel(tr("<p><b>%1</b><br>%2</p>")
                                .arg(QStringLiteral(APP_AUTHOR),

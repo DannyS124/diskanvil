@@ -44,7 +44,8 @@ set(APP_DEFINITIONS
     APP_ID="${APP_ID}"
     APP_AUTHOR="${APP_AUTHOR}"
     APP_AUTHOR_URL="${APP_AUTHOR_URL}"
-    APP_HOMEPAGE="${PROJECT_HOMEPAGE_URL}")
+    APP_HOMEPAGE="${PROJECT_HOMEPAGE_URL}"
+    APP_SUPPORT_URL="https://ko-fi.com/K0C528JI83")
 
 # Everything that talks to UDisks2 (or Windows' disk API) or touches devices, shared with the
 # test tools.

@@ -714,6 +714,9 @@ void MainWindow::createActions()
     help->addAction(themeIcon("internet-services", "applications-internet"), tr("Project &Website"), this, [] {
         QDesktopServices::openUrl(QUrl(QStringLiteral(APP_HOMEPAGE)));
     });
+    help->addAction(themeIcon("help-donate", "emblem-favorite"), tr("&Support DiskForge (Ko-fi)"), this, [] {
+        QDesktopServices::openUrl(QUrl(QStringLiteral(APP_SUPPORT_URL)));
+    });
     help->addSeparator();
     help->addAction(QApplication::windowIcon(), tr("&About DiskForge"), this, [this] {
         AboutDialog(m_udisks->daemonVersion(), this).exec();
