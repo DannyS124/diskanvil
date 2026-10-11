@@ -6,8 +6,8 @@
 
 #include "testkit.h"
 
-#include "../src/imagesource.h"
-#include "../src/newids.h"
+#include "../src/usb/imagesource.h"
+#include "../src/backup/newids.h"
 
 #include <QDir>
 #include <QFile>

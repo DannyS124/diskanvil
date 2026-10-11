@@ -8,15 +8,15 @@
 
 #include "testkit.h"
 
-#include "../src/filetypes.h"
-#include "../src/imagesource.h"
-#include "../src/lostfs.h"
-#include "../src/lostscan.h"
-#include "../src/lostsource.h"
-#include "../src/mediainfo.h"
-#include "../src/officetext.h"
-#include "../src/vdisk.h"
-#include "../src/vshadow.h"
+#include "../src/lostfiles/filetypes.h"
+#include "../src/usb/imagesource.h"
+#include "../src/lostfiles/lostfs.h"
+#include "../src/lostfiles/lostscan.h"
+#include "../src/lostfiles/lostsource.h"
+#include "../src/lostfiles/mediainfo.h"
+#include "../src/lostfiles/officetext.h"
+#include "../src/lostfiles/vdisk.h"
+#include "../src/lostfiles/vshadow.h"
 
 #include <QBuffer>
 #include <QCryptographicHash>

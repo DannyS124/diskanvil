@@ -9,8 +9,8 @@
 
 #include "testkit.h"
 
-#include "../src/shelllink.h"
-#include "../src/winstartup.h"
+#include "../src/viruses/shelllink.h"
+#include "../src/viruses/winstartup.h"
 
 #include <QDir>
 #include <QElapsedTimer>

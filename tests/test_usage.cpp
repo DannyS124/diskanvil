@@ -6,8 +6,8 @@
 
 #include "testkit.h"
 
-#include "../src/fswalk.h"
-#include "../src/squarify.h"
+#include "../src/tools/fswalk.h"
+#include "../src/tools/squarify.h"
 
 #include <QDir>
 #include <QFile>

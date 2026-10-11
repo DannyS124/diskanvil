@@ -1,5 +1,5 @@
 #!/bin/bash
-# Makes the test disks for virtual machines' disk files (src/vdisk.cpp): one small disk of our
+# Makes the test disks for virtual machines' disk files (src/lostfiles/vdisk.cpp): one small disk of our
 # own (an MBR, a FAT12 partition with two files, and numbered sectors near its end, so the last
 # blocks are written to), then that same disk in every format and kind qemu-img writes. The tests
 # read each one and expect the disk itself back, byte for byte; the two that only hold changes

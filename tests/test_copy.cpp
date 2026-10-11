@@ -5,7 +5,7 @@
 
 #include "testkit.h"
 
-#include "../src/blockcopy.h"
+#include "../src/backup/blockcopy.h"
 
 #include <QFile>
 #include <QRandomGenerator>

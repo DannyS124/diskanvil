@@ -6,9 +6,9 @@
 
 #include "testkit.h"
 
-#include "../src/format.h"
-#include "../src/recoverdialog.h"
-#include "../src/udisks.h"
+#include "../src/common/format.h"
+#include "../src/drives/recoverdialog.h"
+#include "../src/drives/udisks.h"
 
 #include <QCoreApplication>
 #include <QDBusConnection>
@@ -24,14 +24,14 @@
 #include <QTextStream>
 #include <QThread>
 
-#include "../src/addons.h"
-#include "../src/outputfilter.h"
-#include "../src/benchmark.h"
-#include "../src/surfacescan.h"
+#include "../src/addons/addons.h"
+#include "../src/addons/outputfilter.h"
+#include "../src/health/benchmark.h"
+#include "../src/health/surfacescan.h"
 
 #include <QProcess>
 #include <fcntl.h>
-#include "../src/imagewriter.h"
+#include "../src/usb/imagewriter.h"
 
 #include <QFileInfo>
 #include <QRandomGenerator>

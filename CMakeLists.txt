@@ -51,61 +51,61 @@ set(APP_DEFINITIONS
 # Everything that talks to UDisks2 (or Windows' disk API) or touches devices, shared with the
 # test tools.
 add_library(diskforge-core STATIC
-    src/udisks.h src/udisks_common.cpp
-    src/fsprobe.cpp src/fsprobe.h
-    src/format.cpp src/format.h
-    src/blockio.cpp src/blockio.h
-    src/systemd.h
-    src/imagewriter.cpp src/imagewriter.h
-    src/imagesource.cpp src/imagesource.h
-    src/lostsource.cpp src/lostsource.h
-    src/lostscan.cpp src/lostscan.h
-    src/lostfs.cpp src/lostfs.h src/lostntfs.cpp src/lostraw.h
-    src/vshadow.cpp src/vshadow.h
-    src/vdisk.cpp src/vdisk.h
-    src/fat32format.cpp src/fat32format.h
-    src/mediainfo.cpp src/mediainfo.h
-    src/officetext.cpp src/officetext.h
-    src/virusscan.cpp src/virusscan.h
-    src/reghive.cpp src/reghive.h
-    src/winstartup.cpp src/winstartup.h
-    src/shelllink.cpp src/shelllink.h
-    src/authenticode.cpp src/authenticode.h
-    src/efivars.cpp src/efivars.h
-    src/bootcheck.cpp src/bootcheck.h
-    src/newids.cpp src/newids.h
-    src/filetypes.cpp src/filetypes.h
-    src/checksums.cpp src/checksums.h
-    src/benchmark.cpp src/benchmark.h
-    src/addons.cpp src/addons.h
-    src/surfacescan.cpp src/surfacescan.h
-    src/gpt.cpp src/gpt.h
-    src/blockcopy.cpp src/blockcopy.h
-    src/blockmapdata.cpp src/blockmapdata.h
-    src/fswalk.cpp src/fswalk.h src/squarify.h
-    src/clone.cpp src/clone.h
-    src/imagebackup.cpp src/imagebackup.h
-    src/rescuecopy.cpp src/rescuecopy.h
-    src/cleanup.cpp src/cleanup.h
-    src/snapper.h
-    src/signature.cpp src/signature.h
-    src/outputfilter.cpp src/outputfilter.h
-    src/health.cpp src/health.h
-    src/smartdata.cpp src/smartdata.h
-    src/firmware.h
-    src/btrfscheck.cpp src/btrfscheck.h
-    src/drivepower.cpp src/drivepower.h
-    src/partrecover.cpp src/partrecover.h
-    src/partscan.h
-    src/applog.cpp src/applog.h
-    src/isofs.cpp src/isofs.h
-    src/filecopy.cpp src/filecopy.h
-    src/isomode.cpp src/isomode.h
-    src/windowsusb.cpp src/windowsusb.h
-    src/hostprocess.cpp src/hostprocess.h
-    src/rescuestick.cpp src/rescuestick.h
-    src/stickcheck.cpp src/stickcheck.h
-    src/partscan.cpp src/partscan.h
+    src/drives/udisks.h src/drives/udisks_common.cpp
+    src/drives/fsprobe.cpp src/drives/fsprobe.h
+    src/common/format.cpp src/common/format.h
+    src/drives/blockio.cpp src/drives/blockio.h
+    src/tools/systemd.h
+    src/usb/imagewriter.cpp src/usb/imagewriter.h
+    src/usb/imagesource.cpp src/usb/imagesource.h
+    src/lostfiles/lostsource.cpp src/lostfiles/lostsource.h
+    src/lostfiles/lostscan.cpp src/lostfiles/lostscan.h
+    src/lostfiles/lostfs.cpp src/lostfiles/lostfs.h src/lostfiles/lostntfs.cpp src/lostfiles/lostraw.h
+    src/lostfiles/vshadow.cpp src/lostfiles/vshadow.h
+    src/lostfiles/vdisk.cpp src/lostfiles/vdisk.h
+    src/drives/fat32format.cpp src/drives/fat32format.h
+    src/lostfiles/mediainfo.cpp src/lostfiles/mediainfo.h
+    src/lostfiles/officetext.cpp src/lostfiles/officetext.h
+    src/viruses/virusscan.cpp src/viruses/virusscan.h
+    src/viruses/reghive.cpp src/viruses/reghive.h
+    src/viruses/winstartup.cpp src/viruses/winstartup.h
+    src/viruses/shelllink.cpp src/viruses/shelllink.h
+    src/viruses/authenticode.cpp src/viruses/authenticode.h
+    src/viruses/efivars.cpp src/viruses/efivars.h
+    src/viruses/bootcheck.cpp src/viruses/bootcheck.h
+    src/backup/newids.cpp src/backup/newids.h
+    src/lostfiles/filetypes.cpp src/lostfiles/filetypes.h
+    src/usb/checksums.cpp src/usb/checksums.h
+    src/health/benchmark.cpp src/health/benchmark.h
+    src/addons/addons.cpp src/addons/addons.h
+    src/health/surfacescan.cpp src/health/surfacescan.h
+    src/drives/gpt.cpp src/drives/gpt.h
+    src/backup/blockcopy.cpp src/backup/blockcopy.h
+    src/health/blockmapdata.cpp src/health/blockmapdata.h
+    src/tools/fswalk.cpp src/tools/fswalk.h src/tools/squarify.h
+    src/backup/clone.cpp src/backup/clone.h
+    src/backup/imagebackup.cpp src/backup/imagebackup.h
+    src/backup/rescuecopy.cpp src/backup/rescuecopy.h
+    src/tools/cleanup.cpp src/tools/cleanup.h
+    src/tools/snapper.h
+    src/addons/signature.cpp src/addons/signature.h
+    src/addons/outputfilter.cpp src/addons/outputfilter.h
+    src/health/health.cpp src/health/health.h
+    src/health/smartdata.cpp src/health/smartdata.h
+    src/health/firmware.h
+    src/health/btrfscheck.cpp src/health/btrfscheck.h
+    src/drives/drivepower.cpp src/drives/drivepower.h
+    src/drives/partrecover.cpp src/drives/partrecover.h
+    src/drives/partscan.h
+    src/common/applog.cpp src/common/applog.h
+    src/usb/isofs.cpp src/usb/isofs.h
+    src/usb/filecopy.cpp src/usb/filecopy.h
+    src/usb/isomode.cpp src/usb/isomode.h
+    src/usb/windowsusb.cpp src/usb/windowsusb.h
+    src/common/hostprocess.cpp src/common/hostprocess.h
+    src/usb/rescuestick.cpp src/usb/rescuestick.h
+    src/usb/stickcheck.cpp src/usb/stickcheck.h
+    src/drives/partscan.cpp src/drives/partscan.h
 )
 if(WIN32)
     target_sources(diskforge-core PRIVATE
@@ -120,57 +120,58 @@ if(WIN32)
     target_compile_definitions(diskforge-core PUBLIC _FILE_OFFSET_BITS=64 _WIN32_WINNT=0x0A00 WINVER=0x0A00 UNICODE _UNICODE NOMINMAX)
 else()
     target_sources(diskforge-core PRIVATE
-        src/udisks.cpp src/operations.cpp src/dbusnames.h
-        src/systemd.cpp src/snapper.cpp src/firmware.cpp)
+        src/drives/udisks.cpp src/drives/operations.cpp src/drives/dbusnames.h
+        src/tools/systemd.cpp src/tools/snapper.cpp src/health/firmware.cpp)
     target_link_libraries(diskforge-core PUBLIC Qt6::Core Qt6::DBus PRIVATE PkgConfig::ZSTD PkgConfig::ZLIB PkgConfig::BLKID PkgConfig::ARCHIVE OpenSSL::Crypto)
 endif()
-target_include_directories(diskforge-core PUBLIC src)
+# The sources sit in folders by feature and include each other by file name.
+target_include_directories(diskforge-core PUBLIC src src/addons src/app src/backup src/common src/drives src/health src/lostfiles src/tools src/usb src/viruses)
 target_compile_definitions(diskforge-core PUBLIC ${APP_DEFINITIONS})
 target_compile_options(diskforge-core PRIVATE -Wall -Wextra)
 
 # Windows and dialogs, shared by the app, the dialog preview and the window test.
 add_library(diskforge-ui STATIC
-    src/diskmap.cpp src/diskmap.h
-    src/homewindow.cpp src/homewindow.h
-    src/lostfilesdialog.cpp src/lostfilesdialog.h
-    src/preview.cpp src/preview.h
-    src/previewloader.cpp src/previewloader.h
-    src/mainwindow.cpp src/mainwindow.h
-    src/dialogs.cpp src/dialogs.h
-    src/tools.cpp src/tools.h
-    src/rescueusbdialog.cpp src/rescueusbdialog.h
-    src/udiskssteps.cpp src/udiskssteps.h
-    src/usbprep.cpp src/usbprep.h
-    src/isomount.cpp src/isomount.h
-    src/windowsusbjob.cpp src/windowsusbjob.h
-    src/windowsusbdialog.cpp src/windowsusbdialog.h
-    src/isocopy.cpp src/isocopy.h
-    src/stickcheckdialog.cpp src/stickcheckdialog.h
-    src/blockmapwidget.cpp src/blockmapwidget.h
-    src/jobui.cpp src/jobui.h
-    src/copydialogs.cpp src/copydialogs.h
-    src/usagedialog.cpp src/usagedialog.h
-    src/virusdialog.cpp src/virusdialog.h
-    src/hashlookup.cpp src/hashlookup.h
-    src/newidsdialog.cpp src/newidsdialog.h
-    src/systemtools.cpp src/systemtools.h
-    src/erasedialog.cpp src/erasedialog.h
-    src/addonsdialog.cpp src/addonsdialog.h
-    src/addonprompt.cpp src/addonprompt.h
-    src/addonform.cpp src/addonform.h
-    src/addonmaker.cpp src/addonmaker.h
-    src/addonoutput.cpp src/addonoutput.h
-    src/noticebar.cpp src/noticebar.h
-    src/typedialog.cpp src/typedialog.h
-    src/powerbox.cpp src/powerbox.h
-    src/inspectdialog.cpp src/inspectdialog.h
-    src/recoverdialog.cpp src/recoverdialog.h
-    src/catalogdialog.cpp src/catalogdialog.h
-    src/about.cpp src/about.h
-    src/updates.cpp src/updates.h
-    src/translations.cpp src/translations.h
-    src/theme.cpp src/theme.h
-    src/thememaker.cpp src/thememaker.h
+    src/app/diskmap.cpp src/app/diskmap.h
+    src/app/homewindow.cpp src/app/homewindow.h
+    src/lostfiles/lostfilesdialog.cpp src/lostfiles/lostfilesdialog.h
+    src/lostfiles/preview.cpp src/lostfiles/preview.h
+    src/lostfiles/previewloader.cpp src/lostfiles/previewloader.h
+    src/app/mainwindow.cpp src/app/mainwindow.h
+    src/app/dialogs.cpp src/app/dialogs.h
+    src/app/tools.cpp src/app/tools.h
+    src/usb/rescueusbdialog.cpp src/usb/rescueusbdialog.h
+    src/drives/udiskssteps.cpp src/drives/udiskssteps.h
+    src/usb/usbprep.cpp src/usb/usbprep.h
+    src/drives/isomount.cpp src/drives/isomount.h
+    src/usb/windowsusbjob.cpp src/usb/windowsusbjob.h
+    src/usb/windowsusbdialog.cpp src/usb/windowsusbdialog.h
+    src/usb/isocopy.cpp src/usb/isocopy.h
+    src/usb/stickcheckdialog.cpp src/usb/stickcheckdialog.h
+    src/health/blockmapwidget.cpp src/health/blockmapwidget.h
+    src/common/jobui.cpp src/common/jobui.h
+    src/backup/copydialogs.cpp src/backup/copydialogs.h
+    src/tools/usagedialog.cpp src/tools/usagedialog.h
+    src/viruses/virusdialog.cpp src/viruses/virusdialog.h
+    src/viruses/hashlookup.cpp src/viruses/hashlookup.h
+    src/backup/newidsdialog.cpp src/backup/newidsdialog.h
+    src/tools/systemtools.cpp src/tools/systemtools.h
+    src/drives/erasedialog.cpp src/drives/erasedialog.h
+    src/addons/addonsdialog.cpp src/addons/addonsdialog.h
+    src/addons/addonprompt.cpp src/addons/addonprompt.h
+    src/addons/addonform.cpp src/addons/addonform.h
+    src/addons/addonmaker.cpp src/addons/addonmaker.h
+    src/addons/addonoutput.cpp src/addons/addonoutput.h
+    src/app/noticebar.cpp src/app/noticebar.h
+    src/drives/typedialog.cpp src/drives/typedialog.h
+    src/drives/powerbox.cpp src/drives/powerbox.h
+    src/drives/inspectdialog.cpp src/drives/inspectdialog.h
+    src/drives/recoverdialog.cpp src/drives/recoverdialog.h
+    src/addons/catalogdialog.cpp src/addons/catalogdialog.h
+    src/app/about.cpp src/app/about.h
+    src/app/updates.cpp src/app/updates.h
+    src/app/translations.cpp src/app/translations.h
+    src/app/theme.cpp src/app/theme.h
+    src/app/thememaker.cpp src/app/thememaker.h
 )
 target_link_libraries(diskforge-ui PUBLIC diskforge-core Qt6::Widgets Qt6::Network)
 # PDF pages in Find Lost Files' previews, when poppler's Qt 6 library is there (releases have it).

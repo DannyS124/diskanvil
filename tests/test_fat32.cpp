@@ -6,8 +6,8 @@
 
 #include "testkit.h"
 
-#include "../src/blockio.h"
-#include "../src/fat32format.h"
+#include "../src/drives/blockio.h"
+#include "../src/drives/fat32format.h"
 
 #include <QFile>
 #include <QProcess>

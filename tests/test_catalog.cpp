@@ -5,7 +5,7 @@
 
 #include "testkit.h"
 
-#include "../src/addons.h"
+#include "../src/addons/addons.h"
 
 #include <QCryptographicHash>
 #include <QFile>

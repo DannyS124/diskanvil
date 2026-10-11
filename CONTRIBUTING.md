@@ -1,6 +1,6 @@
 # Contributing
 
-PRs are welcome. If you change anything in `src/udisks.cpp`, run the self-test first:
+PRs are welcome. If you change anything in `src/drives/udisks.cpp`, run the self-test first:
 ```
 sudo ./build/diskforge-selftest
 ./build/diskforge-selftest --guard

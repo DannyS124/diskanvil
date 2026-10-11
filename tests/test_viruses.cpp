@@ -7,7 +7,7 @@
 
 #include "testkit.h"
 
-#include "../src/virusscan.h"
+#include "../src/viruses/virusscan.h"
 
 #include <QCryptographicHash>
 #include <QDir>

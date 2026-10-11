@@ -9,8 +9,8 @@
 
 #include "testkit.h"
 
-#include "../src/format.h"
-#include "../src/udisks.h"
+#include "../src/common/format.h"
+#include "../src/drives/udisks.h"
 
 #include <QCoreApplication>
 #include <QElapsedTimer>

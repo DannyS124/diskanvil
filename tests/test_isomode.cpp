@@ -6,8 +6,8 @@
 
 #include "testkit.h"
 
-#include "../src/filecopy.h"
-#include "../src/isomode.h"
+#include "../src/usb/filecopy.h"
+#include "../src/usb/isomode.h"
 
 #include <QDir>
 #include <QFile>

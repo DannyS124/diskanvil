@@ -4,7 +4,7 @@
 <context>
     <name>AddonOutputWindow</name>
     <message numerus="yes">
-        <location filename="../src/addonoutput.cpp" line="168"/>
+        <location filename="../src/addons/addonoutput.cpp" line="168"/>
         <source>… (%n line(s) skipped)</source>
         <translation>
             <numerusform>… (%n line skipped)</numerusform>
@@ -15,7 +15,7 @@
 <context>
     <name>BadSectorsDialog</name>
     <message numerus="yes">
-        <location filename="../src/tools.cpp" line="1475"/>
+        <location filename="../src/app/tools.cpp" line="1475"/>
         <source>%n area(s) read slowly. Slow spots often turn into bad sectors later, so keep a backup.</source>
         <translation>
             <numerusform>%n area read slowly. Slow spots often turn into bad sectors later, so keep a backup.</numerusform>
@@ -23,7 +23,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/tools.cpp" line="1503"/>
+        <location filename="../src/app/tools.cpp" line="1503"/>
         <source>Repair %n bad sector(s) on %1?</source>
         <translation>
             <numerusform>Repair %n bad sector on %1?</numerusform>
@@ -31,7 +31,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/tools.cpp" line="1550"/>
+        <location filename="../src/app/tools.cpp" line="1550"/>
         <source>%n block(s)</source>
         <translation>
             <numerusform>%n block</numerusform>
@@ -42,7 +42,7 @@
 <context>
     <name>BlockMapWidget</name>
     <message numerus="yes">
-        <location filename="../src/blockmapwidget.cpp" line="107"/>
+        <location filename="../src/health/blockmapwidget.cpp" line="107"/>
         <source>Slow (%n area(s))</source>
         <translation>
             <numerusform>Slow (%n area)</numerusform>
@@ -53,7 +53,7 @@
 <context>
     <name>CleanupDialog</name>
     <message numerus="yes">
-        <location filename="../src/systemtools.cpp" line="447"/>
+        <location filename="../src/tools/systemtools.cpp" line="447"/>
         <source>%n item(s) couldn&apos;t be deleted (first: %1).</source>
         <translation>
             <numerusform>%n item couldn't be deleted (first: %1).</numerusform>
@@ -64,7 +64,7 @@
 <context>
     <name>CloneDialog</name>
     <message numerus="yes">
-        <location filename="../src/copydialogs.cpp" line="239"/>
+        <location filename="../src/backup/copydialogs.cpp" line="239"/>
         <source>Copies %n partition(s), %1 in all. Takes %2.</source>
         <translation>
             <numerusform>Copies %n partition, %1 in all. Takes %2.</numerusform>
@@ -75,7 +75,7 @@
 <context>
     <name>LostFilesDialog</name>
     <message numerus="yes">
-        <location filename="../src/lostfilesdialog.cpp" line="928"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="928"/>
         <source>Windows kept %n earlier version(s) of this drive, the newest from %1. Files that have changed or gone since can come back from them.</source>
         <translation>
             <numerusform>Windows kept %n earlier version of this drive, the newest from %1. Files that have changed or gone since can come back from them.</numerusform>
@@ -83,7 +83,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfilesdialog.cpp" line="971"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="971"/>
         <source>%n file(s) from the earlier versions have changed or gone since: they&apos;re in the &quot;as it was on&quot; folders.</source>
         <translation>
             <numerusform>%n file from the earlier versions have changed or gone since: they're in the "as it was on" folders.</numerusform>
@@ -91,7 +91,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfilesdialog.cpp" line="1023"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1023"/>
         <source>Done: nothing deleted was found on %1. %n file(s) that weren&apos;t deleted show when &quot;Only deleted files&quot; is unticked.</source>
         <translation>
             <numerusform>Done: nothing deleted was found on %1. %n file that weren't deleted show when "Only deleted files" is unticked.</numerusform>
@@ -102,7 +102,7 @@
 <context>
     <name>MainWindow</name>
     <message numerus="yes">
-        <location filename="../src/mainwindow.cpp" line="974"/>
+        <location filename="../src/app/mainwindow.cpp" line="974"/>
         <source>%n more drive(s) need a look; their health is in the Status column.</source>
         <translation>
             <numerusform>%n more drive need a look; their health is in the Status column.</numerusform>
@@ -110,7 +110,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/mainwindow.cpp" line="2010"/>
+        <location filename="../src/app/mainwindow.cpp" line="2010"/>
         <source>%n add-on command(s) still running. Stop them and quit?</source>
         <translation>
             <numerusform>%n add-on command still running. Stop them and quit?</numerusform>
@@ -121,7 +121,7 @@
 <context>
     <name>QObject</name>
     <message numerus="yes">
-        <location filename="../src/jobui.cpp" line="23"/>
+        <location filename="../src/common/jobui.cpp" line="23"/>
         <source>about %n minute(s)</source>
         <translation>
             <numerusform>about %n minute</numerusform>
@@ -129,7 +129,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/jobui.cpp" line="24"/>
+        <location filename="../src/common/jobui.cpp" line="24"/>
         <source>about %n hour(s)</source>
         <translation>
             <numerusform>about %n hour</numerusform>
@@ -137,7 +137,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/tools.cpp" line="105"/>
+        <location filename="../src/app/tools.cpp" line="105"/>
         <source>%n sector(s)</source>
         <translation>
             <numerusform>%n sector</numerusform>
@@ -145,7 +145,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/fswalk.cpp" line="38"/>
+        <location filename="../src/tools/fswalk.cpp" line="38"/>
         <source>%n smaller file(s)</source>
         <translation>
             <numerusform>%n smaller file</numerusform>
@@ -153,7 +153,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/usagedialog.cpp" line="53"/>
+        <location filename="../src/tools/usagedialog.cpp" line="53"/>
         <source>%n file(s)</source>
         <translation>
             <numerusform>%n file</numerusform>
@@ -161,7 +161,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/addons.cpp" line="1047"/>
+        <location filename="../src/addons/addons.cpp" line="1047"/>
         <source>%n entry(s) in the list were left out because they didn&apos;t check out</source>
         <translation>
             <numerusform>%n entry in the list were left out because they didn't check out</numerusform>
@@ -169,7 +169,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/health.cpp" line="119"/>
+        <location filename="../src/health/health.cpp" line="119"/>
         <source>%n of its health numbers is past the limit its maker set. Copy what you want to keep to another drive now.</source>
         <translation>
             <numerusform>%n of its health numbers is past the limit its maker set. Copy what you want to keep to another drive now.</numerusform>
@@ -177,7 +177,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/health.cpp" line="126"/>
+        <location filename="../src/health/health.cpp" line="126"/>
         <source>%n unreadable sector(s). Scan for Bad Sectors can repair them; what was stored there is already lost.</source>
         <translation>
             <numerusform>%n unreadable sector. Scan for Bad Sectors can repair them; what was stored there is already lost.</numerusform>
@@ -185,7 +185,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/health.cpp" line="128"/>
+        <location filename="../src/health/health.cpp" line="128"/>
         <source>%n sector(s) its own scan couldn&apos;t read. Keep backups.</source>
         <translation>
             <numerusform>%n sector its own scan couldn't read. Keep backups.</numerusform>
@@ -193,7 +193,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/health.cpp" line="131"/>
+        <location filename="../src/health/health.cpp" line="131"/>
         <source>%n read error(s) it couldn&apos;t fix. Drives that have had these fail far more often: keep backups and think about replacing it.</source>
         <translation>
             <numerusform>%n read error it couldn't fix. Drives that have had these fail far more often: keep backups and think about replacing it.</numerusform>
@@ -201,7 +201,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/health.cpp" line="135"/>
+        <location filename="../src/health/health.cpp" line="135"/>
         <source>%n sector(s) replaced. That&apos;s what drives are built to do, but keep backups and watch whether the number grows.</source>
         <translation>
             <numerusform>%n sector replaced. That's what drives are built to do, but keep backups and watch whether the number grows.</numerusform>
@@ -209,7 +209,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/health.cpp" line="138"/>
+        <location filename="../src/health/health.cpp" line="138"/>
         <source>%n spin-up retry(s): a mechanical or power problem.</source>
         <translation>
             <numerusform>%n spin-up retry: a mechanical or power problem.</numerusform>
@@ -217,7 +217,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/health.cpp" line="145"/>
+        <location filename="../src/health/health.cpp" line="145"/>
         <source>%n end-to-end error(s): data damaged inside the drive.</source>
         <translation>
             <numerusform>%n end-to-end error: data damaged inside the drive.</numerusform>
@@ -225,7 +225,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/health.cpp" line="148"/>
+        <location filename="../src/health/health.cpp" line="148"/>
         <source>Connection problems: %n new error(s) between the drive and the PC. Check the cable or try another port; the drive itself may be fine.</source>
         <translation>
             <numerusform>Connection problems: %n new error between the drive and the PC. Check the cable or try another port; the drive itself may be fine.</numerusform>
@@ -233,7 +233,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/health.cpp" line="150"/>
+        <location filename="../src/health/health.cpp" line="150"/>
         <source>%n connection error(s) in the past (cable or port).</source>
         <translation>
             <numerusform>%n connection error in the past (cable or port).</numerusform>
@@ -241,7 +241,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/health.cpp" line="153"/>
+        <location filename="../src/health/health.cpp" line="153"/>
         <source>%n command timeout(s).</source>
         <translation>
             <numerusform>%n command timeout.</numerusform>
@@ -249,7 +249,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/health.cpp" line="194"/>
+        <location filename="../src/health/health.cpp" line="194"/>
         <source>%n media error(s): data it couldn&apos;t read back correctly. Keep backups.</source>
         <translation>
             <numerusform>%n media error: data it couldn't read back correctly. Keep backups.</numerusform>
@@ -257,7 +257,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/btrfscheck.cpp" line="88"/>
+        <location filename="../src/health/btrfscheck.cpp" line="88"/>
         <source>%n read error(s)</source>
         <translation>
             <numerusform>%n read error</numerusform>
@@ -265,7 +265,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/btrfscheck.cpp" line="90"/>
+        <location filename="../src/health/btrfscheck.cpp" line="90"/>
         <source>%n write error(s)</source>
         <translation>
             <numerusform>%n write error</numerusform>
@@ -273,7 +273,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/btrfscheck.cpp" line="92"/>
+        <location filename="../src/health/btrfscheck.cpp" line="92"/>
         <source>%n flush error(s)</source>
         <translation>
             <numerusform>%n flush error</numerusform>
@@ -281,7 +281,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/btrfscheck.cpp" line="94"/>
+        <location filename="../src/health/btrfscheck.cpp" line="94"/>
         <source>%n checksum error(s)</source>
         <translation>
             <numerusform>%n checksum error</numerusform>
@@ -289,7 +289,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/btrfscheck.cpp" line="96"/>
+        <location filename="../src/health/btrfscheck.cpp" line="96"/>
         <source>%n out-of-date block(s)</source>
         <translation>
             <numerusform>%n out-of-date block</numerusform>
@@ -297,9 +297,9 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/drivepower.cpp" line="48"/>
-        <location filename="../src/drivepower.cpp" line="52"/>
-        <location filename="../src/drivepower.cpp" line="55"/>
+        <location filename="../src/drives/drivepower.cpp" line="48"/>
+        <location filename="../src/drives/drivepower.cpp" line="52"/>
+        <location filename="../src/drives/drivepower.cpp" line="55"/>
         <source>%n minute(s)</source>
         <translation>
             <numerusform>%n minute</numerusform>
@@ -307,7 +307,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/drivepower.cpp" line="48"/>
+        <location filename="../src/drives/drivepower.cpp" line="48"/>
         <source>%n second(s)</source>
         <translation>
             <numerusform>%n second</numerusform>
@@ -315,7 +315,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/drivepower.cpp" line="52"/>
+        <location filename="../src/drives/drivepower.cpp" line="52"/>
         <source>%n hour(s)</source>
         <translation>
             <numerusform>%n hour</numerusform>
@@ -326,7 +326,7 @@
 <context>
     <name>RecoverDialog</name>
     <message numerus="yes">
-        <location filename="../src/recoverdialog.cpp" line="198"/>
+        <location filename="../src/drives/recoverdialog.cpp" line="198"/>
         <source>The backup copy at the end of the drive: %n partition(s)</source>
         <translation>
             <numerusform>The backup copy at the end of the drive: %n partition</numerusform>
@@ -334,7 +334,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/recoverdialog.cpp" line="338"/>
+        <location filename="../src/drives/recoverdialog.cpp" line="338"/>
         <source>Stopped: %n file system(s) found before that.</source>
         <translation>
             <numerusform>Stopped: %n file system found before that.</numerusform>
@@ -342,7 +342,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/recoverdialog.cpp" line="339"/>
+        <location filename="../src/drives/recoverdialog.cpp" line="339"/>
         <source>Found %n file system(s).</source>
         <translation>
             <numerusform>Found %n file system.</numerusform>
@@ -350,7 +350,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/recoverdialog.cpp" line="441"/>
+        <location filename="../src/drives/recoverdialog.cpp" line="441"/>
         <source>The partition table of %1 is back: %n partition(s).</source>
         <translation>
             <numerusform>The partition table of %1 is back: %n partition.</numerusform>
@@ -361,7 +361,7 @@
 <context>
     <name>RescueCopy</name>
     <message numerus="yes">
-        <location filename="../src/rescuecopy.cpp" line="247"/>
+        <location filename="../src/backup/rescuecopy.cpp" line="247"/>
         <source>Resting for %n second(s) after %1 read errors in a row</source>
         <translation>
             <numerusform>Resting for %n second after %1 read errors in a row</numerusform>
@@ -372,7 +372,7 @@
 <context>
     <name>SnapshotsDialog</name>
     <message numerus="yes">
-        <location filename="../src/systemtools.cpp" line="543"/>
+        <location filename="../src/tools/systemtools.cpp" line="543"/>
         <source>&lt;small&gt;%n snapshot(s). Sizes aren&apos;t shown: Btrfs only knows them with quotas switched on, which slows it down. To go back to a snapshot, use snapper or the snapshot entries in your boot menu.&lt;/small&gt;</source>
         <translation>
             <numerusform>&lt;small&gt;%n snapshot. Sizes aren't shown: Btrfs only knows them with quotas switched on, which slows it down. To go back to a snapshot, use snapper or the snapshot entries in your boot menu.&lt;/small&gt;</numerusform>
@@ -383,7 +383,7 @@
 <context>
     <name>TableInspectorDialog</name>
     <message numerus="yes">
-        <location filename="../src/inspectdialog.cpp" line="150"/>
+        <location filename="../src/drives/inspectdialog.cpp" line="150"/>
         <source>%n sector(s) of %1 bytes</source>
         <translation>
             <numerusform>%n sector of %1 bytes</numerusform>
@@ -391,7 +391,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/inspectdialog.cpp" line="173"/>
+        <location filename="../src/drives/inspectdialog.cpp" line="173"/>
         <source>%n in use</source>
         <translation>
             <numerusform>%n in use</numerusform>
@@ -423,7 +423,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/udisks.cpp" line="457"/>
+        <location filename="../src/drives/udisks.cpp" line="457"/>
         <source>The volume group %1 is missing %n of its drives. What was on them can&apos;t be read.</source>
         <translation>
             <numerusform>The volume group %1 is missing %n of its drives. What was on them can't be read.</numerusform>
@@ -434,7 +434,7 @@
 <context>
     <name>UsageDialog</name>
     <message numerus="yes">
-        <location filename="../src/usagedialog.cpp" line="341"/>
+        <location filename="../src/tools/usagedialog.cpp" line="341"/>
         <source>%n folder(s) couldn&apos;t be opened (they belong to the system or other users), so the total may be a little low.</source>
         <translation>
             <numerusform>%n folder couldn't be opened (they belong to the system or other users), so the total may be a little low.</numerusform>
@@ -445,7 +445,7 @@
 <context>
     <name>VirusDialog</name>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="77"/>
+        <location filename="../src/viruses/virusdialog.cpp" line="77"/>
         <source>%n day(s) ago</source>
         <translation>
             <numerusform>%n day ago</numerusform>
@@ -453,8 +453,8 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="314"/>
-        <location filename="../src/virusdialog.cpp" line="782"/>
+        <location filename="../src/viruses/virusdialog.cpp" line="314"/>
+        <location filename="../src/viruses/virusdialog.cpp" line="782"/>
         <source>Switch Off %n Ticked…</source>
         <translation>
             <numerusform>Switch Off %n Ticked…</numerusform>
@@ -462,7 +462,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="470"/>
+        <location filename="../src/viruses/virusdialog.cpp" line="470"/>
         <source>Delete %n Ticked File(s)…</source>
         <translation>
             <numerusform>Delete %n Ticked File…</numerusform>
@@ -470,7 +470,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="788"/>
+        <location filename="../src/viruses/virusdialog.cpp" line="788"/>
         <source>Starts with Windows (%n odd)</source>
         <translation>
             <numerusform>Starts with Windows (%n odd)</numerusform>
@@ -478,7 +478,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="789"/>
+        <location filename="../src/viruses/virusdialog.cpp" line="789"/>
         <source>%1 things start with Windows. Odd ones: %n. Pick one to see exactly where it&apos;s kept and what it runs.</source>
         <translation>
             <numerusform>%1 things start with Windows. Odd ones: %n. Pick one to see exactly where it's kept and what it runs.</numerusform>
@@ -486,7 +486,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="792"/>
+        <location filename="../src/viruses/virusdialog.cpp" line="792"/>
         <source>Nothing that starts with Windows looks odd (%n looked at).</source>
         <translation>
             <numerusform>Nothing that starts with Windows looks odd (%n looked at).</numerusform>
@@ -494,7 +494,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="858"/>
+        <location filename="../src/viruses/virusdialog.cpp" line="858"/>
         <source>Stopped. %n thing(s) found before that.</source>
         <translation>
             <numerusform>Stopped. %n thing found before that.</numerusform>
@@ -502,7 +502,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="864"/>
+        <location filename="../src/viruses/virusdialog.cpp" line="864"/>
         <source>Done: found %n thing(s) in %L1 files.</source>
         <translation>
             <numerusform>Done: found %n thing in %L1 files.</numerusform>
@@ -510,7 +510,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="864"/>
+        <location filename="../src/viruses/virusdialog.cpp" line="864"/>
         <source>Done: found %n thing(s).</source>
         <translation>
             <numerusform>Done: found %n thing.</numerusform>
@@ -518,7 +518,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="866"/>
+        <location filename="../src/viruses/virusdialog.cpp" line="866"/>
         <source>%n file(s) couldn&apos;t be read: another user&apos;s or the system&apos;s, or in use.</source>
         <translation>
             <numerusform>%n file couldn't be read: another user's or the system's, or in use.</numerusform>
@@ -526,7 +526,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="871"/>
+        <location filename="../src/viruses/virusdialog.cpp" line="871"/>
         <source>Starts with Windows: %n odd thing(s) to look at.</source>
         <translation>
             <numerusform>Starts with Windows: %n odd thing to look at.</numerusform>
@@ -534,8 +534,8 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="906"/>
-        <location filename="../src/virusdialog.cpp" line="1337"/>
+        <location filename="../src/viruses/virusdialog.cpp" line="906"/>
+        <location filename="../src/viruses/virusdialog.cpp" line="1337"/>
         <source>…and %n more</source>
         <translation>
             <numerusform>…and %n more</numerusform>
@@ -543,7 +543,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="907"/>
+        <location filename="../src/viruses/virusdialog.cpp" line="907"/>
         <source>Delete these %n file(s) for good?</source>
         <translation>
             <numerusform>Delete these %n file for good?</numerusform>
@@ -551,7 +551,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="943"/>
+        <location filename="../src/viruses/virusdialog.cpp" line="943"/>
         <source>Deleted %n file(s). The list of what was done is in %1.</source>
         <translation>
             <numerusform>Deleted %n file. The list of what was done is in %1.</numerusform>
@@ -559,7 +559,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="1178"/>
+        <location filename="../src/viruses/virusdialog.cpp" line="1178"/>
         <source>Boot (%n wrong)</source>
         <translation>
             <numerusform>Boot (%n wrong)</numerusform>
@@ -567,7 +567,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="1248"/>
+        <location filename="../src/viruses/virusdialog.cpp" line="1248"/>
         <source>Put back %n of Windows&apos; boot files. The old ones are in %1.</source>
         <translation>
             <numerusform>Put back %n of Windows' boot files. The old ones are in %1.</numerusform>
@@ -575,7 +575,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="1286"/>
+        <location filename="../src/viruses/virusdialog.cpp" line="1286"/>
         <source>Look up %n program(s) online?</source>
         <translation>
             <numerusform>Look up %n program online?</numerusform>
@@ -583,7 +583,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="1338"/>
+        <location filename="../src/viruses/virusdialog.cpp" line="1338"/>
         <source>Switch off these %n thing(s) that start with Windows?</source>
         <translation>
             <numerusform>Switch off these %n thing that start with Windows?</numerusform>
@@ -591,7 +591,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/virusdialog.cpp" line="1382"/>
+        <location filename="../src/viruses/virusdialog.cpp" line="1382"/>
         <source>Switched off %n thing(s). The backup, and how to undo it, is in %1.</source>
         <translation>
             <numerusform>Switched off %n thing. The backup, and how to undo it, is in %1.</numerusform>
@@ -602,7 +602,7 @@
 <context>
     <name>format</name>
     <message numerus="yes">
-        <location filename="../src/format.cpp" line="123"/>
+        <location filename="../src/common/format.cpp" line="123"/>
         <source>%n drive(s), all there</source>
         <translation>
             <numerusform>%n drive, all there</numerusform>
@@ -613,7 +613,7 @@
 <context>
     <name>newids</name>
     <message numerus="yes">
-        <location filename="../src/newids.cpp" line="75"/>
+        <location filename="../src/backup/newids.cpp" line="75"/>
         <source>%n partition ID(s)</source>
         <translation>
             <numerusform>%n partition ID</numerusform>
@@ -624,7 +624,7 @@
 <context>
     <name>preview</name>
     <message numerus="yes">
-        <location filename="../src/preview.cpp" line="235"/>
+        <location filename="../src/lostfiles/preview.cpp" line="235"/>
         <source>%n page(s)</source>
         <translation>
             <numerusform>%n page</numerusform>

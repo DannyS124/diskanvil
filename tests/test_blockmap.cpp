@@ -6,8 +6,8 @@
 
 #include "testkit.h"
 
-#include "../src/blockmapdata.h"
-#include "../src/surfacescan.h"
+#include "../src/health/blockmapdata.h"
+#include "../src/health/surfacescan.h"
 
 #include <QFile>
 #include <QTemporaryDir>

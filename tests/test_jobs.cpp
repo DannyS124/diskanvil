@@ -8,8 +8,8 @@
 
 #include "slowdisk.h"
 
-#include "../src/jobui.h"
-#include "../src/udisks.h"
+#include "../src/common/jobui.h"
+#include "../src/drives/udisks.h"
 
 #include <QElapsedTimer>
 #include <QFile>

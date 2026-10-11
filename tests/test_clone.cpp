@@ -6,8 +6,8 @@
 
 #include "testkit.h"
 
-#include "../src/clone.h"
-#include "../src/udisks.h"
+#include "../src/backup/clone.h"
+#include "../src/drives/udisks.h"
 
 #include <QFile>
 #include <QTemporaryDir>

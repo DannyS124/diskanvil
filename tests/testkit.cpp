@@ -3,7 +3,7 @@
 
 #include "testkit.h"
 
-#include "../src/udisks.h"
+#include "../src/drives/udisks.h"
 
 #include <QCoreApplication>
 #include <QCryptographicHash>

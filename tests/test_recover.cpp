@@ -7,11 +7,11 @@
 
 #include "testkit.h"
 
-#include "../src/gpt.h"
-#include "../src/partrecover.h"
-#include "../src/partscan.h"
-#include "../src/blockio.h"
-#include "../src/fsprobe.h"
+#include "../src/drives/gpt.h"
+#include "../src/drives/partrecover.h"
+#include "../src/drives/partscan.h"
+#include "../src/drives/blockio.h"
+#include "../src/drives/fsprobe.h"
 
 #include <QDir>
 #include <QFile>

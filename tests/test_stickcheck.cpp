@@ -7,7 +7,7 @@
 
 #include "testkit.h"
 
-#include "../src/stickcheck.h"
+#include "../src/usb/stickcheck.h"
 
 #include <QRandomGenerator>
 

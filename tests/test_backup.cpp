@@ -5,7 +5,7 @@
 
 #include "testkit.h"
 
-#include "../src/imagebackup.h"
+#include "../src/backup/imagebackup.h"
 
 #include <QFile>
 #include <QJsonDocument>

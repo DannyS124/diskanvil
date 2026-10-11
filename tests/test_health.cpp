@@ -6,13 +6,13 @@
 
 #include "testkit.h"
 
-#include "../src/btrfscheck.h"
-#include "../src/drivepower.h"
-#include "../src/firmware.h"
-#include "../src/health.h"
-#include "../src/powerbox.h"
-#include "../src/smartdata.h"
-#include "../src/systemd.h"
+#include "../src/health/btrfscheck.h"
+#include "../src/drives/drivepower.h"
+#include "../src/health/firmware.h"
+#include "../src/health/health.h"
+#include "../src/drives/powerbox.h"
+#include "../src/health/smartdata.h"
+#include "../src/tools/systemd.h"
 
 #include <QDir>
 #include <QFile>

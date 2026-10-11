@@ -6,10 +6,10 @@
 
 #include "testkit.h"
 
-#include "../src/btrfscheck.h"
-#include "../src/cleanup.h"
-#include "../src/snapper.h"
-#include "../src/systemd.h"
+#include "../src/health/btrfscheck.h"
+#include "../src/tools/cleanup.h"
+#include "../src/tools/snapper.h"
+#include "../src/tools/systemd.h"
 
 #include <QCoreApplication>
 #include <QDir>

@@ -6,7 +6,7 @@
 
 #include "testkit.h"
 
-#include "../src/rescuecopy.h"
+#include "../src/backup/rescuecopy.h"
 
 #include <QElapsedTimer>
 #include <QFile>

@@ -7,9 +7,9 @@
 
 #include "testkit.h"
 
-#include "../src/filecopy.h"
-#include "../src/isofs.h"
-#include "../src/rescuestick.h"
+#include "../src/usb/filecopy.h"
+#include "../src/usb/isofs.h"
+#include "../src/usb/rescuestick.h"
 
 #include <QCryptographicHash>
 #include <QDir>

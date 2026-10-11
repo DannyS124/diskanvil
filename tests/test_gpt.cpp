@@ -5,8 +5,8 @@
 
 #include "testkit.h"
 
-#include "../src/format.h"
-#include "../src/gpt.h"
+#include "../src/common/format.h"
+#include "../src/drives/gpt.h"
 
 #include <QFile>
 #include <QFileInfo>

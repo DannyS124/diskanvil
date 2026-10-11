@@ -9,9 +9,9 @@
 
 #include "testkit.h"
 
-#include "../src/authenticode.h"
-#include "../src/bootcheck.h"
-#include "../src/efivars.h"
+#include "../src/viruses/authenticode.h"
+#include "../src/viruses/bootcheck.h"
+#include "../src/viruses/efivars.h"
 #include "testsign.h"
 
 #include <QDir>

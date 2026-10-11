@@ -9,7 +9,7 @@
 
 #include "testkit.h"
 
-#include "../src/reghive.h"
+#include "../src/viruses/reghive.h"
 
 #include <QDir>
 #include <QFile>

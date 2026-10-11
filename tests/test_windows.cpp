@@ -7,7 +7,7 @@
 
 #include "testkit.h"
 
-#include "../src/windowsusb.h"
+#include "../src/usb/windowsusb.h"
 
 #include <QDir>
 #include <QFile>

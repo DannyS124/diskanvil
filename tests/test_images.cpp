@@ -7,9 +7,9 @@
 
 #include "testkit.h"
 
-#include "../src/checksums.h"
-#include "../src/imagesource.h"
-#include "../src/imagewriter.h"
+#include "../src/usb/checksums.h"
+#include "../src/usb/imagesource.h"
+#include "../src/usb/imagewriter.h"
 
 #include <QCryptographicHash>
 #include <QFile>
