@@ -101,7 +101,7 @@ void PreviewLoader::run()
         request.data = lost::FileReader(m_source, f).head(most);
         bool failed = false;
         const preview::Result result = ask(request, &failed);
-        Q_EMIT ready(wish.index, wish.pixels, result.image, result.text, failed);
+        Q_EMIT ready(wish.index, wish.pixels, result.image, result.text, result.facts, failed);
     }
     m_helper.reset();
 }

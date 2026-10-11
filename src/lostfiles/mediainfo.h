@@ -10,6 +10,7 @@
 // WAV and AVI.
 
 #include <QByteArray>
+#include <QDateTime>
 #include <QString>
 
 namespace mediainfo {
@@ -22,6 +23,7 @@ struct Info {
     int sampleRate = 0; // Hz
     int channels = 0;
     QString title, artist, album, year;
+    QDateTime recorded; // when a film was made, from its own header (MP4, MOV: in UTC)
     QByteArray cover;   // a JPEG or PNG, when it carries one
     bool found() const { return durationMs >= 0 || width > 0 || !codec.isEmpty() || !title.isEmpty() || !cover.isEmpty(); }
 };

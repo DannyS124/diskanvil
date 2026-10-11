@@ -34,6 +34,7 @@ struct Request {
 struct Result {
     QImage image;
     QString text;
+    QStringList facts; // what the file says about itself, a "label\tvalue" per line
 };
 
 // What the helper does with one request.

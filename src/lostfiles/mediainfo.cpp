@@ -6,6 +6,7 @@
 #include "filetypes.h"
 
 #include <QCoreApplication>
+#include <QTimeZone>
 #include <QStringDecoder>
 #include <QStringList>
 #include <QtEndian>
@@ -172,6 +173,11 @@ struct Mp4Walk {
                 walk(body + 4, next, depth + 1); // a full box: version and flags first
             } else if (type == "mvhd") {
                 const bool v1 = b.u8(body) == 1;
+                // Seconds since 1904, in UTC. Cameras without a clock write 0, or 1904 itself.
+                const quint64 made = v1 ? b.be64(body + 4) : b.be32(body + 4);
+                const qint64 since1970 = qint64(made) - 2082844800LL;
+                if (made > 0 && since1970 > 315532800LL && since1970 < 4102444800LL)
+                    info.recorded = QDateTime::fromSecsSinceEpoch(since1970, QTimeZone::UTC);
                 const quint32 scale = b.be32(body + (v1 ? 20 : 12));
                 const quint64 duration = v1 ? b.be64(body + 24) : b.be32(body + 16);
                 if (scale > 0 && duration > 0 && duration != 0xFFFFFFFFu && duration / scale < 1000ull * 3600)

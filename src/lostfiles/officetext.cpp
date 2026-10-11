@@ -8,6 +8,10 @@
 #include <QMap>
 #include <QRegularExpression>
 #include <QSet>
+#include <QCoreApplication>
+#include <QDateTime>
+#include <QHash>
+#include <QLocale>
 #include <QXmlStreamReader>
 
 #include <archive.h>
@@ -139,6 +143,86 @@ QString text(int type, const QByteArray &data, int most)
         return m.isEmpty() ? QString() : xmlText(m.first(), {QStringLiteral("p"), QStringLiteral("h")}, {QStringLiteral("p"), QStringLiteral("h")}, most);
     }
     return {};
+}
+
+QStringList properties(int type, const QByteArray &data)
+{
+    if (type < 0 || type >= filetypes::types().size())
+        return {};
+    const QString id = filetypes::types()[type].id;
+    const bool ooxml = id == QLatin1String("docx") || id == QLatin1String("xlsx") || id == QLatin1String("pptx");
+    const bool odf = id == QLatin1String("odt") || id == QLatin1String("ods") || id == QLatin1String("odp");
+    if (!ooxml && !odf)
+        return {};
+    const auto m = members(
+        data,
+        [ooxml](const QString &p) {
+            return ooxml ? p == QLatin1String("docProps/core.xml") || p == QLatin1String("docProps/app.xml") : p == QLatin1String("meta.xml");
+        },
+        2);
+    // Each element's text by its name without the namespace, the first of each.
+    QHash<QString, QString> v;
+    for (const QByteArray &xml : m) {
+        QXmlStreamReader r(xml);
+        r.setNamespaceProcessing(true);
+        QString current;
+        while (!r.atEnd()) {
+            switch (r.readNext()) {
+            case QXmlStreamReader::StartElement:
+                current = r.name().toString();
+                if (current == QLatin1String("document-statistic")) {
+                    for (const QXmlStreamAttribute &a : r.attributes())
+                        v.insert(a.name().toString(), a.value().toString());
+                }
+                break;
+            case QXmlStreamReader::Characters:
+                if (!current.isEmpty() && !v.contains(current) && !r.isWhitespace())
+                    v.insert(current, r.text().toString().simplified().left(200));
+                break;
+            case QXmlStreamReader::EndElement:
+                current.clear();
+                break;
+            default:
+                break;
+            }
+        }
+    }
+    QStringList out;
+    const auto add = [&out](const char *label, const QString &value) {
+        if (!value.trimmed().isEmpty())
+            out << QCoreApplication::translate("officetext", label) + QLatin1Char('\t') + value.trimmed();
+    };
+    // "2024-07-14T13:22:05Z" (Word, in UTC) or without a zone (OpenDocument): shown in local time.
+    const auto when = [](const QString &iso) {
+        const QDateTime t = QDateTime::fromString(iso, Qt::ISODateWithMs).isValid() ? QDateTime::fromString(iso, Qt::ISODateWithMs)
+                                                                                     : QDateTime::fromString(iso.left(19), Qt::ISODate);
+        if (!t.isValid() || t.date().year() <= 1900)
+            return QString();
+        const QDateTime local = t.toLocalTime();
+        return QLocale().toString(local.date(), QLocale::LongFormat) + QStringLiteral(", ") + QLocale().toString(local.time(), QLocale::ShortFormat);
+    };
+    add(QT_TRANSLATE_NOOP("officetext", "Title"), v.value(QStringLiteral("title")));
+    if (ooxml) {
+        add(QT_TRANSLATE_NOOP("officetext", "Author"), v.value(QStringLiteral("creator")));
+        add(QT_TRANSLATE_NOOP("officetext", "Last changed by"), v.value(QStringLiteral("lastModifiedBy")));
+        add(QT_TRANSLATE_NOOP("officetext", "Created"), when(v.value(QStringLiteral("created"))));
+        add(QT_TRANSLATE_NOOP("officetext", "Changed"), when(v.value(QStringLiteral("modified"))));
+        add(QT_TRANSLATE_NOOP("officetext", "Made with"),
+            (v.value(QStringLiteral("Application")) + QLatin1Char(' ') + v.value(QStringLiteral("AppVersion"))).trimmed());
+        add(QT_TRANSLATE_NOOP("officetext", "Company"), v.value(QStringLiteral("Company")));
+        add(QT_TRANSLATE_NOOP("officetext", "Pages"), v.value(QStringLiteral("Pages")));
+        add(QT_TRANSLATE_NOOP("officetext", "Words"), v.value(QStringLiteral("Words")));
+        add(QT_TRANSLATE_NOOP("officetext", "Slides"), v.value(QStringLiteral("Slides")));
+    } else {
+        add(QT_TRANSLATE_NOOP("officetext", "Author"), v.value(QStringLiteral("initial-creator")));
+        add(QT_TRANSLATE_NOOP("officetext", "Last changed by"), v.value(QStringLiteral("creator")));
+        add(QT_TRANSLATE_NOOP("officetext", "Created"), when(v.value(QStringLiteral("creation-date"))));
+        add(QT_TRANSLATE_NOOP("officetext", "Changed"), when(v.value(QStringLiteral("date"))));
+        add(QT_TRANSLATE_NOOP("officetext", "Made with"), v.value(QStringLiteral("generator")).section(QLatin1Char('$'), 0, 0));
+        add(QT_TRANSLATE_NOOP("officetext", "Pages"), v.value(QStringLiteral("page-count")));
+        add(QT_TRANSLATE_NOOP("officetext", "Words"), v.value(QStringLiteral("word-count")));
+    }
+    return out;
 }
 
 QVector<Entry> list(const QByteArray &data, int most, bool *complete)

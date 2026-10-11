@@ -38,6 +38,10 @@ struct Found {
     Origin origin = Origin::Contents;
     bool deleted = true;
     qint64 modified = 0; // ms since 1970, 0 when not known
+    qint64 created = 0;  // the same way, when the file system keeps it
+    qint64 accessed = 0; // last opened (FAT keeps only the day: accessedDayOnly)
+    qint64 changed = 0;  // NTFS: when its record last changed (renamed, moved, deleted...)
+    bool accessedDayOnly = false;
     qint64 deletedAt = 0; // when it was deleted, the same way (NTFS's change journal, the Recycle Bin)
     bool nameOnly = false; // only its name and folder are left: nothing to save
     bool nameGuessed = false;   // FAT lost the first letter, and nothing said what it was

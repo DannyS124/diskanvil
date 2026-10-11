@@ -10,6 +10,7 @@
 
 #include <QByteArray>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 
 namespace officetext {
@@ -17,6 +18,10 @@ namespace officetext {
 // The text of a .docx, .xlsx, .pptx, .odt, .ods or .odp (a filetypes number), up to `most`
 // characters. Empty when it has none, or isn't one of those.
 QString text(int type, const QByteArray &data, int most = 4000);
+// What a document says about itself (docProps in Word, Excel and PowerPoint files, meta.xml in
+// OpenDocument ones), a "label\tvalue" per line: Title, Author, Last changed by, Created,
+// Changed, Made with, Pages, Words, Slides. Only what's there.
+QStringList properties(int type, const QByteArray &data);
 
 struct Entry {
     QString path;

@@ -54,6 +54,8 @@ struct Entry {
     quint32 first = 0;
     quint64 size = 0;
     qint64 modified = 0;
+    qint64 created = 0;
+    qint64 accessed = 0;
     bool contiguous = false; // exFAT's "no FAT chain": one piece, exactly where it says
 };
 
@@ -68,6 +70,8 @@ public:
     {
     }
     virtual ~Clusters() = default;
+    // FAT keeps the day a file was last opened, not the time; exFAT keeps both.
+    virtual bool accessedDayOnly() const { return false; }
 
     quint64 clusterSize = 0;
     quint32 count = 0; // clusters, numbered from 2
@@ -190,6 +194,7 @@ class Fat : public Clusters
 {
 public:
     using Clusters::Clusters;
+    bool accessedDayOnly() const override { return true; }
 
     int bits = 0; // 12, 16 or 32
     quint64 fatStart = 0, fatBytes = 0;
@@ -336,6 +341,11 @@ public:
             entry.first = (bits == 32 ? quint32(le16(e + 20)) << 16 : 0) | le16(e + 26);
             entry.size = entry.isDir ? 0 : le32(e + 28);
             entry.modified = fatTime(le16(e + 24), le16(e + 22));
+            // Created to the hundredth of a second (byte 13 adds up to 1.99 s); last opened, the day only.
+            entry.created = fatTime(le16(e + 16), le16(e + 14));
+            if (entry.created > 0)
+                entry.created += std::min(199, int(e[13])) * 10;
+            entry.accessed = fatTime(le16(e + 18), 0);
             if (entry.deleted && ((entry.size > 0 && !valid(entry.first)) || entry.size > m_where.length))
                 continue;
             out.push_back(entry);
@@ -511,6 +521,8 @@ public:
             entry.deleted = gone;
             entry.isDir = le16(e + 4) & 0x10;
             entry.modified = exfatTime(le32(e + 12), e[21], e[23]);
+            entry.created = exfatTime(le32(e + 8), e[20], e[22]);
+            entry.accessed = exfatTime(le32(e + 16), 0, e[24]);
             entry.contiguous = stream[1] & 0x02;
             const int nameLength = stream[3];
             entry.first = le32(stream + 20);
@@ -620,6 +632,9 @@ public:
         f.piecesGuessed = guessed;
         f.size = entry.size;
         f.modified = entry.modified;
+        f.created = entry.created;
+        f.accessed = entry.accessed;
+        f.accessedDayOnly = m_fs.accessedDayOnly();
         f.type = filetypes::typeForName(entry.name);
         f.extents = m_fs.extentsOf(clusters, entry.size);
         quint64 covered = 0;

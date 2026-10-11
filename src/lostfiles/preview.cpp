@@ -3,6 +3,7 @@
 
 #include "preview.h"
 
+#include "exif.h"
 #include "filetypes.h"
 #include "format.h"
 #include "mediainfo.h"
@@ -14,10 +15,13 @@
 #include <QDeadlineTimer>
 #include <QFile>
 #include <QImageReader>
+#include <QLocale>
 #include <QProcess>
 #include <QStandardPaths>
 #include <QStringDecoder>
 #include <QTemporaryFile>
+
+#include <algorithm>
 
 #ifdef DISKFORGE_PDF
 #include <poppler-qt6.h>
@@ -190,7 +194,7 @@ void write(QIODevice &to, const Result &r)
         buffer.open(QIODevice::WriteOnly);
         r.image.save(&buffer, "PNG");
     }
-    s << png << r.text;
+    s << png << r.text << r.facts;
     writeMessage(to, body);
 }
 
@@ -201,7 +205,7 @@ bool read(QIODevice &from, Result &r, int msecs)
         return false;
     QDataStream s(body);
     QByteArray png;
-    s >> png >> r.text;
+    s >> png >> r.text >> r.facts;
     if (!png.isEmpty())
         r.image.loadFromData(png, "PNG");
     return s.status() == QDataStream::Ok;
@@ -216,12 +220,26 @@ Result make(const Request &r)
 
     if (type && type->category == filetypes::Category::Picture) {
         out.image = picture(r.data, readerFormat(id), r.pixels);
+        // When, with what and where it was taken, as the camera wrote it down.
+        out.facts = exif::describe(exif::read(r.data));
+        if (std::none_of(out.facts.cbegin(), out.facts.cend(), [](const QString &f) { return f.startsWith(exif::sizeLabel() + QLatin1Char('\t')); })) {
+            QBuffer buffer(const_cast<QByteArray *>(&r.data));
+            QImageReader reader(&buffer, readerFormat(id));
+            const QSize size = reader.size();
+            if (size.isValid())
+                out.facts << exif::sizeLabel() + QLatin1Char('\t') + tr("%1 × %2 pixels").arg(size.width()).arg(size.height());
+        }
         return out;
     }
 #ifdef DISKFORGE_PDF
     if (id == QLatin1String("pdf")) {
         std::unique_ptr<Poppler::Document> document = Poppler::Document::loadFromData(r.data);
-        if (!document || document->isLocked())
+        if (document && document->isLocked()) {
+            out.text = tr("It's locked with a password, so its pages can't be shown.");
+            out.facts << tr("Locked") + QLatin1Char('\t') + tr("It needs a password to open");
+            return out;
+        }
+        if (!document)
             return out;
         document->setRenderHint(Poppler::Document::Antialiasing);
         document->setRenderHint(Poppler::Document::TextAntialiasing);
@@ -233,11 +251,33 @@ Result make(const Request &r)
         }
         const QString title = document->info(QStringLiteral("Title")).simplified();
         out.text = (title.isEmpty() ? QString() : title + QLatin1Char('\n')) + QCoreApplication::translate("preview", "%n page(s)", nullptr, document->numPages());
+        // What it says about itself: who made it, with what, when.
+        const auto fact = [&out](const QString &label, const QString &value) {
+            if (!value.simplified().isEmpty())
+                out.facts << label + QLatin1Char('\t') + value.simplified().left(200);
+        };
+        const auto when = [](const QDateTime &t) {
+            if (!t.isValid() || t.date().year() <= 1900)
+                return QString();
+            const QDateTime local = t.toLocalTime();
+            return QLocale().toString(local.date(), QLocale::LongFormat) + QStringLiteral(", ") + QLocale().toString(local.time(), QLocale::ShortFormat);
+        };
+        fact(tr("Title"), title);
+        fact(tr("Author"), document->info(QStringLiteral("Author")));
+        fact(tr("Subject"), document->info(QStringLiteral("Subject")));
+        fact(tr("Created"), when(document->creationDate()));
+        fact(tr("Changed"), when(document->modificationDate()));
+        fact(tr("Made with"), document->info(QStringLiteral("Creator")));
+        fact(tr("Turned into a PDF by"), document->info(QStringLiteral("Producer")));
+        fact(tr("Pages"), QString::number(document->numPages()));
+        if (document->isEncrypted())
+            fact(tr("Locked"), tr("It has a password for changing or printing it"));
         return out;
     }
 #endif
     if (type && type->category == filetypes::Category::Document) {
         out.text = officetext::text(r.type, r.data);
+        out.facts = officetext::properties(r.type, r.data);
         if (!out.text.isEmpty() || id != QLatin1String("epub"))
             return out;
     }
@@ -257,6 +297,9 @@ Result make(const Request &r)
     if (type && (type->category == filetypes::Category::Music || type->category == filetypes::Category::Video)) {
         const mediainfo::Info info = mediainfo::read(r.type, r.data, r.size);
         out.text = mediainfo::describe(info);
+        if (info.recorded.isValid())
+            out.facts << tr("Recorded") + QLatin1Char('\t') + QLocale().toString(info.recorded.toLocalTime().date(), QLocale::LongFormat)
+                             + QStringLiteral(", ") + QLocale().toString(info.recorded.toLocalTime().time(), QLocale::ShortFormat);
         if (!info.cover.isEmpty())
             out.image = picture(info.cover, QByteArray(), r.pixels);
         if (out.image.isNull() && type->category == filetypes::Category::Video)

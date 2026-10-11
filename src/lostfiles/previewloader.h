@@ -40,8 +40,8 @@ public Q_SLOTS:
     void run();
 
 Q_SIGNALS:
-    // `failed`: the helper crashed or hung on it.
-    void ready(int index, int pixels, const QImage &image, const QString &text, bool failed);
+    // `facts`: what the file says about itself. `failed`: the helper crashed or hung on it.
+    void ready(int index, int pixels, const QImage &image, const QString &text, const QStringList &facts, bool failed);
     // A wish let go of unanswered (too many piled up): ask again when it's wanted again.
     void dropped(int index, int pixels);
 

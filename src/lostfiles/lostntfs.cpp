@@ -332,7 +332,7 @@ struct Candidate {
     quint64 parent = 0;
     quint16 parentSequence = 0;
     bool deleted = false;
-    qint64 modified = 0;
+    qint64 modified = 0, created = 0, changed = 0, accessed = 0;
     QVector<Attribute> data; // the unnamed $DATA, maybe in pieces across extension records
     quint16 dataFlags = 0;
 };
@@ -555,8 +555,15 @@ bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::
             c.parentSequence = node.parentSequence;
             c.deleted = !r.inUse;
             for (const Attribute &a : r.attributes) {
-                if (a.type == 0x10 && a.value.size() >= 16)
+                // $STANDARD_INFORMATION: created, changed, its record changed, last opened.
+                if (a.type == 0x10 && a.value.size() >= 32) {
+                    c.created = fileTime(le64(bytes(a.value)));
                     c.modified = fileTime(le64(bytes(a.value) + 8));
+                    c.changed = fileTime(le64(bytes(a.value) + 16));
+                    c.accessed = fileTime(le64(bytes(a.value) + 24));
+                } else if (a.type == 0x10 && a.value.size() >= 16) {
+                    c.modified = fileTime(le64(bytes(a.value) + 8));
+                }
                 if (a.type == 0x80 && a.name.isEmpty()) {
                     c.data.push_back(a);
                     c.dataFlags |= a.flags;
@@ -705,6 +712,9 @@ bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::
         f.origin = Origin::FileSystem;
         f.deleted = c.deleted || binned || copy;
         f.modified = c.modified;
+        f.created = c.created;
+        f.changed = c.changed;
+        f.accessed = c.accessed;
         f.deletedAt = deletedAt;
         f.note = note;
         f.type = filetypes::typeForName(name);

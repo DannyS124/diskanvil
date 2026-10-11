@@ -975,12 +975,13 @@ void LostFilesDialog::scanSource(std::shared_ptr<lost::Source> source, const QSt
         if (pixels == kThumbnail)
             m_model->forgetAsked(index);
     });
-    connect(m_thumbs, &PreviewLoader::ready, this, [this](int index, int pixels, const QImage &image, const QString &text, bool failed) {
+    connect(m_thumbs, &PreviewLoader::ready, this,
+            [this](int index, int pixels, const QImage &image, const QString &text, const QStringList &facts, bool failed) {
         if (pixels == kThumbnail) {
             if (!image.isNull())
                 m_model->setThumbnail(index, QPixmap::fromImage(image));
         } else if (index == m_previewIndex) {
-            showPreviewResult(image, text, failed);
+            showPreviewResult(image, text, facts, failed);
         }
     });
     m_thumbThread = startOnThread(this, m_thumbs);
@@ -1290,10 +1291,6 @@ void LostFilesDialog::showPreview()
                     .arg(formatSize(where));
     } else {
         html += (f.deleted ? tr("Was in %1") : tr("In %1")).arg(f.folder.toHtmlEscaped());
-        if (f.modified > 0)
-            html += QStringLiteral("<br>") + tr("Last changed %1").arg(QLocale().toString(QDateTime::fromMSecsSinceEpoch(f.modified), QLocale::ShortFormat));
-        if (f.deletedAt > 0)
-            html += QStringLiteral("<br>") + tr("Deleted %1").arg(QLocale().toString(QDateTime::fromMSecsSinceEpoch(f.deletedAt), QLocale::ShortFormat));
         if (f.nameGuessed)
             html += QStringLiteral("<br>") + tr("Deleting it took away the first letter of its name; _ stands in for it.");
         if (f.piecesGuessed)
@@ -1305,6 +1302,26 @@ void LostFilesDialog::showPreview()
     html += QStringLiteral("<br><br><span style=\"color:%1\">●</span> %2").arg(colour.name(), conditionWords(f).toHtmlEscaped());
     if (!f.note.isEmpty())
         html += QStringLiteral("<br>") + f.note.toHtmlEscaped();
+    // The times the file system kept: FAT keeps only the day it was last opened.
+    const auto when = [](qint64 ms, bool dayOnly = false) {
+        const QDateTime t = QDateTime::fromMSecsSinceEpoch(ms);
+        return dayOnly ? QLocale().toString(t.date(), QLocale::LongFormat)
+                       : QLocale().toString(t.date(), QLocale::LongFormat) + QStringLiteral(", ") + QLocale().toString(t.time(), QLocale::ShortFormat);
+    };
+    QVector<QPair<QString, QString>> times;
+    if (f.created > 0)
+        times.append({tr("Created"), when(f.created)});
+    if (f.modified > 0)
+        times.append({tr("Changed"), when(f.modified)});
+    if (f.accessed > 0)
+        times.append({tr("Last opened"), when(f.accessed, f.accessedDayOnly)});
+    if (f.changed > 0 && f.changed != f.modified)
+        times.append({tr("Its entry changed"), when(f.changed)});
+    if (f.deletedAt > 0)
+        times.append({tr("Deleted"), when(f.deletedAt)});
+    if (!times.isEmpty())
+        html += QStringLiteral("<br><br><b>%1</b>").arg(tr("On the drive")) + detailsTable(times);
+    m_detailsHtml = html;
     m_details->setText(html);
     if (f.nameOnly)
         return; // nothing of it to show
@@ -1350,8 +1367,25 @@ bool LostFilesDialog::eventFilter(QObject *watched, QEvent *event)
     return QDialog::eventFilter(watched, event);
 }
 
-void LostFilesDialog::showPreviewResult(const QImage &image, const QString &text, bool failed)
+QString LostFilesDialog::detailsTable(const QVector<QPair<QString, QString>> &rows) const
 {
+    const QString quiet = palette().color(QPalette::PlaceholderText).name();
+    QString html = QStringLiteral("<table cellspacing=\"0\" cellpadding=\"1\">");
+    for (const auto &[label, value] : rows)
+        html += QStringLiteral("<tr><td style=\"color:%1; padding-right:12px\">%2</td><td>%3</td></tr>")
+                    .arg(quiet, label.toHtmlEscaped(), value.toHtmlEscaped());
+    return html + QStringLiteral("</table>");
+}
+
+void LostFilesDialog::showPreviewResult(const QImage &image, const QString &text, const QStringList &facts, bool failed)
+{
+    // What the file says about itself, under what the drive said.
+    if (!facts.isEmpty()) {
+        QVector<QPair<QString, QString>> rows;
+        for (const QString &fact : facts)
+            rows.append({fact.section(QLatin1Char('\t'), 0, 0), fact.section(QLatin1Char('\t'), 1)});
+        m_details->setText(m_detailsHtml + QStringLiteral("<br><br><b>%1</b>").arg(tr("In the file")) + detailsTable(rows));
+    }
     const lost::Found &f = m_model->file(m_previewIndex);
     const filetypes::Category category = f.type >= 0 ? filetypes::types()[f.type].category : filetypes::Category::Other;
     if (!image.isNull()) {

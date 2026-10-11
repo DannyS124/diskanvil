@@ -65,6 +65,7 @@ add_library(diskforge-core STATIC
     src/lostfiles/vdisk.cpp src/lostfiles/vdisk.h
     src/drives/fat32format.cpp src/drives/fat32format.h
     src/lostfiles/mediainfo.cpp src/lostfiles/mediainfo.h
+    src/lostfiles/exif.cpp src/lostfiles/exif.h
     src/lostfiles/officetext.cpp src/lostfiles/officetext.h
     src/viruses/virusscan.cpp src/viruses/virusscan.h
     src/viruses/reghive.cpp src/viruses/reghive.h

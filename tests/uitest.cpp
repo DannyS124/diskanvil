@@ -2233,7 +2233,11 @@ void previewsThroughHelper()
         p.drawText(QRect(0, 0, 4000, 1000), QStringLiteral("Your account is fine."));
     }
     const QByteArray docx = storedZip({{"word/document.xml", "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">"
-                                                             "<w:body><w:p><w:r><w:t>Dear landlord,</w:t></w:r></w:p></w:body></w:document>"}});
+                                                             "<w:body><w:p><w:r><w:t>Dear landlord,</w:t></w:r></w:p></w:body></w:document>"},
+                                       {"docProps/core.xml", "<cp:coreProperties xmlns:cp=\"http://schemas.openxmlformats.org/package/2006/metadata/core-properties\" "
+                                                             "xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:dcterms=\"http://purl.org/dc/terms/\">"
+                                                             "<dc:creator>Danny</dc:creator><dcterms:created>2024-07-14T13:22:05Z</dcterms:created>"
+                                                             "</cp:coreProperties>"}});
     QByteArray cover;
     {
         QImage image(64, 64, QImage::Format_RGB32);
@@ -2276,10 +2280,13 @@ void previewsThroughHelper()
     }
     auto *loader = new PreviewLoader(lost::Source::fromMemory(drive));
     QHash<int, std::tuple<QImage, QString, bool>> results;
+    QHash<int, QStringList> facts;
     QObject context;
-    QObject::connect(loader, &PreviewLoader::ready, &context, [&results](int index, int, const QImage &image, const QString &text, bool failed) {
-        results.insert(index, {image, text, failed});
-    });
+    QObject::connect(loader, &PreviewLoader::ready, &context,
+                     [&results, &facts](int index, int, const QImage &image, const QString &text, const QStringList &said, bool failed) {
+                         results.insert(index, {image, text, failed});
+                         facts.insert(index, said);
+                     });
     QThread *thread = startOnThread(&context, loader);
     for (int i = int(files.size()) - 1; i >= 0; --i)
         loader->want(i, files[i], 480);
@@ -2291,7 +2298,11 @@ void previewsThroughHelper()
     const auto [pdfImage, pdfText, pdfFailed] = results.value(0);
     report(!pdfImage.isNull() && pdfText.contains(QLatin1String("Bank letter")) && pdfText.contains(QLatin1String("1 page")),
            QStringLiteral("Find Lost Files: a PDF shows its first page and title"), QString(pdfText).replace(QLatin1Char('\n'), QLatin1String(" / ")));
+    report(facts.value(0).contains(QStringLiteral("Title\tBank letter")), QStringLiteral("and what it says about itself"),
+           facts.value(0).join(QStringLiteral(" | ")).left(100));
     report(std::get<1>(results.value(1)) == QLatin1String("Dear landlord,"), QStringLiteral("a Word document shows its text"), std::get<1>(results.value(1)));
+    report(facts.value(1).contains(QStringLiteral("Author\tDanny")) && facts.value(1).join(QString()).contains(QLatin1String("2024")),
+           QStringLiteral("and who wrote it and when"), facts.value(1).join(QStringLiteral(" | ")));
     const auto [songImage, songText, songFailed] = results.value(2);
     report(!songImage.isNull() && songImage.pixel(5, 5) == QColor(0x2b, 0xee, 0x8a).rgb() && songText.contains(QLatin1String("Lost song")),
            QStringLiteral("an MP3 shows its cover and title"), QString(songText).replace(QLatin1Char('\n'), QLatin1String(" / ")));
@@ -2383,6 +2394,9 @@ void lostFilesFromFileSystem()
     auto *details = dialog.findChild<QLabel *>(QStringLiteral("details"));
     report(details->text().contains(QLatin1String("Was in TESTFAT32/Old stuff")) && details->text().contains(QLatin1String("should open fine")),
            QStringLiteral("its details say where it was and that it's whole"), details->text().left(160));
+    report(details->text().contains(QLatin1String("On the drive")) && details->text().contains(QLatin1String("Created"))
+               && details->text().contains(QLatin1String("Last opened")),
+           QStringLiteral("and when it was created, changed and last opened, from FAT's own records"));
 
     // DISKFORGE_UITEST_SHOTS=folder: a picture of the window as it is now, to look at.
     if (qEnvironmentVariableIsSet("DISKFORGE_UITEST_SHOTS")) {
@@ -2526,7 +2540,7 @@ void lostFilesDeletedRecently()
     view->setCurrentIndex(planRow);
     auto *details = dialog.findChild<QLabel *>(QStringLiteral("details"));
     report(details->text().contains(QLatin1String("size not known")) && details->text().contains(QLatin1String("Was in WINJRNL/Drafts"))
-               && details->text().contains(QLatin1String("Deleted ")) && details->text().contains(QLatin1String("nothing of it to save")),
+               && details->text().contains(QLatin1String(">Deleted<")) && details->text().contains(QLatin1String("nothing of it to save")),
            QStringLiteral("its details say where it was, when it went and that there's nothing to save"), details->text().left(240));
     for (QPushButton *b : dialog.findChildren<QPushButton *>()) {
         if (b->text() == QLatin1String("Tick All Shown"))

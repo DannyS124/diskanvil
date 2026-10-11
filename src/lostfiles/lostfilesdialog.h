@@ -135,7 +135,9 @@ private:
     void lookInCopies();
     void scanDone(bool stopped);
     void showPreview();
-    void showPreviewResult(const QImage &image, const QString &text, bool failed);
+    void showPreviewResult(const QImage &image, const QString &text, const QStringList &facts, bool failed);
+    // Rows of "label: value", the labels quieter, for the details.
+    QString detailsTable(const QVector<QPair<QString, QString>> &rows) const;
     void updateTicked();
     void saveTicked();
     void saveSelected();
@@ -174,6 +176,7 @@ private:
     QPlainTextEdit *m_hex;
     QSplitter *m_split = nullptr;
     QImage m_previewPicture; // the last one shown, fitted again when the room changes
+    QString m_detailsHtml;   // what's known without the file's own facts, which come with its preview
     int m_previewAsked = 0;  // how big it was asked for
     QTimer *m_previewResize = nullptr;
     bool m_placed = false;

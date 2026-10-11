@@ -8,6 +8,7 @@
 
 #include "testkit.h"
 
+#include "../src/lostfiles/exif.h"
 #include "../src/lostfiles/filetypes.h"
 #include "../src/usb/imagesource.h"
 #include "../src/lostfiles/lostfs.h"
@@ -1486,9 +1487,116 @@ void previewQueue()
            QStringLiteral("%1 let go").arg(dropped.size()));
 }
 
+// EXIF written by hand, the way a camera would: a folder of tags (IFD) for the camera, one for
+// the photo's settings and one for where it was taken, in either byte order.
+struct ExifTag {
+    quint16 tag, type;
+    quint32 count;
+    QByteArray bytes; // its value, already in the file's byte order
+};
+
+QByteArray exifTiff(bool little, bool loop = false)
+{
+    const auto number = [little](quint32 v, int bytes) {
+        QByteArray b(bytes, '\0');
+        for (int i = 0; i < bytes; ++i)
+            b[little ? i : bytes - 1 - i] = char(v >> (8 * i));
+        return b;
+    };
+    const auto n16 = [&number](quint16 v) { return number(v, 2); };
+    const auto n32 = [&number](quint32 v) { return number(v, 4); };
+    const auto text = [](const char *s) { return ExifTag{0, 2, quint32(qstrlen(s) + 1), QByteArray(s, int(qstrlen(s) + 1))}; };
+    const auto rational = [&n32](QVector<std::pair<quint32, quint32>> v) {
+        QByteArray b;
+        for (const auto &[top, bottom] : v)
+            b += n32(top) + n32(bottom);
+        return ExifTag{0, 5, quint32(v.size()), b};
+    };
+    const auto tagged = [](quint16 tag, ExifTag t) { t.tag = tag; return t; };
+    QByteArray t = QByteArray(little ? "II" : "MM") + n16(42) + n32(0); // where the first folder is: filled in last
+    // A folder of tags at the end of what's written, its longer values after it.
+    const auto folder = [&](const QVector<ExifTag> &tags) {
+        const quint32 at = quint32(t.size());
+        quint32 data = at + 2 + 12 * quint32(tags.size()) + 4;
+        QByteArray entries = n16(quint16(tags.size())), values;
+        for (const ExifTag &e : tags) {
+            QByteArray value = e.bytes;
+            entries += n16(e.tag) + n16(e.type) + n32(e.count);
+            if (value.size() <= 4) {
+                entries += value + QByteArray(4 - value.size(), '\0');
+            } else {
+                entries += n32(data + quint32(values.size()));
+                values += value + QByteArray(value.size() % 2, '\0');
+            }
+        }
+        t += entries + n32(0) + values;
+        return at;
+    };
+    const quint32 exif = folder({tagged(0x829A, rational({{1, 250}})), tagged(0x829D, rational({{28, 10}})), ExifTag{0x8827, 3, 1, n16(100)},
+                                 tagged(0x9003, text("2024:07:14 13:22:05")), tagged(0x9011, text("+02:00")), tagged(0x920A, rational({{42, 10}})),
+                                 ExifTag{0xA002, 4, 1, n32(4032)}, ExifTag{0xA003, 4, 1, n32(3024)}, tagged(0xA434, text("EF-S 18-55mm"))});
+    const quint32 gps = folder({tagged(1, text("N")), tagged(2, rational({{51, 1}, {30, 1}, {2604, 100}})), tagged(3, text("W")),
+                                tagged(4, rational({{0, 1}, {7, 1}, {3900, 100}})), ExifTag{5, 1, 1, QByteArray(1, '\0')}, tagged(6, rational({{35, 1}}))});
+    const quint32 first = quint32(t.size());
+    const quint32 first0 = folder({tagged(0x010F, text("Canon")), tagged(0x0110, text("Canon EOS 80D")), tagged(0x0132, text("2024:07:14 13:20:00")),
+                                   ExifTag{0x8769, 4, 1, n32(loop ? first : exif)}, ExifTag{0x8825, 4, 1, n32(loop ? exif : gps)}});
+    t.replace(4, 4, n32(first0));
+    return t;
+}
+
+QByteArray jpegWith(const QByteArray &tiff)
+{
+    const QByteArray app1 = QByteArray("Exif\0\0", 6) + tiff;
+    const int length = int(app1.size()) + 2;
+    return QByteArray("\xFF\xD8\xFF\xE1", 4) + char(length >> 8) + char(length & 0xFF) + app1 + QByteArray("\xFF\xDA\x00\x02\xFF\xD9", 6);
+}
+
+void photoFacts()
+{
+    for (const bool little : {true, false}) {
+        const exif::Info i = exif::read(jpegWith(exifTiff(little)));
+        const QString order = little ? QStringLiteral("Intel order") : QStringLiteral("Motorola order");
+        report(i.make == QLatin1String("Canon") && i.model == QLatin1String("Canon EOS 80D") && i.lens == QLatin1String("EF-S 18-55mm"),
+               QStringLiteral("EXIF (%1): the camera and lens").arg(order), i.make + QLatin1Char('/') + i.model + QLatin1Char('/') + i.lens);
+        report(i.taken.isValid() && i.takenHasZone && i.taken.toUTC() == QDateTime(QDate(2024, 7, 14), QTime(11, 22, 5), QTimeZone::UTC),
+               QStringLiteral("EXIF (%1): when it was taken, with its time zone").arg(order), i.taken.toString(Qt::ISODate));
+        report(qFuzzyCompare(i.exposure, 0.004) && qFuzzyCompare(i.aperture, 2.8) && i.iso == 100 && qFuzzyCompare(i.focalLength, 4.2)
+                   && i.width == 4032 && i.height == 3024,
+               QStringLiteral("EXIF (%1): the settings and size").arg(order));
+        report(i.hasLocation && std::abs(i.latitude - 51.507233) < 1e-5 && std::abs(i.longitude + 0.1275) < 1e-6 && i.hasAltitude && i.altitude == 35,
+               QStringLiteral("EXIF (%1): where it was taken").arg(order), QStringLiteral("%1, %2").arg(i.latitude, 0, 'f', 6).arg(i.longitude, 0, 'f', 6));
+    }
+    const QStringList said = exif::describe(exif::read(jpegWith(exifTiff(true))));
+    const QString all = said.join(QLatin1Char('|'));
+    report(said.contains(QStringLiteral("Camera\tCanon EOS 80D")) && all.contains(QStringLiteral("1/250 s · f/2.8 · ISO 100 · 4.2 mm"))
+               && all.contains(QStringLiteral("51.50723° N, 0.12750° W, 35 m up")) && all.contains(QLatin1String("UTC+02:00")),
+           QStringLiteral("EXIF: said in plain words"), said.filter(QStringLiteral("Location")).join(QString()) + QLatin1Char('|') + said.value(3));
+    // A raw file is TIFF itself; PNG, WebP, HEIC and CR3 carry the same block somewhere inside.
+    report(exif::read(exifTiff(false)).model == QLatin1String("Canon EOS 80D"), QStringLiteral("EXIF: from a raw (TIFF) file"));
+    report(exif::read(QByteArray("\x89PNG\r\n\x1a\n....eXIf", 16) + exifTiff(true)).iso == 100, QStringLiteral("EXIF: from a PNG's eXIf chunk"));
+    report(exif::read(QByteArray(40, 'x') + QByteArray("Exif\0\0", 6) + exifTiff(false)).iso == 100, QStringLiteral("EXIF: found in a HEIC or WebP"));
+    report(exif::read(QByteArray(20, 'x') + QByteArray("CMT1", 4) + exifTiff(true)).make == QLatin1String("Canon"), QStringLiteral("EXIF: from a CR3's CMT1 box"));
+    // Folders pointing at each other, cut short anywhere, damaged anyhow: no hang, no crash.
+    const exif::Info looped = exif::read(jpegWith(exifTiff(true, true)));
+    report(looped.make == QLatin1String("Canon") && looped.iso == 0, QStringLiteral("EXIF: folders pointing back at each other are read once"));
+    const QByteArray good = jpegWith(exifTiff(true));
+    for (int cut = 0; cut < good.size(); ++cut)
+        exif::read(good.left(cut));
+    QRandomGenerator random(12345);
+    for (int round = 0; round < 3000; ++round) {
+        QByteArray bad = good;
+        for (int k = 0, n = 1 + int(random.bounded(8)); k < n; ++k)
+            bad[int(random.bounded(quint32(bad.size())))] = char(random.bounded(256));
+        exif::describe(exif::read(bad));
+    }
+    report(true, QStringLiteral("EXIF: cut short at every byte and damaged 3000 ways, read without a crash"));
+    report(exif::read(QByteArray("\xFF\xD8\xFF\xE0\x00\x10JFIF", 10)).empty(), QStringLiteral("EXIF: a photo without any says nothing"));
+}
+
 void lostFilesTests()
 {
     previewQueue();
+    photoFacts();
     journal();
     QTemporaryDir dir;
     finding(dir.path());
