@@ -16,6 +16,7 @@
 #include "../src/app/homewindow.h"
 #include "../src/drives/blockio.h"
 #include "../src/usb/imagesource.h"
+#include "../src/lostfiles/viewer.h"
 #include "../src/lostfiles/lostfilesdialog.h"
 #include "../src/lostfiles/filetypes.h"
 #include "../src/common/jobui.h"
@@ -60,6 +61,7 @@
 #include <QBuffer>
 #include <QPainter>
 #include <QPdfWriter>
+#include <QPlainTextEdit>
 #include <QThread>
 #include <QRegularExpression>
 #include <QTcpSocket>
@@ -2313,6 +2315,86 @@ void previewsThroughHelper()
                QStringLiteral("the helper runs in a bubblewrap sandbox"), command.first());
 }
 
+// The viewer's window: each kind of file shown its own way, and a damaged one as its bytes, saying why.
+void viewerWindow()
+{
+    QTemporaryDir dir;
+    QImage photo(600, 400, QImage::Format_RGB32);
+    photo.fill(QColor(0x1f, 0x6f, 0xff));
+    photo.save(dir.filePath(QStringLiteral("photo.png")));
+    {
+        QPdfWriter writer(dir.filePath(QStringLiteral("three.pdf")));
+        QPainter p(&writer);
+        for (int page = 1; page <= 3; ++page) {
+            if (page > 1)
+                writer.newPage();
+            p.drawText(QRect(0, 0, 4000, 1000), QStringLiteral("Page %1").arg(page));
+        }
+    }
+    const auto write = [&dir](const char *name, const QByteArray &data) {
+        QFile f(dir.filePath(QString::fromLatin1(name)));
+        if (f.open(QIODevice::WriteOnly))
+            f.write(data);
+        return f.fileName();
+    };
+    write("notes.txt", "Shopping list\nMilk\n");
+    write("broken.jpg", QByteArray("\xFF\xD8\xFF\xE0", 4) + QByteArray(5000, '\x13'));
+    write("rent.docx", storedZip({{"word/document.xml", "<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">"
+                                                        "<w:body><w:p><w:r><w:t>Dear landlord,</w:t></w:r></w:p></w:body></w:document>"}}));
+    QByteArray wav("RIFF", 4);
+    const QByteArray samples(8000, '\x80');
+    const auto le32 = [](quint32 v) {
+        QByteArray b(4, '\0');
+        for (int i = 0; i < 4; ++i)
+            b[i] = char(v >> (8 * i));
+        return b;
+    };
+    wav += le32(36 + quint32(samples.size())) + QByteArray("WAVEfmt ", 8) + le32(16) + QByteArray("\x01\x00\x01\x00", 4) + le32(8000) + le32(8000)
+         + QByteArray("\x01\x00\x08\x00", 4) + QByteArray("data", 4) + le32(quint32(samples.size())) + samples;
+    write("beep.wav", wav);
+
+    viewer::Window window;
+    window.resize(1000, 700);
+    window.show();
+    const auto show = [&](const char *name) {
+        viewer::Show s;
+        s.name = QString::fromLatin1(name);
+        s.type = filetypes::typeForName(s.name);
+        s.kind = viewer::kindFor(s.type, s.name);
+        s.path = dir.filePath(s.name);
+        s.where = QStringLiteral("1 of 6");
+        s.facts = {QStringLiteral("Created\tyesterday")};
+        window.present(s);
+        QCoreApplication::processEvents();
+    };
+    show("photo.png");
+    report(window.shownKind() == viewer::Kind::Picture && window.problem().isEmpty(), QStringLiteral("viewer: a photo is shown"));
+    show("three.pdf");
+    report(window.shownKind() == viewer::Kind::Pdf && window.problem().isEmpty(), QStringLiteral("viewer: a PDF is shown page by page"),
+           window.problem());
+    const auto visibleText = [&window] {
+        for (QPlainTextEdit *t : window.findChildren<QPlainTextEdit *>()) {
+            if (t->isVisible())
+                return t->toPlainText();
+        }
+        return QString();
+    };
+    show("notes.txt");
+    report(window.shownKind() == viewer::Kind::Words && visibleText().startsWith(QLatin1String("Shopping list")),
+           QStringLiteral("viewer: a text file is shown as words"));
+    show("rent.docx");
+    report(window.shownKind() == viewer::Kind::Words && visibleText().contains(QLatin1String("Dear landlord")),
+           QStringLiteral("viewer: a Word document's words"));
+    show("beep.wav");
+    report(window.shownKind() == viewer::Kind::Song, QStringLiteral("viewer: a song gets the player"));
+    show("broken.jpg");
+    report(window.shownKind() == viewer::Kind::Bytes && window.problem().contains(QLatin1String("can't be shown"))
+               && visibleText().startsWith(QLatin1String("00000000")),
+           QStringLiteral("viewer: a damaged picture shows its bytes, and says why"), window.problem().left(80));
+    auto *facts = window.findChild<QLabel *>(QStringLiteral("facts"));
+    report(facts && facts->text().contains(QLatin1String("yesterday")), QStringLiteral("viewer: what's known about it is beside it"));
+}
+
 // A compressed test file unpacked to `path`; empty when it couldn't be.
 QString unpackTestFile(const QString &packed, const QString &path)
 {
@@ -3413,6 +3495,12 @@ void lostFilesThroughWindow()
     report(boxes.size() == 1 && boxes[0].contains(QLatin1String("on the drive you're getting the files back from"))
                && QDir(again).entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty(),
            QStringLiteral("saving onto the drive the files are on is refused"), boxes.join(QStringLiteral(" | ")).left(120));
+    // Double-click: the viewer, a program of its own (in its sandbox where there's one), says it's ready.
+    Q_EMIT view->doubleClicked(view->model()->index(0, 0));
+    const int first = qobject_cast<const QAbstractItemModel *>(view->model())->index(0, 0).data(Qt::UserRole).toInt();
+    waitUntil([&] { return dialog.viewerShown() == first; }, 20000);
+    report(dialog.viewerReady() && dialog.viewerShown() == first, QStringLiteral("double-click opens the viewer, a program of its own, and it shows that file"),
+           QStringLiteral("shown %1, wanted %2").arg(dialog.viewerShown()).arg(first));
     // Closing with files found asks first, and No keeps them.
     boxes.clear();
     answerer.answer = [&](QWidget *modal) {
@@ -3554,7 +3642,7 @@ int userScenarios(const QStringList &only)
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
         {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
-        {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostfs", lostFilesFromFileSystem},
+        {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},
         {"previews", previewsThroughHelper}, {"viruses", virusScanThroughWindow}, {"virusdrive", virusScanOnDrive}, {"viruswindows", virusScanWindowsDrive}, {"virusboot", virusScanBoot}, {"viruslookup", virusLookUpOnline}, {"newids", newIdsThroughWindow},
     };
@@ -3577,6 +3665,9 @@ int main(int argc, char *argv[])
         return preview::runHelper();
     }
     QApplication app(argc, argv);
+    // ...and as its viewer.
+    if (argc == 2 && QByteArray(argv[1]) == "--viewer")
+        return viewer::run();
     installTranslations();
     // As the user: the add-on, menu and theme parts, which need no test disks.
     if (app.arguments().contains(QStringLiteral("--user"))) {

@@ -8,6 +8,7 @@
 #include "preview.h"
 #include "translations.h"
 #include "udisks.h"
+#include "viewer.h"
 
 #include <QApplication>
 #include <QGuiApplication>
@@ -86,6 +87,10 @@ int main(int argc, char *argv[])
     QApplication::setApplicationVersion(QStringLiteral(APP_VERSION));
     QApplication::setDesktopFileName(QStringLiteral(APP_ID));
     QApplication::setWindowIcon(QIcon::fromTheme(QStringLiteral(APP_ID), QIcon(QStringLiteral(":/data/" APP_ID ".svg"))));
+    // Find Lost Files' viewer (viewer.h): a program of its own, so a damaged file can't take
+    // DiskForge down. Find Lost Files talks to it on its standard input and output.
+    if (argc == 2 && QByteArray(argv[1]) == "--viewer")
+        return viewer::run();
 
     QCommandLineParser parser;
     parser.setApplicationDescription(QStringLiteral("A Windows-style disk manager built on UDisks2."));

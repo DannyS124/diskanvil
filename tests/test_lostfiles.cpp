@@ -19,6 +19,7 @@
 #include "../src/lostfiles/officetext.h"
 #include "../src/lostfiles/preview.h"
 #include "../src/lostfiles/previewloader.h"
+#include "../src/lostfiles/viewer.h"
 #include "../src/lostfiles/vdisk.h"
 #include "../src/lostfiles/vshadow.h"
 
@@ -1635,9 +1636,77 @@ void lookCopies()
     report(right, QStringLiteral("look copies: documents, pictures and films open in their own program; programs, scripts and unknowns don't"));
 }
 
+// The viewer's messages: what's sent comes out the same, whole or in pieces, and anything else
+// is refused. And each kind of file is shown its own way.
+void viewerMessages()
+{
+    viewer::Message m;
+    m.type = viewer::Message::ShowFile;
+    m.show.kind = viewer::Kind::Pdf;
+    m.show.type = filetypes::typeForName(QStringLiteral("letter.pdf"));
+    m.show.path = QStringLiteral("/tmp/x/3/letter.pdf");
+    m.show.name = QStringLiteral("letter.pdf");
+    m.show.where = QStringLiteral("3 of 12");
+    m.show.facts = {QStringLiteral("Created\tyesterday"), QStringLiteral("Author\tDanny")};
+    m.show.next = true;
+    m.show.openable = true;
+    viewer::Message ask;
+    ask.type = viewer::Message::AskFor;
+    ask.ask = viewer::Ask::Next;
+    QByteArray stream = viewer::encode(m) + viewer::encode(ask);
+    QByteArray piece;
+    QVector<viewer::Message> got;
+    bool bad = false;
+    for (const char c : std::as_const(stream)) { // a byte at a time, the slowest a pipe can be
+        piece += c;
+        viewer::Message out;
+        while (viewer::decode(piece, out, &bad))
+            got << out;
+    }
+    report(got.size() == 2 && !bad && got[0].show.path == m.show.path && got[0].show.facts == m.show.facts && got[0].show.where == m.show.where
+               && got[0].show.next && !got[0].show.previous && got[0].show.openable && got[0].show.kind == viewer::Kind::Pdf
+               && got[1].ask == viewer::Ask::Next,
+           QStringLiteral("viewer: its messages come out as they went in, even a byte at a time"));
+    QByteArray junk("\x00\x00\x00\x01 not a message at all", 30);
+    viewer::Message out;
+    report(!viewer::decode(junk, out, &bad) && bad, QStringLiteral("viewer: anything else is refused"));
+    QRandomGenerator random(7);
+    for (int round = 0; round < 2000; ++round) {
+        QByteArray damaged = viewer::encode(m);
+        damaged[int(random.bounded(quint32(damaged.size())))] = char(random.bounded(256));
+        while (viewer::decode(damaged, out, &bad)) {}
+    }
+    report(true, QStringLiteral("viewer: 2000 damaged messages read without a crash"));
+    // The preview helper's answers are read the same careful way: it handles hostile files too.
+    preview::Result said;
+    said.text = QStringLiteral("3 pages");
+    said.facts = {QStringLiteral("Title\tBank letter"), QStringLiteral("Author\tDanny")};
+    QByteArray answer;
+    {
+        QBuffer buffer(&answer);
+        buffer.open(QIODevice::WriteOnly);
+        preview::write(buffer, said);
+    }
+    for (int round = 0; round < 2000; ++round) {
+        QByteArray damaged = answer;
+        damaged[8 + int(random.bounded(quint32(damaged.size() - 8)))] = char(random.bounded(256));
+        QBuffer buffer(&damaged);
+        buffer.open(QIODevice::ReadOnly);
+        preview::Result back;
+        preview::read(buffer, back, 100);
+    }
+    report(true, QStringLiteral("previews: 2000 damaged answers from the helper read without a crash"));
+    const auto kind = [](const char *name) { return viewer::kindFor(filetypes::typeForName(QString::fromLatin1(name)), QString::fromLatin1(name)); };
+    report(kind("a.jpg") == viewer::Kind::Picture && kind("b.pdf") == viewer::Kind::Pdf && kind("c.mp4") == viewer::Kind::Film
+               && kind("d.mp3") == viewer::Kind::Song && kind("e.docx") == viewer::Kind::Words && kind("f.zip") == viewer::Kind::Words
+               && kind("notes.txt") == viewer::Kind::Words && kind("thing.bin") == viewer::Kind::Bytes,
+           QStringLiteral("viewer: pictures, PDFs, films, songs, documents, archives, text and the rest each get their own view"));
+}
+
 void lostFilesTests()
 {
     previewQueue();
+    viewerMessages();
     lookCopies();
     photoFacts();
     journal();

@@ -74,6 +74,25 @@ QString LookCopies::folderFor(quint64 size, QString *why)
     return {};
 }
 
+QStringList LookCopies::folders()
+{
+    // Asking for a small one makes the folder in memory (or the cache one where memory won't do),
+    // and a big one the other.
+    folderFor(0, nullptr);
+    if (!m_cache) {
+        const QString cache = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+        QDir().mkpath(cache);
+        if ((m_disk.isEmpty() || !blockio::pathIsOnDisk(cache, m_disk)) && !inMemory(QStorageInfo(cache)))
+            m_cache = std::make_unique<QTemporaryDir>(cache + QStringLiteral("/diskforge-look-XXXXXX"));
+    }
+    QStringList out;
+    for (const auto *dir : {m_memory.get(), m_cache.get(), m_picked.get()}) {
+        if (dir && dir->isValid())
+            out << dir->path();
+    }
+    return out;
+}
+
 bool LookCopies::setFolder(const QString &folder, QString *why)
 {
     if (!m_disk.isEmpty() && blockio::pathIsOnDisk(folder, m_disk)) {

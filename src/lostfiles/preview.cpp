@@ -163,6 +163,30 @@ void writeMessage(QIODevice &to, const QByteArray &body)
 
 } // namespace
 
+void writeStrings(QDataStream &to, const QStringList &list)
+{
+    to << quint32(list.size());
+    for (const QString &item : list)
+        to << item;
+}
+
+bool readStrings(QDataStream &from, QStringList &list, quint32 most)
+{
+    list.clear();
+    quint32 n = 0;
+    from >> n;
+    if (n > most) {
+        from.setStatus(QDataStream::ReadCorruptData);
+        return false;
+    }
+    for (quint32 i = 0; i < n && from.status() == QDataStream::Ok; ++i) {
+        QString item;
+        from >> item; // Qt reads a string's length in steps, so a damaged one can't ask for gigabytes
+        list << item;
+    }
+    return from.status() == QDataStream::Ok;
+}
+
 void write(QIODevice &to, const Request &r)
 {
     QByteArray body;
@@ -194,7 +218,8 @@ void write(QIODevice &to, const Result &r)
         buffer.open(QIODevice::WriteOnly);
         r.image.save(&buffer, "PNG");
     }
-    s << png << r.text << r.facts;
+    s << png << r.text;
+    writeStrings(s, r.facts);
     writeMessage(to, body);
 }
 
@@ -205,7 +230,8 @@ bool read(QIODevice &from, Result &r, int msecs)
         return false;
     QDataStream s(body);
     QByteArray png;
-    s >> png >> r.text >> r.facts;
+    s >> png >> r.text;
+    readStrings(s, r.facts);
     if (!png.isEmpty())
         r.image.loadFromData(png, "PNG");
     return s.status() == QDataStream::Ok;

@@ -50,6 +50,12 @@ bool read(QIODevice &from, Request &request, int msecs = -1);
 void write(QIODevice &to, const Result &result);
 bool read(QIODevice &from, Result &result, int msecs = -1);
 
+// A list of words, read one at a time, so a damaged or made-up count can't ask for more memory
+// than the message holds (Qt's own reading of a list reserves room for the count first). The
+// helpers that send these handle files that may be hostile; what they send is read this way.
+void writeStrings(QDataStream &to, const QStringList &list);
+bool readStrings(QDataStream &from, QStringList &list, quint32 most = 10000);
+
 // How much of a file is handed to the helper: all of it up to this, or the start of a bigger one.
 constexpr qint64 kMostData = 64 * 1024 * 1024;
 // A PDF says where its pages are at its very end, so a bigger one (a scanned book) is handed

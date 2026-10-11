@@ -13,6 +13,7 @@
 #include "lookcopies.h"
 #include "lostfs.h"
 #include "previewloader.h"
+#include "viewer.h"
 #include "udisks.h"
 #include "vdisk.h"
 
@@ -44,6 +45,7 @@
 #include <QPainter>
 #include <QPlainTextEdit>
 #include <QProgressBar>
+#include <QProcess>
 #include <QProgressDialog>
 #include <QPushButton>
 #include <QScreen>
@@ -651,6 +653,13 @@ LostFilesDialog::LostFilesDialog(UDisks *udisks, const QString &preferredPath, Q
     m_previewImage->installEventFilter(this);
     m_previewImage->setObjectName(QStringLiteral("preview"));
     previewLayout->addWidget(m_previewImage, 1);
+    // The whole file, before saving it: pictures to zoom into, every page, films that play.
+    m_viewButton = new QPushButton(QIcon::fromTheme(QStringLiteral("document-preview")), tr("View…"));
+    m_viewButton->setObjectName(QStringLiteral("view"));
+    m_viewButton->setAutoDefault(false);
+    m_viewButton->setToolTip(tr("See all of it before saving it (double-click a file, or Enter, does the same)"));
+    m_viewButton->setEnabled(false);
+    previewLayout->addWidget(m_viewButton, 0, Qt::AlignLeft);
     m_details->setWordWrap(true);
     m_details->setTextFormat(Qt::RichText);
     m_details->setObjectName(QStringLiteral("details"));
@@ -750,6 +759,9 @@ LostFilesDialog::LostFilesDialog(UDisks *udisks, const QString &preferredPath, Q
     connect(m_hideSaved, &QPushButton::clicked, m_saveStrip, &QWidget::hide);
     connect(m_openFolder, &QPushButton::clicked, this, [this] { QDesktopServices::openUrl(QUrl::fromLocalFile(m_savedTo)); });
     connect(m_view, &QWidget::customContextMenuRequested, this, &LostFilesDialog::showFilesMenu);
+    connect(m_view, &QAbstractItemView::doubleClicked, this, [this](const QModelIndex &index) { openViewer(m_model->fileIndex(index.row())); });
+    m_view->installEventFilter(this);
+    connect(m_viewButton, &QPushButton::clicked, this, [this] { openViewer(m_previewIndex); });
     m_previewResize = new QTimer(this);
     m_previewResize->setSingleShot(true);
     m_previewResize->setInterval(200);
@@ -811,6 +823,7 @@ void LostFilesDialog::placeWindow()
 
 void LostFilesDialog::stopWorkers()
 {
+    stopViewer();
     if (m_quick)
         m_quick->cancel();
     if (m_scan)
@@ -949,6 +962,8 @@ void LostFilesDialog::scanSource(std::shared_ptr<lost::Source> source, const QSt
     m_title = title;
     m_diskDevice = diskDevice;
     m_model->clear();
+    m_facts.clear();
+    m_viewerIndex = -1;
     m_previewIndex = -1;
     m_previewImage->clear();
     m_details->clear();
@@ -1308,23 +1323,8 @@ void LostFilesDialog::showPreview()
     html += QStringLiteral("<br><br><span style=\"color:%1\">●</span> %2").arg(colour.name(), conditionWords(f).toHtmlEscaped());
     if (!f.note.isEmpty())
         html += QStringLiteral("<br>") + f.note.toHtmlEscaped();
-    // The times the file system kept: FAT keeps only the day it was last opened.
-    const auto when = [](qint64 ms, bool dayOnly = false) {
-        const QDateTime t = QDateTime::fromMSecsSinceEpoch(ms);
-        return dayOnly ? QLocale().toString(t.date(), QLocale::LongFormat)
-                       : QLocale().toString(t.date(), QLocale::LongFormat) + QStringLiteral(", ") + QLocale().toString(t.time(), QLocale::ShortFormat);
-    };
-    QVector<QPair<QString, QString>> times;
-    if (f.created > 0)
-        times.append({tr("Created"), when(f.created)});
-    if (f.modified > 0)
-        times.append({tr("Changed"), when(f.modified)});
-    if (f.accessed > 0)
-        times.append({tr("Last opened"), when(f.accessed, f.accessedDayOnly)});
-    if (f.changed > 0 && f.changed != f.modified)
-        times.append({tr("Its entry changed"), when(f.changed)});
-    if (f.deletedAt > 0)
-        times.append({tr("Deleted"), when(f.deletedAt)});
+    const QVector<QPair<QString, QString>> times = driveTimes(f);
+    m_viewButton->setEnabled(!f.nameOnly);
     if (!times.isEmpty())
         html += QStringLiteral("<br><br><b>%1</b>").arg(tr("On the drive")) + detailsTable(times);
     m_detailsHtml = html;
@@ -1370,6 +1370,13 @@ bool LostFilesDialog::eventFilter(QObject *watched, QEvent *event)
 {
     if (watched == m_previewImage && event->type() == QEvent::Resize && m_previewResize)
         m_previewResize->start();
+    if (watched == m_view && event->type() == QEvent::KeyPress) {
+        const int key = static_cast<QKeyEvent *>(event)->key();
+        if ((key == Qt::Key_Return || key == Qt::Key_Enter) && m_view->currentIndex().isValid()) {
+            openViewer(m_model->fileIndex(m_view->currentIndex().row()));
+            return true;
+        }
+    }
     if (watched == m_view->viewport()) {
         // A press on a picked file, then a move: that's a drag out. Elsewhere the view picks.
         if (event->type() == QEvent::MouseButtonPress) {
@@ -1449,6 +1456,181 @@ void LostFilesDialog::openInProgram(int index)
         QMessageBox::information(this, windowTitle(), tr("There's no program on this computer for that kind of file."));
 }
 
+void LostFilesDialog::openViewer(int index)
+{
+    if (index < 0 || index >= m_model->fileCount() || m_model->file(index).nameOnly)
+        return;
+    if (!m_viewer)
+        startViewer();
+    viewerShow(index);
+}
+
+void LostFilesDialog::startViewer()
+{
+    if (!m_looks)
+        m_looks = std::make_unique<lost::LookCopies>(m_diskDevice);
+    m_viewerReadable = m_looks->folders();
+    m_viewerReady = false;
+    m_viewerHeard.clear();
+    m_viewerWaiting.clear();
+    auto *process = new QProcess(this);
+    m_viewer = process;
+    process->setProcessChannelMode(QProcess::ForwardedErrorChannel);
+    connect(process, &QProcess::readyReadStandardOutput, this, [this, process] { viewerSaid(process->readAllStandardOutput()); });
+    connect(process, &QProcess::finished, this, [this, process] {
+        process->deleteLater();
+        if (process != m_viewer)
+            return;
+        const bool neverStarted = !m_viewerReady;
+        m_viewer = nullptr;
+        m_viewerReady = false;
+        // The sandbox didn't work here (some systems don't allow one): it runs without.
+        if (neverStarted && m_viewerSandboxed && m_viewerIndex >= 0) {
+            qCInfo(lcOps).noquote() << "Find Lost Files: the viewer couldn't start in its sandbox here; it runs without one";
+            m_viewerSandboxed = false;
+            openViewer(m_viewerIndex);
+        } else {
+            m_viewerIndex = -1;
+        }
+    });
+    const QStringList command = viewer::command(m_viewerSandboxed, m_viewerReadable);
+    process->start(command.first(), command.mid(1));
+    // It looks like DiskForge does.
+    viewer::Message look;
+    look.type = viewer::Message::Look;
+    look.style = QApplication::style()->name();
+    look.palette = QApplication::palette();
+    sendToViewer(viewer::encode(look));
+    // A sandbox that hangs rather than failing is given up on after a while, the same way.
+    QTimer::singleShot(15000, process, [this, process] {
+        if (process == m_viewer && !m_viewerReady)
+            process->kill();
+    });
+}
+
+void LostFilesDialog::stopViewer()
+{
+    if (!m_viewer)
+        return;
+    QProcess *process = m_viewer;
+    m_viewer = nullptr;
+    m_viewerReady = false;
+    m_viewerIndex = -1;
+    m_viewerShown = -1;
+    process->disconnect(this);
+    // With nothing more to read, it closes by itself.
+    process->closeWriteChannel();
+    if (!process->waitForFinished(1500)) {
+        process->kill();
+        process->waitForFinished(1000);
+    }
+    process->deleteLater();
+}
+
+void LostFilesDialog::sendToViewer(const QByteArray &message)
+{
+    if (m_viewer && m_viewerReady)
+        m_viewer->write(message);
+    else
+        m_viewerWaiting << message;
+}
+
+void LostFilesDialog::viewerSaid(const QByteArray &said)
+{
+    m_viewerHeard += said;
+    viewer::Message m;
+    bool bad = false;
+    while (viewer::decode(m_viewerHeard, m, &bad)) {
+        if (m.type != viewer::Message::AskFor)
+            continue;
+        switch (m.ask) {
+        case viewer::Ask::Ready:
+            m_viewerReady = true;
+            for (const QByteArray &waiting : std::as_const(m_viewerWaiting))
+                m_viewer->write(waiting);
+            m_viewerWaiting.clear();
+            break;
+        case viewer::Ask::Previous:
+        case viewer::Ask::Next: {
+            const int to = neighbour(m_viewerIndex, m.ask == viewer::Ask::Next ? 1 : -1);
+            if (to < 0)
+                break;
+            // The list here follows, so its preview and details are the same file.
+            const QModelIndex row = m_model->index(m_model->rowOf(to));
+            m_view->setCurrentIndex(row);
+            m_view->scrollTo(row);
+            viewerShow(to);
+            break;
+        }
+        case viewer::Ask::Save:
+            if (m_viewerIndex >= 0 && !m_saving && !m_scanning) {
+                raise();
+                activateWindow();
+                const int index = m_viewerIndex;
+                const QString start = m_savedTo.isEmpty() ? QStandardPaths::writableLocation(QStandardPaths::HomeLocation)
+                                                          : QFileInfo(m_savedTo).absolutePath();
+                const QString folder = QFileDialog::getExistingDirectory(this, tr("Save \"%1\" Where?").arg(m_model->file(index).name), start);
+                if (!folder.isEmpty())
+                    saveFiles({index}, folder);
+            }
+            break;
+        case viewer::Ask::Open:
+            if (m_viewerIndex >= 0)
+                openInProgram(m_viewerIndex);
+            break;
+        case viewer::Ask::Shown:
+            m_viewerShown = m_viewerIndex;
+            break;
+        }
+    }
+    if (bad)
+        stopViewer();
+}
+
+void LostFilesDialog::viewerShow(int index)
+{
+    const lost::Found &f = m_model->file(index);
+    const QString copy = lookCopy(index);
+    if (copy.isEmpty())
+        return;
+    // A copy where its sandbox can't see it (a folder picked since it started): it starts again.
+    const bool seen = std::any_of(m_viewerReadable.cbegin(), m_viewerReadable.cend(),
+                                  [&copy](const QString &folder) { return copy.startsWith(folder + QLatin1Char('/')); });
+    if (!seen && m_viewer) {
+        stopViewer();
+        startViewer();
+    }
+    if (!m_viewer)
+        startViewer();
+    viewer::Message m;
+    m.type = viewer::Message::ShowFile;
+    m.show.kind = viewer::kindFor(f.type, f.name);
+    m.show.type = f.type;
+    m.show.path = copy;
+    m.show.name = f.name;
+    const int row = m_model->rowOf(index);
+    m.show.where = row >= 0 ? tr("%1 of %2").arg(row + 1).arg(m_model->rowCount()) : QString();
+    m.show.previous = neighbour(index, -1) >= 0;
+    m.show.next = neighbour(index, 1) >= 0;
+    m.show.openable = lost::LookCopies::safeToOpen(f.name);
+    m.show.facts = factsFor(index);
+    m_viewerIndex = index;
+    sendToViewer(viewer::encode(m));
+}
+
+int LostFilesDialog::neighbour(int index, int step) const
+{
+    const int row = m_model->rowOf(index);
+    if (row < 0)
+        return -1;
+    for (int r = row + step; r >= 0 && r < m_model->rowCount(); r += step) {
+        const int i = m_model->fileIndex(r);
+        if (i >= 0 && !m_model->file(i).nameOnly)
+            return i;
+    }
+    return -1;
+}
+
 bool LostFilesDialog::sourceMounted() const
 {
     for (const Disk &d : m_udisks->disks()) {
@@ -1507,6 +1689,44 @@ void LostFilesDialog::dragOut()
     drag->exec(Qt::CopyAction, Qt::CopyAction);
 }
 
+// The times the file system kept: FAT keeps only the day it was last opened.
+QVector<QPair<QString, QString>> LostFilesDialog::driveTimes(const lost::Found &f) const
+{
+    const auto when = [](qint64 ms, bool dayOnly = false) {
+        const QDateTime t = QDateTime::fromMSecsSinceEpoch(ms);
+        return dayOnly ? QLocale().toString(t.date(), QLocale::LongFormat)
+                       : QLocale().toString(t.date(), QLocale::LongFormat) + QStringLiteral(", ") + QLocale().toString(t.time(), QLocale::ShortFormat);
+    };
+    QVector<QPair<QString, QString>> times;
+    if (f.created > 0)
+        times.append({tr("Created"), when(f.created)});
+    if (f.modified > 0)
+        times.append({tr("Changed"), when(f.modified)});
+    if (f.accessed > 0)
+        times.append({tr("Last opened"), when(f.accessed, f.accessedDayOnly)});
+    if (f.changed > 0 && f.changed != f.modified)
+        times.append({tr("Its entry changed"), when(f.changed)});
+    if (f.deletedAt > 0)
+        times.append({tr("Deleted"), when(f.deletedAt)});
+    return times;
+}
+
+QStringList LostFilesDialog::factsFor(int index) const
+{
+    const lost::Found &f = m_model->file(index);
+    QStringList facts;
+    facts << tr("Size") + QLatin1Char('\t') + (f.nameOnly ? tr("not known") : formatSize(f.size));
+    if (f.origin == lost::Origin::FileSystem)
+        facts << (f.deleted ? tr("Was in") : tr("In")) + QLatin1Char('\t') + f.folder;
+    for (const auto &[label, value] : driveTimes(f))
+        facts << label + QLatin1Char('\t') + value;
+    if (const QString saved = m_model->savedTo(index); !saved.isEmpty())
+        facts << tr("Saved to") + QLatin1Char('\t') + saved;
+    // What the file itself said, once its preview did.
+    facts << m_facts.value(index);
+    return facts;
+}
+
 QString LostFilesDialog::detailsTable(const QVector<QPair<QString, QString>> &rows) const
 {
     const QString quiet = palette().color(QPalette::PlaceholderText).name();
@@ -1519,7 +1739,15 @@ QString LostFilesDialog::detailsTable(const QVector<QPair<QString, QString>> &ro
 
 void LostFilesDialog::showPreviewResult(const QImage &image, const QString &text, const QStringList &facts, bool failed)
 {
-    // What the file says about itself, under what the drive said.
+    // What the file says about itself, under what the drive said (and in the viewer, when it
+    // shows this one).
+    m_facts.insert(m_previewIndex, facts);
+    if (m_viewer && m_viewerIndex == m_previewIndex) {
+        viewer::Message m;
+        m.type = viewer::Message::Facts;
+        m.show.facts = factsFor(m_previewIndex);
+        sendToViewer(viewer::encode(m));
+    }
     if (!facts.isEmpty()) {
         QVector<QPair<QString, QString>> rows;
         for (const QString &fact : facts)
@@ -1612,6 +1840,11 @@ void LostFilesDialog::showFilesMenu(const QPoint &at)
     QMenu menu(this);
     if (picked.size() == 1) {
         const int one = picked.first();
+        QAction *view = menu.addAction(QIcon::fromTheme(QStringLiteral("document-preview")), tr("View"));
+        QFont bold = view->font();
+        bold.setBold(true);
+        view->setFont(bold);
+        connect(view, &QAction::triggered, this, [this, one] { openViewer(one); });
         QAction *open = menu.addAction(QIcon::fromTheme(QStringLiteral("document-open")), tr("Open in Its Own Program"));
         if (!lost::LookCopies::safeToOpen(m_model->file(one).name))
             open->setToolTip(tr("Programs and scripts aren't opened: they could run"));

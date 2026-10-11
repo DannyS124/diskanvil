@@ -138,6 +138,7 @@ add_library(diskforge-ui STATIC
     src/lostfiles/lostfilesdialog.cpp src/lostfiles/lostfilesdialog.h
     src/lostfiles/preview.cpp src/lostfiles/preview.h
     src/lostfiles/previewloader.cpp src/lostfiles/previewloader.h
+    src/lostfiles/viewer.cpp src/lostfiles/viewer.h
     src/app/mainwindow.cpp src/app/mainwindow.h
     src/app/dialogs.cpp src/app/dialogs.h
     src/app/tools.cpp src/app/tools.h
@@ -185,6 +186,17 @@ if(DISKFORGE_PDF)
         target_compile_definitions(diskforge-ui PRIVATE DISKFORGE_PDF)
     else()
         message(STATUS "poppler-qt6 not found: Find Lost Files shows PDFs without their pages")
+    endif()
+endif()
+# Films and songs that play in Find Lost Files' viewer, when Qt Multimedia is there (releases have it).
+option(DISKFORGE_MEDIA "Play films and songs in Find Lost Files' viewer (needs Qt Multimedia)" ON)
+if(DISKFORGE_MEDIA)
+    find_package(Qt6 6.8 QUIET COMPONENTS Multimedia MultimediaWidgets)
+    if(Qt6Multimedia_FOUND AND Qt6MultimediaWidgets_FOUND)
+        target_link_libraries(diskforge-ui PRIVATE Qt6::Multimedia Qt6::MultimediaWidgets)
+        target_compile_definitions(diskforge-ui PRIVATE DISKFORGE_MEDIA)
+    else()
+        message(STATUS "Qt Multimedia not found: Find Lost Files' viewer shows films' details without playing them")
     endif()
 endif()
 if(WIN32)

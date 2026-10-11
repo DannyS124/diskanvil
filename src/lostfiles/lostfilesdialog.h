@@ -21,6 +21,7 @@ class QListView;
 class QListWidget;
 class QPlainTextEdit;
 class QProgressBar;
+class QProcess;
 class QPushButton;
 class QSplitter;
 class QStackedWidget;
@@ -60,6 +61,7 @@ public:
     const lost::Found &file(int index) const { return m_files[index]; }
     int fileCount() const { return int(m_files.size()); }
     int fileIndex(int row) const { return m_shown.value(row, -1); }
+    int rowOf(int index) const { return int(m_shown.indexOf(index)); } // -1 when it isn't shown
     int count(int category) const; // how many of a kind were found
     void setThumbnail(int index, const QPixmap &thumbnail);
     // Its thumbnail was never made (the request was let go): ask again when it's shown.
@@ -154,6 +156,27 @@ private:
     void openInProgram(int index);
     void dragOut();
     bool sourceMounted() const;
+    // The viewer (viewer.h), a program of its own: started for the first file to view, then
+    // handed the next ones.
+    void openViewer(int index);
+    void viewerShow(int index);
+    void startViewer();
+    void stopViewer();
+    void sendToViewer(const QByteArray &message);
+    void viewerSaid(const QByteArray &said);
+    // The next or previous file in the list that has something to show, -1 when there's none.
+    int neighbour(int index, int step) const;
+    // The times the file system kept, as "label", "value" rows.
+    QVector<QPair<QString, QString>> driveTimes(const lost::Found &f) const;
+    QStringList factsFor(int index) const;
+
+public:
+    // For the tests: whether the viewer is running and has said it's ready, and what it shows.
+    bool viewerReady() const { return m_viewerReady; }
+    int viewerIndex() const { return m_viewerIndex; }
+    int viewerShown() const { return m_viewerShown; } // the file it said it has on the screen, -1 for none
+
+private:
     // Sized for the screen it opens on, or as it was left last time.
     void placeWindow();
     // How big a preview to ask for: as big as the room for it, within limits.
@@ -191,6 +214,16 @@ private:
     bool m_placed = false;
     std::unique_ptr<lost::LookCopies> m_looks;
     QPoint m_dragFrom;       // where a press on a picked file was, to drag it out from
+    QPushButton *m_viewButton = nullptr;
+    QProcess *m_viewer = nullptr;
+    QByteArray m_viewerHeard;        // what it said that isn't read yet
+    QList<QByteArray> m_viewerWaiting; // for it, until it's ready
+    QStringList m_viewerReadable;    // the folders its sandbox may read
+    bool m_viewerReady = false;
+    bool m_viewerSandboxed = true;   // false once the sandbox turned out not to work here
+    int m_viewerIndex = -1;
+    int m_viewerShown = -1;
+    QHash<int, QStringList> m_facts; // what each file said about itself, once its preview did
     bool m_warnedDrop = false;
     QWidget *m_copiesBar = nullptr;
     QLabel *m_copiesText = nullptr;

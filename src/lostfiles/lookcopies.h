@@ -12,6 +12,7 @@
 
 #include <QHash>
 #include <QString>
+#include <QStringList>
 
 #include <functional>
 #include <memory>
@@ -39,6 +40,9 @@ public:
     // called as it goes, and returning false from it stops it.
     QString make(const std::shared_ptr<Source> &source, const Found &f, int index, QString *why,
                  const std::function<bool(quint64 done, quint64 total)> &progress = {});
+    // The folders copies can go in, made now where they can be (the viewer's sandbox is told
+    // which ones it may read before it starts).
+    QStringList folders();
     // The copy made of that file, if there is one.
     QString made(int index) const { return m_made.value(index); }
 
