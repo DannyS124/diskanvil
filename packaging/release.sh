@@ -40,6 +40,8 @@ v="${2:-}"
 [[ -n "$v" ]] || die "usage: release.sh --stage|--publish|--pull|--aur <version>"
 stage="$root/packaging/staging/$v"
 rescue_iso="diskforge-live-$v.iso"
+win_msi="DiskForge-$v.msi"
+win_zip="DiskForge-$v-windows.zip"
 tarball="diskforge-$v.tar.gz"
 pkg="diskforge-$v-1-$(uname -m).pkg.tar.zst"
 tmp=$(mktemp -d)
@@ -151,6 +153,19 @@ case "$cmd" in
     cp "$iso" "$stage/$rescue_iso"
     (cd "$stage" && sha256sum "$rescue_iso" > "$rescue_iso.sha256")
 
+    # The Windows version, from the same source: its installer, and a zip to run it from a
+    # folder. Only where its cross-compiler is set up (see packaging/windows/build.sh); point
+    # DISKFORGE_WINDOWS_WORK at the folder it downloads into.
+    if command -v x86_64-w64-mingw32-g++ >/dev/null && command -v wixl >/dev/null; then
+        echo "==> building the Windows version $v"
+        win_work=$(realpath -m "${DISKFORGE_WINDOWS_WORK:-$HOME/.cache/diskforge-windows}")
+        packaging/windows/build.sh "$win_work" >"$logs/windows.log" 2>&1 || { tail -20 "$logs/windows.log"; die "the Windows version didn't build (full log: $logs/windows.log)"; }
+        cp "$win_work/$win_msi" "$win_work/$win_zip" "$stage/"
+        (cd "$stage" && sha256sum "$win_msi" "$win_zip" > SHA256SUMS-windows)
+    else
+        echo "==> no MinGW-w64 or msitools here, so no Windows version this time"
+    fi
+
     cat <<EOF
 ==> $v is staged in packaging/staging/$v. Nothing is on GitHub yet.
 
@@ -171,6 +186,20 @@ files" (and persistence), Make a Windows USB, and Make a DiskForge Live USB with
 packaging/staging/$v/$rescue_iso. Start a PC (or a VM) from the DiskForge Live stick, UEFI and an old
 BIOS one if you have it, and look at its logs. Find Lost Files on a stick with a few deleted pictures,
 saving them onto another drive.
+Newer things: Find Lost Files on a FAT, exFAT and NTFS stick where you deleted some files and folders
+(they should come back with their names), on a virtual machine's disk (File > Find Lost Files in a Disk
+Image), and its previews of a PDF, a document, a song and a film. Scan for Viruses on a stick with the
+EICAR test file on it (harmless, from eicar.org) and on your own drives. Give New IDs on a stick you
+cloned. A SATA drive's settings and self-test history in Disk Health and Properties.
+EOF
+    if [[ -f "$stage/$win_msi" ]]; then
+        cat <<EOF
+Windows, on a PC or in a VM: install packaging/staging/$v/$win_msi. It isn't signed, so SmartScreen
+warns (More info > Run anyway) and the admin prompt says the publisher is unknown. The zip next to it
+runs without installing.
+EOF
+    fi
+    cat <<EOF
 
 All good:  packaging/release.sh --publish $v
 Problem:   fix it, commit, and run --stage $v again
@@ -185,11 +214,15 @@ EOF
     git archive --format=tar.gz --prefix="diskforge-$v/" -o "$tmp/$tarball" "v$v"
     cmp -s "$tmp/$tarball" "$stage/$tarball" || die "the staged file doesn't match tag v$v, run --stage $v again"
     hash=$(cut -d' ' -f1 "$stage/SHA256SUMS")
+    windows=()
+    if [[ -f "$stage/$win_msi" ]]; then
+        windows=("$stage/$win_msi" "$stage/$win_zip" "$stage/SHA256SUMS-windows")
+    fi
     notes=$(awk -v h="## $v" '$0 == h {on=1; next} /^## / {on=0} on' CHANGELOG.md)
 
     git push -q
     git push -q origin "v$v"
-    gh release create "v$v" "$stage/$tarball" "$stage/SHA256SUMS" "$stage/$rescue_iso" "$stage/$rescue_iso.sha256" \
+    gh release create "v$v" "$stage/$tarball" "$stage/SHA256SUMS" "$stage/$rescue_iso" "$stage/$rescue_iso.sha256" "${windows[@]}" \
         -R "$repo" --verify-tag --latest \
         --title "DiskForge $v" --notes "$notes
 

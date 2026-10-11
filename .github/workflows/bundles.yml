@@ -51,7 +51,7 @@ jobs:
       - name: Build
         run: |
           sudo apt-get update
-          sudo apt-get install -y libzstd-dev libssl-dev libblkid-dev libarchive-dev pkg-config ninja-build desktop-file-utils
+          sudo apt-get install -y libzstd-dev libssl-dev libblkid-dev libarchive-dev zlib1g-dev pkg-config ninja-build desktop-file-utils
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr \
             -DDISKFORGE_SELFTEST=OFF -DDISKFORGE_SYSTEMD_UNIT=OFF
           cmake --build build
