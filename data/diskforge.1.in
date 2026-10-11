@@ -41,10 +41,14 @@ Open just one tool, without the main window:
 .BR write-image ,
 .BR windows-usb ,
 .BR rescue-usb ,
-.B check-stick
+.BR check-stick ,
+.B lost-files
 or
-.BR lost-files .
+.BR virus-scan .
 DiskForge closes when the tool is closed.
+.TP
+.B \-\-home
+Be DiskForge Live's home screen, the desktop with the big tiles.
 .TP
 .BI \-\-log " file"
 Write what DiskForge does to

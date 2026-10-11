@@ -297,8 +297,10 @@ void MainWindow::createActions()
     });
     m_findFilesImage = new QAction(themeIcon("diskforge-live-recover", "edit-find"), tr("Find Lost &Files in a Disk Image…"), this);
     connect(m_findFilesImage, &QAction::triggered, this, [this] {
-        const QString file = QFileDialog::getOpenFileName(this, tr("Find Lost Files in a Disk Image"), QDir::homePath(),
-                                                          tr("Disk images (*.img *.iso *.raw *.dd *.bin);;All files (*)"));
+        const QString file = QFileDialog::getOpenFileName(
+            this, tr("Find Lost Files in a Disk Image"), QDir::homePath(),
+            tr("Disk images (*.img *.iso *.raw *.dd *.bin *.vdi *.vmdk *.vhd *.vhdx *.qcow2);;Virtual machines' disks (*.vdi *.vmdk *.vhd *.vhdx "
+               "*.qcow2);;All files (*)"));
         if (file.isEmpty())
             return;
         LostFilesDialog dialog(m_udisks, QString(), this);
@@ -1256,7 +1258,9 @@ void MainWindow::updateActions()
     // BitLocker's password changes while it's unlocked; Windows' own drive uses the TPM.
     m_changePass->setEnabled(changeable && v && v->encrypted && !v->cleartextPath.isEmpty() && !v->isSystem);
 #else
-    m_changePass->setEnabled(changeable && v && v->encrypted);
+    // UDisks changes LUKS passphrases; a BitLocker password only Windows can change.
+    const bool bitLocker = v && v->fsType == QLatin1String("BitLocker");
+    m_changePass->setEnabled(changeable && v && v->encrypted && !bitLocker);
 #endif
     m_newPartition->setEnabled(tableChangeable && kind == DiskMap::Selection::Kind::Free && !d->tableType.isEmpty());
     m_format->setEnabled(tableChangeable && v && !v->isContainer);
@@ -1326,6 +1330,10 @@ void MainWindow::updateActions()
         m_health->setToolTip(tr("This drive doesn't report health data"));
     if (v && v->encrypted && !m_startup->isEnabled() && why.isEmpty())
         m_startup->setToolTip(tr("Encrypted drives can't mount at startup yet"));
+#ifndef Q_OS_WIN
+    if (bitLocker && why.isEmpty())
+        m_changePass->setToolTip(tr("Only Windows can change a BitLocker password"));
+#endif
     // In DiskForge Live these would only change the system in memory, which starts fresh.
     if (rescue::runningInRescue()) {
         for (QAction *a : {m_startup, m_cleanup, m_snapshots}) {
