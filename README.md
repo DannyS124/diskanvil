@@ -9,6 +9,13 @@ made this. It does the everyday stuff, but also the things you need when a drive
 are gone. It never runs as root: changes go through udisks2 with the normal password prompt, and the drive your
 system runs from is locked so you can't format it by accident.
 
+
+## Support
+DiskForge is free and it's staying free. If it got your files back or saved you a trip to the computer shop and you
+want to say thanks, you can buy me a coffee on Ko-fi. It helps me keep working on it.
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/K0C528JI83)
+
 ![DiskForge](docs/screenshot.png)
 
 ## What it does
@@ -181,11 +188,7 @@ cmake --build build
 `sudo ./build/diskforge-selftest` runs every operation on a throwaway disk image, so you can test changes without
 touching a real drive. `packaging/release.sh` lists the other test suites.
 
-## Support
-DiskForge is free and it's staying free. If it got your files back or saved you a trip to the computer shop and you
-want to say thanks, you can buy me a coffee on Ko-fi. It helps me keep working on it.
 
-[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/K0C528JI83)
 
 ## License
 GPL-3.0-or-later (0.3.0 and 0.4.0 were MIT).
