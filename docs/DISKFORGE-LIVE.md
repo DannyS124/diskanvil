@@ -5,7 +5,7 @@ for when the PC's own system won't start, when a drive is dying and you don't wa
 someone's Windows PC and you'd rather not install anything on it.
 
 It opens on a home screen with big tiles for the usual jobs: drives and partitions, getting deleted files back,
-TestDisk for lost partitions, and the USB stick tools. The everyday programs are under them (files, browser,
+scanning for viruses, TestDisk for lost partitions, and the USB stick tools. The everyday programs are under them (files, browser,
 terminal, task manager, text editor), and a strip at the top says if Secure Boot is on, if there's internet and
 how many drives it found. PhotoRec is in the start menu, and the boot menu has memtest86+.
 
@@ -58,12 +58,20 @@ Every start leaves a folder in `logs/` on the stick, named by date, time and the
 | `network.txt` | NetworkManager and addresses |
 | `desktop.log`, `Xorg.0.log` | the desktop starting up, or why it didn't |
 | `diskforge.log` | what DiskForge did (`--log`) |
+| `virus-scan.log` | what Scan for Viruses deleted, switched off or put back |
 
 They're saved a couple of minutes after starting, every 3 minutes after that, when shutting down, and when
 you click Save Logs. The stick is only writable for the moment they're copied, so pulling it out at the
 wrong time is unlikely to break it. The 30 newest are kept.
 
 The logs have the PC's and the drives' serial numbers in them. Look before posting them somewhere public.
+
+## The virus list
+Scan for Viruses uses ClamAV, and ClamAV needs its list of known malware, about 250 MB. The first time, the scan
+window offers to download it (it needs internet). DiskForge Live keeps it on the stick, in
+`diskforge-live/virus-signatures`, and loads it from there on the next start, so after that an update is only a small
+download. Like the logs, that only works on a stick made with Make a DiskForge Live USB: an ISO written with Rufus or
+dd can't be written to, so the list has to be downloaded again each time.
 
 When the ISO runs as a CD (a VM's CD drive) it can't write to itself. Two ways around that:
 - Plug in a stick made from the same ISO (in VMware: VM → Removable Devices → the stick → Connect). The

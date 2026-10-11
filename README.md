@@ -2,12 +2,12 @@
   <img src="data/io.github.DannyS124.DiskForge.svg" width="96" alt="DiskForge">
 </p>
 <h1 align="center">DiskForge</h1>
-<p align="center">A disk manager for Linux that looks and works like Windows Disk Management,<br>plus a rescue USB stick that can start any PC and fix its drives.</p>
+<p align="center">A disk manager for Linux and Windows that looks and works like Windows Disk Management,<br>plus a rescue USB stick that can start any PC and fix its drives.</p>
 
 I've been on Arch for a while and wanted something simple for managing drives without going to the terminal, so I
 made this. It does the everyday stuff, but also the things you need when a drive is dying, a stick is fake or files
 are gone. It never runs as root: changes go through udisks2 with the normal password prompt, and the drive your
-system runs from is locked so you can't format it by accident.
+system runs from is locked so you can't format it by accident. It runs on Windows too ([see below](#windows)).
 
 ![DiskForge](docs/screenshot.png)
 
@@ -18,7 +18,7 @@ system runs from is locked so you can't format it by accident.
 - <img src="docs/icons/format.svg" width="22" height="22" align="top" alt="">&nbsp; **Format**: exFAT, FAT32, NTFS, ext4, Btrfs and XFS, with encryption (LUKS) if you want it
 - <img src="docs/icons/resize.svg" width="22" height="22" align="top" alt="">&nbsp; **Partitions**: create, delete, resize and rename them, set their type and flags, and make new GPT or MBR tables
 - <img src="docs/icons/mount.svg" width="22" height="22" align="top" alt="">&nbsp; **Mounting**: mount, unmount and safely remove drives, or make one mount every time the PC starts
-- <img src="docs/icons/lock.svg" width="22" height="22" align="top" alt="">&nbsp; **Encryption**: unlock and lock encrypted partitions, and change their passphrase
+- <img src="docs/icons/lock.svg" width="22" height="22" align="top" alt="">&nbsp; **Encryption**: unlock and lock encrypted partitions, LUKS and BitLocker, and change a LUKS passphrase (a BitLocker password on Windows)
 - <img src="docs/icons/disc.svg" width="22" height="22" align="top" alt="">&nbsp; **Disk images**: open .iso and .img files like a drive
 
 What each file system supports:
@@ -36,13 +36,14 @@ What each file system supports:
 
 - <img src="docs/icons/health.svg" width="22" height="22" align="top" alt="">&nbsp; **Disk Health**: reads the drive's own health data (SATA and NVMe) and gives a plain verdict with every reason behind it, going by the numbers Backblaze's drive stats tie to failures. A bar at the top warns you when a drive starts going
 - <img src="docs/icons/badsectors.svg" width="22" height="22" align="top" alt="">&nbsp; **Scan for Bad Sectors**: reads every sector and draws a map (fine, slow, unreadable). Repair rewrites the unreadable blocks so the drive swaps in spare ones, and keeps everything around them
-- <img src="docs/icons/firmware.svg" width="22" height="22" align="top" alt="">&nbsp; **Firmware and self-tests**: runs the drive's own self-tests and checks for firmware updates through fwupd
+- <img src="docs/icons/firmware.svg" width="22" height="22" align="top" alt="">&nbsp; **Firmware and self-tests**: runs the drive's own self-tests (short, long, and conveyance on hard drives), lists the last ones, turns SMART on if it's off, and checks for firmware updates through fwupd
 - <img src="docs/icons/benchmark.svg" width="22" height="22" align="top" alt="">&nbsp; **Benchmark**: read speed on any drive, plus an optional write test with a temporary file
-- <img src="docs/icons/power.svg" width="22" height="22" align="top" alt="">&nbsp; **Power settings**: for hard drives: when to spin down, power saving, the write cache, and Sleep Now
+- <img src="docs/icons/settings.svg" width="22" height="22" align="top" alt="">&nbsp; **Drive settings**: power saving, the write cache and read-ahead for every SATA drive, SSDs too, plus spin-down, seek noise and Sleep Now for hard drives. DiskForge Live also finds a hidden area (HPA) at the end of a drive and can give that space back
 
 ### <img src="docs/icons/partitions.svg" width="28" height="28" align="top" alt="">&nbsp; Repair and rescue
 
-- <img src="docs/icons/findfiles.svg" width="22" height="22" align="top" alt="">&nbsp; **Find Lost Files**: gets deleted files back, or files off a drive that was formatted or won't open, by what's inside them. Thumbnails and a preview, each file says if it looks complete, and it only ever reads the drive it looks through
+- <img src="docs/icons/findfiles.svg" width="22" height="22" align="top" alt="">&nbsp; **Find Lost Files**: gets deleted files back with their names and folders from FAT, exFAT and NTFS (the Recycle Bin too), from Windows' earlier versions of a drive, and by what's inside them when a drive was formatted or won't open. It reads virtual machines' disks, previews pictures, PDFs, documents, music and films, says if each file looks complete, and only ever reads the drive it looks through
+- <img src="docs/icons/virus.svg" width="22" height="22" align="top" alt="">&nbsp; **Scan for Viruses**: ClamAV (or Microsoft Defender on Windows) on a drive or folder, plus everything that starts with Windows, its boot files and Secure Boot. It finds files dressed up as others (`invoice.pdf.exe`), switches startup entries off with a backup, and deletes nothing until you've seen the list
 - <img src="docs/icons/partitions.svg" width="22" height="22" align="top" alt="">&nbsp; **Recover Partitions**: puts a lost partition table back from GPT's backup copy, from a layout DiskForge saw before (it keeps the last 10), or by scanning the drive. It remembers the old table, so you can undo it
 - <img src="docs/icons/rescuecopy.svg" width="22" height="22" align="top" alt="">&nbsp; **Rescue Copy**: copies a failing drive to an image file or another drive, easy parts first. It can stop and carry on later, its map file works with GNU ddrescue, and it can go easy on a hot or struggling drive
 - <img src="docs/icons/repair.svg" width="22" height="22" align="top" alt="">&nbsp; **Check and Repair**: runs the file system's own checker (see the table above)
@@ -59,7 +60,8 @@ Files Find Lost Files can recover:
 | Archives | ZIP, 7-Zip, JAR, APK |
 | Other | SQLite databases |
 
-Names and folders can't come back this way, so recovered files get made-up names, sorted by kind.
+These are the kinds it finds by what's inside them. Found that way, they get made-up names sorted by kind. Deleted
+files that FAT, exFAT or NTFS still remember come back with their real names and folders, whatever their kind.
 
 ### <img src="docs/icons/writeimage.svg" width="28" height="28" align="top" alt="">&nbsp; USB sticks
 
@@ -72,12 +74,13 @@ Names and folders can't come back this way, so recovered files get made-up names
 
 - <img src="docs/icons/backup.svg" width="22" height="22" align="top" alt="">&nbsp; **Back Up and Restore**: a drive or partition to a compressed .img.zst file with a checksum, checked before anything is restored
 - <img src="docs/icons/clone.svg" width="22" height="22" align="top" alt="">&nbsp; **Clone Drive**: copies a drive onto another one, skips empty space, can grow the last partition onto a bigger drive, and keeps the same IDs or gives new ones
+- <img src="docs/icons/newids.svg" width="22" height="22" align="top" alt="">&nbsp; **Give New IDs**: gives a copied drive its own IDs, so both can be plugged in at once, and fixes a Linux on it to match. A bar warns you when two drives are copies of each other
 - <img src="docs/icons/usage.svg" width="22" height="22" align="top" alt="">&nbsp; **Disk Usage**: a map of what's using the space on a drive
 - <img src="docs/icons/cleanup.svg" width="22" height="22" align="top" alt="">&nbsp; **Disk Cleanup**: old package files, the cache of packages you've uninstalled, old system logs, your cache folder and the trash
 - <img src="docs/icons/optimize.svg" width="22" height="22" align="top" alt="">&nbsp; **Optimize Drives**: TRIM your SSDs now, or every week
 - <img src="docs/icons/snapshots.svg" width="22" height="22" align="top" alt="">&nbsp; **Btrfs**: your snapshots (snapper), error counts, and a scrub now or every month
 - <img src="docs/icons/wipe.svg" width="22" height="22" align="top" alt="">&nbsp; **Wipe Disk**: overwrites every byte with zeros, and can be stopped
-- <img src="docs/icons/secure.svg" width="22" height="22" align="top" alt="">&nbsp; **Secure Erase**: tells the drive to erase itself (normal or enhanced on SATA, user data or crypto erase on NVMe), and walks you through unfreezing a frozen drive. [Guide with pictures](docs/SECURE-ERASE.md)
+- <img src="docs/icons/secure.svg" width="22" height="22" align="top" alt="">&nbsp; **Secure Erase**: tells the drive to erase itself (normal or enhanced on SATA, user data or crypto erase or a sanitize on NVMe), and walks you through unfreezing a frozen drive. [Guide with pictures](docs/SECURE-ERASE.md)
 
 ### <img src="docs/icons/addons.svg" width="28" height="28" align="top" alt="">&nbsp; Extras
 
@@ -114,7 +117,32 @@ the ones it can use (Arch names):
 | Firmware check | `fwupd` |
 | LVM | `udisks2-lvm2` |
 | Make a Windows USB (most Windows 11 ISOs) | `wimlib` |
-| Look-only add-ons | `bubblewrap` |
+| Scan for Viruses | `clamav` |
+| Look-only add-ons, and Find Lost Files' previews in a sandbox | `bubblewrap` |
+| More picture kinds in previews (WebP, HEIC...), and a frame from films | `qt6-imageformats`, `ffmpeg` |
+
+### Windows
+DiskForge runs on Windows too: 64-bit Windows 10 or 11 (I test it on 11). Each release has two downloads for it:
+
+- `DiskForge-<version>.msi` installs it like any other program, into Program Files with a Start menu entry, plus a
+  desktop shortcut if you leave that box ticked. Settings → Apps removes it again, and a newer .msi replaces an
+  older one.
+- `DiskForge-<version>-windows.zip` runs without installing: unpack it anywhere and start `diskforge.exe`.
+
+The installer isn't signed yet, so Windows warns you about it: SmartScreen says "Windows protected your PC" (click
+More info, then Run anyway), and the admin prompt says the publisher is unknown. DiskForge asks for admin rights
+every time it starts, because Windows only lets admins work with drives directly.
+
+Most of it works the same as on Linux. What's different:
+
+- Left out, because they're Linux things: LUKS encryption, LVM and RAID, Btrfs snapshots, mount at startup, add-ons,
+  Quick Fixes, the drive settings and the firmware check
+- Formatting as ext4, Btrfs or XFS, and a drive's own Secure Erase, can't be done from a running Windows: DiskForge
+  says so and points you to DiskForge Live (or Wipe Disk)
+- Only on Windows: Change BitLocker Password, Optimize Drives with Windows' own weekly task, and Disk Cleanup of
+  Windows' temporary files, the Recycle Bin, error reports and update files
+- Windows won't format FAT32 over 32 GB, so DiskForge does it with its own formatter
+- Scan for Viruses uses Microsoft Defender when ClamAV isn't installed
 
 ## <img src="rescue/art/diskforge-live-icon.svg" width="32" height="32" align="top" alt="">&nbsp; DiskForge Live
 
@@ -145,6 +173,9 @@ and one new partition.
 **Erase a drive for good?** Wipe Disk is enough for a hard drive. For an SSD use Secure Erase, which has its own guide
 with pictures: [docs/SECURE-ERASE.md](docs/SECURE-ERASE.md).
 
+**Check a Windows PC for viruses?** Start it from DiskForge Live and use Scan for Viruses. Windows isn't running then,
+so nothing on it can hide, and it also goes through what starts with Windows and its boot files.
+
 **Save what's left on a dying drive?** Rescue Copy it to an image file or another drive, then open the copy and work
 on that, never the dying drive.
 
@@ -169,10 +200,12 @@ Help → Check for Updates tells you when there's a new version. You don't need 
 cd diskforge && git pull
 cd packaging/arch && makepkg -si
 ```
+On Windows, run the new .msi: it replaces the old version and keeps your settings.
 
 ## Building
-You need CMake, Qt 6.8 or newer (base, svg and tools), udisks2, OpenSSL, zstd, libarchive and libblkid. On Arch:
-`pacman -S cmake qt6-base qt6-svg qt6-tools udisks2 openssl zstd libarchive util-linux-libs`.
+You need CMake, Qt 6.8 or newer (base, svg and tools), udisks2, OpenSSL, zstd, zlib, libarchive and libblkid, plus
+poppler-qt6 for PDF pages in Find Lost Files' previews (it builds without it). On Arch:
+`pacman -S cmake qt6-base qt6-svg qt6-tools udisks2 openssl zstd zlib libarchive util-linux-libs poppler-qt6`.
 ```
 cmake -S . -B build
 cmake --build build
@@ -180,6 +213,9 @@ cmake --build build
 ```
 `sudo ./build/diskforge-selftest` runs every operation on a throwaway disk image, so you can test changes without
 touching a real drive. `packaging/release.sh` lists the other test suites.
+
+The Windows version is built on Linux too: `packaging/windows/build.sh` cross-compiles it with MinGW-w64, using Qt
+and the other libraries from MSYS2, and makes the installer with msitools when it's there.
 
 ## Support
 DiskForge is free and it's staying free. If it got your files back or saved you a trip to the computer shop and you

@@ -6,6 +6,7 @@
   <a href="#tasks">How to</a> |
   <a href="#filesystems">Which file system?</a> |
   <a href="#trouble">Problems</a> |
+  <a href="#windows">On Windows</a> |
   <a href="#keys">Shortcuts</a>
 </p>
 
@@ -23,7 +24,8 @@ your file manager.</p>
 before you pull it out.</p>
 <p><b>Format:</b> right-click the partition, Format. Everything on it gets erased.</p>
 <p><b>New partition:</b> right-click grey unallocated space, New Partition. A brand new disk needs a
-partition table first (right-click the disk on the left, New Partition Table).</p>
+partition table first (right-click the disk on the left, New Partition Table). At the end of an SSD it can leave part
+of the drive unused, which keeps it fast and makes it last longer.</p>
 <p><b>Resize:</b> right-click the partition, Resize. It can only grow into free space right after
 it. exFAT can't be resized, XFS can only grow. Back up anything important first.</p>
 <p><b>Rename:</b> select it and press F2.</p>
@@ -57,12 +59,15 @@ offers to repair them.</p>
 will show up under /mnt.</p>
 <p><b>Encrypt a drive:</b> tick "Encrypt with a passphrase" when you format or create a partition. To use it
 later, right-click it and Unlock, then Mount. Lock it when you're done. The lock drawn on it in the map does the same with
-one click.</p>
+one click. A BitLocker drive from Windows unlocks the same way, with its password or its 48-digit recovery key. Only
+Windows can change a BitLocker password (DiskForge for Windows does it).</p>
 <p><b>Open an ISO or disk image:</b> File → Open Disk Image (Ctrl+O). It shows up as a disk you can mount
 and browse. Close it from the disk's right-click menu.</p>
 <p><b>Is my drive OK?</b> The dot on each disk shows its health: green is fine, orange means it's wearing
 out (keep backups), red means back it up now. Right-click the disk, Disk Health for details and self-tests.
-USB sticks don't report health.</p>
+USB sticks don't report health. Hard drives also have a conveyance test, for damage from being moved or shipped.
+If a drive has SMART switched off, Turn SMART On is there too, and Earlier tests lists the last tests DiskForge
+saw finish.</p>
 <p>When a drive is failing or needs a look, a bar at the top of the window says so, with Back Up, Details and Dismiss.
 Dismissed, it stays away until things get worse. Disk Health lists every reason and explains each number (select one);
 the bold ones are the ones that count. Connection errors usually mean a bad cable or port, not a bad drive.</p>
@@ -86,6 +91,12 @@ the drive" it can pause when the drive gets too hot, rest after a run of read er
 space isn't copied, and on a bigger drive the last partition can grow into the extra space. Pick "replaces the old
 drive" if the old one is going away (it's an exact copy), or "keep using both" so the copy gets its own IDs. You
 can't clone the drive you're running from; start from a live USB for that.</p>
+<p><b>Give a copied drive new IDs:</b> a copy made with Clone (as an exact copy) or dd has the same IDs as the
+drive it came from. With both plugged in, Linux may use the wrong one and Windows switches one of them off, so a bar at
+the top says when two drives are copies of each other. Action → Give New IDs, or the button on that bar, gives the copy
+its own disk, partition and file system IDs; type the drive's name to confirm. Leave "Change them in a Linux on it too"
+ticked if there's a Linux on the copy, so it still starts (it keeps the old files next to the new ones). The window warns
+when a Windows on the copy might not start afterwards.</p>
 <p><b>Back up a drive or partition:</b> right-click it, Back Up. It's saved as one compressed .img.zst file with a
 small .json next to it. Keep both. Empty space packs down to almost nothing. Save it on a different drive.</p>
 <p><b>Put a backup back:</b> right-click the drive or partition, Restore Backup, and pick the .img.zst. The whole
@@ -107,7 +118,8 @@ areas Wipe Disk can't reach. It doesn't work through most USB adapters, so conne
 says the drive is frozen, click Unplug and Replug: it gets the drive ready, tells you when to pull its power cable
 and plug it back in, finds it again and checks it. Sleep Now does the same on PCs that wake up fine from sleep. If
 a PC never notices the drive coming back, turn on Hot Plug for that port in the BIOS setup, or use Wipe Disk, which
-is enough for a hard drive. Keep the PC on until the erase is done.</p>
+is enough for a hard drive. Keep the PC on until the erase is done. NVMe drives that have it also offer Sanitize, the
+newer and more thorough erase, and the sector size the drive should have afterwards (on Linux).</p>
 <p><b>How fast is it?</b> Right-click the disk, Benchmark. Reading doesn't change anything; the optional
 write test uses a temporary file.</p>
 <p><b>Wipe a whole disk:</b> right-click the disk on the left, Wipe Disk. Every byte is overwritten with
@@ -118,24 +130,39 @@ the disk name to confirm. Pick GPT unless it's for a really old computer.</p>
 on the toolbar too). What's already wiped is gone; to use the drive again, make a new partition table. A drive's own
 Secure Erase can't be stopped once it starts.</p>
 <p><b>Get deleted files back:</b> Action → Find Lost Files (or right-click the drive). Pick the drive or partition the
-files were on, or a disk image. It looks through all of it for pictures, documents, videos, music and archives by
-what's inside them, so it also works on a drive that was formatted or won't open; their names are made up.
-Pictures show as thumbnails. Each file says whether it looks whole. Tick the ones you want and save them to
-<i>another</i> drive: saving onto the same one could overwrite what you're after. On a drive that's failing, make a
-Rescue Copy first and look in the copy instead (File → Find Lost Files in a Disk Image). SSDs usually erase
-deleted files within minutes, so those are rarely found there.</p>
+files were on, or a disk image. On FAT, exFAT and NTFS drives it first lists deleted files with their real names and
+folders, the Recycle Bin's too, and on NTFS what was deleted recently, newest first. Untick Only deleted files to see
+the rest as well. Then it looks through the whole drive for pictures, documents, videos, music and archives by what's
+inside them, so it also works on a drive that was formatted or won't open; those get made-up names. If Windows kept
+earlier versions of the drive, Look in Them brings back what has changed or gone since. Pictures show as thumbnails,
+and the preview shows PDFs, documents, archives, songs and films. Each file says whether it looks whole. Tick the ones
+you want and save them to <i>another</i> drive: saving onto the same one could overwrite what you're after. On a drive
+that's failing, make a Rescue Copy first and look in the copy instead (File → Find Lost Files in a Disk Image, which
+also opens virtual machines' disks: .vdi, .vmdk, .vhd, .vhdx and .qcow2). SSDs usually erase deleted files within
+minutes, so those are rarely found there.</p>
 <p><b>Get partitions back:</b> right-click the drive, Recover Partitions. If the main copy of a GPT is damaged, it puts
 back the copy GPT keeps at the end of the drive. DiskForge also remembers each drive's layout, so a deleted partition or a
 wiped table can be put back the way it was. With nothing to go on, Scan the Drive looks for file systems where partitions
 used to start. Only the partition table is written, never what's in the partitions, and the table that's there now is
 remembered first, so you can undo it the same way.</p>
+<p><b>Scan for viruses:</b> Tools → Scan for Viruses. Pick a drive or a folder, then Quick (programs, scripts and
+documents) or Everything. On Linux it uses ClamAV (the clamav package): the first time it downloads its list of
+viruses, about 250 MB, and after that only small updates. It also points out files dressed up as something else, like
+invoice.pdf.exe. On a drive with Windows on it, it lists the odd things that start with Windows and checks the boot
+files and Secure Boot. Tick what you want gone and Delete Ticked Files, Switch Off Ticked for startup entries (what it
+changes is backed up first, in a "DiskForge backups" folder on that drive), or Put Back Windows' Own boot files. Look
+Up Online checks odd programs and boot files by their fingerprint, only if you say so; nothing else is sent. To scan a
+Windows PC, DiskForge Live is the best place: Windows isn't running, so nothing on it can hide. No scanner catches
+everything, so if a PC is badly infected, save your files and reinstall.</p>
 <p><b>Look at the partition table itself:</b> Inspect Partition Table shows the MBR, the GPT and its backup copy the way
 they are on the drive, whether their checksums are right, and any sector in hex. It only reads.</p>
 <p><b>Partition type and flags:</b> right-click a partition, Partition Type and Flags. The type tells other systems and
 installers what the partition is for; what's on it doesn't change. Changing an EFI or boot partition's type, or the boot
 flags, can stop the PC from starting from that drive.</p>
-<p><b>Hard drive power:</b> Properties of a hard drive has Power settings: when it spins down, how hard it saves power,
-the write cache, and Sleep Now. UDisks keeps them and sets them again whenever the drive shows up.</p>
+<p><b>Drive settings:</b> Properties of a SATA drive has Drive settings: how hard it saves power, the write cache and
+read-ahead, and for a hard drive when it spins down, how loud its seeking is, and Sleep Now. UDisks keeps them and sets
+them again whenever the drive shows up. In DiskForge Live, Properties also says whether a drive has a hidden area
+(HPA) at its end, and Show the Hidden Area gives that space back for good.</p>
 <p><b>RAID and LVM:</b> software RAID arrays and LVM volume groups show up like drives. A RAID array shows whether it's
 degraded or rebuilding, and Check RAID Array reads it all and compares the copies. LVM needs the udisks2-lvm2 package;
 for now you can mount, open and check logical volumes, but not create or resize them.</p>
@@ -185,6 +212,22 @@ The Arch package doesn't have these limits.</p>
 <p>Still stuck? Open an issue at
 <a href="https://github.com/DannyS124/diskforge/issues">github.com/DannyS124/diskforge/issues</a>
 and paste the output of <code>diskforge --dump</code>.</p>
+
+<a name="windows"></a>
+<h2>On Windows</h2>
+<p>DiskForge works the same way on Windows, with Windows' names: drives are Disk 0, Disk 1 and so on, and
+partitions show their letters. It asks for admin rights every time it starts, because Windows only lets admins
+work with drives directly; that's also why there's no password prompt for each change.</p>
+<p><b>Not on Windows:</b> the Linux things, so LUKS encryption, LVM and RAID, Btrfs snapshots, mount at startup,
+add-ons, Quick Fixes, the drive settings and the firmware check. Formatting as ext4, Btrfs or XFS, and a drive's own
+Secure Erase, can't be done from a running Windows: DiskForge says so and points you to DiskForge Live (or Wipe Disk).
+Open Disk Image takes .vhd and .vhdx files; Windows opens ISOs by itself.</p>
+<p><b>Only on Windows:</b> Change BitLocker Password (while the drive is unlocked), Optimize Drives with Windows' own
+weekly task, and Disk Cleanup for Windows' temporary files, the Recycle Bin, error reports and update files shared with
+other PCs. Windows won't format FAT32 over 32 GB, so DiskForge does that with its own formatter.</p>
+<p><b>Scan for Viruses</b> uses ClamAV if it's installed, and otherwise Microsoft Defender, which keeps its list up to
+date by itself and always checks every file. The previews in Find Lost Files run without a sandbox there. The Problems
+above about polkit, pacman and the Flatpak are Linux-only.</p>
 
 <a name="keys"></a>
 <h2>Shortcuts</h2>
