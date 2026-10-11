@@ -38,10 +38,12 @@ for suite in addons gpt copy usage backup rescuemap catalog fuzz health jobs rec
     fi
 done
 (cd /build && cpack -G DEB >/tmp/cpack.log 2>&1) || { cat /tmp/cpack.log; exit 1; }
-cp /build/*.deb /out/
-dpkg-deb -f /out/*.deb Package Version Depends | sed 's/^/  /'
+# The one just made (out/ can still hold older ones).
+deb=$(ls /build/*.deb | head -1)
+cp "$deb" /out/
+dpkg-deb -f "$deb" Package Version Depends | sed 's/^/  /'
 exit $failed
 INSIDE
 chmod +x "$work/inside.sh"
 podman run --rm -v "$work:/work:Z" -v "$out:/out:Z" "docker.io/library/debian:$release" /work/inside.sh
-echo "==> $(ls "$out"/*.deb)"
+echo "==> $(ls -t "$out"/*.deb | head -1)"
