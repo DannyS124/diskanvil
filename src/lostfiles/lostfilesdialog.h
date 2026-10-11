@@ -29,6 +29,9 @@ class QTimer;
 class QTreeWidget;
 class QTreeWidgetItem;
 class PreviewLoader;
+namespace lost {
+class LookCopies;
+}
 class UDisks;
 
 // Which of the found files are shown.
@@ -145,6 +148,12 @@ private:
     void saveFiles(const QVector<int> &indexes, const QString &folder);
     QVector<int> selectedIndexes() const;
     void showFilesMenu(const QPoint &at);
+    // A copy of a found file to look at, kept off the drive it's on (a progress window for a
+    // big one). Empty when there's none; it's said why.
+    QString lookCopy(int index);
+    void openInProgram(int index);
+    void dragOut();
+    bool sourceMounted() const;
     // Sized for the screen it opens on, or as it was left last time.
     void placeWindow();
     // How big a preview to ask for: as big as the room for it, within limits.
@@ -180,6 +189,9 @@ private:
     int m_previewAsked = 0;  // how big it was asked for
     QTimer *m_previewResize = nullptr;
     bool m_placed = false;
+    std::unique_ptr<lost::LookCopies> m_looks;
+    QPoint m_dragFrom;       // where a press on a picked file was, to drag it out from
+    bool m_warnedDrop = false;
     QWidget *m_copiesBar = nullptr;
     QLabel *m_copiesText = nullptr;
     QPushButton *m_copiesLook = nullptr;

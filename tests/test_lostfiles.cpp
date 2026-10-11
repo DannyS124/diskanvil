@@ -11,6 +11,7 @@
 #include "../src/lostfiles/exif.h"
 #include "../src/lostfiles/filetypes.h"
 #include "../src/usb/imagesource.h"
+#include "../src/lostfiles/lookcopies.h"
 #include "../src/lostfiles/lostfs.h"
 #include "../src/lostfiles/lostscan.h"
 #include "../src/lostfiles/lostsource.h"
@@ -1593,9 +1594,51 @@ void photoFacts()
     report(exif::read(QByteArray("\xFF\xD8\xFF\xE0\x00\x10JFIF", 10)).empty(), QStringLiteral("EXIF: a photo without any says nothing"));
 }
 
+// Copies made just to look at a found file: the same bytes, under its own name, read-only, made
+// once, and gone when they're done with. Programs and scripts are never opened.
+void lookCopies()
+{
+    QByteArray drive(1 << 20, '\0');
+    QByteArray photo = QByteArray("\xFF\xD8\xFF\xE0", 4) + QByteArray(300000, 'p');
+    drive.replace(65536, photo.size(), photo);
+    const auto source = lost::Source::fromMemory(drive);
+    lost::Found f;
+    f.name = QStringLiteral("Beach day.jpg");
+    f.size = quint64(photo.size());
+    f.extents = {{65536, f.size}};
+    QString path, again, why;
+    {
+        lost::LookCopies copies{QString()}; // a disk image: no drive to keep off
+        path = copies.make(source, f, 7, &why);
+        again = copies.make(source, f, 7, &why);
+        QFile copy(path);
+        report(!path.isEmpty() && copy.open(QIODevice::ReadOnly) && copy.readAll() == photo && path.endsWith(QLatin1String("/7/Beach day.jpg")),
+               QStringLiteral("look copies: the file's own bytes, under its own name"), path + why);
+        report(again == path && !(QFileInfo(path).permissions() & QFileDevice::WriteOwner),
+               QStringLiteral("look copies: made once, and read-only"));
+        lost::Found gone = f;
+        gone.nameOnly = true;
+        report(copies.make(source, gone, 8, &why).isEmpty() && why.contains(QLatin1String("Only its name")),
+               QStringLiteral("look copies: nothing to copy when only a name is left"), why);
+    }
+    report(!path.isEmpty() && !QFileInfo::exists(path), QStringLiteral("look copies: gone when Find Lost Files closes"));
+    const QStringList safe = {QStringLiteral("a.JPG"), QStringLiteral("letter.pdf"), QStringLiteral("song.flac"), QStringLiteral("film.mkv"),
+                              QStringLiteral("notes.docx")};
+    const QStringList unsafe = {QStringLiteral("invoice.pdf.exe"), QStringLiteral("setup.msi"), QStringLiteral("run.sh"), QStringLiteral("page.html"),
+                                QStringLiteral("macro.docm"), QStringLiteral("README"), QStringLiteral("app.desktop"), QStringLiteral("x.svg"),
+                                QStringLiteral("t.ps1"), QStringLiteral("shortcut.lnk")};
+    bool right = true;
+    for (const QString &name : safe)
+        right = right && lost::LookCopies::safeToOpen(name);
+    for (const QString &name : unsafe)
+        right = right && !lost::LookCopies::safeToOpen(name);
+    report(right, QStringLiteral("look copies: documents, pictures and films open in their own program; programs, scripts and unknowns don't"));
+}
+
 void lostFilesTests()
 {
     previewQueue();
+    lookCopies();
     photoFacts();
     journal();
     QTemporaryDir dir;

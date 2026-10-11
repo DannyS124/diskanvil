@@ -10,6 +10,7 @@
 #include "format.h"
 #include "gpt.h"
 #include "health.h"
+#include "lookcopies.h"
 #include "lostfs.h"
 #include "previewloader.h"
 #include "udisks.h"
@@ -21,6 +22,7 @@
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDialogButtonBox>
+#include <QDrag>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFontDatabase>
@@ -37,10 +39,12 @@
 #include <QLocale>
 #include <QMenu>
 #include <QMessageBox>
+#include <QMimeData>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPlainTextEdit>
 #include <QProgressBar>
+#include <QProgressDialog>
 #include <QPushButton>
 #include <QScreen>
 #include <QSettings>
@@ -633,6 +637,8 @@ LostFilesDialog::LostFilesDialog(UDisks *udisks, const QString &preferredPath, Q
     // Shift and Ctrl pick several, to save just those (right-click).
     m_view->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_view->setContextMenuPolicy(Qt::CustomContextMenu);
+    // Picked files can be dragged out to a folder (copies, never moved off the drive).
+    m_view->viewport()->installEventFilter(this);
     middleLayout->addWidget(m_view, 1);
     split->addWidget(middle);
     auto *preview = new QWidget;
@@ -1364,7 +1370,141 @@ bool LostFilesDialog::eventFilter(QObject *watched, QEvent *event)
 {
     if (watched == m_previewImage && event->type() == QEvent::Resize && m_previewResize)
         m_previewResize->start();
+    if (watched == m_view->viewport()) {
+        // A press on a picked file, then a move: that's a drag out. Elsewhere the view picks.
+        if (event->type() == QEvent::MouseButtonPress) {
+            const auto *mouse = static_cast<QMouseEvent *>(event);
+            const QModelIndex under = m_view->indexAt(mouse->position().toPoint());
+            m_dragFrom = mouse->button() == Qt::LeftButton && under.isValid() && m_view->selectionModel()->isSelected(under)
+                           ? mouse->position().toPoint()
+                           : QPoint(-1, -1);
+        } else if (event->type() == QEvent::MouseMove && m_dragFrom.x() >= 0) {
+            const auto *mouse = static_cast<QMouseEvent *>(event);
+            if ((mouse->buttons() & Qt::LeftButton)
+                && (mouse->position().toPoint() - m_dragFrom).manhattanLength() >= QApplication::startDragDistance()) {
+                m_dragFrom = QPoint(-1, -1);
+                dragOut();
+                return true;
+            }
+        } else if (event->type() == QEvent::MouseButtonRelease) {
+            m_dragFrom = QPoint(-1, -1);
+        }
+    }
     return QDialog::eventFilter(watched, event);
+}
+
+QString LostFilesDialog::lookCopy(int index)
+{
+    if (!m_looks)
+        m_looks = std::make_unique<lost::LookCopies>(m_diskDevice);
+    const lost::Found &f = m_model->file(index);
+    QString why;
+    const auto make = [&] {
+        if (f.size < (32ull << 20))
+            return m_looks->make(m_source, f, index, &why);
+        QProgressDialog progress(tr("Making a copy of \"%1\" to look at…").arg(f.name), tr("Stop"), 0, 1000, this);
+        progress.setWindowModality(Qt::WindowModal);
+        progress.setMinimumDuration(300);
+        return m_looks->make(m_source, f, index, &why, [&progress](quint64 done, quint64 total) {
+            progress.setValue(int(done * 1000 / std::max<quint64>(total, 1)));
+            QCoreApplication::processEvents();
+            return !progress.wasCanceled();
+        });
+    };
+    QString copy = make();
+    if (copy.isEmpty() && !why.isEmpty() && m_looks->folderFor(f.size, nullptr).isEmpty()) {
+        // Nowhere safe for it: a folder on another drive, picked now, does for the rest of the time.
+        QMessageBox box(QMessageBox::Information, windowTitle(), why, QMessageBox::Cancel, this);
+        QPushButton *pick = box.addButton(tr("Choose a Folder…"), QMessageBox::AcceptRole);
+        box.exec();
+        if (box.clickedButton() != pick)
+            return {};
+        const QString folder = QFileDialog::getExistingDirectory(this, tr("A Folder for Copies to Look At"), QDir::homePath());
+        if (folder.isEmpty())
+            return {};
+        if (!m_looks->setFolder(folder, &why)) {
+            QMessageBox::warning(this, windowTitle(), why);
+            return {};
+        }
+        why.clear();
+        copy = make();
+    }
+    if (copy.isEmpty() && !why.isEmpty())
+        QMessageBox::warning(this, windowTitle(), why);
+    return copy;
+}
+
+void LostFilesDialog::openInProgram(int index)
+{
+    const lost::Found &f = m_model->file(index);
+    if (!lost::LookCopies::safeToOpen(f.name)) {
+        QMessageBox::information(this, windowTitle(),
+                                 tr("\"%1\" isn't opened in another program: opening a program or a script can run it. Save it instead, "
+                                    "and check it with Scan for Viruses before using it.")
+                                     .arg(f.name));
+        return;
+    }
+    const QString copy = lookCopy(index);
+    if (!copy.isEmpty() && !QDesktopServices::openUrl(QUrl::fromLocalFile(copy)))
+        QMessageBox::information(this, windowTitle(), tr("There's no program on this computer for that kind of file."));
+}
+
+bool LostFilesDialog::sourceMounted() const
+{
+    for (const Disk &d : m_udisks->disks()) {
+        if (d.device != m_diskDevice)
+            continue;
+        for (const Volume &v : d.volumes) {
+            if (!v.mounts().isEmpty())
+                return true;
+        }
+    }
+    return false;
+}
+
+// Copies of the picked files, dragged to a folder or the desktop: the file manager puts them
+// there. Big ones are better saved, which shows how it's going.
+void LostFilesDialog::dragOut()
+{
+    const QVector<int> picked = selectedIndexes();
+    if (picked.isEmpty())
+        return;
+    quint64 total = 0;
+    for (int i : picked)
+        total += m_model->file(i).size;
+    if (total > (2ull << 30)) {
+        QMessageBox::information(this, windowTitle(), tr("That's a lot to drag (%1). Tick them and use Save Ticked Files To… instead.").arg(formatSize(total)));
+        return;
+    }
+    // A drop onto the drive they're on would write over the space they're found in.
+    if (!m_warnedDrop && !m_diskDevice.isEmpty() && sourceMounted()) {
+        m_warnedDrop = true;
+        m_saveStrip->show();
+        m_saveBar->hide();
+        m_savePhase->hide();
+        m_openFolder->hide();
+        m_hideSaved->show();
+        m_saveStatus->setText(tr("Drop them anywhere but on %1 itself: putting them back on the drive they were lost on can overwrite other "
+                                 "files that are still to be found.")
+                                  .arg(m_title));
+    }
+    QList<QUrl> urls;
+    for (int i : picked) {
+        const QString copy = lookCopy(i);
+        if (copy.isEmpty())
+            return;
+        urls << QUrl::fromLocalFile(copy);
+    }
+    auto *mime = new QMimeData;
+    mime->setUrls(urls);
+    auto *drag = new QDrag(m_view);
+    drag->setMimeData(mime);
+    const QModelIndex first = m_view->currentIndex();
+    const QVariant look = first.data(Qt::DecorationRole);
+    QPixmap pixmap = look.typeId() == QMetaType::QPixmap ? look.value<QPixmap>() : look.value<QIcon>().pixmap(48, 48);
+    if (!pixmap.isNull())
+        drag->setPixmap(pixmap.scaled(64, 64, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    drag->exec(Qt::CopyAction, Qt::CopyAction);
 }
 
 QString LostFilesDialog::detailsTable(const QVector<QPair<QString, QString>> &rows) const
@@ -1470,6 +1610,14 @@ void LostFilesDialog::showFilesMenu(const QPoint &at)
     if (picked.isEmpty())
         return;
     QMenu menu(this);
+    if (picked.size() == 1) {
+        const int one = picked.first();
+        QAction *open = menu.addAction(QIcon::fromTheme(QStringLiteral("document-open")), tr("Open in Its Own Program"));
+        if (!lost::LookCopies::safeToOpen(m_model->file(one).name))
+            open->setToolTip(tr("Programs and scripts aren't opened: they could run"));
+        connect(open, &QAction::triggered, this, [this, one] { openInProgram(one); });
+        menu.addSeparator();
+    }
     QAction *save = menu.addAction(QIcon::fromTheme(QStringLiteral("document-save")),
                                    picked.size() == 1 ? tr("Save This File…") : tr("Save These %1 Files…").arg(picked.size()));
     save->setEnabled(!m_saving && !m_scanning);
