@@ -5,7 +5,7 @@
 // drive, read through the registry API. A user who isn't signed in has no registry loaded;
 // their NTUSER.DAT isn't in use then, so it's read from the file.
 
-#include "../winstartup.h"
+#include "winstartup.h"
 
 #include "winutil.h"
 
