@@ -22,8 +22,10 @@ class QListWidget;
 class QPlainTextEdit;
 class QProgressBar;
 class QPushButton;
+class QSplitter;
 class QStackedWidget;
 class QThread;
+class QTimer;
 class QTreeWidget;
 class QTreeWidgetItem;
 class PreviewLoader;
@@ -58,7 +60,11 @@ public:
     int count(int category) const; // how many of a kind were found
     void setThumbnail(int index, const QPixmap &thumbnail);
     QVector<lost::Found> ticked() const;
+    QVector<int> tickedIndexes() const; // in the order ticked() has them
     int tickedCount() const { return int(m_ticked.size()); }
+    // Where a file was saved to, once it has been (it stays in the list, marked).
+    void markSaved(int index, const QString &path);
+    QString savedTo(int index) const { return m_saved.value(index); }
     quint64 tickedSize() const;
     void tickShown(bool tick);
 
@@ -79,6 +85,7 @@ private:
 
     QVector<int> m_shown; // file indexes in the list, in order (newest deleted first for kDeletedRecently)
     QSet<int> m_ticked;
+    QHash<int, QString> m_saved;
     QHash<int, QPixmap> m_thumbnails;
     mutable QSet<int> m_asked;
     LostFilter m_filter;
@@ -105,6 +112,9 @@ public:
 
 protected:
     void reject() override;
+    void showEvent(QShowEvent *event) override;
+    void hideEvent(QHideEvent *event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
     void fillDrives(const QString &preferredPath);
@@ -126,6 +136,16 @@ private:
     void showPreviewResult(const QImage &image, const QString &text, bool failed);
     void updateTicked();
     void saveTicked();
+    void saveSelected();
+    // Saves files (indexes into the model) into `folder`, after the checks; the results stay.
+    void saveFiles(const QVector<int> &indexes, const QString &folder);
+    QVector<int> selectedIndexes() const;
+    void showFilesMenu(const QPoint &at);
+    // Sized for the screen it opens on, or as it was left last time.
+    void placeWindow();
+    // How big a preview to ask for: as big as the room for it, within limits.
+    int previewPixels() const;
+    void fitPreview();
     void stopWorkers();
 
     UDisks *m_udisks;
@@ -150,18 +170,24 @@ private:
     QLabel *m_previewImage;
     QLabel *m_details;
     QPlainTextEdit *m_hex;
+    QSplitter *m_split = nullptr;
+    QImage m_previewPicture; // the last one shown, fitted again when the room changes
+    int m_previewAsked = 0;  // how big it was asked for
+    QTimer *m_previewResize = nullptr;
+    bool m_placed = false;
     QWidget *m_copiesBar = nullptr;
     QLabel *m_copiesText = nullptr;
     QPushButton *m_copiesLook = nullptr;
     QLabel *m_tickedInfo;
     QPushButton *m_save;
-    // Saving
+    // Saving, in a strip under the files: the results stay there for more
+    QWidget *m_saveStrip = nullptr;
     QLabel *m_saveStatus;
     QProgressBar *m_saveBar;
     QLabel *m_savePhase;
     PhaseProgress m_saveMeter;
     QPushButton *m_openFolder;
-    QPushButton *m_backToFiles;
+    QPushButton *m_hideSaved;
     QString m_savedTo;
 
     LostFilesModel *m_model;

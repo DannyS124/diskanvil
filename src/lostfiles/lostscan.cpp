@@ -352,7 +352,8 @@ void lost::Saver::run()
     QByteArray buffer(1024 * 1024, Qt::Uninitialized);
     qCInfo(lcOps).noquote() << "Find Lost Files: saving" << m_files.size() << "files to" << base;
 
-    for (const Found &f : std::as_const(m_files)) {
+    for (int position = 0; position < m_files.size(); ++position) {
+        const Found &f = m_files[position];
         if (m_cancel)
             break;
         if (f.nameOnly) {
@@ -407,13 +408,17 @@ void lost::Saver::run()
             continue;
         }
         ++saved;
+        Q_EMIT fileSaved(position, path);
         const QString shownName = path.mid(base.size() + 1);
         report << (f.condition == Condition::Good ? shownName : QStringLiteral("%1  (%2)").arg(shownName, conditionText(f.condition)));
     }
 
+    // Saving more within the same minute lands in the same folder: its list gets added to.
     QFile summary(base + QStringLiteral("/What was saved.txt"));
-    if (QDir().mkpath(base) && summary.open(QIODevice::WriteOnly | QIODevice::Text)) {
+    if (QDir().mkpath(base) && summary.open(QIODevice::Append | QIODevice::Text)) {
         QStringList text = {tr("Saved by DiskForge's Find Lost Files on %1.").arg(QDateTime::currentDateTime().toString(Qt::ISODate)), QString()};
+        if (summary.size() > 0)
+            text.prepend(QString());
         if (!problems.isEmpty())
             text << tr("Not saved:") << problems << QString();
         text << tr("Saved (%1):").arg(saved) << report;

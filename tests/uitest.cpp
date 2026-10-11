@@ -105,6 +105,9 @@
 #include <QTextStream>
 #include <QThread>
 #include <QTimer>
+#include <QScreen>
+#include <QStackedWidget>
+#include <QSplitter>
 
 #include <memory>
 
@@ -3316,6 +3319,53 @@ void lostFilesThroughWindow()
     report(saveStatus->text().startsWith(QLatin1String("Saved 3 files")) && same == 3, QStringLiteral("all three saved, byte for byte"),
            saveStatus->text());
 
+    // Saving doesn't end it: the files stay, each marked as saved, for saving more.
+    auto *pages = dialog.findChild<QStackedWidget *>();
+    int marked = 0;
+    for (int row = 0; row < view->model()->rowCount(); ++row)
+        marked += !view->model()->index(row, 0).data(Qt::UserRole + 2).toString().isEmpty();
+    report(pages && pages->currentIndex() == 1 && view->isVisible() && view->model()->rowCount() == 3 && marked == 3,
+           QStringLiteral("after saving, the files are still there, each marked as saved"), QStringLiteral("%1 marked").arg(marked));
+    // Enter used to press Close, and everything found was gone.
+    view->setFocus();
+    QKeyEvent enter(QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier);
+    QApplication::sendEvent(view, &enter);
+    QCoreApplication::processEvents();
+    report(dialog.isVisible(), QStringLiteral("Enter doesn't close the window"));
+    // And again, somewhere else.
+    const QString saveAgain = dir.filePath(QStringLiteral("saved again"));
+    QDir().mkpath(saveAgain);
+    {
+        Answerer answerer;
+        answerer.answer = [](QWidget *modal) {
+            if (auto *box = qobject_cast<QMessageBox *>(modal)) {
+                box->button(QMessageBox::No) ? box->button(QMessageBox::No)->click() : box->accept();
+                return true;
+            }
+            return false;
+        };
+        dialog.saveTo(saveAgain);
+        waitUntil([&] { return saveStatus->text().startsWith(QLatin1String("Saved")) && saveStatus->text().contains(saveAgain); }, 30000);
+    }
+    int savedAgain = 0;
+    QDirIterator it2(saveAgain, QDir::Files, QDirIterator::Subdirectories);
+    while (it2.hasNext())
+        savedAgain += !it2.next().endsWith(QLatin1String(".txt"));
+    report(savedAgain == 3 && view->model()->rowCount() == 3, QStringLiteral("a second save works, from the same results"),
+           saveStatus->text().left(80));
+    auto *panes = dialog.findChild<QSplitter *>(QStringLiteral("panes"));
+    report(panes && panes->widget(0)->maximumWidth() > 4000 && panes->widget(0)->width() > 0,
+           QStringLiteral("the kinds and folders pane isn't capped, so long names fit when it's made wider"));
+    const QRect room = dialog.screen()->availableGeometry();
+    report(room.contains(dialog.frameGeometry()), QStringLiteral("the window fits on its screen"),
+           QStringLiteral("%1x%2 on %3x%4").arg(dialog.width()).arg(dialog.height()).arg(room.width()).arg(room.height()));
+    // DISKFORGE_SHOTS=<folder>: a picture of the window as it is now, to look at by eye.
+    if (const QString shots = qEnvironmentVariable("DISKFORGE_SHOTS"); !shots.isEmpty()) {
+        view->setCurrentIndex(view->model()->index(0, 0));
+        waitUntil([&] { return !preview->pixmap().isNull(); }, 10000);
+        dialog.grab().save(QDir(shots).filePath(QStringLiteral("lostfiles-%1x%2.png").arg(room.width()).arg(room.height())));
+    }
+
     // The same, as if the files were on the drive a folder in the home folder is on (/tmp can be
     // in memory): saving there is refused.
     QTemporaryDir onDisk(QDir::homePath() + QStringLiteral("/.cache/diskforge-uitest-XXXXXX"));
@@ -3349,7 +3399,20 @@ void lostFilesThroughWindow()
     report(boxes.size() == 1 && boxes[0].contains(QLatin1String("on the drive you're getting the files back from"))
                && QDir(again).entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty(),
            QStringLiteral("saving onto the drive the files are on is refused"), boxes.join(QStringLiteral(" | ")).left(120));
+    // Closing with files found asks first, and No keeps them.
+    boxes.clear();
+    answerer.answer = [&](QWidget *modal) {
+        if (auto *box = qobject_cast<QMessageBox *>(modal)) {
+            boxes << box->text();
+            box->button(QMessageBox::No)->click();
+            return true;
+        }
+        return false;
+    };
     dialog.close();
+    QCoreApplication::processEvents();
+    report(dialog.isVisible() && boxes.size() == 1 && boxes[0].startsWith(QLatin1String("Close Find Lost Files?")),
+           QStringLiteral("closing with files found asks first, and No keeps them"), boxes.join(QStringLiteral(" | ")).left(100));
 }
 
 // Enter in a USB dialog goes to Close or Cancel, never to the button that erases the stick, and

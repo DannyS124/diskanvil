@@ -24,6 +24,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFontDatabase>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QIcon>
@@ -34,18 +35,22 @@
 #include <QKeyEvent>
 #include <QListWidget>
 #include <QLocale>
+#include <QMenu>
 #include <QMessageBox>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPlainTextEdit>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QScreen>
+#include <QSettings>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStandardPaths>
 #include <QStorageInfo>
 #include <QStyledItemDelegate>
 #include <QThread>
+#include <QTimer>
 #include <QTreeWidget>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -53,7 +58,8 @@
 namespace {
 
 constexpr int kThumbnail = 128;
-constexpr int kPreview = 480;
+constexpr int kPreview = 480;      // the smallest a preview is asked for
+constexpr int kPreviewMost = 2048; // and the biggest, its longest side
 constexpr qint64 kMostToDecode = 64 * 1024 * 1024; // a picture bigger than this isn't shown
 
 QString categoryIcon(filetypes::Category category)
@@ -114,7 +120,8 @@ QString conditionWords(const lost::Found &f)
 // (or its icon, or a card with its extension when there's neither) above its name, with the
 // tick box in the corner. Styles draw icon grids very differently (Windows 11's puts the name
 // beside the picture and gets where to click wrong), and here they all have to work alike.
-constexpr int kNameRole = Qt::UserRole + 1; // the file's own name, without what the list adds to it
+constexpr int kNameRole = Qt::UserRole + 1;  // the file's own name, without what the list adds to it
+constexpr int kSavedRole = Qt::UserRole + 2; // where it was saved to, once it has been
 
 class GridDelegate : public QStyledItemDelegate
 {
@@ -134,10 +141,29 @@ public:
         return QRect(option.rect.left() + 4, option.rect.top() + 4, size, size);
     }
 
+    // A green tick on a file that has been saved, so it's clear what's done.
+    static void drawSaved(QPainter *p, const QRectF &badge)
+    {
+        p->save();
+        p->setRenderHint(QPainter::Antialiasing);
+        p->setPen(Qt::NoPen);
+        p->setBrush(QColor(0x0f, 0x7b, 0x0f));
+        p->drawEllipse(badge);
+        p->setPen(QPen(Qt::white, 2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        const QPointF at = badge.topLeft();
+        p->drawPolyline(QPolygonF{at + QPointF(4, 8.5), at + QPointF(7, 11.5), at + QPointF(12, 5)});
+        p->restore();
+    }
+
     void paint(QPainter *p, const QStyleOptionViewItem &option, const QModelIndex &index) const override
     {
-        if (!grid(option))
-            return QStyledItemDelegate::paint(p, option, index);
+        const bool saved = !index.data(kSavedRole).toString().isEmpty();
+        if (!grid(option)) {
+            QStyledItemDelegate::paint(p, option, index);
+            if (saved)
+                drawSaved(p, QRectF(option.rect.right() - 22, option.rect.center().y() - 8, 16, 16));
+            return;
+        }
         QStyleOptionViewItem opt(option);
         initStyleOption(&opt, index);
         QStyle *style = opt.widget ? opt.widget->style() : QApplication::style();
@@ -210,6 +236,8 @@ public:
         if (cut < name.size())
             lines << opt.fontMetrics.elidedText(name.mid(cut), Qt::ElideMiddle, text.width());
         p->drawText(text, Qt::AlignHCenter | Qt::AlignTop, lines.join(QLatin1Char('\n')));
+        if (saved)
+            drawSaved(p, QRectF(opt.rect.right() - 22, opt.rect.top() + 5, 16, 16));
         p->restore();
     }
 
@@ -298,6 +326,7 @@ void LostFilesModel::clear()
     m_files.clear();
     m_shown.clear();
     m_ticked.clear();
+    m_saved.clear();
     m_thumbnails.clear();
     m_asked.clear();
     endResetModel();
@@ -347,12 +376,25 @@ void LostFilesModel::setThumbnail(int index, const QPixmap &thumbnail)
 
 QVector<lost::Found> LostFilesModel::ticked() const
 {
-    QList<int> indexes = m_ticked.values();
-    std::sort(indexes.begin(), indexes.end());
     QVector<lost::Found> out;
-    for (int i : std::as_const(indexes))
+    for (int i : tickedIndexes())
         out << m_files[i];
     return out;
+}
+
+QVector<int> LostFilesModel::tickedIndexes() const
+{
+    QVector<int> indexes = m_ticked.values();
+    std::sort(indexes.begin(), indexes.end());
+    return indexes;
+}
+
+void LostFilesModel::markSaved(int index, const QString &path)
+{
+    m_saved.insert(index, path);
+    const int row = int(m_shown.indexOf(index));
+    if (row >= 0)
+        Q_EMIT dataChanged(this->index(row), this->index(row), {kSavedRole, Qt::ToolTipRole});
 }
 
 quint64 LostFilesModel::tickedSize() const
@@ -413,12 +455,16 @@ QVariant LostFilesModel::data(const QModelIndex &index, int role) const
                                                        f.nameOnly ? tr("only the name is left") : formatSize(f.size));
         if (!deleted.isEmpty())
             tip += QLatin1Char('\n') + tr("Deleted %1").arg(deleted);
+        if (m_saved.contains(i))
+            tip += QLatin1Char('\n') + tr("Saved to %1").arg(m_saved.value(i));
         return tip;
     }
     case Qt::UserRole:
         return i;
     case kNameRole:
         return f.name;
+    case kSavedRole:
+        return m_saved.value(i);
     default:
         return {};
     }
@@ -479,7 +525,7 @@ LostFilesDialog::LostFilesDialog(UDisks *udisks, const QString &preferredPath, Q
     , m_savePhase(new QLabel)
     , m_saveMeter(m_saveBar, m_savePhase)
     , m_openFolder(new QPushButton(tr("Open the Folder")))
-    , m_backToFiles(new QPushButton(tr("Back to the Files")))
+    , m_hideSaved(new QPushButton(tr("Hide")))
     , m_model(new LostFilesModel(this))
 {
     setWindowTitle(tr("Find Lost Files"));
@@ -517,11 +563,13 @@ LostFilesDialog::LostFilesDialog(UDisks *udisks, const QString &preferredPath, Q
     auto *resultsLayout = new QVBoxLayout(results);
     auto *top = new QHBoxLayout;
     m_status->setObjectName(QStringLiteral("status"));
+    m_status->setWordWrap(true);
     top->addWidget(m_status, 1);
     m_stop->setAutoDefault(false);
     top->addWidget(m_stop);
     resultsLayout->addLayout(top);
     resultsLayout->addWidget(m_bar);
+    m_phase->setWordWrap(true);
     resultsLayout->addWidget(m_phase);
     m_copiesBar = new QWidget;
     auto *copies = new QHBoxLayout(m_copiesBar);
@@ -548,23 +596,27 @@ LostFilesDialog::LostFilesDialog(UDisks *udisks, const QString &preferredPath, Q
     // Long names lose their middle, not the end that tells them apart (a time, the count).
     m_folders->setTextElideMode(Qt::ElideMiddle);
     left->addWidget(m_folders);
-    left->setMaximumWidth(260);
     split->addWidget(left);
     auto *middle = new QWidget;
     auto *middleLayout = new QVBoxLayout(middle);
     middleLayout->setContentsMargins(0, 0, 0, 0);
-    auto *filters = new QHBoxLayout;
+    // The search and the view on one line, the filters under them, so the middle stays narrow
+    // enough for a small screen.
+    auto *search = new QHBoxLayout;
     m_search->setPlaceholderText(tr("Search the names"));
     m_search->setClearButtonEnabled(true);
-    filters->addWidget(m_search, 1);
+    search->addWidget(m_search, 1);
+    m_grid->setAutoDefault(false);
+    search->addWidget(m_grid);
+    middleLayout->addLayout(search);
+    auto *filters = new QHBoxLayout;
     m_deletedOnly->setObjectName(QStringLiteral("deletedOnly"));
     m_deletedOnly->setChecked(true);
     m_deletedOnly->setToolTip(tr("Files that weren't deleted are listed too, for a drive whose file system won't open. "
                                  "Untick this to see them."));
     filters->addWidget(m_deletedOnly);
     filters->addWidget(m_hideDamaged);
-    m_grid->setAutoDefault(false);
-    filters->addWidget(m_grid);
+    filters->addStretch();
     middleLayout->addLayout(filters);
     m_view->setObjectName(QStringLiteral("files"));
     m_view->setModel(m_model);
@@ -578,13 +630,19 @@ LostFilesDialog::LostFilesDialog(UDisks *udisks, const QString &preferredPath, Q
     m_view->setWordWrap(true);
     m_view->setLayoutMode(QListView::Batched);
     m_view->setBatchSize(300);
+    // Shift and Ctrl pick several, to save just those (right-click).
+    m_view->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    m_view->setContextMenuPolicy(Qt::CustomContextMenu);
     middleLayout->addWidget(m_view, 1);
     split->addWidget(middle);
     auto *preview = new QWidget;
     auto *previewLayout = new QVBoxLayout(preview);
     previewLayout->setContentsMargins(0, 0, 0, 0);
     m_previewImage->setAlignment(Qt::AlignCenter);
-    m_previewImage->setMinimumSize(320, 240);
+    m_previewImage->setMinimumSize(240, 180);
+    // The picture is fitted to the room it has, so it never pushes the panes around.
+    m_previewImage->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
+    m_previewImage->installEventFilter(this);
     m_previewImage->setObjectName(QStringLiteral("preview"));
     previewLayout->addWidget(m_previewImage, 1);
     m_details->setWordWrap(true);
@@ -599,10 +657,34 @@ LostFilesDialog::LostFilesDialog(UDisks *udisks, const QString &preferredPath, Q
     split->addWidget(preview);
     split->setStretchFactor(1, 3);
     split->setStretchFactor(2, 2);
+    // Every pane can be made wider or narrower, on any screen; none can be squeezed away.
+    split->setChildrenCollapsible(false);
+    split->setObjectName(QStringLiteral("panes"));
+    m_split = split;
     resultsLayout->addWidget(split, 1);
+
+    // Saving happens here, under the files, which stay for saving more.
+    m_saveStrip = new QWidget;
+    m_saveStrip->setObjectName(QStringLiteral("saveStrip"));
+    auto *strip = new QGridLayout(m_saveStrip);
+    strip->setContentsMargins(0, 0, 0, 0);
+    m_saveStatus->setWordWrap(true);
+    m_saveStatus->setObjectName(QStringLiteral("saveStatus"));
+    strip->addWidget(m_saveStatus, 0, 0);
+    for (QPushButton *b : {m_openFolder, m_hideSaved}) {
+        b->setAutoDefault(false);
+        strip->addWidget(b, 0, b == m_openFolder ? 1 : 2);
+    }
+    strip->addWidget(m_saveBar, 1, 0, 1, 3);
+    m_savePhase->setWordWrap(true);
+    strip->addWidget(m_savePhase, 2, 0, 1, 3);
+    strip->setColumnStretch(0, 1);
+    m_saveStrip->hide();
+    resultsLayout->addWidget(m_saveStrip);
 
     auto *bottom = new QHBoxLayout;
     m_tickedInfo->setObjectName(QStringLiteral("ticked"));
+    m_tickedInfo->setWordWrap(true);
     bottom->addWidget(m_tickedInfo, 1);
     auto *tickAll = new QPushButton(tr("Tick All Shown"));
     auto *untick = new QPushButton(tr("Untick All"));
@@ -614,28 +696,11 @@ LostFilesDialog::LostFilesDialog(UDisks *udisks, const QString &preferredPath, Q
     resultsLayout->addLayout(bottom);
     m_pages->addWidget(results);
 
-    // 3. Saving
-    auto *saving = new QWidget;
-    auto *savingLayout = new QVBoxLayout(saving);
-    m_saveStatus->setWordWrap(true);
-    m_saveStatus->setObjectName(QStringLiteral("saveStatus"));
-    savingLayout->addWidget(m_saveStatus);
-    savingLayout->addWidget(m_saveBar);
-    savingLayout->addWidget(m_savePhase);
-    savingLayout->addStretch();
-    auto *savingButtons = new QHBoxLayout;
-    savingButtons->addStretch();
-    for (QPushButton *b : {m_backToFiles, m_openFolder}) {
-        b->setAutoDefault(false);
-        savingButtons->addWidget(b);
-    }
-    savingLayout->addLayout(savingButtons);
-    m_pages->addWidget(saving);
-
     auto *layout = new QVBoxLayout(this);
     layout->addWidget(m_pages, 1);
     auto *box = new QDialogButtonBox(QDialogButtonBox::Close);
-    box->button(QDialogButtonBox::Close)->setDefault(true);
+    // Enter never closes it: everything found would be gone.
+    box->button(QDialogButtonBox::Close)->setAutoDefault(false);
     connect(box, &QDialogButtonBox::rejected, this, &LostFilesDialog::reject);
     layout->addWidget(box);
 
@@ -676,8 +741,13 @@ LostFilesDialog::LostFilesDialog(UDisks *udisks, const QString &preferredPath, Q
     connect(tickAll, &QPushButton::clicked, this, [this] { m_model->tickShown(true); });
     connect(untick, &QPushButton::clicked, this, [this] { m_model->tickShown(false); });
     connect(m_save, &QPushButton::clicked, this, &LostFilesDialog::saveTicked);
-    connect(m_backToFiles, &QPushButton::clicked, this, [this] { m_pages->setCurrentIndex(1); });
+    connect(m_hideSaved, &QPushButton::clicked, m_saveStrip, &QWidget::hide);
     connect(m_openFolder, &QPushButton::clicked, this, [this] { QDesktopServices::openUrl(QUrl::fromLocalFile(m_savedTo)); });
+    connect(m_view, &QWidget::customContextMenuRequested, this, &LostFilesDialog::showFilesMenu);
+    m_previewResize = new QTimer(this);
+    m_previewResize->setSingleShot(true);
+    m_previewResize->setInterval(200);
+    connect(m_previewResize, &QTimer::timeout, this, &LostFilesDialog::fitPreview);
 
     fillDrives(preferredPath);
     updateTicked();
@@ -686,6 +756,51 @@ LostFilesDialog::LostFilesDialog(UDisks *udisks, const QString &preferredPath, Q
 LostFilesDialog::~LostFilesDialog()
 {
     stopWorkers();
+}
+
+void LostFilesDialog::showEvent(QShowEvent *event)
+{
+    QDialog::showEvent(event);
+    if (!m_placed) {
+        m_placed = true;
+        placeWindow();
+    }
+}
+
+void LostFilesDialog::hideEvent(QHideEvent *event)
+{
+    // Its size and panes, for next time.
+    if (m_placed) {
+        QSettings settings;
+        settings.setValue(QStringLiteral("lostFiles/geometry"), saveGeometry());
+        settings.setValue(QStringLiteral("lostFiles/panes"), m_split->saveState());
+    }
+    QDialog::hideEvent(event);
+}
+
+void LostFilesDialog::placeWindow()
+{
+    QSettings settings;
+    const QScreen *screen = this->screen();
+    const QRect room = screen ? screen->availableGeometry() : QRect(0, 0, 1280, 800);
+    const QByteArray geometry = settings.value(QStringLiteral("lostFiles/geometry")).toByteArray();
+    if (geometry.isEmpty() || !restoreGeometry(geometry)) {
+        // Most of the screen, but not stretched across a very wide one, and never more than there is.
+        const int width = std::min(room.width(), std::max(std::min(1120, room.width()), std::min(room.width() * 3 / 4, 2000)));
+        const int height = std::min(room.height(), std::max(std::min(720, room.height()), room.height() * 17 / 20));
+        const QSize frame = frameGeometry().size() - size();
+        resize(width - frame.width(), height - frame.height());
+        move(room.center() - QPoint(width / 2, height / 2));
+    }
+    keepOnScreen(this);
+    const QByteArray panes = settings.value(QStringLiteral("lostFiles/panes")).toByteArray();
+    if (panes.isEmpty() || !m_split->restoreState(panes)) {
+        // Kinds and folders get a fifth, the preview about a third: room for long names and a picture.
+        const int across = std::max(m_split->width(), width() - 40);
+        const int left = std::clamp(across / 5, 200, 440);
+        const int preview = std::clamp(across * 3 / 10, 240, 1000);
+        m_split->setSizes({left, std::max(240, across - left - preview), preview});
+    }
 }
 
 void LostFilesDialog::stopWorkers()
@@ -1008,6 +1123,9 @@ void LostFilesDialog::scanDone(bool stopped)
 {
     m_scanning = false;
     m_stop->hide();
+    // Done: the bar and what it was doing only take room from the files now.
+    m_bar->hide();
+    m_phase->hide();
     int deleted = 0;
     for (int i = 0; i < m_model->fileCount(); ++i)
         deleted += m_model->file(i).deleted;
@@ -1178,6 +1296,8 @@ void LostFilesDialog::showPreview()
             html += QStringLiteral("<br>") + tr("The file system doesn't say where all of it is anymore, so it's taken to follow on "
                                                  "from where it started. That's right for most files.");
     }
+    if (const QString saved = m_model->savedTo(i); !saved.isEmpty())
+        html += QStringLiteral("<br>") + tr("Saved to %1").arg(saved.toHtmlEscaped());
     html += QStringLiteral("<br><br><span style=\"color:%1\">●</span> %2").arg(colour.name(), conditionWords(f).toHtmlEscaped());
     if (!f.note.isEmpty())
         html += QStringLiteral("<br>") + f.note.toHtmlEscaped();
@@ -1186,8 +1306,44 @@ void LostFilesDialog::showPreview()
         return; // nothing of it to show
     // The picture and the words come from the preview helper; until then, a moment.
     m_previewImage->setText(tr("Loading…"));
+    m_previewPicture = QImage();
+    m_previewAsked = previewPixels();
     if (m_thumbs)
-        m_thumbs->want(i, f, kPreview);
+        m_thumbs->want(i, f, m_previewAsked);
+}
+
+int LostFilesDialog::previewPixels() const
+{
+    const QSize room = m_previewImage->size() * m_previewImage->devicePixelRatioF();
+    return std::clamp(std::max(room.width(), room.height()), kPreview, kPreviewMost);
+}
+
+// The preview's room changed (the window or a pane was resized): the picture is fitted again, and
+// asked for bigger when it was made for a lot less room than there is now.
+void LostFilesDialog::fitPreview()
+{
+    if (m_previewIndex < 0 || m_previewPicture.isNull())
+        return;
+    const qreal ratio = m_previewImage->devicePixelRatioF();
+    const QSize room = m_previewImage->size() * ratio;
+    QImage fitted = m_previewPicture;
+    if (room.width() > 16 && room.height() > 16 && (fitted.width() > room.width() || fitted.height() > room.height()))
+        fitted = fitted.scaled(room, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    QPixmap pixmap = QPixmap::fromImage(fitted);
+    pixmap.setDevicePixelRatio(ratio);
+    m_previewImage->setPixmap(pixmap);
+    const int wanted = previewPixels();
+    if (m_thumbs && wanted > m_previewAsked * 5 / 4 && std::max(m_previewPicture.width(), m_previewPicture.height()) >= m_previewAsked) {
+        m_previewAsked = wanted;
+        m_thumbs->want(m_previewIndex, m_model->file(m_previewIndex), wanted);
+    }
+}
+
+bool LostFilesDialog::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == m_previewImage && event->type() == QEvent::Resize && m_previewResize)
+        m_previewResize->start();
+    return QDialog::eventFilter(watched, event);
 }
 
 void LostFilesDialog::showPreviewResult(const QImage &image, const QString &text, bool failed)
@@ -1195,12 +1351,12 @@ void LostFilesDialog::showPreviewResult(const QImage &image, const QString &text
     const lost::Found &f = m_model->file(m_previewIndex);
     const filetypes::Category category = f.type >= 0 ? filetypes::types()[f.type].category : filetypes::Category::Other;
     if (!image.isNull()) {
-        // Bigger than the room there is (a PDF page in a narrow window): scaled down to fit.
-        const QSize room = m_previewImage->size();
-        QPixmap pixmap = QPixmap::fromImage(image);
-        if (room.width() > 16 && room.height() > 16 && (pixmap.width() > room.width() || pixmap.height() > room.height()))
-            pixmap = pixmap.scaled(room, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-        m_previewImage->setPixmap(pixmap);
+        // Bigger than the room there is (a PDF page in a narrow window): scaled down to fit. Never
+        // blown up past its own size.
+        m_previewPicture = image;
+        const int asked = m_previewAsked;
+        fitPreview();
+        m_previewAsked = asked;
     } else if (failed)
         m_previewImage->setText(tr("It can't be shown: it may be damaged, or not what its name says."));
     else if (category == filetypes::Category::Picture)
@@ -1230,16 +1386,81 @@ void LostFilesDialog::updateTicked()
 
 void LostFilesDialog::saveTicked()
 {
-    const QString start = QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
+    const QVector<int> indexes = m_model->tickedIndexes();
+    if (indexes.isEmpty())
+        return;
+    const QString start = m_savedTo.isEmpty() ? QStandardPaths::writableLocation(QStandardPaths::HomeLocation)
+                                              : QFileInfo(m_savedTo).absolutePath();
     const QString folder = QFileDialog::getExistingDirectory(this, tr("Save the Ticked Files Where?"), start);
     if (!folder.isEmpty())
-        saveTo(folder);
+        saveFiles(indexes, folder);
+}
+
+void LostFilesDialog::saveSelected()
+{
+    const QVector<int> indexes = selectedIndexes();
+    if (indexes.isEmpty())
+        return;
+    const QString start = m_savedTo.isEmpty() ? QStandardPaths::writableLocation(QStandardPaths::HomeLocation)
+                                              : QFileInfo(m_savedTo).absolutePath();
+    const QString folder = QFileDialog::getExistingDirectory(
+        this, indexes.size() == 1 ? tr("Save \"%1\" Where?").arg(m_model->file(indexes[0]).name) : tr("Save These Files Where?"), start);
+    if (!folder.isEmpty())
+        saveFiles(indexes, folder);
+}
+
+// The picked files that have something to save (not the ones with only a name left).
+QVector<int> LostFilesDialog::selectedIndexes() const
+{
+    QVector<int> out;
+    for (const QModelIndex &index : m_view->selectionModel()->selectedIndexes()) {
+        const int i = m_model->fileIndex(index.row());
+        if (i >= 0 && !m_model->file(i).nameOnly && !out.contains(i))
+            out << i;
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+void LostFilesDialog::showFilesMenu(const QPoint &at)
+{
+    // A right-click on a file that isn't picked yet picks just that one, the way file managers do.
+    const QModelIndex under = m_view->indexAt(at);
+    if (under.isValid() && !m_view->selectionModel()->isSelected(under))
+        m_view->selectionModel()->select(under, QItemSelectionModel::ClearAndSelect);
+    const QVector<int> picked = selectedIndexes();
+    if (picked.isEmpty())
+        return;
+    QMenu menu(this);
+    QAction *save = menu.addAction(QIcon::fromTheme(QStringLiteral("document-save")),
+                                   picked.size() == 1 ? tr("Save This File…") : tr("Save These %1 Files…").arg(picked.size()));
+    save->setEnabled(!m_saving && !m_scanning);
+    if (m_scanning)
+        save->setToolTip(tr("Stop the search first, or wait until it's done."));
+    connect(save, &QAction::triggered, this, &LostFilesDialog::saveSelected);
+    menu.addSeparator();
+    QAction *tick = menu.addAction(picked.size() == 1 ? tr("Tick It") : tr("Tick Them"));
+    QAction *untick = menu.addAction(picked.size() == 1 ? tr("Untick It") : tr("Untick Them"));
+    for (QAction *a : {tick, untick}) {
+        connect(a, &QAction::triggered, this, [this, a, tick] {
+            for (const QModelIndex &index : m_view->selectionModel()->selectedIndexes())
+                m_model->setData(index, a == tick ? Qt::Checked : Qt::Unchecked, Qt::CheckStateRole);
+        });
+    }
+    menu.exec(m_view->viewport()->mapToGlobal(at));
 }
 
 void LostFilesDialog::saveTo(const QString &folder)
 {
-    const QVector<lost::Found> files = m_model->ticked();
-    if (files.isEmpty())
+    saveFiles(m_model->tickedIndexes(), folder);
+}
+
+void LostFilesDialog::saveFiles(const QVector<int> &indexes, const QString &folder)
+{
+    QVector<lost::Found> files;
+    for (int i : indexes)
+        files << m_model->file(i);
+    if (files.isEmpty() || m_saving)
         return;
     // Never onto the drive the files are being got back from: it could overwrite them.
     if (!m_diskDevice.isEmpty() && blockio::pathIsOnDisk(folder, m_diskDevice)) {
@@ -1279,25 +1500,41 @@ void LostFilesDialog::saveTo(const QString &folder)
 
     m_saving = true;
     updateTicked();
-    m_pages->setCurrentIndex(2);
-    m_saveStatus->setText(tr("Saving %1 files to %2…").arg(files.size()).arg(folder));
+    m_saveStrip->show();
+    m_saveBar->setValue(0);
+    m_saveBar->show();
+    m_savePhase->clear();
+    m_savePhase->show();
+    m_saveStatus->setText(files.size() == 1 ? tr("Saving \"%1\" to %2…").arg(files[0].name, folder)
+                                            : tr("Saving %1 files to %2…").arg(files.size()).arg(folder));
     m_openFolder->hide();
-    m_backToFiles->hide();
+    m_hideSaved->hide();
     m_saver = new lost::Saver(m_source, files, folder);
     connect(m_saver, &lost::Saver::progress, this, [this](quint64 done, quint64 total) { m_saveMeter.update(tr("Saving"), done, total); });
-    connect(m_saver, &lost::Saver::finished, this, [this](int saved, int failed, const QString &to, const QString &message) {
+    connect(m_saver, &lost::Saver::fileSaved, this, [this, indexes](int position, const QString &path) {
+        if (position >= 0 && position < indexes.size())
+            m_model->markSaved(indexes[position], path);
+    });
+    connect(m_saver, &lost::Saver::finished, this, [this, indexes](int saved, int failed, const QString &to, const QString &message) {
         m_saving = false;
         if (m_saveThread)
             m_saveThread->quit();
         m_saver = nullptr;
         m_savedTo = to;
-        QString text = failed == 0 ? tr("Saved %1 files to %2.").arg(saved).arg(to) : tr("Saved %1 files to %2. %3 couldn't be saved.").arg(saved).arg(to).arg(failed);
+        QString text = saved == 1 && failed == 0 ? tr("Saved one file to %1.").arg(to)
+                     : failed == 0               ? tr("Saved %1 files to %2.").arg(saved).arg(to)
+                                                 : tr("Saved %1 files to %2. %3 couldn't be saved.").arg(saved).arg(to).arg(failed);
         if (!message.isEmpty())
             text = message + QLatin1Char(' ') + text;
-        m_saveStatus->setText(text + QLatin1Char(' ') + tr("\"What was saved.txt\" there lists them, and any that may be damaged."));
+        m_saveStatus->setText(text + QLatin1Char(' ') + tr("\"What was saved.txt\" there lists them, and any that may be damaged. "
+                                                             "Everything found is still here, to save more."));
+        m_saveBar->hide();
+        m_savePhase->hide();
         m_openFolder->show();
-        m_backToFiles->show();
+        m_hideSaved->show();
         updateTicked();
+        if (indexes.contains(m_previewIndex))
+            showPreview(); // its details now say where it went
     });
     m_saveThread = startOnThread(this, m_saver);
 }
@@ -1312,6 +1549,13 @@ void LostFilesDialog::reject()
     } else if (m_scanning && m_model->fileCount() > 0) {
         if (QMessageBox::question(this, windowTitle(), tr("Close? What was found so far isn't kept."), QMessageBox::Yes | QMessageBox::No,
                                   QMessageBox::No)
+            != QMessageBox::Yes)
+            return;
+    } else if (m_model->fileCount() > 0) {
+        if (QMessageBox::question(this, windowTitle(),
+                                  tr("Close Find Lost Files? What it found isn't kept: to save more later, it would have to look "
+                                     "through the drive again."),
+                                  QMessageBox::Yes | QMessageBox::No, QMessageBox::No)
             != QMessageBox::Yes)
             return;
     }

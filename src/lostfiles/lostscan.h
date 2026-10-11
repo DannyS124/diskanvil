@@ -196,6 +196,8 @@ public Q_SLOTS:
 
 Q_SIGNALS:
     void progress(quint64 done, quint64 total);
+    // position: where the file was in the list it was given.
+    void fileSaved(int position, const QString &path);
     void finished(int saved, int failed, const QString &folder, const QString &message);
 
 private:
