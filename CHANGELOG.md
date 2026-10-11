@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.5.2
+New:
+- DiskForge for Windows: the same program on 64-bit Windows 10 and 11, with an installer (Program Files, the Start menu, a desktop shortcut if you want one, and Settings → Apps to remove it) or a zip to run it from a folder. Partitions, formatting, Disk Health, the USB makers, Check a USB Stick, Clone, Back Up and Restore, Disk Usage, Disk Cleanup, Optimize Drives, Recover Partitions, Find Lost Files and Scan for Viruses all work there, and it formats FAT32 over 32 GB, which Windows itself won't. The README's Windows part says what's different
+- Scan for Viruses (Tools menu, and a tile in DiskForge Live): looks through a drive or a folder with ClamAV, or on Windows with Microsoft Defender when ClamAV isn't installed. On Linux the drive is mounted read-only while it looks. Quick checks programs, scripts and documents; Everything checks every file
+- Scan for Viruses also finds files dressed up as something else: `invoice.pdf.exe`, names with a hidden character that flips them around, and programs named like a picture or a document
+- On a drive with Windows on it, Scan for Viruses goes through everything that starts with Windows, read straight from its registry files, and shows the odd ones. It can switch them off, after backing up what it changes into a "DiskForge backups" folder on that drive
+- It checks the boot files too: who signed each one against the PC's own Secure Boot lists, the boot entries, the MBR's boot code and the Secure Boot settings, and can put Windows' own boot files back. On Linux it adds fwupd's firmware checks
+- Odd startup programs and boot files can be looked up online by their SHA-256 fingerprint (CIRCL's hashlookup), only when you say so, every time. Nothing else is sent
+- Found files are deleted only after you've seen the list, and every deletion is written down in a log. In DiskForge Live the virus list is kept on the stick (when it was made with Make a DiskForge Live USB), so it only needs a small update next time
+- Give New IDs (Action menu): gives a copy of a drive its own disk, partition and file system IDs, so it can be used next to the drive it was copied from, and fixes a Linux on it to match (fstab, crypttab, GRUB, systemd-boot, keeping each old file). When two drives share IDs, a bar at the top says so and offers it
+- Find Lost Files brings deleted files back with their names and folders from FAT, exFAT and NTFS drives, and the files in Windows' Recycle Bin under their old names. On NTFS it reads the change journal for names of files whose records were reused, and lists what was deleted recently, newest first. Files found by what's inside them still come after, as before
+- Find Lost Files looks in Windows' earlier versions of a drive (shadow copies) and brings back what has changed or gone since, in folders named after the date of each copy. DiskForge reads them with its own code, so this works on Linux and DiskForge Live too
+- Find Lost Files opens virtual machines' disks: .vdi, .vmdk, .vhd, .vhdx and .qcow2
+- Find Lost Files previews PDFs (their first page), Word, Excel, PowerPoint and OpenDocument files (their text), what's in archives, and songs and films (their details and cover, and a frame from a film when ffmpeg is installed). A separate program makes them, in a sandbox on Linux, so a damaged file can't take DiskForge down
+- Drive settings in Properties for every SATA drive on Linux, SSDs too: power saving, the write cache and read-ahead, plus when to spin down and seek noise for hard drives
+- Disk Health: the conveyance self-test for hard drives, Turn SMART On, and the last tests DiskForge saw finish
+- Secure Erase on NVMe drives, on Linux: Sanitize (block erase or crypto erase, whichever the drive has) and the sector size it should have afterwards
+- New Partition at the end of an SSD can leave part of it unused, so it stays fast and lasts longer
+- DiskForge Live shows a hidden area (HPA) at the end of a SATA drive in Properties, and can give that space back
+- BitLocker drives show as BitLocker and unlock with their password or their 48-digit recovery key. On Windows, Change BitLocker Password too
+- Help → Support DiskForge (Ko-fi), and a line about it in About
+- `--open virus-scan`
+
+Changed:
+- Disk Usage says why a drive counts more space as used than its files add up to
+
+Fixed:
+- Typing a drive's name to confirm in Clone, Restore or Rescue Copy could move the keyboard to another button, so a space pressed Cancel
+- Check a USB Stick's map stayed yellow after a good check. Now it turns green
+- Tall windows could run off a small screen
+- Write Image to USB, Make a Windows USB and Make a DiskForge Live USB now refuse to write onto the stick the image is on
+- The unlock window's explanation stretched the window instead of wrapping
+- Change Passphrase is greyed out for BitLocker drives on Linux, where only Windows can change their password
+
 ## 0.5.1
 New:
 - DiskForge Live: a rescue stick that starts any PC, new (UEFI, Secure Boot on is fine) or old (BIOS), into a small desktop with DiskForge, TestDisk, PhotoRec, a browser and a terminal, plus memtest86+ in the boot menu. It keeps a log of every start on the stick. Built from `rescue/`, see [docs/DISKFORGE-LIVE.md](docs/DISKFORGE-LIVE.md)

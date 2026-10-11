@@ -55,6 +55,16 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.5.2" date="2026-10-10">
+      <description>
+        <p>DiskForge runs on Windows now too, with an installer. Scan for Viruses checks a drive for malware, and
+        a Windows drive's startup entries, boot files and firmware too. Give New IDs lets a copied drive be used
+        next to the one it was copied from.</p>
+        <p>Find Lost Files brings deleted files back with their names and folders from FAT, exFAT and NTFS drives,
+        finds Windows' earlier versions of a drive, opens virtual machines' disks, and previews documents, music
+        and films. Also: settings for every SATA drive, NVMe sanitize, BitLocker drives, and fixes.</p>
+      </description>
+    </release>
     <release version="0.5.1" date="2026-10-09">
       <description>
         <p>DiskForge Live: a rescue USB stick that starts any PC, new (UEFI, Secure Boot on) or old (BIOS), with DiskForge
