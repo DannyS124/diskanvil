@@ -27,5 +27,6 @@ version=$(sed -n 's/^ *VERSION \([0-9.]*\)$/\1/p' "$root/CMakeLists.txt" | head 
 rm -rf "$work/DiskForge"
 "$root/packaging/windows/deploy.sh" "$work/build/diskforge.exe" "$work/DiskForge" "$work/sysroot"
 cp "$root/LICENSE" "$work/DiskForge/LICENSE.txt"
+python3 -I "$root/packaging/windows/icons.py" "$root/rescue/icons/DiskForge-Live" "$work/DiskForge/icons"
 (cd "$work" && rm -f "DiskForge-$version-windows.zip" && python3 -m zipfile -c "DiskForge-$version-windows.zip" DiskForge)
 echo "==> $work/DiskForge-$version-windows.zip"

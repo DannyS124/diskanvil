@@ -7,6 +7,7 @@
 #include <QCoreApplication>
 #include <QEvent>
 #include <QFile>
+#include <QIcon>
 #include <QSettings>
 #include <QStyle>
 #include <QStyleFactory>
@@ -342,5 +343,10 @@ void Theme::apply(const AddonTheme &raw)
             QApplication::setStyle(m_desktopStyle);
         QApplication::setPalette(QPalette());
     }
+#ifdef Q_OS_WIN
+    // Windows has no icon theme to borrow from: DiskForge's own, dark or light like the windows.
+    QIcon::setThemeName(QApplication::palette().color(QPalette::Window).lightness() < 128 ? QStringLiteral("DiskForge-Dark")
+                                                                                         : QStringLiteral("DiskForge-Light"));
+#endif
     emit changed();
 }

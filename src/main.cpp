@@ -74,6 +74,12 @@ int main(int argc, char *argv[])
             qputenv("QT_QPA_PLATFORM", "offscreen");
     }
     QApplication app(argc, argv);
+#ifdef Q_OS_WIN
+    // DiskForge's own icons, next to the program (Windows has no icon theme to borrow from);
+    // Theme picks the dark or the light ones.
+    QIcon::setThemeSearchPaths(QIcon::themeSearchPaths() << QCoreApplication::applicationDirPath() + QStringLiteral("/icons"));
+    QIcon::setThemeName(QStringLiteral("DiskForge-Light"));
+#endif
     installTranslations();
     QApplication::setApplicationName(QStringLiteral("diskforge"));
     QApplication::setApplicationDisplayName(QStringLiteral("DiskForge"));
