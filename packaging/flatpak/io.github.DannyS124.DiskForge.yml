@@ -44,6 +44,35 @@ modules:
         url: https://github.com/ebiggers/wimlib.git
         tag: v1.14.5
         commit: cd5e231c348c255ae5088873b5a66ee0eb96fa07
+  # PDF pages in Find Lost Files' previews: the KDE runtime has no poppler. The version DiskForge
+  # Live has; the hash is of the release tarball, whose signature (Albert Astals Cid,
+  # CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7) was checked.
+  - name: poppler
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DENABLE_QT5=OFF
+      - -DENABLE_QT6=ON
+      - -DENABLE_GLIB=OFF
+      - -DENABLE_CPP=OFF
+      - -DENABLE_UTILS=OFF
+      - -DENABLE_BOOST=OFF
+      - -DENABLE_NSS3=OFF
+      - -DENABLE_GPGME=OFF
+      - -DENABLE_LIBCURL=OFF
+      - -DENABLE_LIBTIFF=OFF
+      - -DBUILD_GTK_TESTS=OFF
+      - -DBUILD_QT5_TESTS=OFF
+      - -DBUILD_QT6_TESTS=OFF
+      - -DBUILD_CPP_TESTS=OFF
+      - -DBUILD_MANUAL_TESTS=OFF
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+    sources:
+      - type: archive
+        url: https://poppler.freedesktop.org/poppler-25.03.0.tar.xz
+        sha256: 97da4ff88517a6bbd729529f195f85c8d7a0c3bb4a3d57cb0c685cbb052fe837
   - name: diskforge
     buildsystem: cmake-ninja
     config-opts:

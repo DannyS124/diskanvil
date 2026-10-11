@@ -19,7 +19,7 @@ optdepends=(
   'bubblewrap: run look-only add-ons, and Find Lost Files previews, in a read-only sandbox'
   'clamav: Scan for Viruses'
   "ffmpeg: a film's first frame in Find Lost Files previews"
-  'qt6-imageformats: more picture kinds in Find Lost Files previews (WebP, HEIC...)'
+  'qt6-imageformats: more picture kinds in Find Lost Files previews (WebP, TIFF...)'
   'fwupd: look for drive firmware updates in Disk Health'
   'udisks2-lvm2: show LVM volume groups'
   'wimlib: Make a Windows USB from ISOs with an install.wim over 4 GB'

@@ -144,3 +144,5 @@ clamav
 clamav-freshclam
 # the sandbox for Find Lost Files' previews
 bubblewrap
+# more picture kinds in those previews (WebP, TIFF...)
+qt6-image-formats-plugins

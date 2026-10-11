@@ -119,7 +119,7 @@ the ones it can use (Arch names):
 | Make a Windows USB (most Windows 11 ISOs) | `wimlib` |
 | Scan for Viruses | `clamav` |
 | Look-only add-ons, and Find Lost Files' previews in a sandbox | `bubblewrap` |
-| More picture kinds in previews (WebP, HEIC...), and a frame from films | `qt6-imageformats`, `ffmpeg` |
+| More picture kinds in previews (WebP, TIFF...), and a frame from films | `qt6-imageformats`, `ffmpeg` |
 
 ### Windows
 DiskForge runs on Windows too: 64-bit Windows 10 or 11 (I test it on 11). Each release has two downloads for it:
