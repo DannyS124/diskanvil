@@ -3,7 +3,8 @@
 # other libraries from MSYS2 (fetch-msys2.py), and moc and friends from a Linux Qt of the
 # same version (aqtinstall, in a Python venv). Everything downloaded goes in one work folder.
 #   packaging/windows/build.sh [work folder, default ~/.cache/diskforge-windows]
-# Ends with the program and everything it needs in <work>/DiskForge, zipped next to it.
+# Ends with the program and everything it needs in <work>/DiskForge, zipped next to it, and with
+# msitools there, DiskForge-<version>.msi to install it (msi.sh).
 set -euo pipefail
 root=$(cd "$(dirname "$0")/../.." && pwd)
 work=$(realpath -m "${1:-${DISKFORGE_WINDOWS_WORK:-$HOME/.cache/diskforge-windows}}")
@@ -30,3 +31,7 @@ cp "$root/LICENSE" "$work/DiskForge/LICENSE.txt"
 python3 -I "$root/packaging/windows/icons.py" "$root/rescue/icons/DiskForge-Live" "$work/DiskForge/icons"
 (cd "$work" && rm -f "DiskForge-$version-windows.zip" && python3 -m zipfile -c "DiskForge-$version-windows.zip" DiskForge)
 echo "==> $work/DiskForge-$version-windows.zip"
+# The installer too, when msitools is here.
+if command -v wixl >/dev/null; then
+    "$root/packaging/windows/msi.sh" "$work"
+fi
