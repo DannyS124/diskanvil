@@ -489,6 +489,25 @@ void MainWindow::createActions()
         const Disk *d = selectedDisk();
         if (!d)
             return;
+#ifdef Q_OS_WIN
+        // Windows doesn't pass a drive's own erase command through, and PCs lock it while
+        // Windows runs (DiskForge Live gets around that). Wipe Disk works here.
+        QMessageBox box(QMessageBox::Information, tr("Secure Erase"),
+                        tr("Secure Erase has the drive erase itself, spare areas and all, which only the drive can reach. "
+                           "Windows doesn't let programs send it that command, and most PCs lock it while Windows runs.\n\n"
+                           "DiskForge Live does it: start the PC from a DiskForge Live USB. Wipe Disk works here, writing zeros "
+                           "over everything, which is as good for a hard drive."),
+                        QMessageBox::Close, this);
+        QPushButton *live = box.addButton(tr("Make a DiskForge Live USB…"), QMessageBox::ActionRole);
+        QPushButton *wipe = box.addButton(tr("Wipe Disk…"), QMessageBox::ActionRole);
+        wipe->setEnabled(m_wipe->isEnabled());
+        box.exec();
+        if (box.clickedButton() == live)
+            m_rescueUsb->trigger();
+        else if (box.clickedButton() == wipe)
+            m_wipe->trigger();
+        return;
+#endif
         const QString path = d->blockPath;
         SecureEraseDialog dialog(m_udisks, path, selectedDiskNumber(), this);
         if (dialog.exec() != QDialog::Accepted)
@@ -769,7 +788,7 @@ void MainWindow::createActions()
 
 #ifdef Q_OS_WIN
     // Linux's own things (LUKS, fstab, RAID, Btrfs), and what the Windows version can't do yet.
-    for (QAction *a : {m_startup, m_raidCheck, m_snapshots, m_secureErase})
+    for (QAction *a : {m_startup, m_raidCheck, m_snapshots})
         a->setVisible(false);
 #endif
 
@@ -1259,7 +1278,11 @@ void MainWindow::updateActions()
     m_resize->setEnabled(tableChangeable && limits.possible);
     m_newTable->setEnabled(tableChangeable);
     m_wipe->setEnabled(tableChangeable);
+#ifdef Q_OS_WIN
+    m_secureErase->setEnabled(tableChangeable && !d->isLoop); // it says what Windows can't do, and what can
+#else
     m_secureErase->setEnabled(tableChangeable && !d->isLoop && (d->ataEraseMinutes > 0 || d->ataEnhancedEraseMinutes > 0 || d->nvmeNamespace));
+#endif
     m_detachImage->setEnabled(d && d->isLoop && !busy);
     m_openImage->setEnabled(!busy);
     m_writeImage->setEnabled(!busy);
