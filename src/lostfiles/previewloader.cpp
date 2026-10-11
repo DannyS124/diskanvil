@@ -53,12 +53,19 @@ QStringList PreviewLoader::helperCommand(bool sandbox)
 
 void PreviewLoader::want(int index, const lost::Found &file, int pixels)
 {
-    QMutexLocker locker(&m_lock);
-    m_queue.prepend({index, file, pixels});
-    // Long scrolls pile up wishes: the oldest ones aren't on screen anymore.
-    while (m_queue.size() > 300)
-        m_queue.removeLast();
-    m_wake.wakeOne();
+    QList<Wish> gone;
+    {
+        QMutexLocker locker(&m_lock);
+        // The same wish again goes to the front instead of being in the queue twice.
+        m_queue.removeIf([&](const Wish &w) { return w.index == index && w.pixels == pixels; });
+        m_queue.prepend({index, file, pixels});
+        // Long scrolls pile up wishes: the oldest ones aren't on screen anymore.
+        while (m_queue.size() > 300)
+            gone << m_queue.takeLast();
+        m_wake.wakeOne();
+    }
+    for (const Wish &w : std::as_const(gone))
+        Q_EMIT dropped(w.index, w.pixels);
 }
 
 void PreviewLoader::stop()
@@ -84,7 +91,8 @@ void PreviewLoader::run()
         // A thumbnail of a song or a film only needs its start (the tags, the first frame).
         const filetypes::Category category = f.type >= 0 ? filetypes::types()[f.type].category : filetypes::Category::Other;
         const bool media = category == filetypes::Category::Music || category == filetypes::Category::Video;
-        const qint64 most = wish.pixels <= 160 && media ? 16 * 1024 * 1024 : preview::kMostData;
+        const bool pdf = f.type >= 0 && filetypes::types()[f.type].id == QLatin1String("pdf");
+        const qint64 most = wish.pixels <= 160 && media ? 16 * 1024 * 1024 : pdf ? preview::kMostPdfData : preview::kMostData;
         preview::Request request;
         request.type = f.type;
         request.name = f.name;

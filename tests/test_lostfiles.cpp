@@ -15,6 +15,8 @@
 #include "../src/lostfiles/lostsource.h"
 #include "../src/lostfiles/mediainfo.h"
 #include "../src/lostfiles/officetext.h"
+#include "../src/lostfiles/preview.h"
+#include "../src/lostfiles/previewloader.h"
 #include "../src/lostfiles/vdisk.h"
 #include "../src/lostfiles/vshadow.h"
 
@@ -823,13 +825,33 @@ int scanImage(const QString &path)
         return 1;
     }
     QVector<lost::Volume> volumes;
-    const QVector<lost::Found> found = quickScan(source, &volumes);
+    QVector<lost::Found> found = quickScan(source, &volumes);
     for (const lost::Volume &v : std::as_const(volumes))
         out << v.type << " " << v.label << " at " << v.where.start << ": " << v.files << " files, " << v.deleted << " deleted" << Qt::endl;
+    // DISKFORGE_SCAN_DEEP=1: the files found by their contents too.
+    if (qEnvironmentVariableIsSet("DISKFORGE_SCAN_DEEP")) {
+        lost::DeepScan deep(source);
+        QObject::connect(&deep, &lost::DeepScan::found, [&found](const QVector<lost::Found> &batch) { found += batch; });
+        deep.run();
+    }
+    // DISKFORGE_SCAN_PREVIEWS=1: what the preview makes of each one (here, not in the sandbox).
+    const bool previews = qEnvironmentVariableIsSet("DISKFORGE_SCAN_PREVIEWS");
     for (const lost::Found &f : found) {
         out << (f.deleted ? "deleted " : "        ") << f.folder << "/" << f.name << "  " << f.size << " bytes, condition "
             << int(f.condition) << (f.checked ? " checked" : "") << (f.nameGuessed ? " name-guessed" : "")
+            << (f.piecesGuessed ? " pieces-guessed" : "") << (f.origin == lost::Origin::Contents ? " by-contents" : "")
             << (f.note.isEmpty() ? QString() : QStringLiteral("  (%1)").arg(f.note)) << Qt::endl;
+        if (previews && !f.nameOnly) {
+            preview::Request r;
+            r.type = f.type;
+            r.name = f.name;
+            r.size = f.size;
+            r.pixels = 480;
+            r.data = lost::FileReader(source, f).head(preview::kMostData);
+            const preview::Result result = preview::make(r);
+            out << "        preview: " << (result.image.isNull() ? QStringLiteral("no picture") : QStringLiteral("%1x%2").arg(result.image.width()).arg(result.image.height()))
+                << ", " << result.text.section(QLatin1Char('\n'), 0, 0).left(60) << Qt::endl;
+        }
     }
     return 0;
 }
@@ -1446,8 +1468,27 @@ void journal()
            QStringLiteral("NTFS's change journal: V2 and V3 records, between zeros and junk"), seen.join(QStringLiteral(", ")));
 }
 
+// Thumbnails asked for while scrolling pile up; the oldest are let go, and the window is told so it
+// asks again when they're on screen once more (they used to stay a plain card for good).
+void previewQueue()
+{
+    PreviewLoader loader(lost::Source::fromMemory(QByteArray(4096, '\0')));
+    QVector<int> dropped;
+    QObject::connect(&loader, &PreviewLoader::dropped, [&dropped](int index, int) { dropped << index; });
+    lost::Found f;
+    f.size = 4096;
+    for (int i = 0; i < 300; ++i)
+        loader.want(i, f, 128);
+    loader.want(5, f, 128); // the same one again: moved up, not queued twice
+    report(dropped.isEmpty(), QStringLiteral("previews: 300 thumbnails wait, the same one asked twice counts once"));
+    loader.want(300, f, 128);
+    report(dropped == QVector<int>{0}, QStringLiteral("previews: one more lets the oldest go, and says which"),
+           QStringLiteral("%1 let go").arg(dropped.size()));
+}
+
 void lostFilesTests()
 {
+    previewQueue();
     journal();
     QTemporaryDir dir;
     finding(dir.path());

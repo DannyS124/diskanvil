@@ -59,6 +59,8 @@ public:
     int fileIndex(int row) const { return m_shown.value(row, -1); }
     int count(int category) const; // how many of a kind were found
     void setThumbnail(int index, const QPixmap &thumbnail);
+    // Its thumbnail was never made (the request was let go): ask again when it's shown.
+    void forgetAsked(int index) { m_asked.remove(index); }
     QVector<lost::Found> ticked() const;
     QVector<int> tickedIndexes() const; // in the order ticked() has them
     int tickedCount() const { return int(m_ticked.size()); }

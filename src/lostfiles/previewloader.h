@@ -42,6 +42,8 @@ public Q_SLOTS:
 Q_SIGNALS:
     // `failed`: the helper crashed or hung on it.
     void ready(int index, int pixels, const QImage &image, const QString &text, bool failed);
+    // A wish let go of unanswered (too many piled up): ask again when it's wanted again.
+    void dropped(int index, int pixels);
 
 private:
     struct Wish {

@@ -38,7 +38,7 @@ namespace preview {
 namespace {
 
 constexpr quint32 kMagic = 0x44465056; // "DFPV"
-constexpr qint64 kMostMessage = kMostData + 1024 * 1024;
+constexpr qint64 kMostMessage = kMostPdfData + 1024 * 1024;
 
 QString tr(const char *text)
 {

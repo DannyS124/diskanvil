@@ -971,6 +971,10 @@ void LostFilesDialog::scanSource(std::shared_ptr<lost::Source> source, const QSt
     }
 
     m_thumbs = new PreviewLoader(m_source);
+    connect(m_thumbs, &PreviewLoader::dropped, this, [this](int index, int pixels) {
+        if (pixels == kThumbnail)
+            m_model->forgetAsked(index);
+    });
     connect(m_thumbs, &PreviewLoader::ready, this, [this](int index, int pixels, const QImage &image, const QString &text, bool failed) {
         if (pixels == kThumbnail) {
             if (!image.isNull())

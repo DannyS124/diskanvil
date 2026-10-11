@@ -51,5 +51,8 @@ bool read(QIODevice &from, Result &result, int msecs = -1);
 
 // How much of a file is handed to the helper: all of it up to this, or the start of a bigger one.
 constexpr qint64 kMostData = 64 * 1024 * 1024;
+// A PDF says where its pages are at its very end, so a bigger one (a scanned book) is handed
+// over whole, up to this.
+constexpr qint64 kMostPdfData = 512 * 1024 * 1024;
 
 } // namespace preview
