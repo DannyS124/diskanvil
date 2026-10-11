@@ -61,7 +61,10 @@ case "$cmd" in
         die "something in src/ listens for other programs (above); DiskForge mustn't"
     fi
     # Invisible characters (zero-width, text direction) can make code read differently than it runs.
-    if grep -rnP '[\x{200B}-\x{200F}\x{202A}-\x{202E}\x{2066}-\x{2069}\x{FEFF}]' src tests data docs examples; then
+    # A byte order mark is fine as a file's very first character (Windows PowerShell needs it to
+    # read a script as UTF-8), and nowhere else.
+    if grep -rnP '[\x{200B}-\x{200F}\x{202A}-\x{202E}\x{2066}-\x{2069}]' src tests data docs examples \
+        || grep -rboP '\x{FEFF}' src tests data docs examples | grep -v ':0:'; then
         die "invisible characters in the files above; use escapes like \\u202E instead"
     fi
 
