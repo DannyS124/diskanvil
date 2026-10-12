@@ -17,6 +17,7 @@
 #include "isocopy.h"
 #include "imagewriter.h"
 #include "rescuestick.h"
+#include "sdcard.h"
 #include "surfacescan.h"
 #include "drivefacts.h"
 #include "farm.h"
@@ -265,6 +266,149 @@ WipeDialog::WipeDialog(const Disk &disk, int diskNumber, QWidget *parent)
 }
 
 // --- Health -------------------------------------------------------------------
+
+// --- SD cards -----------------------------------------------------------------
+
+SdCardDialog::SdCardDialog(UDisks *udisks, const Disk &disk, int diskNumber, QWidget *parent)
+    : QDialog(parent)
+    , m_udisks(udisks)
+    , m_disk(disk)
+    , m_label(new QLineEdit)
+    , m_confirm(new QLineEdit)
+    , m_start(new QPushButton(tr("Format")))
+    , m_progress(new QProgressBar)
+    , m_status(new QLabel)
+{
+    setWindowTitle(tr("Format Disk %1 as an SD Card").arg(diskNumber));
+    const sdcard::Plan plan = sdcard::plan(disk.size, disk.sectorSize);
+    // Exact powers of two, said as such: "32 KiB", "4 MiB".
+    const auto exact = [](quint64 bytes) {
+        return bytes >= 1024 * 1024 ? tr("%1 MiB").arg(bytes / (1024 * 1024)) : tr("%1 KiB").arg(bytes / 1024);
+    };
+    QString text = tr("<p><b>Disk %1: %2</b></p>").arg(diskNumber).arg(diskTitle(disk).toHtmlEscaped());
+    if (!plan.problem.isEmpty()) {
+        text += QStringLiteral("<p>") + tr("This one can't be: %1.").arg(plan.problem.toHtmlEscaped()) + QStringLiteral("</p>");
+    } else {
+        text += tr("<p>Formats it the way the SD Card Association specifies, as cameras, phones and consoles expect: "
+                   "<b>%1</b> with %2 clusters, and its partition and data placed on the card's %3 erase blocks, so it "
+                   "writes faster and wears less than with a computer's usual format.</p>")
+                    .arg(plan.fsName(), exact(quint64(plan.cluster)), exact(plan.boundary));
+        if (!disk.sdCard)
+            text += tr("<p>This drive doesn't say it's a memory card. The layout works on any drive, but it's made for cards.</p>");
+    }
+    QStringList lost;
+    for (const Volume &v : disk.volumes) {
+        if (!v.isContainer)
+            lost << QStringLiteral("• ") + describeVolume(v).toHtmlEscaped();
+    }
+    if (!lost.isEmpty())
+        text += redText(tr("This erases:")) + QStringLiteral("<br>") + lost.join(QStringLiteral("<br>"));
+    if (!diskWarning(disk).isEmpty())
+        text += QStringLiteral("<br>") + redText(diskWarning(disk));
+
+    m_label->setMaxLength(11);
+    m_label->setPlaceholderText(tr("Name (up to 11 characters)"));
+    m_label->setObjectName(QStringLiteral("sdLabel"));
+    m_confirm->setObjectName(QStringLiteral("sdConfirm"));
+    const QString name = shortDevice(disk.device);
+    m_confirm->setPlaceholderText(name);
+    m_progress->setRange(0, 1000);
+    m_progress->setVisible(false);
+    m_status->setWordWrap(true);
+    m_start->setEnabled(false);
+    connect(m_confirm, &QLineEdit::textChanged, this, [this, name, plan](const QString &t) {
+        m_start->setEnabled(t.trimmed() == name && plan.problem.isEmpty() && !m_running);
+    });
+    connect(m_start, &QPushButton::clicked, this, &SdCardDialog::start);
+    auto *close = new QPushButton(tr("Close"));
+    connect(close, &QPushButton::clicked, this, &SdCardDialog::reject);
+    auto *buttons = new QHBoxLayout;
+    buttons->addStretch();
+    buttons->addWidget(m_start);
+    buttons->addWidget(close);
+
+    auto *form = new QFormLayout;
+    form->addRow(tr("Name:"), m_label);
+    auto *layout = new QVBoxLayout(this);
+    layout->addWidget(wrappingLabel(text));
+    layout->addLayout(form);
+    layout->addWidget(new QLabel(tr("Type <b>%1</b> to confirm:").arg(name)));
+    layout->addWidget(m_confirm);
+    layout->addWidget(m_progress);
+    layout->addWidget(m_status);
+    layout->addLayout(buttons);
+    m_confirm->setEnabled(plan.problem.isEmpty());
+    resize(540, sizeHint().height());
+}
+
+SdCardDialog::~SdCardDialog()
+{
+    if (m_thread) {
+        m_thread->wait();
+        delete m_thread;
+    }
+}
+
+void SdCardDialog::reject()
+{
+    if (!m_running)
+        QDialog::reject();
+}
+
+void SdCardDialog::start()
+{
+    m_running = true;
+    m_start->setEnabled(false);
+    m_confirm->setEnabled(false);
+    m_label->setEnabled(false);
+    m_status->setText(tr("Waiting for permission…"));
+    const QString label = m_label->text().trimmed();
+    m_openConn = connect(m_udisks, &UDisks::deviceOpened, this, [this, label](const QString &path, int fd) {
+        if (path != m_disk.blockPath)
+            return;
+        disconnect(m_openConn);
+        if (fd < 0) {
+            m_running = false;
+            m_status->setText(tr("Couldn't open the drive for writing."));
+            m_confirm->setEnabled(true);
+            m_label->setEnabled(true);
+            return;
+        }
+        m_progress->setValue(0);
+        m_progress->setVisible(true);
+        m_status->setText(tr("Formatting…"));
+        const quint64 size = m_disk.size;
+        const int sectorSize = m_disk.sectorSize;
+        m_thread = QThread::create([this, fd, size, sectorSize, label] {
+            QString error;
+            const bool ok = sdcard::write(fd, size, sectorSize, label, &error, [this](quint64 done, quint64 total) {
+                QMetaObject::invokeMethod(this, [this, done, total] { m_progress->setValue(total ? int(done * 1000 / total) : 0); });
+            });
+            blockio::close(fd);
+            qCInfo(lcOps).noquote() << "SD card format of" << m_disk.device << (ok ? "done" : "failed: " + error);
+            QMetaObject::invokeMethod(this, [this, ok, error] {
+                m_thread->wait();
+                delete m_thread;
+                m_thread = nullptr;
+                m_running = false;
+                m_progress->setVisible(false);
+                m_udisks->rescan(m_disk.blockPath);
+                m_udisks->refresh();
+                if (ok) {
+                    QMessageBox::information(this, windowTitle(), tr("Done: the card is ready."));
+                    QDialog::accept();
+                } else {
+                    m_status->setText(redText(tr("It couldn't be formatted: %1").arg(error.toHtmlEscaped())));
+                    m_status->setTextFormat(Qt::RichText);
+                    m_confirm->setEnabled(true);
+                    m_label->setEnabled(true);
+                }
+            });
+        });
+        m_thread->start();
+    });
+    m_udisks->openDevice(m_disk, true, false);
+}
 
 HealthDialog::HealthDialog(UDisks *udisks, const QString &blockPath, QWidget *parent)
     : QDialog(parent)

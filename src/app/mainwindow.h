@@ -126,6 +126,7 @@ private:
     QAction *m_rescueUsb = nullptr;
     QAction *m_windowsUsb = nullptr;
     QAction *m_wipe = nullptr;
+    QAction *m_sdCard = nullptr; // format a memory card the SD Card Association's way
     QAction *m_health = nullptr;
     QAction *m_benchmark = nullptr;
     QAction *m_badSectors = nullptr;

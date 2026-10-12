@@ -117,6 +117,7 @@ struct Disk {
     quint64 size = 0;
     int rotationRate = -1; // 0 = SSD, -1 = unknown
     bool removable = false;
+    bool sdCard = false; // a memory card (SD, SDHC, SDXC, MMC), in a reader or a slot
     bool canPowerOff = false;
     bool readOnly = false;
     bool isLoop = false;

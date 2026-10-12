@@ -64,6 +64,8 @@ add_library(diskforge-core STATIC
     src/lostfiles/vshadow.cpp src/lostfiles/vshadow.h
     src/lostfiles/vdisk.cpp src/lostfiles/vdisk.h
     src/drives/fat32format.cpp src/drives/fat32format.h
+    src/drives/exfatformat.cpp src/drives/exfatformat.h
+    src/drives/sdcard.cpp src/drives/sdcard.h
     src/lostfiles/mediainfo.cpp src/lostfiles/mediainfo.h
     src/lostfiles/exif.cpp src/lostfiles/exif.h
     src/lostfiles/lookcopies.cpp src/lostfiles/lookcopies.h
@@ -105,6 +107,7 @@ add_library(diskforge-core STATIC
     src/health/health.cpp src/health/health.h
     src/health/triage.cpp src/health/triage.h
     src/health/drivefacts.cpp src/health/drivefacts.h
+    src/health/farm.cpp src/health/farm.h
     src/health/smartdata.cpp src/health/smartdata.h
     src/health/firmware.h
     src/health/btrfscheck.cpp src/health/btrfscheck.h

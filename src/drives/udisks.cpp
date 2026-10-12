@@ -316,6 +316,10 @@ void UDisks::refresh()
         d.revision = cleanName(drive.value(QStringLiteral("Revision")).toString());
         d.bus = drive.value(QStringLiteral("ConnectionBus")).toString();
         d.removable = drive.value(QStringLiteral("Removable")).toBool();
+        // A card in a slot is mmcblk; in a USB reader, the reader says what it takes and what's in it.
+        const QString media = drive.value(QStringLiteral("Media")).toString();
+        d.sdCard = d.device.startsWith(QLatin1String("/dev/mmcblk")) || d.bus == QLatin1String("sdio") || media.startsWith(QLatin1String("flash_sd"))
+                || media == QLatin1String("flash_mmc");
         d.rotationRate = drive.value(QStringLiteral("RotationRate"), -1).toInt();
         d.canPowerOff = drive.value(QStringLiteral("CanPowerOff")).toBool();
         d.readOnly = block.value(QStringLiteral("ReadOnly")).toBool();

@@ -15,7 +15,7 @@
 <context>
     <name>BadSectorsDialog</name>
     <message numerus="yes">
-        <location filename="../src/app/tools.cpp" line="1511"/>
+        <location filename="../src/app/tools.cpp" line="1717"/>
         <source>%n area(s) read slowly. Slow spots often turn into bad sectors later, so keep a backup.</source>
         <translation>
             <numerusform>%n area read slowly. Slow spots often turn into bad sectors later, so keep a backup.</numerusform>
@@ -23,7 +23,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/app/tools.cpp" line="1539"/>
+        <location filename="../src/app/tools.cpp" line="1745"/>
         <source>Repair %n bad sector(s) on %1?</source>
         <translation>
             <numerusform>Repair %n bad sector on %1?</numerusform>
@@ -31,7 +31,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/app/tools.cpp" line="1586"/>
+        <location filename="../src/app/tools.cpp" line="1792"/>
         <source>%n block(s)</source>
         <translation>
             <numerusform>%n block</numerusform>
@@ -192,7 +192,7 @@
 <context>
     <name>MainWindow</name>
     <message numerus="yes">
-        <location filename="../src/app/mainwindow.cpp" line="1004"/>
+        <location filename="../src/app/mainwindow.cpp" line="1013"/>
         <source>%n more drive(s) need a look; their health is in the Status column.</source>
         <translation>
             <numerusform>%n more drive need a look; their health is in the Status column.</numerusform>
@@ -200,7 +200,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/app/mainwindow.cpp" line="2068"/>
+        <location filename="../src/app/mainwindow.cpp" line="2080"/>
         <source>%n add-on command(s) still running. Stop them and quit?</source>
         <translation>
             <numerusform>%n add-on command still running. Stop them and quit?</numerusform>
@@ -227,7 +227,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/app/tools.cpp" line="106"/>
+        <location filename="../src/app/tools.cpp" line="109"/>
         <source>%n sector(s)</source>
         <translation>
             <numerusform>%n sector</numerusform>
@@ -513,7 +513,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/drives/udisks.cpp" line="457"/>
+        <location filename="../src/drives/udisks.cpp" line="461"/>
         <source>The volume group %1 is missing %n of its drives. What was on them can&apos;t be read.</source>
         <translation>
             <numerusform>The volume group %1 is missing %n of its drives. What was on them can't be read.</numerusform>

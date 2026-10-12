@@ -746,6 +746,7 @@ void UDisks::refresh()
             case BusTypeSd:
             case BusTypeMmc:
                 d.bus = QStringLiteral("sd");
+                d.sdCard = true;
                 break;
             case BusTypeFileBackedVirtual:
                 d.isLoop = true;
@@ -755,6 +756,10 @@ void UDisks::refresh()
             }
         }
         d.canPowerOff = d.bus == QLatin1String("usb");
+        // USB card readers name themselves ("Generic- SD/MMC", "Card Reader", "microSD").
+        static const QRegularExpression reader(QStringLiteral("\\bSD(HC|XC)?\\b|SD/MMC|micro ?SD|card ?reader"), QRegularExpression::CaseInsensitiveOption);
+        if (d.bus == QLatin1String("usb") && reader.match(d.model).hasMatch())
+            d.sdCard = true;
         DEVICE_SEEK_PENALTY_DESCRIPTOR seek {};
         if (storageProperty(query.get(), StorageDeviceSeekPenaltyProperty, &seek) && seek.Size)
             d.rotationRate = seek.IncursSeekPenalty ? 1 : 0; // spins, but how fast isn't said here

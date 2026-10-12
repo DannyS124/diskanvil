@@ -70,6 +70,33 @@ public:
     WipeDialog(const Disk &disk, int diskNumber, QWidget *parent = nullptr);
 };
 
+// Formats a memory card the SD Card Association's way (sdcard.h). Everything on it goes:
+// type-to-confirm, like a wipe.
+class SdCardDialog : public QDialog
+{
+    Q_OBJECT
+public:
+    SdCardDialog(UDisks *udisks, const Disk &disk, int diskNumber, QWidget *parent = nullptr);
+    ~SdCardDialog() override;
+
+protected:
+    void reject() override; // not while it writes
+
+private:
+    void start();
+
+    UDisks *m_udisks;
+    Disk m_disk;
+    QLineEdit *m_label;
+    QLineEdit *m_confirm;
+    QPushButton *m_start;
+    QProgressBar *m_progress;
+    QLabel *m_status;
+    QThread *m_thread = nullptr;
+    QMetaObject::Connection m_openConn;
+    bool m_running = false;
+};
+
 class HealthDialog : public QDialog
 {
     Q_OBJECT

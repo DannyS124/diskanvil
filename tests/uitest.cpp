@@ -1773,6 +1773,98 @@ void stickCheck()
     cleanUpLoop(udisks, loopPath);
 }
 
+// Format as an SD Card on a 3 GB loop device standing in for a card. As root: the card gets one
+// FAT32 partition 4 MiB in, with its name. As the user: writing to a drive directly needs the
+// admin password, so without a prompt it's refused, and the window says so.
+void sdCardFormat()
+{
+    const bool asRoot = geteuid() == 0;
+    QTemporaryDir dir;
+    const QString image = dir.filePath(QStringLiteral("card.img"));
+    sh(QStringLiteral("truncate"), {QStringLiteral("-s"), QStringLiteral("3G"), image});
+    QFile backing(image);
+    QString loopPath;
+    if (backing.open(QIODevice::ReadWrite)) {
+        QDBusMessage call = QDBusMessage::createMethodCall(QStringLiteral("org.freedesktop.UDisks2"), QStringLiteral("/org/freedesktop/UDisks2/Manager"),
+                                                           QStringLiteral("org.freedesktop.UDisks2.Manager"), QStringLiteral("LoopSetup"));
+        call << QVariant::fromValue(QDBusUnixFileDescriptor(backing.handle())) << QVariantMap{{QStringLiteral("auth.no_user_interaction"), true}};
+        loopPath = QDBusConnection::systemBus().call(call, QDBus::Block, 30000).arguments().value(0).value<QDBusObjectPath>().path();
+        backing.close();
+    }
+    report(!loopPath.isEmpty(), QStringLiteral("SD card: a loop device stands in for the card"));
+    if (loopPath.isEmpty())
+        return;
+    UDisks udisks;
+    udisks.setInteractive(false);
+    const Disk *card = nullptr;
+    waitUntil([&] {
+        udisks.refresh();
+        card = udisks.diskByPath(loopPath);
+        return card != nullptr;
+    }, 15000);
+    if (!card) {
+        report(false, QStringLiteral("SD card: the loop device shows up"));
+        return;
+    }
+    const QString device = card->device;
+    QStringList boxes;
+    Answerer answerer;
+    answerer.answer = [&](QWidget *modal) {
+        if (auto *box = qobject_cast<QMessageBox *>(modal)) {
+            boxes << box->text();
+            box->accept();
+            return true;
+        }
+        return false;
+    };
+    {
+        SdCardDialog dialog(&udisks, *card, 9);
+        dialog.show();
+        QApplication::processEvents();
+        const QString text = [&] {
+            QStringList all;
+            for (QLabel *l : dialog.findChildren<QLabel *>())
+                all << l->text();
+            return all.join(QLatin1Char(' '));
+        }();
+        report(text.contains(QLatin1String("FAT32")) && text.contains(QLatin1String("32 KiB")) && text.contains(QLatin1String("4 MiB")),
+               QStringLiteral("SD card: the window says what the card gets (FAT32, 32 KiB clusters, 4 MiB erase blocks)"), text.left(400));
+        QPushButton *format = findButton(&dialog, QStringLiteral("Format"));
+        report(format && !format->isEnabled(), QStringLiteral("SD card: nothing starts before the device name is typed"));
+        dialog.findChild<QLineEdit *>(QStringLiteral("sdLabel"))->setText(QStringLiteral("Holiday"));
+        dialog.findChild<QLineEdit *>(QStringLiteral("sdConfirm"))->setText(shortDevice(device));
+        if (format)
+            format->click();
+        if (asRoot) {
+            waitUntil([&] { return !boxes.isEmpty(); }, 120000);
+            report(boxes.join(QLatin1Char(' ')).contains(QLatin1String("the card is ready")), QStringLiteral("SD card: it's formatted, and says so"),
+                   boxes.join(QStringLiteral(" | ")));
+        } else {
+            QLabel *status = nullptr;
+            waitUntil([&] {
+                for (QLabel *l : dialog.findChildren<QLabel *>()) {
+                    if (l->text().contains(QLatin1String("Couldn't open")))
+                        status = l;
+                }
+                return status != nullptr;
+            }, 60000);
+            report(status != nullptr, QStringLiteral("SD card: as the user without a password prompt, it can't open the card and says so"));
+        }
+    }
+    if (asRoot) {
+        waitUntil([&] {
+            udisks.refresh();
+            card = udisks.diskByPath(loopPath);
+            return card && card->volumes.size() == 1 && !card->volumes[0].fsType.isEmpty();
+        }, 20000);
+        report(card && card->tableType == QLatin1String("dos") && card->volumes.size() == 1 && card->volumes[0].fsType == QLatin1String("vfat")
+                   && card->volumes[0].offset == 4 * 1024 * 1024 && card->volumes[0].label == QLatin1String("HOLIDAY"),
+               QStringLiteral("SD card: an MBR with one FAT32 partition 4 MiB in, named HOLIDAY"),
+               card && !card->volumes.isEmpty() ? QStringLiteral("%1 %2 %3").arg(card->volumes[0].fsType).arg(card->volumes[0].offset).arg(card->volumes[0].label) : QString());
+    }
+    cleanUpLoop(udisks, loopPath);
+}
+
 // Write Image to USB's "copy the files" way, with persistence, on a loop device of the user's
 // own (no raw access needed, so no password): a Debian-live-like ISO with a long label.
 // DISKFORGE_TEST_COPY_ISO uses a real ISO instead (one with live-boot persistence, like
@@ -4236,7 +4328,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},
@@ -4267,18 +4359,27 @@ int main(int argc, char *argv[])
     installTranslations();
     // Qt's own file dialogs, which the tests can see and answer (the desktop's own aren't widgets).
     QCoreApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
-    // As the user: the add-on, menu and theme parts, which need no test disks.
-    if (app.arguments().contains(QStringLiteral("--user"))) {
-        QStringList only;
-        for (const QString &arg : app.arguments()) {
-            if (arg.startsWith(QLatin1String("--only=")))
-                only = arg.mid(7).split(QLatin1Char(','));
-        }
-        return userScenarios(only);
+    QStringList only;
+    for (const QString &arg : app.arguments()) {
+        if (arg.startsWith(QLatin1String("--only=")))
+            only = arg.mid(7).split(QLatin1Char(','));
     }
+    // As the user: the add-on, menu and theme parts, which need no test disks.
+    if (app.arguments().contains(QStringLiteral("--user")))
+        return userScenarios(only);
     if (geteuid() != 0) {
         out << "Run as root: it creates a loop device (or use --user for the parts that don't)." << Qt::endl;
         return 2;
+    }
+    // As root, the ones that make their own loop device can run by themselves.
+    if (!only.isEmpty()) {
+        const QVector<QPair<const char *, void (*)()>> alone = {{"stickcheck", stickCheck}, {"sdcard", sdCardFormat}, {"stopwipe", stopWipe}};
+        for (const auto &[name, run] : alone) {
+            if (only.contains(QLatin1String(name)))
+                run();
+        }
+        out << (failures ? QStringLiteral("%1 step(s) failed").arg(failures) : QStringLiteral("All steps passed")) << Qt::endl;
+        return failures ? 1 : 0;
     }
 
     // A disk image with one ext4 partition whose root folder has a wrong link count.
@@ -4365,6 +4466,7 @@ int main(int argc, char *argv[])
     scanThroughWindow();
     raidBanner();
     stickCheck();
+    sdCardFormat();
 
     out << (failures ? QStringLiteral("%1 step(s) failed").arg(failures) : QStringLiteral("All steps passed")) << Qt::endl;
     return failures ? 1 : 0;

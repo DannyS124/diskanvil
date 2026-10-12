@@ -93,7 +93,12 @@ bool format(int fd, quint64 offset, quint64 size, const Options &options, QStrin
         return false;
     }
     const quint32 total = quint32(size / ss);
-    const quint32 spc = quint32(std::max<int>(clusterSize(size), int(ss))) / ss; // sectors per cluster
+    const int wanted = options.clusterBytes > 0 ? options.clusterBytes : clusterSize(size);
+    if (wanted % int(ss) || (wanted & (wanted - 1)) || wanted / int(ss) > 128) {
+        *error = tr("that cluster size can't be used here");
+        return false;
+    }
+    const quint32 spc = quint32(std::max<int>(wanted, int(ss))) / ss; // sectors per cluster
 
     // Each FAT has an entry for every cluster (and two more), and the clusters are what's left
     // after the reserved sectors and the two FATs: worked out until it fits.
@@ -108,9 +113,15 @@ bool format(int fd, quint64 offset, quint64 size, const Options &options, QStrin
             break;
         fatSize = needed;
     }
-    // The data starts on a cluster's edge (flash drives write whole clusters fastest).
-    if (const quint64 start = reserved + 2 * fatSize; start % spc)
+    // The data starts on a cluster's edge (flash drives write whole clusters fastest), or on the
+    // boundary asked for, counted from the drive's start (a memory card's erase blocks).
+    if (options.alignBytes >= ss) {
+        const quint64 unit = options.alignBytes / ss;
+        if (const quint64 start = options.hiddenSectors + reserved + 2 * fatSize; start % unit)
+            reserved += quint32(unit - start % unit);
+    } else if (const quint64 start = reserved + 2 * fatSize; start % spc) {
         reserved += quint32(spc - start % spc);
+    }
     const quint64 dataStart = reserved + 2 * fatSize;
     const quint64 clusters = total > dataStart ? (total - dataStart) / spc : 0;
     if (clusters < kLeastClusters) {
@@ -226,6 +237,127 @@ bool format(int fd, quint64 offset, quint64 size, const Options &options, QStrin
     }
     if (!blockio::writeAt(fd, root.get(), clusterBytes, offset + dataStart * ss))
         return failed();
+    if (!blockio::flush(fd)) {
+        *error = tr("what was written couldn't be saved to the drive");
+        return false;
+    }
+    return true;
+}
+
+namespace {
+
+constexpr quint32 kFat16RootEntries = 512;
+
+// A FAT16 volume's FAT size in sectors, for its size and cluster size.
+quint64 fat16FatSize(quint64 total, quint32 spc, quint32 ss)
+{
+    const quint64 rootSectors = kFat16RootEntries * 32 / ss;
+    quint64 fatSize = 1;
+    for (int round = 0; round < 64; ++round) {
+        const qint64 data = qint64(total) - 1 - 2 * qint64(fatSize) - qint64(rootSectors);
+        const quint64 clusters = data > 0 ? quint64(data) / spc : 0;
+        const quint64 needed = ((clusters + 2) * 2 + ss - 1) / ss;
+        if (needed <= fatSize)
+            break;
+        fatSize = needed;
+    }
+    return fatSize;
+}
+
+} // namespace
+
+quint64 fat16Overhead(quint64 size, int clusterBytes, int sectorSize)
+{
+    const quint32 ss = quint32(sectorSize);
+    const quint32 spc = std::max<quint32>(1, quint32(clusterBytes) / ss);
+    return 1 + 2 * fat16FatSize(size / ss, spc, ss) + kFat16RootEntries * 32 / ss;
+}
+
+bool formatFat16(int fd, quint64 offset, quint64 size, const Options &options, QString *error)
+{
+    const quint32 ss = quint32(options.sectorSize);
+    if (ss != 512) {
+        *error = tr("FAT16 here is for drives with 512-byte sectors");
+        return false;
+    }
+    const quint32 spc = quint32(options.clusterBytes) / ss;
+    if (spc == 0 || spc > 64 || (spc & (spc - 1))) {
+        *error = tr("that cluster size can't be used here");
+        return false;
+    }
+    const quint64 total = size / ss;
+    const quint64 fatSize = fat16FatSize(total, spc, ss);
+    const quint64 rootSectors = kFat16RootEntries * 32 / ss;
+    const quint64 dataStart = 1 + 2 * fatSize + rootSectors;
+    const quint64 clusters = total > dataStart ? (total - dataStart) / spc : 0;
+    // FAT16 is what has 4,085 to 65,524 clusters: fewer is FAT12, more FAT32.
+    if (clusters < 4085 || clusters > 65524 || total > 0xFFFFFFFFull) {
+        *error = tr("FAT16 doesn't fit this size with that cluster size");
+        return false;
+    }
+
+    // The boot sector, the FATs and the root folder are written as one piece.
+    const quint64 headBytes = dataStart * ss;
+    blockio::Buffer head = blockio::alignedBuffer(headBytes);
+    if (!head) {
+        *error = tr("out of memory");
+        return false;
+    }
+    uchar *b = reinterpret_cast<uchar *>(head.get());
+    memset(b, 0, headBytes);
+    b[0] = 0xEB;
+    b[1] = 0x3C;
+    b[2] = 0x90;
+    memcpy(b + 3, "MSWIN4.1", 8);
+    qToLittleEndian<quint16>(quint16(ss), b + 11);
+    b[13] = uchar(spc);
+    qToLittleEndian<quint16>(1, b + 14); // reserved sectors
+    b[16] = 2;
+    qToLittleEndian<quint16>(quint16(kFat16RootEntries), b + 17);
+    if (total < 65536)
+        qToLittleEndian<quint16>(quint16(total), b + 19);
+    else
+        qToLittleEndian<quint32>(quint32(total), b + 32);
+    b[21] = 0xF8;
+    qToLittleEndian<quint16>(quint16(fatSize), b + 22);
+    qToLittleEndian<quint16>(63, b + 24);
+    qToLittleEndian<quint16>(255, b + 26);
+    qToLittleEndian<quint32>(quint32(options.hiddenSectors), b + 28);
+    b[36] = 0x80;
+    b[38] = 0x29;
+    qToLittleEndian<quint32>(QRandomGenerator::system()->generate(), b + 39);
+    const QByteArray label = labelOf(options.label);
+    memcpy(b + 43, label.constData(), 11);
+    memcpy(b + 54, "FAT16   ", 8);
+    memcpy(b + 0x3E, kBootCode, sizeof kBootCode); // the message stays at 0x7C, where the code looks
+    memcpy(b + 0x7C, kMessage, sizeof kMessage);
+    b[510] = 0x55;
+    b[511] = 0xAA;
+    for (int f = 0; f < 2; ++f) {
+        uchar *fat = b + (1 + f * fatSize) * ss;
+        qToLittleEndian<quint16>(0xFFF8, fat);
+        qToLittleEndian<quint16>(0xFFFF, fat + 2);
+    }
+    if (options.label.trimmed().size() > 0) {
+        uchar *e = b + (1 + 2 * fatSize) * ss;
+        memcpy(e, label.constData(), 11);
+        e[11] = 0x08;
+        const QDateTime now = QDateTime::currentDateTime();
+        qToLittleEndian<quint16>(quint16((now.time().hour() << 11) | (now.time().minute() << 5) | (now.time().second() / 2)), e + 22);
+        qToLittleEndian<quint16>(quint16(((now.date().year() - 1980) << 9) | (now.date().month() << 5) | now.date().day()), e + 24);
+    }
+    // An old file system's backup at the end stops too.
+    blockio::Buffer zeros = blockio::alignedBuffer(kChunk);
+    if (!zeros) {
+        *error = tr("out of memory");
+        return false;
+    }
+    memset(zeros.get(), 0, kChunk);
+    const quint64 tail = std::min<quint64>(kChunk, total * ss);
+    if (!blockio::writeAt(fd, zeros.get(), tail, offset + total * ss - tail) || !blockio::writeAt(fd, head.get(), headBytes, offset)) {
+        *error = tr("writing to it failed");
+        return false;
+    }
     if (!blockio::flush(fd)) {
         *error = tr("what was written couldn't be saved to the drive");
         return false;

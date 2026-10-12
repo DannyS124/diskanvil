@@ -491,6 +491,15 @@ void MainWindow::createActions()
         m_udisks->wipe(*fresh);
     });
 
+    m_sdCard = new QAction(themeIcon("media-flash-sd-mmc", "media-flash"), tr("Format as an SD &Card…"), this);
+    m_sdCard->setObjectName(QStringLiteral("sdCard"));
+    m_sdCard->setToolTip(tr("Formats a memory card the way the SD Card Association specifies, as cameras and phones expect"));
+    connect(m_sdCard, &QAction::triggered, this, [this] {
+        if (const Disk *d = selectedDisk())
+            SdCardDialog(m_udisks, *d, selectedDiskNumber(), this).exec();
+        updateActions();
+    });
+
     m_secureErase = new QAction(themeIcon("edit-delete-shred", "edit-delete"), tr("Secure &Erase…"), this);
     connect(m_secureErase, &QAction::triggered, this, [this] {
         const Disk *d = selectedDisk();
@@ -707,7 +716,7 @@ void MainWindow::createActions()
     action->addSeparator();
     action->addActions({m_newPartition, m_format, m_resize, m_rename, m_typeFlags, m_check, m_startup, m_delete});
     action->addSeparator();
-    action->addActions({m_newTable, m_inspect, m_recover, m_findFiles, m_wipe, m_secureErase, m_detachImage});
+    action->addActions({m_newTable, m_inspect, m_recover, m_findFiles, m_wipe, m_sdCard, m_secureErase, m_detachImage});
     action->addSeparator();
     action->addActions({m_health, m_badSectors, m_checkStick, m_benchmark, m_raidCheck});
     action->addSeparator();
@@ -1312,6 +1321,7 @@ void MainWindow::updateActions()
     m_resize->setEnabled(tableChangeable && limits.possible);
     m_newTable->setEnabled(tableChangeable);
     m_wipe->setEnabled(tableChangeable);
+    m_sdCard->setEnabled(tableChangeable && (d->sdCard || d->removable || d->bus == QLatin1String("usb") || d->isLoop));
 #ifdef Q_OS_WIN
     m_secureErase->setEnabled(tableChangeable && !d->isLoop); // it says what Windows can't do, and what can
 #else
@@ -1481,6 +1491,8 @@ void MainWindow::buildContextMenu(QMenu *menu)
     if (!d->isSystem && (d->removable || d->bus == QLatin1String("usb")))
         add({m_writeImage, m_windowsUsb, m_rescueUsb, m_checkStick});
     add({m_newTable, m_wipe, m_secureErase});
+    if (m_sdCard->isEnabled())
+        add({m_sdCard});
 
     const auto addonActions = m_addons.actionsFor(*d, v, sel.kind == DiskMap::Selection::Kind::Free);
     if (!addonActions.isEmpty()) {
