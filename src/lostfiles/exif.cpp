@@ -358,7 +358,7 @@ QStringList describe(const Info &i)
     add(tr("Lens"), i.lens);
     QStringList settings;
     if (i.exposure > 0)
-        settings << (i.exposure >= 1 ? tr("%1 s").arg(trimmedNumber(i.exposure, 1)) : tr("1/%1 s").arg(qRound(1 / i.exposure)));
+        settings << (i.exposure >= 1 ? tr("%1 s").arg(trimmedNumber(i.exposure, 1)) : tr("1/%1 s").arg(qRound64(1 / i.exposure)));
     if (i.aperture > 0)
         settings << QStringLiteral("f/%1").arg(trimmedNumber(i.aperture, 1));
     if (i.iso > 0)
@@ -373,8 +373,8 @@ QStringList describe(const Info &i)
                             .arg(QLocale().toString(std::abs(i.latitude), 'f', 5), i.latitude < 0 ? tr("S") : tr("N"),
                                  QLocale().toString(std::abs(i.longitude), 'f', 5), i.longitude < 0 ? tr("W") : tr("E"));
         if (i.hasAltitude)
-            where += QLatin1String(", ") + (i.altitude < 0 ? tr("%1 m below the sea").arg(qRound(-i.altitude))
-                                                           : tr("%1 m up").arg(qRound(i.altitude)));
+            where += QLatin1String(", ") + (i.altitude < 0 ? tr("%1 m below the sea").arg(qRound64(-i.altitude))
+                                                           : tr("%1 m up").arg(qRound64(i.altitude)));
         add(tr("Location"), where);
     }
     add(tr("Edited with"), i.software);

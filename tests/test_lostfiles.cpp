@@ -256,6 +256,275 @@ QByteArray noise(qsizetype size, quint32 seed)
     return data;
 }
 
+// --- The kinds added in 0.5.2, written by hand the way their makers write them.
+
+QByteArray le(quint64 v, int bytes)
+{
+    QByteArray b(bytes, '\0');
+    for (int i = 0; i < bytes; ++i)
+        b[i] = char(v >> (8 * i));
+    return b;
+}
+
+QByteArray be(quint64 v, int bytes)
+{
+    QByteArray b(bytes, '\0');
+    for (int i = 0; i < bytes; ++i)
+        b[bytes - 1 - i] = char(v >> (8 * i));
+    return b;
+}
+
+// A little-endian TIFF with a 16 by 16 picture in one strip. `make` and an embedded JPEG make
+// it a camera's raw file; `magic` is Olympus' or Panasonic's number, `canon` adds CR2's "CR".
+QByteArray tiff(const QByteArray &make = {}, bool dng = false, quint16 magic = 42, bool canon = false)
+{
+    struct Tag {
+        quint16 tag, type;
+        quint32 count;
+        QByteArray value;
+    };
+    const QByteArray jpeg = make.isEmpty() ? QByteArray() : picture("JPG");
+    QByteArray pixels(16 * 16 * 3, '\0');
+    for (int i = 0; i < pixels.size(); ++i)
+        pixels[i] = char(i * 7);
+    QVector<Tag> tags = {{256, 3, 1, le(16, 2)}, {257, 3, 1, le(16, 2)}, {258, 3, 3, le(8, 2) + le(8, 2) + le(8, 2)}, {259, 3, 1, le(1, 2)},
+                         {262, 3, 1, le(2, 2)},  {273, 4, 1, {}},          {277, 3, 1, le(3, 2)},                        {278, 3, 1, le(16, 2)},
+                         {279, 4, 1, le(quint64(pixels.size()), 4)}};
+    if (!make.isEmpty()) {
+        tags.insert(5, {271, 2, quint32(make.size() + 1), make + '\0'});
+        tags << Tag{513, 4, 1, {}} << Tag{514, 4, 1, le(quint64(jpeg.size()), 4)};
+    }
+    if (dng)
+        tags << Tag{50706, 1, 4, QByteArray("\x01\x04\x00\x00", 4)};
+    const quint32 ifd = 16;
+    quint32 data = ifd + 2 + 12 * quint32(tags.size()) + 4;
+    QByteArray entries = le(quint64(tags.size()), 2), values;
+    QVector<int> pixelsAt, jpegAt;
+    for (const Tag &t : std::as_const(tags)) {
+        entries += le(t.tag, 2) + le(t.type, 2) + le(t.count, 4);
+        if (t.tag == 273)
+            pixelsAt << int(entries.size());
+        if (t.tag == 513)
+            jpegAt << int(entries.size());
+        if (t.value.size() <= 4) {
+            entries += t.value + QByteArray(4 - t.value.size(), '\0');
+        } else {
+            entries += le(data + quint32(values.size()), 4);
+            values += t.value + QByteArray(t.value.size() % 2, '\0');
+        }
+    }
+    entries += le(0, 4);
+    const quint32 pixelsOffset = data + quint32(values.size());
+    const quint32 jpegOffset = pixelsOffset + quint32(pixels.size());
+    for (int at : pixelsAt)
+        entries.replace(at, 4, le(pixelsOffset, 4));
+    for (int at : jpegAt)
+        entries.replace(at, 4, le(jpegOffset, 4));
+    QByteArray head = QByteArray("II", 2) + le(magic, 2) + le(ifd, 4) + (canon ? QByteArray("CR\x02\x00\x00\x00\x00\x00", 8) : QByteArray(8, '\0'));
+    return head + entries + values + pixels + jpeg;
+}
+
+QByteArray raf()
+{
+    const QByteArray jpeg = picture("JPG");
+    QByteArray sensor(3000, '\x5A');
+    QByteArray head = QByteArray("FUJIFILMCCD-RAW 0201FF383501", 28) + QByteArray(56, '\0'); // up to byte 84
+    const quint32 jpegAt = 160, sensorAt = jpegAt + quint32(jpeg.size());
+    head += be(jpegAt, 4) + be(quint64(jpeg.size()), 4) + be(0, 4) + be(0, 4) + be(sensorAt, 4) + be(quint64(sensor.size()), 4);
+    head += QByteArray(int(jpegAt) - head.size(), '\0');
+    return head + jpeg + sensor;
+}
+
+// Photoshop: a 4 by 4 RGB picture, as it is or packed row by row (PackBits).
+QByteArray psd(bool packed)
+{
+    QByteArray out = QByteArray("8BPS", 4) + be(1, 2) + QByteArray(6, '\0') + be(3, 2) + be(4, 4) + be(4, 4) + be(8, 2) + be(3, 2);
+    out += be(0, 4) + be(0, 4) + be(0, 4); // no colour table, resources or layers
+    out += be(packed ? 1 : 0, 2);
+    if (!packed)
+        return out + QByteArray(3 * 4 * 4, '\x77');
+    const QByteArray row("\x03\x10\x20\x30\x40", 5); // 4 bytes as they are
+    for (int r = 0; r < 12; ++r)
+        out += be(quint64(row.size()), 2);
+    for (int r = 0; r < 12; ++r)
+        out += row;
+    return out;
+}
+
+QByteArray rarNumberBytes(quint64 v)
+{
+    QByteArray b;
+    do {
+        b += char((v & 0x7F) | (v > 0x7F ? 0x80 : 0));
+        v >>= 7;
+    } while (v);
+    return b;
+}
+
+QByteArray rar5()
+{
+    const auto block = [](const QByteArray &body) { // body: type, flags and the rest
+        const QByteArray sized = rarNumberBytes(quint64(body.size())) + body;
+        const quint32 crc = filetypes::crc32(reinterpret_cast<const uchar *>(sized.constData()), sized.size());
+        return le(crc, 4) + sized;
+    };
+    const QByteArray data(2500, 'd');
+    QByteArray file = rarNumberBytes(2) + rarNumberBytes(2) + rarNumberBytes(quint64(data.size())); // a file, with data
+    file += rarNumberBytes(0) + rarNumberBytes(quint64(data.size())) + rarNumberBytes(0x20) + rarNumberBytes(0) + rarNumberBytes(1)
+          + rarNumberBytes(9) + QByteArray("notes.txt");
+    return QByteArray("Rar!\x1a\x07\x01\x00", 8) + block(rarNumberBytes(1) + rarNumberBytes(0) + rarNumberBytes(0)) + block(file) + data
+         + block(rarNumberBytes(5) + rarNumberBytes(0) + rarNumberBytes(0));
+}
+
+QByteArray rar4()
+{
+    const auto block = [](quint8 type, quint16 flags, const QByteArray &rest) {
+        const QByteArray body = QByteArray(1, char(type)) + le(flags, 2) + le(quint64(rest.size() + 7), 2) + rest;
+        const quint32 crc = filetypes::crc32(reinterpret_cast<const uchar *>(body.constData()), body.size());
+        return le(crc & 0xFFFF, 2) + body;
+    };
+    const QByteArray data(1800, 'e');
+    const QByteArray name("old.txt");
+    QByteArray file = le(quint64(data.size()), 4) + le(quint64(data.size()), 4) + QByteArray(1, '\3') + le(0, 4) + le(0, 4) + QByteArray(1, 29)
+                    + QByteArray(1, '\x30') + le(quint64(name.size()), 2) + le(0x20, 4) + name;
+    return QByteArray("Rar!\x1a\x07\x00", 7) + block(0x73, 0, QByteArray(6, '\0')) + block(0x74, 0x8000, file) + data + block(0x7B, 0, {});
+}
+
+// Matroska: elements with 8-byte sizes, which any size fits in. An "open" Segment is what a
+// live recording leaves.
+QByteArray ebml(const QByteArray &id, const QByteArray &payload)
+{
+    return id + QByteArray(1, '\x01') + be(quint64(payload.size()), 7) + payload;
+}
+
+QByteArray matroska(const char *docType, bool open = false)
+{
+    const QByteArray header = ebml("\x1A\x45\xDF\xA3", ebml("\x42\x86", "\x01") + ebml("\x42\x82", docType) + ebml("\x42\x87", "\x04"));
+    const QByteArray info = ebml("\x15\x49\xA9\x66", ebml("\x2A\xD7\xB1", be(1000000, 3)));
+    const QByteArray tracks = ebml("\x16\x54\xAE\x6B", ebml("\xAE", ebml("\xD7", "\x01") + ebml("\x86", "V_MS/VFW/FOURCC")));
+    const QByteArray cluster = ebml("\x1F\x43\xB6\x75", ebml("\xE7", "\x00") + ebml("\xA3", QByteArray("\x81\x00\x00\x80", 4) + QByteArray(1200, 'v')));
+    const QByteArray content = info + tracks + cluster;
+    if (open)
+        return header + QByteArray("\x18\x53\x80\x67\x01\xFF\xFF\xFF\xFF\xFF\xFF\xFF", 12) + content;
+    return header + ebml("\x18\x53\x80\x67", content);
+}
+
+QByteArray flac()
+{
+    const auto crc8 = [](const QByteArray &d) {
+        quint8 c = 0;
+        for (char ch : d) {
+            c ^= quint8(ch);
+            for (int b = 0; b < 8; ++b)
+                c = quint8(c & 0x80 ? (c << 1) ^ 0x07 : c << 1);
+        }
+        return char(c);
+    };
+    const auto crc16 = [](const QByteArray &d) {
+        quint32 c = 0;
+        for (char ch : d) {
+            c ^= quint32(quint8(ch)) << 8;
+            for (int b = 0; b < 8; ++b)
+                c = (c & 0x8000 ? (c << 1) ^ 0x8005 : c << 1) & 0xFFFF;
+        }
+        return be(c, 2);
+    };
+    // STREAMINFO: blocks of 192 samples, 44.1 kHz, stereo, 16-bit, 384 samples in all.
+    QByteArray info = be(192, 2) + be(192, 2) + be(0, 3) + be(0, 3);
+    const quint64 packed = (quint64(44100) << 44) | (quint64(1) << 41) | (quint64(15) << 36) | 384;
+    info += be(packed, 8) + QByteArray(16, '\0');
+    QByteArray out = QByteArray("fLaC") + QByteArray(1, char(0x80)) + be(34, 3) + info;
+    for (int frame = 0; frame < 2; ++frame) {
+        QByteArray f = QByteArray("\xFF\xF8", 2) + QByteArray(1, char(0x19)) + QByteArray(1, char(0x18)) + QByteArray(1, char(frame));
+        f += crc8(f);
+        f += QByteArray("\x00\x12\x34\x00\x56\x78", 6); // two CONSTANT subframes
+        out += f + crc16(f);
+    }
+    return out;
+}
+
+QByteArray asf(bool video)
+{
+    const QByteArray headerGuid("\x30\x26\xB2\x75\x8E\x66\xCF\x11\xA6\xD9\x00\xAA\x00\x62\xCE\x6C", 16);
+    const QByteArray dataGuid("\x36\x26\xB2\x75\x8E\x66\xCF\x11\xA6\xD9\x00\xAA\x00\x62\xCE\x6C", 16);
+    const QByteArray fileGuid("\xA1\xDC\xAB\x8C\x47\xA9\xCF\x11\x8E\xE4\x00\xC0\x0C\x20\x53\x65", 16);
+    const QByteArray streamGuid("\x91\x07\xDC\xB7\xB7\xA9\xCF\x11\x8E\xE6\x00\xC0\x0C\x20\x53\x65", 16);
+    const QByteArray videoGuid("\xC0\xEF\x19\xBC\x4D\x5B\xCF\x11\xA8\xFD\x00\x80\x5F\x5C\x44\x2B", 16);
+    const QByteArray audioGuid("\x40\x9E\x69\xF8\x4D\x5B\xCF\x11\xA8\xFD\x00\x80\x5F\x5C\x44\x2B", 16);
+    const QByteArray packets(4000, 'p');
+    const quint64 headerSize = 30 + 104 + 78, dataSize = 50 + quint64(packets.size()), indexSize = 300;
+    const quint64 total = headerSize + dataSize + indexSize;
+    QByteArray file = fileGuid + le(104, 8) + QByteArray(16, 'i') + le(total, 8) + QByteArray(104 - 48, '\0');
+    QByteArray stream = streamGuid + le(78, 8) + (video ? videoGuid : audioGuid) + QByteArray(78 - 40, '\0');
+    QByteArray out = headerGuid + le(headerSize, 8) + le(2, 4) + QByteArray("\x01\x02", 2) + file + stream;
+    out += dataGuid + le(dataSize, 8) + QByteArray(16, 'i') + le(1, 8) + QByteArray("\x01\x01", 2) + packets;
+    return out + QByteArray(int(indexSize), 'x');
+}
+
+// A compound file (OLE2) as Office 97-2003 writes them: 512-byte sectors, a big stream in
+// sectors of its own and a small one in the mini stream.
+QByteArray ole(const QString &bigName, const QByteArray &big, const QString &smallName, const QByteArray &small)
+{
+    const quint32 kEnd = 0xFFFFFFFE, kFree = 0xFFFFFFFF, kFatSector = 0xFFFFFFFD;
+    const int bigSectors = int((big.size() + 511) / 512), miniSectors = int((small.size() + 63) / 64);
+    // Sectors: 0 the table, 1 the directory, 2 the mini table, 3 the mini stream, then the big stream.
+    QVector<quint32> fat(128, kFree);
+    fat[0] = kFatSector;
+    fat[1] = kEnd;
+    fat[2] = kEnd;
+    fat[3] = kEnd;
+    for (int i = 0; i < bigSectors; ++i)
+        fat[4 + i] = i + 1 < bigSectors ? quint32(5 + i) : kEnd;
+    QByteArray header("\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1", 8);
+    header += QByteArray(16, '\0') + le(0x3E, 2) + le(3, 2) + le(0xFFFE, 2) + le(9, 2) + le(6, 2) + QByteArray(6, '\0') + le(0, 4) + le(1, 4)
+            + le(1, 4) + le(0, 4) + le(4096, 4) + le(2, 4) + le(1, 4) + le(kEnd, 4) + le(0, 4) + le(0, 4);
+    for (int i = 1; i < 109; ++i)
+        header += le(kFree, 4);
+    QByteArray fatSector;
+    for (quint32 v : fat)
+        fatSector += le(v, 4);
+    const auto entry = [](const QString &name, int type, quint32 child, quint32 right, quint32 start, quint64 size) {
+        QByteArray e(128, '\0');
+        const QByteArray utf16 = QByteArray(reinterpret_cast<const char *>(name.utf16()), name.size() * 2) + QByteArray(2, '\0');
+        e.replace(0, utf16.size(), utf16);
+        e.replace(64, 2, le(quint64(utf16.size()), 2));
+        e[66] = char(type);
+        e[67] = 1;
+        e.replace(68, 4, le(0xFFFFFFFF, 4));
+        e.replace(72, 4, le(right, 4));
+        e.replace(76, 4, le(child, 4));
+        e.replace(116, 4, le(start, 4));
+        e.replace(120, 8, le(size, 8));
+        return e;
+    };
+    QByteArray dir = entry(QStringLiteral("Root Entry"), 5, 1, 0xFFFFFFFF, 3, quint64(miniSectors) * 64);
+    dir += entry(bigName, 2, 0xFFFFFFFF, 2, 4, quint64(big.size()));
+    dir += entry(smallName, 2, 0xFFFFFFFF, 0xFFFFFFFF, 0, quint64(small.size()));
+    dir += QByteArray(128, '\0');
+    QByteArray miniFat;
+    for (int i = 0; i < 128; ++i)
+        miniFat += le(i < miniSectors ? (i + 1 < miniSectors ? quint32(i + 1) : kEnd) : kFree, 4);
+    const QByteArray miniStream = small + QByteArray(512 - small.size(), '\0');
+    QByteArray bigData = big + QByteArray(bigSectors * 512 - big.size(), '\0');
+    return header + fatSector + dir + miniFat + miniStream + bigData;
+}
+
+// gzip with the data stored as it is (deflate's "stored" blocks): no zlib needed to make it.
+QByteArray gzipped(const QByteArray &data)
+{
+    QByteArray out("\x1F\x8B\x08\x08\x00\x00\x00\x00\x00\x03", 10);
+    out += "notes.txt";
+    out += '\0';
+    for (qsizetype at = 0; at < data.size() || at == 0; at += 65535) {
+        const QByteArray part = data.mid(at, 65535);
+        const bool last = at + 65535 >= data.size();
+        out += char(last ? 1 : 0) + le(quint64(part.size()), 2) + le(quint64(~quint16(part.size())) & 0xFFFF, 2) + part;
+        if (last)
+            break;
+    }
+    return out + le(filetypes::crc32(reinterpret_cast<const uchar *>(data.constData()), data.size()), 4) + le(quint64(data.size()), 4);
+}
+
 QVector<Sample> samples()
 {
     QVector<Sample> s = {
@@ -273,6 +542,28 @@ QVector<Sample> samples()
         {QStringLiteral("ogg"), ogg()},
         {QStringLiteral("sqlite"), sqlite()},
         {QStringLiteral("7z"), sevenZip()},
+        {QStringLiteral("tif"), tiff()},
+        {QStringLiteral("nef"), tiff("NIKON CORPORATION")},
+        {QStringLiteral("arw"), tiff("SONY")},
+        {QStringLiteral("dng"), tiff("Apple", true)},
+        {QStringLiteral("cr2"), tiff("Canon", false, 42, true)},
+        {QStringLiteral("orf"), tiff("OLYMPUS", false, 0x4F52)},
+        {QStringLiteral("rw2"), tiff("Panasonic", false, 0x55)},
+        {QStringLiteral("raf"), raf()},
+        {QStringLiteral("psd"), psd(false)},
+        {QStringLiteral("psd"), psd(true)},
+        {QStringLiteral("rar"), rar5()},
+        {QStringLiteral("rar"), rar4()},
+        {QStringLiteral("mkv"), matroska("matroska")},
+        {QStringLiteral("webm"), matroska("webm")},
+        {QStringLiteral("flac"), flac()},
+        {QStringLiteral("wmv"), asf(true)},
+        {QStringLiteral("wma"), asf(false)},
+        {QStringLiteral("doc"), ole(QStringLiteral("WordDocument"), QByteArray(5000, 'w'), QStringLiteral("\x05SummaryInformation"), QByteArray(200, 's'))},
+        {QStringLiteral("xls"), ole(QStringLiteral("Workbook"), QByteArray(4200, 'x'), QStringLiteral("\x05SummaryInformation"), QByteArray(100, 's'))},
+        {QStringLiteral("ppt"), ole(QStringLiteral("PowerPoint Document"), QByteArray(4500, 'p'), QStringLiteral("Current User"), QByteArray(60, 'u'))},
+        {QStringLiteral("msg"), ole(QStringLiteral("__substg1.0_1000001F"), QByteArray(4800, 'b'), QStringLiteral("__substg1.0_0037001F"), QByteArray(40, 't'))},
+        {QStringLiteral("gz"), gzipped(QByteArray(70000, 'z'))},
     };
     return s;
 }
@@ -433,7 +724,7 @@ void fuzz()
     QRandomGenerator rng(4321);
     int rounds = 0;
     bool sane = true;
-    for (; rounds < 1500; ++rounds) {
+    for (; rounds < 6000; ++rounds) {
         QByteArray d = files[rounds % files.size()].data;
         const int changes = 1 + int(rng.bounded(12));
         for (int i = 0; i < changes && !d.isEmpty(); ++i) {
@@ -1667,7 +1958,8 @@ void viewerMessages()
                && got[0].show.next && !got[0].show.previous && got[0].show.openable && got[0].show.kind == viewer::Kind::Pdf
                && got[1].ask == viewer::Ask::Next,
            QStringLiteral("viewer: its messages come out as they went in, even a byte at a time"));
-    QByteArray junk("\x00\x00\x00\x01 not a message at all", 30);
+    const char junkBytes[] = "\x00\x00\x00\x01 not a message at all";
+    QByteArray junk(junkBytes, sizeof(junkBytes) - 1);
     viewer::Message out;
     report(!viewer::decode(junk, out, &bad) && bad, QStringLiteral("viewer: anything else is refused"));
     QRandomGenerator random(7);

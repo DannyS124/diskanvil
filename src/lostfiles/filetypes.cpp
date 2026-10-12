@@ -5,10 +5,13 @@
 
 #include <QCoreApplication>
 #include <QHash>
+#include <QSet>
 
 #include <algorithm>
 #include <array>
 #include <cstring>
+
+#include <zlib.h>
 
 namespace {
 
@@ -149,7 +152,9 @@ private:
 // The order of this list is the type numbers; tests and saved names depend on it.
 enum TypeNumber {
     Jpg, Png, Gif, Bmp, Webp, Heic, Avif, Cr3, Pdf, Docx, Xlsx, Pptx, Odt, Ods, Odp, Epub,
-    Mp4, Mov, ThreeGp, Avi, Ogv, Mp3, Wav, M4a, Ogg, Opus, Zip, SevenZip, Jar, Apk, Sqlite, TypeCount
+    Mp4, Mov, ThreeGp, Avi, Ogv, Mp3, Wav, M4a, Ogg, Opus, Zip, SevenZip, Jar, Apk, Sqlite,
+    // Added in 0.5.2, at the end so the numbers before stay the same.
+    Tif, Cr2, Nef, Arw, Dng, Orf, Rw2, Pef, Raf, Psd, Rar, Mkv, Webm, Flac, Wmv, Wma, Doc, Xls, Ppt, Msg, Ole, Gz, TypeCount
 };
 
 filetypes::Measured incomplete(int type, quint64 size)
@@ -684,6 +689,639 @@ filetypes::Measured measureSevenZip(Stream &s)
 
 } // namespace
 
+// --- TIFF, and the camera raw files built on it (CR2, NEF, ARW, DNG, ORF, RW2, PEF): it ends
+// where the furthest thing any of its folders of tags points at ends: the picture's strips or
+// tiles, an embedded JPEG, the tags' own values. Which camera made it says which raw file it is.
+filetypes::Measured measureTiff(Stream &s)
+{
+    const uchar *h = s.peek(0, 16);
+    if (!h)
+        return {};
+    const bool little = h[0] == 'I' && h[1] == 'I';
+    if (!little && !(h[0] == 'M' && h[1] == 'M'))
+        return {};
+    const bool cr2 = h[8] == 'C' && h[9] == 'R';
+    const auto u16 = [&s, little](quint64 at, quint32 &v) { return little ? s.le16(at, v) : s.be16(at, v); };
+    const auto u32 = [&s, little](quint64 at, quint32 &v) { return little ? s.le32(at, v) : s.be32(at, v); };
+    quint32 magic = 0, first = 0;
+    if (!u16(2, magic) || !u32(4, first))
+        return {};
+    int type = Tif;
+    if (magic == 0x4F52 || magic == 0x5352)
+        type = Orf;
+    else if (magic == 0x55)
+        type = Rw2;
+    else if (magic != 42)
+        return {};
+    else if (cr2)
+        type = Cr2;
+    quint64 end = 8;
+    bool picture = false, dng = false;
+    QByteArray make;
+    QVector<quint64> folders{first};
+    QSet<quint64> seen;
+    while (!folders.isEmpty() && seen.size() < 64) {
+        const quint64 at = folders.takeFirst();
+        if (at < 8 || at >= s.limit() || seen.contains(at))
+            continue;
+        seen.insert(at);
+        quint32 n = 0;
+        if (!u16(at, n) || n == 0 || n > 4096)
+            continue;
+        end = std::max(end, at + 2 + quint64(n) * 12 + 4);
+        // Where the picture's pieces are and how long each is: strips, tiles, an embedded JPEG.
+        std::array<QVector<quint64>, 3> offsets, counts;
+        for (quint32 i = 0; i < n; ++i) {
+            const quint64 e = at + 2 + quint64(i) * 12;
+            quint32 tag = 0, kind = 0, count = 0, value = 0;
+            if (!u16(e, tag) || !u16(e + 2, kind) || !u32(e + 4, count) || !u32(e + 8, value))
+                break;
+            static constexpr int sizes[] = {0, 1, 1, 2, 4, 8, 1, 1, 2, 4, 8, 4, 8, 4};
+            const int size = kind < 14 ? sizes[kind] : 0;
+            if (size == 0 || count == 0 || count > (1u << 24))
+                continue;
+            const quint64 bytes = quint64(size) * count;
+            const quint64 valueAt = bytes <= 4 ? e + 8 : value;
+            if (bytes > 4)
+                end = std::max(end, valueAt + bytes);
+            const auto item = [&](quint32 k) -> quint64 {
+                quint32 v = 0;
+                const bool ok = size == 2 ? u16(valueAt + 2ull * k, v) : size == 4 ? u32(valueAt + 4ull * k, v) : s.u8(valueAt + k, v);
+                return ok ? v : 0;
+            };
+            const quint32 most = std::min<quint32>(count, 100000);
+            switch (tag) {
+            case 0x010F: // who made the camera
+                if (const uchar *p = s.peek(valueAt, int(std::min<quint64>(bytes, 32))))
+                    make = QByteArray(reinterpret_cast<const char *>(p), int(std::min<quint64>(bytes, 32))).toUpper();
+                break;
+            case 0xC612: // DNGVersion
+                dng = true;
+                break;
+            case 0x8769: // more folders: the photo's settings, and the full-size pictures of a raw file
+            case 0x014A:
+                for (quint32 k = 0; k < std::min<quint32>(count, 16); ++k)
+                    folders << item(k);
+                break;
+            case 0x0111:
+            case 0x0144:
+            case 0x0201:
+                for (quint32 k = 0; k < most; ++k)
+                    offsets[tag == 0x0111 ? 0 : tag == 0x0144 ? 1 : 2] << item(k);
+                break;
+            case 0x0117:
+            case 0x0145:
+            case 0x0202:
+                for (quint32 k = 0; k < most; ++k)
+                    counts[tag == 0x0117 ? 0 : tag == 0x0145 ? 1 : 2] << item(k);
+                break;
+            default:
+                break;
+            }
+        }
+        for (int k = 0; k < 3; ++k) {
+            for (qsizetype j = 0; j < std::min(offsets[k].size(), counts[k].size()); ++j) {
+                if (counts[k][j] > 0 && offsets[k][j] >= 8) {
+                    end = std::max(end, offsets[k][j] + counts[k][j]);
+                    picture = true;
+                }
+            }
+        }
+        quint32 next = 0;
+        if (u32(at + 2 + quint64(n) * 12, next) && next)
+            folders << next;
+    }
+    if (!picture)
+        return {};
+    if (dng)
+        type = Dng;
+    else if (type == Tif && make.startsWith("NIKON"))
+        type = Nef;
+    else if (type == Tif && make.startsWith("SONY"))
+        type = Arw;
+    else if (type == Tif && (make.startsWith("PENTAX") || make.startsWith("RICOH")))
+        type = Pef;
+    return complete(type, end);
+}
+
+// --- Fujifilm's raw files: a header saying where the embedded JPEG and the sensor data are.
+filetypes::Measured measureRaf(Stream &s)
+{
+    if (!s.is(0, "FUJIFILMCCD-RAW "))
+        return {};
+    quint64 end = 0;
+    for (const quint64 at : {84ull, 92ull, 100ull}) {
+        quint32 offset = 0, length = 0;
+        if (!s.be32(at, offset) || !s.be32(at + 4, length))
+            return {};
+        if (length > 0)
+            end = std::max(end, quint64(offset) + length);
+    }
+    return end > 108 ? complete(Raf, end) : filetypes::Measured{};
+}
+
+// --- Photoshop: its sections one after another, then the merged picture, whose size comes from
+// its rows (the byte count of each one when they're packed).
+filetypes::Measured measurePsd(Stream &s)
+{
+    quint32 version = 0, channels = 0, height = 0, width = 0, depth = 0;
+    if (!s.is(0, "8BPS") || !s.be16(4, version) || (version != 1 && version != 2) || !s.be16(12, channels) || !s.be32(14, height)
+        || !s.be32(18, width) || !s.be16(22, depth))
+        return {};
+    if (channels == 0 || channels > 56 || height == 0 || width == 0 || height > 300000 || width > 300000
+        || (depth != 1 && depth != 8 && depth != 16 && depth != 32))
+        return {};
+    quint64 at = 26;
+    quint32 length = 0;
+    for (int section = 0; section < 2; ++section) { // the colour table, then the picture's resources
+        if (!s.be32(at, length))
+            return {};
+        at += 4 + quint64(length);
+    }
+    if (version == 1) {
+        if (!s.be32(at, length))
+            return {};
+        at += 4 + quint64(length);
+    } else {
+        quint64 big = 0;
+        if (!s.be64(at, big))
+            return {};
+        at += 8 + big;
+    }
+    quint32 compression = 0;
+    if (!s.be16(at, compression))
+        return incomplete(Psd, s.reached());
+    at += 2;
+    const quint64 rows = quint64(channels) * height;
+    if (compression == 0)
+        return complete(Psd, at + rows * ((quint64(width) * depth + 7) / 8));
+    if (compression != 1)
+        return incomplete(Psd, at); // compressed with ZIP: nothing says how long it is
+    const int countSize = version == 1 ? 2 : 4;
+    quint64 sum = 0;
+    for (quint64 r = 0; r < rows; ++r) {
+        quint32 count = 0;
+        if (!(countSize == 2 ? s.be16(at + r * 2, count) : s.be32(at + r * 4, count)))
+            return incomplete(Psd, s.reached());
+        sum += count;
+    }
+    return complete(Psd, at + rows * countSize + sum);
+}
+
+// --- RAR 4 and 5: block after block, each header's checksum checked, to the end-of-archive one.
+bool rarNumber(Stream &s, quint64 &pos, quint64 &v)
+{
+    v = 0;
+    for (int shift = 0; shift < 64; shift += 7) {
+        quint32 b = 0;
+        if (!s.u8(pos++, b))
+            return false;
+        v |= quint64(b & 0x7F) << shift;
+        if (!(b & 0x80))
+            return true;
+    }
+    return false;
+}
+
+filetypes::Measured measureRar(Stream &s)
+{
+    const uchar *h = s.peek(0, 8);
+    if (!h || memcmp(h, "Rar!\x1a\x07", 6) != 0)
+        return {};
+    if (h[6] == 1 && h[7] == 0) { // RAR 5
+        quint64 pos = 8;
+        for (int blocks = 0; blocks < 10000000; ++blocks) {
+            quint32 crc = 0;
+            quint64 p = pos + 4, size = 0, type = 0, flags = 0, extra = 0, data = 0;
+            if (!s.le32(pos, crc) || !rarNumber(s, p, size) || size == 0 || size > 2 * kMiB)
+                return blocks ? incomplete(Rar, pos) : filetypes::Measured{};
+            const quint64 headerEnd = p + size;
+            quint32 got = 0;
+            if (!s.crc32(pos + 4, headerEnd - pos - 4, got) || got != crc)
+                return blocks ? incomplete(Rar, pos) : filetypes::Measured{};
+            if (!rarNumber(s, p, type) || !rarNumber(s, p, flags) || ((flags & 1) && !rarNumber(s, p, extra)) || ((flags & 2) && !rarNumber(s, p, data)))
+                return incomplete(Rar, pos);
+            pos = headerEnd + data;
+            if (type == 5)
+                return complete(Rar, pos);
+        }
+        return {};
+    }
+    if (h[6] != 0) // RAR 1.5 to 4: a 7-byte marker
+        return {};
+    quint64 pos = 7;
+    for (int blocks = 0; blocks < 10000000; ++blocks) {
+        quint32 crc = 0, type = 0, flags = 0, size = 0;
+        if (!s.le16(pos, crc) || !s.u8(pos + 2, type) || !s.le16(pos + 3, flags) || !s.le16(pos + 5, size) || size < 7)
+            return blocks ? incomplete(Rar, pos) : filetypes::Measured{};
+        quint32 got = 0;
+        if (!s.crc32(pos + 2, size - 2, got) || (got & 0xFFFF) != crc)
+            return blocks ? incomplete(Rar, pos) : filetypes::Measured{};
+        if (blocks == 0 && type != 0x73)
+            return {};
+        quint64 add = 0;
+        quint32 low = 0, high = 0;
+        if (type == 0x74 || type == 0x7A) { // a file, or a comment: its packed size, maybe in two halves
+            if (!s.le32(pos + 7, low) || ((flags & 0x100) && !s.le32(pos + 32, high)))
+                return incomplete(Rar, pos);
+            add = quint64(high) << 32 | low;
+        } else if (flags & 0x8000) {
+            if (!s.le32(pos + 7, low))
+                return incomplete(Rar, pos);
+            add = low;
+        }
+        pos += size + add;
+        if (type == 0x7B)
+            return complete(Rar, pos);
+    }
+    return {};
+}
+
+// --- Matroska and WebM (EBML): the header says which, and the Segment how long the rest is. A
+// live recording leaves that open, so its parts are walked to where they stop.
+bool ebmlId(Stream &s, quint64 &pos, quint32 &id)
+{
+    quint32 b = 0;
+    if (!s.u8(pos, b) || b == 0 || b < 0x10)
+        return false;
+    int length = 1;
+    while (!(b & (0x80u >> (length - 1))))
+        ++length;
+    id = b;
+    for (int i = 1; i < length; ++i) {
+        quint32 c = 0;
+        if (!s.u8(pos + i, c))
+            return false;
+        id = id << 8 | c;
+    }
+    pos += quint64(length);
+    return true;
+}
+
+bool ebmlSize(Stream &s, quint64 &pos, quint64 &size, bool &unknown)
+{
+    quint32 b = 0;
+    if (!s.u8(pos, b) || b == 0)
+        return false;
+    int length = 1;
+    while (!(b & (0x80u >> (length - 1))))
+        ++length;
+    quint64 v = b & (0xFFu >> length);
+    bool ones = v == (0xFFull >> length);
+    for (int i = 1; i < length; ++i) {
+        quint32 c = 0;
+        if (!s.u8(pos + i, c))
+            return false;
+        v = v << 8 | c;
+        ones = ones && c == 0xFF;
+    }
+    pos += quint64(length);
+    size = v;
+    unknown = ones;
+    return true;
+}
+
+filetypes::Measured measureMkv(Stream &s)
+{
+    quint64 pos = 0, size = 0;
+    quint32 id = 0;
+    bool unknown = false;
+    if (!ebmlId(s, pos, id) || id != 0x1A45DFA3 || !ebmlSize(s, pos, size, unknown) || unknown || size > 4096)
+        return {};
+    const quint64 headerEnd = pos + size;
+    int type = -1;
+    for (quint64 p = pos; p < headerEnd;) {
+        quint32 child = 0;
+        quint64 childSize = 0;
+        bool open = false;
+        if (!ebmlId(s, p, child) || !ebmlSize(s, p, childSize, open) || open)
+            return {};
+        if (child == 0x4282) // DocType
+            type = s.is(p, "webm") ? Webm : s.is(p, "matroska") ? Mkv : -1;
+        p += childSize;
+    }
+    if (type < 0)
+        return {};
+    pos = headerEnd;
+    if (!ebmlId(s, pos, id) || id != 0x18538067 || !ebmlSize(s, pos, size, unknown))
+        return incomplete(type, headerEnd);
+    if (!unknown)
+        return complete(type, pos + size);
+    static const QSet<quint32> top = {0x114D9B74, 0x1549A966, 0x1654AE6B, 0x1F43B675, 0x1C53BB6B, 0x1043A770, 0x1254C367, 0x1941A469, 0xEC, 0xBF};
+    static const QSet<quint32> inCluster = {0xE7, 0xA7, 0xAB, 0xA3, 0xA0, 0xAF, 0xEC, 0xBF};
+    while (pos < s.limit()) {
+        quint64 p = pos;
+        if (!ebmlId(s, p, id) || !top.contains(id) || !ebmlSize(s, p, size, unknown))
+            break;
+        if (!unknown) {
+            pos = p + size;
+            continue;
+        }
+        if (id != 0x1F43B675)
+            break;
+        pos = p; // a cluster that's open too: its own parts
+        for (;;) {
+            quint64 q = pos;
+            quint32 child = 0;
+            quint64 childSize = 0;
+            bool open = false;
+            if (!ebmlId(s, q, child) || !inCluster.contains(child) || !ebmlSize(s, q, childSize, open) || open)
+                break;
+            pos = q + childSize;
+        }
+    }
+    return incomplete(type, pos);
+}
+
+// --- FLAC: its information blocks, then frame after frame, each ending where its CRC-16 adds
+// up, until all the samples STREAMINFO counts are there.
+quint8 flacCrc8(const uchar *p, int n)
+{
+    quint8 crc = 0;
+    for (int i = 0; i < n; ++i) {
+        crc ^= p[i];
+        for (int b = 0; b < 8; ++b)
+            crc = quint8(crc & 0x80 ? (crc << 1) ^ 0x07 : crc << 1);
+    }
+    return crc;
+}
+
+// The frame header at `pos`: how many samples the frame has (0 when it isn't one).
+quint32 flacFrame(Stream &s, quint64 pos)
+{
+    const uchar *h = s.peek(pos, 16);
+    if (!h || h[0] != 0xFF || (h[1] & 0xFE) != 0xF8 || (h[2] >> 4) == 0 || (h[2] & 0x0F) == 0x0F || (h[3] >> 4) > 10 || (h[3] & 0x01))
+        return 0;
+    int at = 4;
+    // The frame or sample number, UTF-8 style: 1 to 7 bytes.
+    int extra = 0;
+    for (quint8 b = h[4]; b & 0x80; b <<= 1)
+        ++extra;
+    if (extra == 1 || extra > 7)
+        return 0;
+    at += extra ? extra : 1;
+    const int code = h[2] >> 4;
+    quint32 block = code == 1 ? 192 : code <= 5 ? 576u << (code - 2) : code >= 8 ? 256u << (code - 8) : 0;
+    if (code == 6)
+        block = quint32(h[at++]) + 1;
+    else if (code == 7) {
+        block = (quint32(h[at]) << 8 | h[at + 1]) + 1;
+        at += 2;
+    }
+    const int rate = h[2] & 0x0F;
+    at += rate == 12 ? 1 : (rate == 13 || rate == 14) ? 2 : 0;
+    if (at >= 16 || flacCrc8(h, at) != h[at])
+        return 0;
+    return block;
+}
+
+filetypes::Measured measureFlac(Stream &s)
+{
+    if (!s.is(0, "fLaC"))
+        return {};
+    quint64 pos = 4, total = 0;
+    quint32 maxFrame = 0;
+    for (int blocks = 0;; ++blocks) {
+        quint32 head = 0;
+        if (!s.be32(pos, head) || blocks > 4096)
+            return {};
+        const quint32 type = (head >> 24) & 0x7F, length = head & 0xFFFFFF;
+        if (blocks == 0 && (type != 0 || length != 34))
+            return {};
+        if (type == 0) {
+            const uchar *info = s.peek(pos + 4, 34);
+            if (!info)
+                return {};
+            maxFrame = quint32(info[7]) << 16 | quint32(info[8]) << 8 | info[9];
+            total = (quint64(info[13] & 0x0F) << 32) | quint64(info[14]) << 24 | quint64(info[15]) << 16 | quint64(info[16]) << 8 | info[17];
+        }
+        pos += 4 + quint64(length);
+        if (head & 0x80000000)
+            break;
+    }
+    const quint64 longest = maxFrame ? maxFrame : 16 * kMiB;
+    quint64 samples = 0;
+    while (total == 0 || samples < total) {
+        const quint32 block = flacFrame(s, pos);
+        if (block == 0)
+            return total ? incomplete(Flac, pos) : complete(Flac, pos);
+        // Over the whole frame, its checksum included, CRC-16 comes to 0.
+        quint32 crc = 0;
+        quint64 end = 0;
+        for (quint64 q = pos; q < pos + longest + 2; ++q) {
+            quint32 b = 0;
+            if (!s.u8(q, b))
+                break;
+            crc ^= b << 8;
+            for (int k = 0; k < 8; ++k)
+                crc = (crc & 0x8000 ? (crc << 1) ^ 0x8005 : crc << 1) & 0xFFFF;
+            if (crc == 0 && q > pos + 4) {
+                const quint64 next = q + 1;
+                if ((total && samples + block >= total) || flacFrame(s, next) || !s.peek(next, 1)) {
+                    end = next;
+                    break;
+                }
+            }
+        }
+        if (end == 0)
+            return incomplete(Flac, pos);
+        samples += block;
+        pos = end;
+    }
+    return complete(Flac, pos);
+}
+
+// --- Windows Media (ASF): the header's File Properties say how long the file is; a video stream
+// makes it a WMV, sound alone a WMA.
+filetypes::Measured measureAsf(Stream &s)
+{
+    static const char kHeader[] = "\x30\x26\xB2\x75\x8E\x66\xCF\x11\xA6\xD9\x00\xAA\x00\x62\xCE\x6C";
+    static const char kData[] = "\x36\x26\xB2\x75\x8E\x66\xCF\x11\xA6\xD9\x00\xAA\x00\x62\xCE\x6C";
+    static const char kFileProperties[] = "\xA1\xDC\xAB\x8C\x47\xA9\xCF\x11\x8E\xE4\x00\xC0\x0C\x20\x53\x65";
+    static const char kStreamProperties[] = "\x91\x07\xDC\xB7\xB7\xA9\xCF\x11\x8E\xE6\x00\xC0\x0C\x20\x53\x65";
+    static const char kVideo[] = "\xC0\xEF\x19\xBC\x4D\x5B\xCF\x11\xA8\xFD\x00\x80\x5F\x5C\x44\x2B";
+    const uchar *h = s.peek(0, 30);
+    quint64 headerSize = 0;
+    quint32 objects = 0;
+    if (!h || memcmp(h, kHeader, 16) != 0 || !s.le64(16, headerSize) || !s.le32(24, objects) || headerSize < 30 || headerSize > 64 * kMiB || objects > 1000)
+        return {};
+    quint64 fileSize = 0;
+    int type = Wma;
+    quint64 pos = 30;
+    for (quint32 i = 0; i < objects && pos + 24 <= headerSize; ++i) {
+        const uchar *g = s.peek(pos, 16);
+        if (!g)
+            return {};
+        const QByteArray guid(reinterpret_cast<const char *>(g), 16);
+        quint64 size = 0;
+        if (!s.le64(pos + 16, size) || size < 24)
+            return {};
+        if (guid == QByteArray(kFileProperties, 16)) {
+            s.le64(pos + 40, fileSize);
+        } else if (guid == QByteArray(kStreamProperties, 16)) {
+            const uchar *kind = s.peek(pos + 24, 16);
+            if (kind && memcmp(kind, kVideo, 16) == 0)
+                type = Wmv;
+        }
+        pos += size;
+    }
+    const uchar *d = s.peek(headerSize, 16);
+    quint64 dataSize = 0;
+    if (!d || memcmp(d, kData, 16) != 0 || !s.le64(headerSize + 16, dataSize) || dataSize < 50)
+        return incomplete(type, headerSize);
+    const quint64 atLeast = headerSize + dataSize;
+    // After the data come the indexes, which the file size counts.
+    if (fileSize >= atLeast)
+        return complete(type, fileSize);
+    return fileSize ? incomplete(type, atLeast) : complete(type, atLeast);
+}
+
+// --- Office 97-2003 documents and Outlook emails are compound files (OLE2): little files of
+// their own inside one, laid out in sectors. It ends at the last sector its table uses, and the
+// names inside say whether it's a Word document, an Excel sheet, a PowerPoint or an email.
+filetypes::Measured measureOle(Stream &s)
+{
+    const uchar *h = s.peek(0, 512);
+    if (!h || memcmp(h, "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1", 8) != 0)
+        return {};
+    quint32 shift = 0, fatSectors = 0, dirStart = 0, difatStart = 0, difatCount = 0;
+    if (!s.le16(30, shift) || (shift != 9 && shift != 12) || !s.le32(44, fatSectors) || !s.le32(48, dirStart) || !s.le32(68, difatStart)
+        || !s.le32(72, difatCount) || fatSectors == 0 || fatSectors > (1u << 20) || difatCount > (1u << 20))
+        return {};
+    const quint64 sector = 1ull << shift;
+    const quint32 perSector = quint32(sector / 4);
+    // The table's own sectors: the first 109 are listed in the header, the rest in DIFAT sectors.
+    QVector<quint32> fat;
+    for (int i = 0; i < 109 && quint32(fat.size()) < fatSectors; ++i) {
+        quint32 v = 0;
+        s.le32(76 + 4ull * i, v);
+        fat << v;
+    }
+    quint32 next = difatStart;
+    for (quint32 d = 0; d < difatCount && quint32(fat.size()) < fatSectors && next < 0xFFFFFFFA; ++d) {
+        const quint64 at = (quint64(next) + 1) * sector;
+        for (quint32 k = 0; k + 1 < perSector && quint32(fat.size()) < fatSectors; ++k) {
+            quint32 v = 0;
+            if (!s.le32(at + 4ull * k, v))
+                return incomplete(Doc, s.reached());
+            fat << v;
+        }
+        if (!s.le32(at + sector - 4, next))
+            return incomplete(Doc, s.reached());
+    }
+    if (quint32(fat.size()) < fatSectors)
+        return {};
+    const auto nextSector = [&](quint32 i, quint32 &v) {
+        const quint32 f = i / perSector;
+        return f < quint32(fat.size()) && fat[f] < 0xFFFFFFFA && s.le32((quint64(fat[f]) + 1) * sector + 4ull * (i % perSector), v);
+    };
+    quint32 last = 0;
+    for (quint32 i = 0; i < quint32(fat.size()) * perSector; ++i) {
+        quint32 v = 0;
+        if (!nextSector(i, v))
+            return incomplete(Doc, s.reached());
+        if (v != 0xFFFFFFFF)
+            last = i;
+    }
+    // What's in it, by the names in its directory (128 bytes an entry, UTF-16).
+    int type = Ole;
+    quint32 dir = dirStart;
+    for (int sectors = 0; dir < 0xFFFFFFFA && sectors < 64 && type == Ole; ++sectors) {
+        for (quint64 e = 0; e < sector / 128; ++e) {
+            const quint64 at = (quint64(dir) + 1) * sector + e * 128;
+            const uchar *entry = s.peek(at, 128);
+            if (!entry)
+                break;
+            const int length = std::min<int>(entry[64] | entry[65] << 8, 64);
+            const QString name = QString::fromUtf16(reinterpret_cast<const char16_t *>(entry), std::max(0, length / 2 - 1));
+            if (name == QLatin1String("WordDocument"))
+                type = Doc;
+            else if (name == QLatin1String("Workbook") || name == QLatin1String("Book"))
+                type = Xls;
+            else if (name == QLatin1String("PowerPoint Document"))
+                type = Ppt;
+            else if (name.startsWith(QLatin1String("__substg1.0_")) || name == QLatin1String("__properties_version1.0"))
+                type = Msg;
+        }
+        if (!nextSector(dir, dir))
+            break;
+    }
+    return complete(type, (quint64(last) + 2) * sector);
+}
+
+// --- gzip: each part unpacked to its end, its CRC-32 and length checked (one gzip file can be
+// several parts in a row).
+filetypes::Measured measureGz(Stream &s)
+{
+    quint64 pos = 0;
+    int parts = 0;
+    QByteArray out(64 * 1024, Qt::Uninitialized);
+    for (;;) {
+        const uchar *h = s.peek(pos, 10);
+        if (!h || h[0] != 0x1F || h[1] != 0x8B || h[2] != 8 || (h[3] & 0xE0))
+            return parts ? complete(Gz, pos) : filetypes::Measured{};
+        const quint32 flags = h[3];
+        quint64 p = pos + 10;
+        if (flags & 4) {
+            quint32 extra = 0;
+            if (!s.le16(p, extra))
+                return {};
+            p += 2 + extra;
+        }
+        for (const quint32 field : {8u, 16u}) { // a name, a comment: up to a zero byte
+            if (!(flags & field))
+                continue;
+            const quint64 zero = s.find(p, QByteArray(1, '\0'));
+            if (zero == ~quint64(0) || zero - p > 4096)
+                return {};
+            p = zero + 1;
+        }
+        if (flags & 2)
+            p += 2;
+        z_stream z{};
+        if (inflateInit2(&z, -MAX_WBITS) != Z_OK)
+            return {};
+        quint32 crc = 0;
+        quint64 unpacked = 0, in = p;
+        int result = Z_OK;
+        while (result == Z_OK) {
+            const int n = int(std::min<quint64>(64 * 1024, s.limit() > in ? s.limit() - in : 0));
+            const uchar *chunk = n > 0 ? s.peek(in, n) : nullptr;
+            int have = n;
+            if (!chunk) { // near the end: whatever is left
+                have = 0;
+                while (have < n && s.peek(in + quint64(have), 1))
+                    have += 4096 < n - have && s.peek(in + quint64(have) + 4095, 1) ? 4096 : 1;
+                chunk = have ? s.peek(in, have) : nullptr;
+            }
+            if (!chunk)
+                break;
+            z.next_in = const_cast<Bytef *>(chunk);
+            z.avail_in = uInt(have);
+            while (z.avail_in > 0 && result == Z_OK) {
+                z.next_out = reinterpret_cast<Bytef *>(out.data());
+                z.avail_out = uInt(out.size());
+                result = inflate(&z, Z_NO_FLUSH);
+                const uInt made = uInt(out.size()) - z.avail_out;
+                crc = quint32(::crc32(crc, reinterpret_cast<const Bytef *>(out.constData()), made));
+                unpacked += made;
+            }
+            in += quint64(have) - z.avail_in;
+        }
+        inflateEnd(&z);
+        // Data that isn't deflate at all: not a gzip file (or its end, after a part that was).
+        if (result != Z_STREAM_END && result != Z_OK)
+            return parts ? complete(Gz, pos) : filetypes::Measured{};
+        if (result != Z_STREAM_END) // the drive ran out first
+            return parts ? complete(Gz, pos) : incomplete(Gz, in);
+        quint32 wantCrc = 0, wantSize = 0;
+        if (!s.le32(in, wantCrc) || !s.le32(in + 4, wantSize) || wantCrc != crc || wantSize != quint32(unpacked))
+            return parts ? complete(Gz, pos) : incomplete(Gz, in + 8);
+        pos = in + 8;
+        ++parts;
+    }
+}
+
 const QVector<filetypes::Type> &filetypes::types()
 {
     using C = Category;
@@ -719,6 +1357,28 @@ const QVector<filetypes::Type> &filetypes::types()
         {QStringLiteral("jar"), C::Archive, tr("Java program")},
         {QStringLiteral("apk"), C::Archive, tr("Android app")},
         {QStringLiteral("sqlite"), C::Other, tr("SQLite database")},
+        {QStringLiteral("tif"), C::Picture, tr("TIFF picture")},
+        {QStringLiteral("cr2"), C::Picture, tr("Canon raw photo (CR2)")},
+        {QStringLiteral("nef"), C::Picture, tr("Nikon raw photo")},
+        {QStringLiteral("arw"), C::Picture, tr("Sony raw photo")},
+        {QStringLiteral("dng"), C::Picture, tr("Raw photo (DNG)")},
+        {QStringLiteral("orf"), C::Picture, tr("Olympus raw photo")},
+        {QStringLiteral("rw2"), C::Picture, tr("Panasonic raw photo")},
+        {QStringLiteral("pef"), C::Picture, tr("Pentax raw photo")},
+        {QStringLiteral("raf"), C::Picture, tr("Fujifilm raw photo")},
+        {QStringLiteral("psd"), C::Picture, tr("Photoshop picture")},
+        {QStringLiteral("rar"), C::Archive, tr("RAR archive")},
+        {QStringLiteral("mkv"), C::Video, tr("Matroska video")},
+        {QStringLiteral("webm"), C::Video, tr("WebM video")},
+        {QStringLiteral("flac"), C::Music, tr("FLAC music")},
+        {QStringLiteral("wmv"), C::Video, tr("Windows Media video")},
+        {QStringLiteral("wma"), C::Music, tr("Windows Media audio")},
+        {QStringLiteral("doc"), C::Document, tr("Word 97-2003 document")},
+        {QStringLiteral("xls"), C::Document, tr("Excel 97-2003 spreadsheet")},
+        {QStringLiteral("ppt"), C::Document, tr("PowerPoint 97-2003 presentation")},
+        {QStringLiteral("msg"), C::Document, tr("Outlook email")},
+        {QStringLiteral("ole"), C::Other, tr("Compound file")},
+        {QStringLiteral("gz"), C::Archive, tr("gzip file")},
     };
     Q_ASSERT(list.size() == TypeCount);
     return list;
@@ -744,7 +1404,11 @@ int filetypes::typeForName(const QString &fileName)
         {QStringLiteral("jpeg"), QStringLiteral("jpg")}, {QStringLiteral("jpe"), QStringLiteral("jpg")},
         {QStringLiteral("jfif"), QStringLiteral("jpg")}, {QStringLiteral("heif"), QStringLiteral("heic")},
         {QStringLiteral("m4v"), QStringLiteral("mp4")},  {QStringLiteral("qt"), QStringLiteral("mov")},
-        {QStringLiteral("oga"), QStringLiteral("ogg")},
+        {QStringLiteral("oga"), QStringLiteral("ogg")},  {QStringLiteral("tiff"), QStringLiteral("tif")},
+        {QStringLiteral("psb"), QStringLiteral("psd")},  {QStringLiteral("nrw"), QStringLiteral("nef")},
+        {QStringLiteral("mka"), QStringLiteral("mkv")},  {QStringLiteral("asf"), QStringLiteral("wmv")},
+        {QStringLiteral("dot"), QStringLiteral("doc")},  {QStringLiteral("xlt"), QStringLiteral("xls")},
+        {QStringLiteral("pps"), QStringLiteral("ppt")},  {QStringLiteral("tgz"), QStringLiteral("gz")},
     };
     return typeNumber(also.value(ext, ext));
 }
@@ -775,6 +1439,23 @@ int filetypes::startType(int type)
     case Ogv:
     case Opus:
         return Ogg;
+    case Cr2:
+    case Nef:
+    case Arw:
+    case Dng:
+    case Orf:
+    case Rw2:
+    case Pef:
+        return Tif;
+    case Webm:
+        return Mkv;
+    case Wma:
+        return Wmv;
+    case Xls:
+    case Ppt:
+    case Msg:
+    case Ole:
+        return Doc;
     default:
         return type;
     }
@@ -837,10 +1518,47 @@ QVector<int> filetypes::candidates(const uchar *h, int len)
     case 'R':
         if (memcmp(h, "RIFF", 4) == 0)
             out << Avi; // measureRiff says which
+        else if (memcmp(h, "Rar!\x1a\x07", 6) == 0)
+            out << Rar;
         break;
     case 'I':
         if (memcmp(h, "ID3", 3) == 0 && h[3] >= 2 && h[3] <= 4 && h[4] != 0xFF)
             out << Mp3;
+        // TIFF and the raw files built on it (Olympus and Panasonic put their own number there)
+        if (h[1] == 'I' && (memcmp(h + 2, "*\0", 2) == 0 || memcmp(h + 2, "RO", 2) == 0 || memcmp(h + 2, "RS", 2) == 0 || memcmp(h + 2, "U\0", 2) == 0))
+            out << Tif;
+        break;
+    case 'M':
+        if (memcmp(h, "MM\0*", 4) == 0)
+            out << Tif;
+        break;
+    case 'F':
+        if (memcmp(h, "FUJIFILMCCD-RAW ", 16) == 0)
+            out << Raf;
+        break;
+    case '8':
+        if (memcmp(h, "8BPS", 4) == 0)
+            out << Psd;
+        break;
+    case 0x1A:
+        if (memcmp(h, "\x1A\x45\xDF\xA3", 4) == 0)
+            out << Mkv;
+        break;
+    case 'f':
+        if (memcmp(h, "fLaC", 4) == 0)
+            out << Flac;
+        break;
+    case 0x30:
+        if (memcmp(h, "\x30\x26\xB2\x75\x8E\x66\xCF\x11", 8) == 0)
+            out << Wmv;
+        break;
+    case 0xD0:
+        if (memcmp(h, "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1", 8) == 0)
+            out << Doc;
+        break;
+    case 0x1F:
+        if (h[1] == 0x8B && h[2] == 8 && !(h[3] & 0xE0))
+            out << Gz;
         break;
     case 'O':
         if (memcmp(h, "OggS", 4) == 0 && h[4] == 0 && (h[5] & 0x02))
@@ -888,7 +1606,29 @@ quint64 filetypes::sizeLimit(int type)
     case Sqlite:
     case Zip:
     case SevenZip:
+    case Rar:
+    case Gz:
         return 8 * kGiB;
+    case Tif:
+    case Cr2:
+    case Nef:
+    case Arw:
+    case Dng:
+    case Orf:
+    case Rw2:
+    case Pef:
+    case Raf:
+        return 512 * kMiB;
+    case Mkv:
+    case Webm:
+    case Wmv:
+        return 16 * kGiB;
+    case Doc:
+    case Xls:
+    case Ppt:
+    case Msg:
+    case Ole:
+        return 1 * kGiB;
     default:
         return 2 * kGiB;
     }
@@ -923,6 +1663,24 @@ filetypes::Measured measureOne(int type, Stream &s)
         return measureSqlite(s);
     case SevenZip:
         return measureSevenZip(s);
+    case Tif:
+        return measureTiff(s);
+    case Raf:
+        return measureRaf(s);
+    case Psd:
+        return measurePsd(s);
+    case Rar:
+        return measureRar(s);
+    case Mkv:
+        return measureMkv(s);
+    case Flac:
+        return measureFlac(s);
+    case Wmv:
+        return measureAsf(s);
+    case Doc:
+        return measureOle(s);
+    case Gz:
+        return measureGz(s);
     default:
         return {};
     }
