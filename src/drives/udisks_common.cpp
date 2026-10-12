@@ -8,6 +8,9 @@
 
 #include "format.h"
 
+#include <QCoreApplication>
+#include <QDateTime>
+
 #include <algorithm>
 
 QVector<Span> diskSpans(const Disk &disk)
@@ -99,6 +102,41 @@ QString UDisks::secureEraseRefused(const QString &error, bool usb)
                                  "enough) and try again. If it keeps refusing, use Wipe Disk instead.");
     return why + QStringLiteral(" ")
          + tr("If the drive shows up locked after it's been off, it kept the temporary password xxxx: Help has how to unlock it.");
+}
+
+// The record of an erasure starting now: the drive, and the method in plain words.
+erasure::Record erasureOf(const Disk &disk, const QString &method, bool zeros)
+{
+    erasure::Record r;
+    r.model = disk.model;
+    r.serial = disk.serial;
+    r.device = disk.device;
+    r.bus = disk.bus;
+    r.size = disk.size;
+    r.method = method;
+    r.zeros = zeros;
+    r.started = QDateTime::currentDateTime();
+    r.app = QCoreApplication::applicationName() + QLatin1Char(' ') + QCoreApplication::applicationVersion();
+    return r;
+}
+
+QString UDisks::eraseMethodName(EraseMethod method)
+{
+    switch (method) {
+    case EraseMethod::AtaNormal:
+        return tr("The drive's own Secure Erase (ATA SECURITY ERASE UNIT)");
+    case EraseMethod::AtaEnhanced:
+        return tr("The drive's own Enhanced Secure Erase (ATA SECURITY ERASE UNIT, enhanced)");
+    case EraseMethod::NvmeUserData:
+        return tr("The drive's own erase (NVMe Format, user data erase)");
+    case EraseMethod::NvmeCrypto:
+        return tr("The drive's own erase (NVMe Format, cryptographic erase)");
+    case EraseMethod::NvmeSanitizeBlock:
+        return tr("The drive's own erase (NVMe Sanitize, block erase)");
+    case EraseMethod::NvmeSanitizeCrypto:
+        break;
+    }
+    return tr("The drive's own erase (NVMe Sanitize, cryptographic erase)");
 }
 
 void UDisks::openDevice(const Disk &disk, bool writable, bool forBenchmark, bool direct)

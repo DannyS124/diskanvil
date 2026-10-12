@@ -40,6 +40,8 @@
 #include "../src/viruses/windowspicker.h"
 #include "../src/viruses/productkeydialog.h"
 #include "../src/viruses/driversdialog.h"
+#include "../src/app/certificates.h"
+#include "../src/common/pdfreport.h"
 #include "../src/viruses/bootentriesdialog.h"
 #include "../src/backup/clonezilladialog.h"
 #include "../src/backup/imagebackup.h"
@@ -2168,6 +2170,152 @@ void bootMenuWindow()
     }
     BootEntriesDialog::runForTest = nullptr;
     efi::varsDir = realVars;
+}
+
+// The text of a PDF, as pdftotext reads it.
+QString pdfText(const QString &pdf)
+{
+    QProcess p;
+    p.start(QStringLiteral("pdftotext"), {QStringLiteral("-layout"), pdf, QStringLiteral("-")});
+    p.waitForFinished(30000);
+    // The fonts join some letters (fi, fl): read as the letters.
+    return QString::fromUtf8(p.readAllStandardOutput()).replace(QChar(0xFB01), QStringLiteral("fi")).replace(QChar(0xFB02), QStringLiteral("fl"));
+}
+
+// A certificate of erasure from a record (no drive needed), saved as a PDF whose text says what
+// was erased, how, and for whom.
+void certificateWindow()
+{
+    QTemporaryDir dir;
+    const QString realStore = erasure::storePath;
+    erasure::storePath = dir.filePath(QStringLiteral("erasures.json"));
+    erasure::Record r;
+    r.model = QStringLiteral("WDC WD10EZEX-08WN4A0");
+    r.serial = QStringLiteral("WD-WCC6Y0TEST");
+    r.device = QStringLiteral("/dev/sdz");
+    r.size = 1000204886016;
+    r.method = QStringLiteral("Every sector written with zeros (Wipe Disk)");
+    r.zeros = true;
+    r.started = QDateTime(QDate(2026, 10, 11), QTime(9, 0));
+    r.finished = QDateTime(QDate(2026, 10, 11), QTime(11, 32));
+    r.app = QStringLiteral("DiskForge test");
+    erasure::remember(r);
+    const QVector<erasure::Record> all = erasure::all();
+    report(all.size() == 1 && all[0].id.size() == 12 && all[0].serial == r.serial, QStringLiteral("certificate: the erasure is remembered, with a number of its own"));
+    const QString pdf = dir.filePath(QStringLiteral("cert.pdf"));
+    UDisks udisks;
+    udisks.setInteractive(false);
+    Answerer answerer;
+    answerer.answer = [&](QWidget *modal) {
+        if (auto *picker = qobject_cast<QFileDialog *>(modal)) {
+            picker->selectFile(pdf);
+            if (auto *name = picker->findChild<QLineEdit *>(QStringLiteral("fileNameEdit")))
+                name->setText(pdf);
+            static_cast<QDialog *>(picker)->accept();
+            return true;
+        }
+        return false;
+    };
+    {
+        CertificateDialog dialog(&udisks, all.value(0));
+        dialog.show();
+        dialog.findChild<QLineEdit *>(QStringLiteral("by"))->setText(QStringLiteral("Sam Tester"));
+        dialog.findChild<QLineEdit *>(QStringLiteral("for"))->setText(QStringLiteral("Order 4711"));
+        report(!dialog.findChild<QPushButton *>(QStringLiteral("check"))->isEnabled(), QStringLiteral("certificate: Check It waits for the drive to be connected"));
+        dialog.findChild<QPushButton *>(QStringLiteral("save"))->click();
+    }
+    const QString text = pdfText(pdf);
+    if (qEnvironmentVariableIsSet("DISKFORGE_UITEST_SHOTS"))
+        QFile::copy(pdf, qEnvironmentVariable("DISKFORGE_UITEST_SHOTS") + QStringLiteral("/certificate.pdf"));
+    report(text.contains(QLatin1String("Certificate of Erasure")) && text.contains(QLatin1String("WD-WCC6Y0TEST")) && text.contains(QLatin1String("Order 4711"))
+               && text.contains(QLatin1String("Sam Tester")) && text.contains(all.value(0).id) && text.contains(QLatin1String("Wipe Disk")),
+           QStringLiteral("certificate: the PDF says what was erased, how, for whom and by whom"), text.left(300));
+    erasure::storePath = realStore;
+}
+
+// As root: Wipe Disk on a loop device full of data. The erasure is recorded, Check It reads it
+// back as zeros, and the certificate says so.
+void wipeCertificate()
+{
+    QTemporaryDir dir;
+    const QString realStore = erasure::storePath;
+    erasure::storePath = dir.filePath(QStringLiteral("erasures.json"));
+    const QString image = dir.filePath(QStringLiteral("old.img"));
+    {
+        QFile f(image);
+        if (f.open(QIODevice::WriteOnly)) {
+            QByteArray block(1024 * 1024, 'x');
+            for (int i = 0; i < 32; ++i)
+                f.write(block);
+        }
+    }
+    QString loop;
+    sh(QStringLiteral("losetup"), {QStringLiteral("-f"), QStringLiteral("--show"), image}, &loop);
+    loop = loop.trimmed();
+    UDisks udisks;
+    udisks.setInteractive(false);
+    const Disk *disk = nullptr;
+    waitUntil([&] {
+        udisks.refresh();
+        for (const Disk &d : udisks.disks()) {
+            if (d.device == loop)
+                disk = &d;
+        }
+        return disk != nullptr;
+    }, 15000);
+    erasure::Record got;
+    QObject::connect(&udisks, &UDisks::erased, [&got](const erasure::Record &r) {
+        got = r;
+        erasure::remember(r);
+    });
+    if (disk)
+        udisks.wipe(*disk);
+    waitUntil([&] { return !got.method.isEmpty(); }, 60000);
+    report(got.zeros && got.device == loop && got.finished >= got.started && got.size == 32 * 1024 * 1024,
+           QStringLiteral("wipe: the finished erasure is announced with the drive and the times"), got.method);
+    {
+        CertificateDialog dialog(&udisks, erasure::all().value(0));
+        dialog.show();
+        auto *check = dialog.findChild<QPushButton *>(QStringLiteral("check"));
+        report(check->isEnabled(), QStringLiteral("wipe: Check It is there with the drive connected"));
+        check->click();
+        auto *summary = dialog.findChild<QLabel *>(QStringLiteral("summary"));
+        waitUntil([&] { return summary->text().contains(QLatin1String("Read back")); }, 30000);
+        report(summary->text().contains(QLatin1String("all zeros")), QStringLiteral("wipe: read back, it's all zeros"), summary->text().right(160));
+    }
+    report(erasure::all().value(0).checked.contains(QLatin1String("all zeros")), QStringLiteral("wipe: the check is kept with the record"));
+    sh(QStringLiteral("losetup"), {QStringLiteral("-d"), loop});
+    erasure::storePath = realStore;
+}
+
+// The drive report from Disk Health, for a drive of this PC's that reports SMART (read only):
+// the PDF has the drive, its verdict and its attributes.
+void driveReport()
+{
+    UDisks udisks;
+    udisks.setInteractive(false);
+    const Disk *drive = nullptr;
+    for (const Disk &d : udisks.disks()) {
+        if (!d.isLoop && d.health.state != Health::State::Unknown && !d.health.nvme)
+            drive = &d;
+    }
+    if (!drive) {
+        report(true, QStringLiteral("drive report: skipped, no drive here reports SMART"));
+        return;
+    }
+    QTemporaryDir dir;
+    HealthDialog dialog(&udisks, drive->blockPath);
+    dialog.show();
+    QApplication::processEvents();
+    const QString pdf = dir.filePath(QStringLiteral("report.pdf"));
+    QString error;
+    const bool saved = pdfreport::save(dialog.reportHtml(), pdf, QStringLiteral("Drive Report"), &error);
+    const QString text = pdfText(pdf);
+    report(saved && text.contains(QLatin1String("Drive Report")) && text.contains(drive->serial) && text.contains(QLatin1String("Temperature"))
+               && text.contains(QLatin1String("power-on-hours")),
+           QStringLiteral("drive report: the PDF has the drive, its verdict, its facts and its SMART attributes"), error + text.left(200));
+    if (qEnvironmentVariableIsSet("DISKFORGE_UITEST_SHOTS"))
+        QFile::copy(pdf, qEnvironmentVariable("DISKFORGE_UITEST_SHOTS") + QStringLiteral("/report.pdf"));
 }
 
 // Windows Product Key on this PC (no MSDM table, no Windows mounted): it says so in plain words,
@@ -5272,7 +5420,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},
@@ -5317,7 +5465,7 @@ int main(int argc, char *argv[])
     }
     // As root, the ones that make their own loop device can run by themselves.
     if (!only.isEmpty()) {
-        const QVector<QPair<const char *, void (*)()>> alone = {{"stickcheck", stickCheck}, {"sdcard", sdCardFormat}, {"refresh", slowAreaRefresh}, {"stopwipe", stopWipe}, {"luksheader", luksHeaderThroughWindow}, {"nas", nasDrives}, {"tryrepair", tryRepairFirst}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}};
+        const QVector<QPair<const char *, void (*)()>> alone = {{"stickcheck", stickCheck}, {"sdcard", sdCardFormat}, {"refresh", slowAreaRefresh}, {"stopwipe", stopWipe}, {"luksheader", luksHeaderThroughWindow}, {"nas", nasDrives}, {"tryrepair", tryRepairFirst}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"wipecert", wipeCertificate}};
         for (const auto &[name, run] : alone) {
             if (only.contains(QLatin1String(name)))
                 run();
@@ -5409,6 +5557,7 @@ int main(int argc, char *argv[])
     tryRepairFirst();
     clonezillaRestore();
     testBootWindow();
+    wipeCertificate();
     inspector();
     recoverThroughWindow();
     scanThroughWindow();

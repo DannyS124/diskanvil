@@ -556,10 +556,17 @@ void UDisks::wipe(const Disk &disk)
     if (refuseSystem(&disk, failure))
         return;
     const QString path = disk.blockPath;
-    unmountThen(disk.volumes, failure, [this, path, name, failure] {
+    const erasure::Record record = erasureOf(disk, tr("Every sector written with zeros (Wipe Disk)"), true);
+    unmountThen(disk.volumes, failure, [this, path, name, failure, record] {
         call(path, kBlock, QStringLiteral("Format"),
              {QStringLiteral("empty"), options({{QStringLiteral("erase"), QStringLiteral("zero")}, {QStringLiteral("tear-down"), true}})},
-             [name](const QDBusMessage &) { return tr("%1 has been wiped").arg(name); }, failure);
+             [this, name, record](const QDBusMessage &) {
+                 erasure::Record done = record;
+                 done.finished = QDateTime::currentDateTime();
+                 emit erased(done);
+                 return tr("%1 has been wiped").arg(name);
+             },
+             failure);
     }, true);
 }
 
@@ -588,10 +595,14 @@ void UDisks::secureErase(const Disk &disk, EraseMethod method, int nvmeSectorSiz
     }
     const QString blockPath = d->blockPath, drivePath = d->drivePath;
     const bool usb = d->bus == QLatin1String("usb");
-    unmountThen(d->volumes, failure, [this, method, ata, blockPath, drivePath, name, failure, usb, nvmeSectorSize] {
+    const erasure::Record record = erasureOf(*d, eraseMethodName(method), false);
+    unmountThen(d->volumes, failure, [this, method, ata, blockPath, drivePath, name, failure, usb, nvmeSectorSize, record] {
         // The drive erased itself, so the system still has the old partitions in mind until it
         // reads the drive again. Whatever that says, the erase itself worked.
-        auto done = [this, blockPath, name](const QDBusMessage &) {
+        auto done = [this, blockPath, name, record](const QDBusMessage &) {
+            erasure::Record finished = record;
+            finished.finished = QDateTime::currentDateTime();
+            emit erased(finished);
             QDBusMessage reread = QDBusMessage::createMethodCall(kService, blockPath, kBlock, QStringLiteral("Rescan"));
             reread << options();
             auto *watcher = new QDBusPendingCallWatcher(QDBusConnection::systemBus().asyncCall(reread, 60000), this);

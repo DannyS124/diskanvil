@@ -68,6 +68,7 @@ add_library(diskforge-core STATIC
     src/drives/sdcard.cpp src/drives/sdcard.h
     src/drives/luksheader.cpp src/drives/luksheader.h
     src/drives/closedsets.cpp src/drives/closedsets.h
+    src/drives/erasure.cpp src/drives/erasure.h
     src/lostfiles/mediainfo.cpp src/lostfiles/mediainfo.h
     src/lostfiles/exif.cpp src/lostfiles/exif.h
     src/lostfiles/lookcopies.cpp src/lostfiles/lookcopies.h
@@ -184,6 +185,8 @@ add_library(diskforge-ui STATIC
     src/health/blockmapwidget.cpp src/health/blockmapwidget.h
     src/common/jobui.cpp src/common/jobui.h
     src/common/flowlayout.cpp src/common/flowlayout.h
+    src/common/pdfreport.cpp src/common/pdfreport.h
+    src/app/certificates.cpp src/app/certificates.h
     src/backup/copydialogs.cpp src/backup/copydialogs.h
     src/tools/usagedialog.cpp src/tools/usagedialog.h
     src/viruses/virusdialog.cpp src/viruses/virusdialog.h

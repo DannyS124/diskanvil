@@ -11,6 +11,8 @@
 // drives are \\.\PhysicalDriveN, partitions \\?\GLOBALROOT\Device\HarddiskN\PartitionM,
 // and `device` is what people know them by there ("Disk 1", "E:").
 
+#include "erasure.h"
+
 #include <QObject>
 #include <QString>
 #include <QStringList>
@@ -234,6 +236,9 @@ struct Span {
 
 QVector<Span> diskSpans(const Disk &disk);
 
+// The record of an erasure starting now (erasure.h).
+erasure::Record erasureOf(const Disk &disk, const QString &method, bool zeros);
+
 class UDisks : public QObject
 {
     Q_OBJECT
@@ -318,6 +323,7 @@ public:
     enum class EraseMethod { AtaNormal, AtaEnhanced, NvmeUserData, NvmeCrypto, NvmeSanitizeBlock, NvmeSanitizeCrypto };
     // nvmeSectorSize: an NVMe drive formatted with another sector size (0 keeps the one it has).
     void secureErase(const Disk &disk, EraseMethod method, int nvmeSectorSize = 0);
+    static QString eraseMethodName(EraseMethod method);
     // What it means when an ATA drive refuses Secure Erase (UDisks' error text), in plain words.
     static QString secureEraseRefused(const QString &error, bool usb);
     // Gets a drive ready to have its power pulled: unmounts (and locks) what's on it, then spins
@@ -366,6 +372,8 @@ signals:
     void checkFinished(const QString &objectPath, bool clean);
     void imageOpened(const QString &loopBlockPath);
     void deviceOpened(const QString &blockPath, int fd); // fd = -1 on failure (reported via operationFinished)
+    // A Wipe Disk or Secure Erase finished: what was erased, and how (for its certificate).
+    void erased(const erasure::Record &record);
 
 #ifndef Q_OS_WIN
 private slots:

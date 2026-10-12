@@ -13,6 +13,7 @@
 #include "addonsdialog.h"
 #include "bootentriesdialog.h"
 #include "catalogdialog.h"
+#include "certificates.h"
 #include "closedsets.h"
 #include "clonezilladialog.h"
 #include "copydialogs.h"
@@ -207,6 +208,36 @@ MainWindow::MainWindow(UDisks *udisks, QWidget *parent)
             statusBar()->clearMessage();
             QMessageBox::warning(this, windowTitle(), message);
         }
+    });
+    // A finished erasure is kept, for its certificate, and a bar offers one now.
+    connect(m_udisks, &UDisks::erased, this, [this](const erasure::Record &record) {
+        erasure::remember(record);
+        const erasure::Record kept = erasure::all().value(0);
+        for (NoticeBar *old : m_notices->findChildren<NoticeBar *>(QStringLiteral("erased"), Qt::FindDirectChildrenOnly)) {
+            old->hide();
+            old->deleteLater();
+        }
+        auto *bar = new NoticeBar(NoticeBar::Level::Info, tr("%1 (%2) has been erased. A certificate of erasure can be saved for it, now or "
+                                                             "later (Tools, Erasure Certificates).")
+                                                              .arg(kept.model, kept.serial.isEmpty() ? kept.device : kept.serial));
+        bar->setObjectName(QStringLiteral("erased"));
+        QPushButton *make = bar->addButton(tr("Make a Certificate…"));
+        connect(make, &QPushButton::clicked, this, [this, kept, bar] {
+            QTimer::singleShot(0, this, [this, kept, bar] {
+                if (CertificateDialog(m_udisks, kept, this).exec() == QDialog::Accepted) {
+                    bar->hide();
+                    bar->deleteLater();
+                }
+            });
+        });
+        QPushButton *dismiss = bar->addButton(tr("Dismiss"));
+        connect(dismiss, &QPushButton::clicked, bar, [bar] {
+            bar->hide();
+            bar->deleteLater();
+        });
+        m_notices->layout()->addWidget(bar);
+        bar->show();
+        showNoticesIfAny();
     });
     connect(m_udisks, &UDisks::jobStopFailed, this, [this](const QString &message) {
         QMessageBox::warning(this, windowTitle(), message);
@@ -665,6 +696,11 @@ void MainWindow::createActions()
             RescueDialog(m_udisks, d->blockPath, this).exec();
     });
 
+    m_certificates = new QAction(themeIcon("document-print", "document-save"), tr("Erasure &Certificates…"), this);
+    m_certificates->setObjectName(QStringLiteral("certificates"));
+    m_certificates->setToolTip(tr("Certificates of erasure for the drives wiped or erased here"));
+    connect(m_certificates, &QAction::triggered, this, [this] { CertificatesDialog(m_udisks, this).exec(); });
+
     m_testBoot = new QAction(themeIcon("computer", "system-run"), tr("&Try Starting It…"), this);
     m_testBoot->setObjectName(QStringLiteral("testBoot"));
     m_testBoot->setToolTip(tr("Starts the drive in a virtual machine, to see that it starts (a clone, say): nothing on it changes"));
@@ -888,10 +924,11 @@ void MainWindow::createActions()
         tools->addAction(m_linuxBoot);
         tools->addAction(m_drivers);
         tools->addAction(m_productKey);
+        tools->addAction(m_certificates);
         tools->addSeparator();
 #ifdef Q_OS_WIN
         // Quick Fixes' tools, and add-ons (Linux commands), aren't in the Windows version yet.
-        tools->addActions({m_saveFiles, m_virusScan, m_bootMenu, m_drivers, m_winRe, m_productKey, m_usage, m_cleanup, m_optimize, m_snapshots});
+        tools->addActions({m_saveFiles, m_virusScan, m_bootMenu, m_drivers, m_winRe, m_productKey, m_certificates, m_usage, m_cleanup, m_optimize, m_snapshots});
         return;
 #endif
         tools->addAction(themeIcon("tools-wizard", "system-run"), tr("&Quick Fixes…"), this, [this] {

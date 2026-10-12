@@ -16,6 +16,7 @@
 #include "imagesource.h"
 #include "isocopy.h"
 #include "imagewriter.h"
+#include "pdfreport.h"
 #include "rescuestick.h"
 #include "sdcard.h"
 #include "surfacescan.h"
@@ -621,6 +622,14 @@ HealthDialog::HealthDialog(UDisks *udisks, const QString &blockPath, QWidget *pa
         if (const Disk *d = m_udisks->diskByPath(m_blockPath))
             m_udisks->smartSetEnabled(*d, true);
     });
+    auto *report = new QPushButton(tr("Save Report…"));
+    report->setObjectName(QStringLiteral("healthReport"));
+    report->setToolTip(tr("Everything here as a PDF: for a customer, a warranty claim, or the next owner"));
+    connect(report, &QPushButton::clicked, this, [this] {
+        const Disk *d = m_udisks->diskByPath(m_blockPath);
+        pdfreport::saveAs(this, reportHtml(), tr("Drive report %1.pdf").arg(d && !d->serial.isEmpty() ? d->serial : d ? d->model : QString()), tr("Drive Report"));
+    });
+    m_report = report;
     m_noise = new QPushButton(tr("What's That Noise?"));
     m_noise->setObjectName(QStringLiteral("noise"));
     connect(m_noise, &QPushButton::clicked, this, [this] {
@@ -668,6 +677,7 @@ HealthDialog::HealthDialog(UDisks *udisks, const QString &blockPath, QWidget *pa
     buttons->addWidget(scan);
     buttons->addWidget(m_noise);
     buttons->addWidget(m_farm);
+    buttons->addWidget(m_report);
     buttons->addWidget(refresh);
     buttons->addStretch();
     buttons->addWidget(close);
@@ -697,6 +707,58 @@ HealthDialog::HealthDialog(UDisks *udisks, const QString &blockPath, QWidget *pa
         checkFirmware();
     reload();
     resize(680, 660);
+}
+
+QString HealthDialog::reportHtml() const
+{
+    const Disk *d = m_udisks->diskByPath(m_blockPath);
+    if (!d)
+        return {};
+    const auto cell = [](const QString &text) { return QStringLiteral("<td style=\"padding:2px 10px 2px 0\">%1</td>").arg(text.toHtmlEscaped()); };
+    QString html = QStringLiteral("<html><body style=\"font-family:sans-serif; font-size:10pt\">");
+    html += QStringLiteral("<h1 style=\"font-size:20pt\">%1</h1>").arg(tr("Drive Report").toHtmlEscaped());
+    html += QStringLiteral("<p><b>%1</b><br>%2: %3 &nbsp; %4: %5</p>")
+                .arg(diskTitle(*d).toHtmlEscaped(), tr("Serial number").toHtmlEscaped(), d->serial.toHtmlEscaped(), tr("Firmware").toHtmlEscaped(),
+                     d->revision.toHtmlEscaped());
+    // The verdict and its reasons, then each row the window shows.
+    html += m_state->text() + m_explain->text();
+    html += QStringLiteral("<table>");
+    for (int row = 0; row < m_form->rowCount(); ++row) {
+        const QLayoutItem *name = m_form->itemAt(row, QFormLayout::LabelRole);
+        const QLayoutItem *value = m_form->itemAt(row, QFormLayout::FieldRole);
+        const auto *nameLabel = name ? qobject_cast<QLabel *>(name->widget()) : nullptr;
+        QString text;
+        if (const auto *label = value ? qobject_cast<QLabel *>(value->widget()) : nullptr)
+            text = label->text();
+        else if (value && value->widget())
+            for (const QLabel *label : value->widget()->findChildren<QLabel *>())
+                text += label->text();
+        // A question still on its way isn't part of a report.
+        text.replace(QStringLiteral(". ") + tr("Asking fwupd…"), QString()).replace(tr("Asking fwupd…"), QString());
+        if (nameLabel)
+            html += QStringLiteral("<tr>%1%2</tr>").arg(cell(nameLabel->text()), cell(text));
+    }
+    html += QStringLiteral("</table>");
+    if (m_attributes->topLevelItemCount() > 0) {
+        html += QStringLiteral("<h2 style=\"font-size:13pt\">%1</h2><table>").arg(tr("What the drive reports (SMART)").toHtmlEscaped());
+        html += QStringLiteral("<tr>");
+        for (int c = 0; c < m_attributes->columnCount(); ++c)
+            html += QStringLiteral("<td style=\"padding:2px 10px 2px 0\"><b>%1</b></td>").arg(m_attributes->headerItem()->text(c).toHtmlEscaped());
+        html += QStringLiteral("</tr>");
+        for (int i = 0; i < m_attributes->topLevelItemCount(); ++i) {
+            html += QStringLiteral("<tr>");
+            for (int c = 0; c < m_attributes->columnCount(); ++c)
+                html += cell(m_attributes->topLevelItem(i)->text(c));
+            html += QStringLiteral("</tr>");
+        }
+        html += QStringLiteral("</table>");
+    }
+    html += QStringLiteral("<p style=\"color:#555; margin-top:24px\">%1</p></body></html>")
+                .arg(tr("Made by %1 %2, %3.")
+                         .arg(QCoreApplication::applicationName(), QCoreApplication::applicationVersion(),
+                              QLocale().toString(QDateTime::currentDateTime(), QLocale::LongFormat))
+                         .toHtmlEscaped());
+    return html;
 }
 
 void HealthDialog::checkFarm()
@@ -1112,7 +1174,23 @@ BenchmarkDialog::BenchmarkDialog(UDisks *udisks, const Disk &disk, QWidget *pare
     auto *close = new QPushButton(tr("Close"));
     connect(close, &QPushButton::clicked, this, &BenchmarkDialog::reject);
     connect(m_start, &QPushButton::clicked, this, &BenchmarkDialog::start);
+    auto *pdf = new QPushButton(tr("Save as PDF…"));
+    pdf->setObjectName(QStringLiteral("benchmarkPdf"));
+    pdf->setVisible(false);
+    connect(pdf, &QPushButton::clicked, this, [this] {
+        const QString html = QStringLiteral("<html><body style=\"font-family:sans-serif; font-size:11pt\"><h1 style=\"font-size:20pt\">%1</h1>"
+                                            "<p><b>%2</b><br>%3: %4</p>%5<p style=\"color:#555\">%6</p></body></html>")
+                                 .arg(tr("Drive Speed").toHtmlEscaped(), diskTitle(m_disk).toHtmlEscaped(), tr("Serial number").toHtmlEscaped(),
+                                      m_disk.serial.toHtmlEscaped(), m_results->text(),
+                                      tr("Measured by %1 %2, %3.")
+                                          .arg(QCoreApplication::applicationName(), QCoreApplication::applicationVersion(),
+                                               QLocale().toString(QDateTime::currentDateTime(), QLocale::LongFormat))
+                                          .toHtmlEscaped());
+        pdfreport::saveAs(this, html, tr("Speed %1.pdf").arg(m_disk.serial.isEmpty() ? m_disk.model : m_disk.serial), tr("Drive Speed"));
+    });
+    m_pdf = pdf;
     auto *buttons = new QHBoxLayout;
+    buttons->addWidget(pdf);
     buttons->addStretch();
     buttons->addWidget(m_start);
     buttons->addWidget(close);
@@ -1198,6 +1276,7 @@ void BenchmarkDialog::start()
             if (r.writeMBps > 0)
                 text += tr("<p><b>Write speed:</b> %1 MB/s</p>").arg(qRound(r.writeMBps));
             m_results->setText(text);
+            m_pdf->setVisible(true);
         });
         m_progress->setValue(0);
         m_progress->setVisible(true);

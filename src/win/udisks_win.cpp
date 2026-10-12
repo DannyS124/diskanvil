@@ -632,6 +632,7 @@ struct UDisks::Windows {
     QHash<QString, RawHealth> health;
     QSet<QString> healthStale;
     QHash<QString, QString> stopMessages;
+    QHash<QString, erasure::Record> erasures; // wipes under way, by drive: their records
     QList<QThread *> workers;
 
     ~Windows()
@@ -2013,10 +2014,12 @@ void UDisks::wipe(const Disk &disk)
     if (refuseSystem(&disk, failure))
         return;
     const int number = diskNumber(disk.blockPath);
+    m_windows->erasures.insert(disk.blockPath, erasureOf(disk, tr("Every sector written with zeros (Wipe Disk)"), true));
     // Offline, Windows lets go of everything on the drive, so all of it can be written.
     storage(this, QStringLiteral("Set-Disk -Number ([int]$env:DF_DISK) -IsOffline $true"), {{QStringLiteral("DF_DISK"), QString::number(number)}},
             [this, path = disk.blockPath, size = disk.size, number, name, failure](bool ok, const QString &said) {
                 if (!ok) {
+                    m_windows->erasures.remove(path);
                     emit operationFinished(false, failure + reasonAfter(failure) + said);
                     return;
                 }
@@ -2071,20 +2074,24 @@ void UDisks::wipeOffline(const QString &path, quint64 size, int number, const QS
         if (zeros)
             VirtualFree(zeros, 0, MEM_RELEASE);
         const bool stopped = *stop;
-        QMetaObject::invokeMethod(this, [this, id, number, name, failure, error, stopped] {
+        QMetaObject::invokeMethod(this, [this, id, path, number, name, failure, error, stopped] {
             const QString stoppedMessage = m_windows->stopMessages.take(id);
             m_windows->stops.remove(id);
             m_windows->jobs.removeIf([&id](const Job &j) { return j.path == id; });
             // Back online, it reads as the empty drive it is now.
             storage(this, QStringLiteral("Set-Disk -Number ([int]$env:DF_DISK) -IsOffline $false"), {{QStringLiteral("DF_DISK"), QString::number(number)}},
-                    [this, name, failure, error, stopped, stoppedMessage](bool, const QString &) {
+                    [this, path, name, failure, error, stopped, stoppedMessage](bool, const QString &) {
                         refresh();
+                        erasure::Record record = m_windows->erasures.take(path);
                         if (!error.isEmpty())
                             emit operationFinished(false, failure + reasonAfter(failure) + error);
                         else if (stopped)
                             emit operationFinished(true, stoppedMessage.isEmpty() ? tr("Stopped wiping %1.").arg(name) : stoppedMessage);
-                        else
+                        else {
+                            record.finished = QDateTime::currentDateTime();
+                            emit erased(record);
                             emit operationFinished(true, tr("%1 has been wiped").arg(name));
+                        }
                     });
         }, Qt::QueuedConnection);
     });

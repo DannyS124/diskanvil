@@ -72,6 +72,7 @@ private:
     QAction *m_clonezilla = nullptr;
     QAction *m_testBoot = nullptr;      // a drive
     QAction *m_testBootImage = nullptr; // a disk image file
+    QAction *m_certificates = nullptr;
     void updateJobBars();
     void showNoticesIfAny();
     void stopJob(const QString &jobPath);

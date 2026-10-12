@@ -147,6 +147,8 @@ class HealthDialog : public QDialog
     Q_OBJECT
 public:
     HealthDialog(UDisks *udisks, const QString &blockPath, QWidget *parent = nullptr);
+    // What the window shows, as a page of HTML: the drive report.
+    QString reportHtml() const;
 
 private:
     void reload();
@@ -163,6 +165,7 @@ private:
     QPushButton *m_conveyance = nullptr;
     QPushButton *m_smartOn = nullptr;
     QPushButton *m_noise = nullptr; // what a hard drive's sounds mean
+    QPushButton *m_report = nullptr; // the drive report, as a PDF
     // Seagate's own record of its use (farm.h), through smartctl.
     void checkFarm();
     QPushButton *m_farm = nullptr;
@@ -207,6 +210,7 @@ private:
     QProgressBar *m_progress;
     QLabel *m_phase;
     QLabel *m_results;
+    QPushButton *m_pdf = nullptr; // the results, as a PDF
     QThread *m_thread = nullptr;
     QObject *m_worker = nullptr;
     QMetaObject::Connection m_openConn;
