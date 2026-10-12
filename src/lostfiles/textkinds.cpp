@@ -642,6 +642,27 @@ QString text(int type, const QByteArray &data, int most)
     return {};
 }
 
+Heading heading(int type, const QByteArray &data)
+{
+    const QString id = idOf(type);
+    Heading out;
+    if (id == QLatin1String("eml")) {
+        const Mail m = readMail(data);
+        out.title = m.subject;
+        out.when = m.sent;
+    } else if (id == QLatin1String("rtf")) {
+        RtfInfo info;
+        rtf(data, 1, &info);
+        out.title = info.title;
+        out.when = info.created;
+    } else if (id == QLatin1String("html")) {
+        static const QRegularExpression title(QStringLiteral("<title[^>]*>(.*?)</title\\s*>"),
+                                              QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
+        out.title = fromHtml(title.match(decode(data.left(256 * 1024), "utf-8")).captured(1)).simplified();
+    }
+    return out;
+}
+
 QStringList properties(int type, const QByteArray &data)
 {
     const QString id = idOf(type);

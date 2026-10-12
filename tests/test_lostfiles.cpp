@@ -98,13 +98,13 @@ QByteArray pdf()
 }
 
 // A ZIP with these files in it, stored as they are (the mimetype of an OpenDocument has to be).
-QByteArray zip(const QList<QPair<QByteArray, QByteArray>> &files)
+QByteArray zip(const QList<QPair<QByteArray, QByteArray>> &files, bool packed = false)
 {
     QByteArray out(4 * kMiB, '\0');
     size_t used = 0;
     archive *a = archive_write_new();
     archive_write_set_format_zip(a);
-    archive_write_set_options(a, "zip:compression=store");
+    archive_write_set_options(a, packed ? "zip:compression=deflate" : "zip:compression=store");
     archive_write_open_memory(a, out.data(), size_t(out.size()), &used);
     for (const auto &f : files) {
         archive_entry *e = archive_entry_new();
@@ -2269,6 +2269,79 @@ void newKinds()
     report(true, QStringLiteral("new kinds: %1 damaged files read without a crash").arg(runs));
 }
 
+// Files found by their contents are named by what's inside them, and keep the date they carry.
+void namesFromContents()
+{
+    const auto named = [](const QByteArray &data, const char *id) {
+        lost::Found f;
+        f.type = filetypes::typeForName(QStringLiteral("x.") + QString::fromLatin1(id));
+        f.size = quint64(data.size());
+        f.extents = {{0, f.size}};
+        f.name = lost::carvedName(f.type, 1);
+        lost::nameFromContents(f, *lost::Source::fromMemory(data));
+        return f;
+    };
+    const auto at = [](int y, int mo, int d, int h, int mi, int s, const QTimeZone &zone) {
+        return QDateTime(QDate(y, mo, d), QTime(h, mi, s), zone).toMSecsSinceEpoch();
+    };
+    struct Case {
+        const char *file, *id, *name;
+    };
+    const Case cases[] = {{"notes.doc", "doc", "Holiday plans.doc"},
+                          {"ferry.msg", "msg", "Ferry tickets.msg"},
+                          {"song.flac", "flac", "Sam Tester - Lake trip.flac"},
+                          {"trip.mkv", "mkv", "Sam Tester - Lake trip.mkv"},
+                          {"trip.wmv", "wmv", "Sam Tester - Lake trip.wmv"},
+                          {"ferry.eml", "eml", "Fähre - the tickets for Sunday.eml"},
+                          {"notes.rtf", "rtf", "Holiday plans.rtf"},
+                          {"notes.html", "html", "Holiday plans.html"},
+                          {"budget.xls.zst", "xls", "Budget.xls"},
+                          {"slides.ppt.zst", "ppt", "Trip slides.ppt"}};
+    for (const Case &c : cases) {
+        const lost::Found f = named(typesFile(QString::fromLatin1(c.file)), c.id);
+        report(f.name == QString::fromUtf8(c.name), QStringLiteral("names: %1 is called \"%2\"").arg(QString::fromLatin1(c.file), QString::fromUtf8(c.name)), f.name);
+    }
+    report(named(typesFile(QStringLiteral("notes.doc")), "doc").inside == at(2024, 7, 14, 13, 22, 5, QTimeZone::UTC)
+               && named(typesFile(QStringLiteral("ferry.msg")), "msg").inside == at(2024, 7, 14, 13, 22, 5, QTimeZone::UTC)
+               && named(typesFile(QStringLiteral("trip.mkv")), "mkv").inside == at(2024, 7, 14, 13, 22, 5, QTimeZone::UTC),
+           QStringLiteral("names: the date inside a document, an email and a film is kept"));
+    const lost::Found photo = named(jpegWith(exifTiff(true)), "jpg");
+    report(photo.name.endsWith(QLatin1String(" Canon EOS 80D.jpg")) && photo.name.startsWith(QLatin1String("20")) && photo.inside != 0,
+           QStringLiteral("names: a photo by when it was taken and the camera"), photo.name);
+    const lost::Found plain = named(picture("JPG"), "jpg");
+    report(plain.name == lost::carvedName(plain.type, 1) && plain.inside == 0, QStringLiteral("names: one that says nothing keeps its made-up name"), plain.name);
+    const QByteArray titled = "%PDF-1.4\n1 0 obj\n<< /Title (Holiday \\(plans\\) for 14/07) /CreationDate (D:20240714132205+02'00') >>\nendobj\n"
+                              "trailer\n<< /Info 1 0 R >>\n%%EOF\n";
+    const lost::Found pdfNamed = named(titled, "pdf");
+    report(pdfNamed.name == QLatin1String("Holiday (plans) for 14-07.pdf") && pdfNamed.inside == at(2024, 7, 14, 11, 22, 5, QTimeZone::UTC),
+           QStringLiteral("names: a PDF by its title, its date with its time zone"), pdfNamed.name);
+    const QByteArray wide = "%PDF-1.7\ntrailer << /Title <FEFF004C00E4006B0065> >>\n%%EOF\n";
+    report(named(wide, "pdf").name == QStringLiteral("Läke.pdf"), QStringLiteral("names: a PDF title in UTF-16"));
+    const QByteArray core = "<?xml version=\"1.0\"?><cp:coreProperties xmlns:cp=\"http://schemas.openxmlformats.org/package/2006/metadata/core-properties\" "
+                            "xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:dcterms=\"http://purl.org/dc/terms/\"><dc:title>Budget 2024</dc:title>"
+                            "<dcterms:created>2024-07-14T13:22:05Z</dcterms:created></cp:coreProperties>";
+    for (const bool packed : {false, true}) {
+        const QByteArray file = zip({{"[Content_Types].xml", "<Types/>"}, {"word/document.xml", QByteArray(3000, 'w')}, {"docProps/core.xml", core}}, packed);
+        report(named(file, "docx").name == QLatin1String("Budget 2024.docx"),
+               QStringLiteral("names: an Office file by the title in its summary (%1)").arg(packed ? QStringLiteral("packed") : QStringLiteral("stored")));
+    }
+    // Damaged ones never crash it.
+    QRandomGenerator rng(77);
+    int runs = 0;
+    for (const Case &c : cases) {
+        const QByteArray good = typesFile(QString::fromLatin1(c.file));
+        for (int round = 0; round < 40; ++round, ++runs) {
+            QByteArray bad = good;
+            for (int k = 0, n = 1 + int(rng.bounded(16)); k < n; ++k)
+                bad[int(rng.bounded(quint32(bad.size())))] = char(rng.bounded(256));
+            if (round % 3 == 0)
+                bad.truncate(qsizetype(rng.bounded(quint32(bad.size()))) + 1);
+            named(bad, c.id);
+        }
+    }
+    report(true, QStringLiteral("names: %1 damaged files named without a crash").arg(runs));
+}
+
 void lostFilesTests()
 {
     previewQueue();
@@ -2289,4 +2362,5 @@ void lostFilesTests()
     virtualDiskFuzz();
     mediaAndOffice();
     newKinds();
+    namesFromContents();
 }

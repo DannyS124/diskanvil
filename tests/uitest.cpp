@@ -59,6 +59,7 @@
 #include <QCheckBox>
 #include <QStorageInfo>
 #include <QBuffer>
+#include <QSettings>
 #include <QPainter>
 #include <QPdfWriter>
 #include <QPlainTextEdit>
@@ -3325,6 +3326,128 @@ void virusScanOnDrive()
     cleanUpLoop(udisks, loopPath);
 }
 
+// Organising what was found: names from inside, sorting, small pictures, copies and files that
+// don't open.
+void lostFilesOrganised()
+{
+    // A photo with the camera's date and name in it (EXIF), little-endian.
+    const auto le = [](quint32 v, int bytes) {
+        QByteArray b(bytes, '\0');
+        for (int i = 0; i < bytes; ++i)
+            b[i] = char(v >> (8 * i));
+        return b;
+    };
+    QByteArray tiff = QByteArray("II*\0", 4) + le(8, 4);
+    tiff += le(3, 2) + le(0x010F, 2) + le(2, 2) + le(5, 4) + le(50, 4) + le(0x0110, 2) + le(2, 2) + le(9, 4) + le(56, 4) + le(0x8769, 2) + le(4, 2)
+          + le(1, 4) + le(66, 4) + le(0, 4);
+    tiff += QByteArray("Test\0\0", 6) + QByteArray("Test Cam\0\0", 10);
+    tiff += le(1, 2) + le(0x9003, 2) + le(2, 2) + le(20, 4) + le(84, 4) + le(0, 4) + QByteArray("2024:07:14 13:22:05\0", 20);
+    const auto encoded = [](const QImage &image, const char *format) {
+        QByteArray file;
+        QBuffer buffer(&file);
+        buffer.open(QIODevice::WriteOnly);
+        image.save(&buffer, format);
+        return file;
+    };
+    QImage photoImage(400, 300, QImage::Format_RGB32);
+    QRandomGenerator rng(11);
+    for (int y = 0; y < photoImage.height(); ++y)
+        for (int x = 0; x < photoImage.width(); ++x)
+            photoImage.setPixel(x, y, qRgb(((x * 3) & 0xFF) ^ int(rng.bounded(96)), (y * 5) & 0xFF, int(rng.bounded(256))));
+    QByteArray photo = encoded(photoImage, "JPG");
+    const QByteArray app1 = QByteArray("Exif\0\0", 6) + tiff;
+    photo.insert(2, QByteArray("\xFF\xE1", 2) + char((app1.size() + 2) >> 8) + char((app1.size() + 2) & 0xFF) + app1);
+    QImage noise(300, 300, QImage::Format_RGB32);
+    for (int y = 0; y < 300; ++y)
+        for (int x = 0; x < 300; ++x)
+            noise.setPixel(x, y, rng.generate());
+    const QByteArray big = encoded(noise, "PNG");
+    QImage iconImage(16, 16, QImage::Format_RGB32);
+    iconImage.fill(QColor(0x2b, 0xee, 0x8a));
+    const QByteArray icon = encoded(iconImage, "PNG");
+    // Damaged inside its picture data (its checksum no longer matches): it doesn't open.
+    QByteArray broken = encoded(noise.copy(0, 0, 200, 200), "PNG");
+    const qsizetype idat = broken.indexOf("IDAT");
+    for (int k = 0; k < 64; ++k)
+        broken[idat + 200 + k] = char(k * 37);
+
+    QTemporaryDir dir;
+    QByteArray data(16 * 1024 * 1024, '\0');
+    quint64 at = 64 * 1024;
+    for (const QByteArray &file : {photo, big, icon, photo, broken}) {
+        data.replace(qsizetype(at), file.size(), file);
+        at = (at + quint64(file.size()) + 64 * 1024) / 512 * 512;
+    }
+    const QString imagePath = dir.filePath(QStringLiteral("organise.img"));
+    QFile imageFile(imagePath);
+    if (!imageFile.open(QIODevice::WriteOnly) || imageFile.write(data) != data.size()) {
+        report(false, QStringLiteral("write the test image"));
+        return;
+    }
+    imageFile.close();
+
+    UDisks udisks;
+    QSettings().remove(QStringLiteral("lostFiles/order"));
+    LostFilesDialog dialog(&udisks, QString());
+    dialog.show();
+    dialog.scanImage(imagePath);
+    auto *status = dialog.findChild<QLabel *>(QStringLiteral("status"));
+    waitUntil([&] { return status->text().startsWith(QLatin1String("Done")); }, 60000);
+    auto *view = dialog.findChild<QListView *>(QStringLiteral("files"));
+    QAbstractItemModel *model = view->model();
+    const auto names = [model] {
+        QStringList out;
+        for (int row = 0; row < model->rowCount(); ++row)
+            out << model->index(row, 0).data().toString();
+        return out;
+    };
+    report(model->rowCount() == 5 && names().count(QStringLiteral("2024-07-14 13.22.05 Test Cam.jpg")) == 2,
+           QStringLiteral("organise: five found, the photos named by when they were taken and the camera"), names().join(QStringLiteral(" | ")));
+
+    auto *sort = dialog.findChild<QComboBox *>(QStringLiteral("sort"));
+    sort->setCurrentIndex(sort->findData(int(LostFilter::Order::Size)));
+    const QStringList bySize = names();
+    sort->setCurrentIndex(sort->findData(int(LostFilter::Order::Date)));
+    const QStringList byDate = names();
+    sort->setCurrentIndex(sort->findData(int(LostFilter::Order::Name)));
+    const QStringList byName = names();
+    QStringList sorted = byName;
+    std::sort(sorted.begin(), sorted.end(), [](const QString &a, const QString &b) { return a.compare(b, Qt::CaseInsensitive) < 0; });
+    report(bySize.value(0) == QStringLiteral("Picture 000002.png") && byDate.value(0).startsWith(QLatin1String("2024-07-14"))
+               && byDate.value(1).startsWith(QLatin1String("2024-07-14")) && byName == sorted,
+           QStringLiteral("organise: by size, by date and by name"), bySize.join(QStringLiteral(" | ")));
+    sort->setCurrentIndex(sort->findData(int(LostFilter::Order::Found)));
+
+    auto *small = dialog.findChild<QCheckBox *>(QStringLiteral("hideSmall"));
+    small->setChecked(true);
+    report(model->rowCount() == 4 && !names().contains(QStringLiteral("Picture 000003.png")), QStringLiteral("organise: small pictures hidden"),
+           names().join(QStringLiteral(" | ")));
+    small->setChecked(false);
+
+    auto *findCopies = dialog.findChild<QAction *>(QStringLiteral("findCopies"));
+    auto *hideCopies = dialog.findChild<QCheckBox *>(QStringLiteral("hideCopies"));
+    findCopies->trigger();
+    waitUntil([&] { return hideCopies->isVisible(); }, 30000);
+    hideCopies->setChecked(true);
+    report(hideCopies->text().startsWith(QLatin1String("Hide copies (1,")) && model->rowCount() == 4
+               && names().count(QStringLiteral("2024-07-14 13.22.05 Test Cam.jpg")) == 1,
+           QStringLiteral("organise: the copy of the photo is found and can be hidden"), hideCopies->text());
+    hideCopies->setChecked(false);
+
+    auto *checkOpen = dialog.findChild<QAction *>(QStringLiteral("checkOpen"));
+    auto *hideBroken = dialog.findChild<QCheckBox *>(QStringLiteral("hideBroken"));
+    checkOpen->trigger();
+    waitUntil([&] { return hideBroken->isVisible(); }, 120000);
+    hideBroken->setChecked(true);
+    report(hideBroken->text() == QLatin1String("Hide ones that don't open (1)") && model->rowCount() == 4,
+           QStringLiteral("organise: the damaged picture is found not to open, and can be hidden"), hideBroken->text());
+    if (qEnvironmentVariableIsSet("DISKFORGE_UITEST_SHOTS")) {
+        hideBroken->setChecked(false);
+        QCoreApplication::processEvents();
+        dialog.grab().save(qEnvironmentVariable("DISKFORGE_UITEST_SHOTS") + QStringLiteral("/lostfiles-organised.png"));
+    }
+}
+
 void lostFilesThroughWindow()
 {
     QTemporaryDir dir;
@@ -3642,7 +3765,7 @@ int userScenarios(const QStringList &only)
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
         {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
-        {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
+        {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},
         {"previews", previewsThroughHelper}, {"viruses", virusScanThroughWindow}, {"virusdrive", virusScanOnDrive}, {"viruswindows", virusScanWindowsDrive}, {"virusboot", virusScanBoot}, {"viruslookup", virusLookUpOnline}, {"newids", newIdsThroughWindow},
     };

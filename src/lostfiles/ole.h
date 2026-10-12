@@ -12,6 +12,7 @@
 // before it's used and every chain and walk has a limit.
 
 #include <QByteArray>
+#include <QDateTime>
 #include <QString>
 #include <QStringList>
 #include <QVector>
@@ -60,5 +61,13 @@ QStringList properties(const File &file);
 bool hasMacros(const File &file);
 // Whether it's password-protected (its words can't be read then).
 bool locked(const File &file);
+
+// What an Office file's summary says, as values (the same as properties() shows), and for an
+// Outlook email, its subject and when it was sent.
+struct Summary {
+    QString title, subject, author;
+    QDateTime created, changed;
+};
+Summary summary(const File &file);
 
 } // namespace ole

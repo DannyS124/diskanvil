@@ -769,6 +769,25 @@ QString text(const File &file, int most)
     return {};
 }
 
+Summary summary(const File &file)
+{
+    Summary out;
+    if (kind(file) == QLatin1String("msg")) {
+        const Mail m = mail(file);
+        out.subject = m.subject;
+        out.author = m.from;
+        out.created = m.sent;
+        return out;
+    }
+    const Properties s = readProperties(file.stream(QStringLiteral("\x05SummaryInformation"), 1024 * 1024));
+    out.title = s.text.value(2);
+    out.subject = s.text.value(3);
+    out.author = s.text.value(4);
+    out.created = s.time.value(12);
+    out.changed = s.time.value(13);
+    return out;
+}
+
 QStringList properties(const File &file)
 {
     QStringList out;

@@ -7,8 +7,10 @@
 #include "blockio.h"
 #include "filetypes.h"
 #include "lostfs.h"
+#include "naming.h"
 
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
 #include <QElapsedTimer>
@@ -260,6 +262,8 @@ void lost::DeepScan::run()
                 if (m_source->unreadable(at, m.size))
                     f.condition = Condition::Unreadable;
                 f.name = carvedName(m.type, ++perCategory[int(types[m.type].category)]);
+                if (f.condition != Condition::Unreadable) // a failing drive isn't read there again
+                    nameFromContents(f, *m_source);
                 batch << f;
                 // A whole file isn't searched again inside: a JPEG's own preview picture
                 // shouldn't come back as a second photo.
@@ -455,6 +459,104 @@ QString lost::cleanName(const QString &name)
         clean.remove(cut, 1);
     }
     return clean;
+}
+
+lost::CopyFinder::CopyFinder(std::shared_ptr<Source> source, QVector<Found> files, QVector<int> indexes)
+    : m_source(std::move(source))
+    , m_files(std::move(files))
+    , m_indexes(std::move(indexes))
+{
+}
+
+void lost::CopyFinder::run()
+{
+    // Only sizes more than one file has can have copies.
+    QHash<quint64, QVector<int>> bySize;
+    for (int i = 0; i < m_files.size(); ++i) {
+        const Found &f = m_files[i];
+        if (!f.nameOnly && f.size > 0 && f.condition != Condition::Unreadable)
+            bySize[f.size] << i;
+    }
+    QVector<QVector<int>> groups;
+    quint64 total = 0, done = 0;
+    for (auto it = bySize.cbegin(); it != bySize.cend(); ++it) {
+        if (it.value().size() > 1) {
+            groups << it.value();
+            total += it.key() * quint64(it.value().size());
+        }
+    }
+    const auto digest = [this, &done, total](const Found &f, qint64 most) {
+        FileReader reader(m_source, f);
+        QCryptographicHash hash(QCryptographicHash::Sha256);
+        QByteArray buffer(1 << 20, Qt::Uninitialized);
+        const quint64 end = std::min<quint64>(f.size, quint64(most));
+        for (quint64 at = 0; at < end && !m_cancel;) {
+            const qint64 n = reader.read(at, buffer.data(), qint64(std::min<quint64>(quint64(buffer.size()), end - at)));
+            if (n <= 0)
+                return QByteArray(); // can't be read: not called a copy of anything
+            hash.addData(QByteArrayView(buffer.constData(), n));
+            at += quint64(n);
+            if (most > 65536) {
+                done += quint64(n);
+                Q_EMIT progress(done, total);
+            }
+        }
+        return hash.result();
+    };
+    QHash<int, int> copyOf;
+    quint64 copyBytes = 0;
+    for (const QVector<int> &group : std::as_const(groups)) {
+        // Their starts first: most files of one size differ there already.
+        QHash<QByteArray, QVector<int>> byStart;
+        for (int i : group) {
+            const QByteArray start = digest(m_files[i], 65536);
+            if (!start.isEmpty())
+                byStart[start] << i;
+        }
+        for (auto same = byStart.cbegin(); same != byStart.cend(); ++same) {
+            if (same->size() < 2)
+                continue;
+            QHash<QByteArray, int> first;
+            for (int i : *same) {
+                // A small file's start is all of it.
+                const QByteArray whole = m_files[i].size <= 65536 ? same.key() : digest(m_files[i], std::numeric_limits<qint64>::max());
+                if (whole.isEmpty() || m_cancel)
+                    continue;
+                if (const auto it = first.constFind(whole); it != first.cend()) {
+                    copyOf.insert(m_indexes[i], m_indexes[*it]);
+                    copyBytes += m_files[i].size;
+                } else {
+                    first.insert(whole, i);
+                }
+            }
+        }
+        if (m_cancel)
+            break;
+    }
+    Q_EMIT finished(copyOf, copyBytes, m_cancel);
+}
+
+void lost::nameFromContents(Found &file, Source &source)
+{
+    if (file.extents.size() != 1 || file.type < 0)
+        return;
+    const quint64 start = file.extents.first().start, size = file.size;
+    const naming::Read read = [&source, start, size](quint64 at, qint64 len) {
+        if (at >= size || len <= 0)
+            return QByteArray();
+        QByteArray out(qsizetype(std::min<quint64>(quint64(len), size - at)), Qt::Uninitialized);
+        const qint64 n = qint64(source.read(start + at, out.data(), quint64(out.size())));
+        out.truncate(qsizetype(std::max<qint64>(0, n)));
+        return out;
+    };
+    const naming::Inside inside = naming::fromContents(file.type, size, read);
+    if (!inside.name.trimmed().isEmpty()) {
+        // "Re: Photos" and "14/07" read better as "Re - Photos" and "14-07" than with the "_" cleanName puts there.
+        QString name = inside.name;
+        name.replace(QStringLiteral(": "), QStringLiteral(" - ")).replace(QLatin1Char(':'), QLatin1Char('-')).replace(QLatin1Char('/'), QLatin1Char('-'));
+        file.name = cleanName(name) + QLatin1Char('.') + filetypes::types()[file.type].id;
+    }
+    file.inside = inside.when;
 }
 
 QString lost::carvedName(int type, int number)

@@ -6,6 +6,7 @@
 #include "applog.h"
 #include "blockio.h"
 #include "dialogs.h"
+#include "flowlayout.h"
 #include "filetypes.h"
 #include "format.h"
 #include "gpt.h"
@@ -20,6 +21,7 @@
 #include <QApplication>
 #include <QBuffer>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDialogButtonBox>
@@ -47,6 +49,7 @@
 #include <QProgressBar>
 #include <QProcess>
 #include <QProgressDialog>
+#include <QRegularExpression>
 #include <QPushButton>
 #include <QScreen>
 #include <QSettings>
@@ -57,9 +60,12 @@
 #include <QStyledItemDelegate>
 #include <QThread>
 #include <QTimer>
+#include <QToolButton>
 #include <QTreeWidget>
 #include <QUrl>
 #include <QVBoxLayout>
+
+#include <numeric>
 
 namespace {
 
@@ -128,6 +134,7 @@ QString conditionWords(const lost::Found &f)
 // beside the picture and gets where to click wrong), and here they all have to work alike.
 constexpr int kNameRole = Qt::UserRole + 1;  // the file's own name, without what the list adds to it
 constexpr int kSavedRole = Qt::UserRole + 2; // where it was saved to, once it has been
+constexpr int kMarkRole = Qt::UserRole + 3;  // "copy" or "broken": marked on its picture
 
 class GridDelegate : public QStyledItemDelegate
 {
@@ -145,6 +152,25 @@ public:
         const QStyle *style = option.widget ? option.widget->style() : QApplication::style();
         const int size = style->pixelMetric(QStyle::PM_IndicatorWidth, &option, option.widget);
         return QRect(option.rect.left() + 4, option.rect.top() + 4, size, size);
+    }
+
+    // A red "!" on a file that didn't open when it was checked, a grey "=" on a copy of another.
+    static void drawMark(QPainter *p, const QRectF &badge, const QString &mark)
+    {
+        if (mark.isEmpty())
+            return;
+        p->save();
+        p->setRenderHint(QPainter::Antialiasing);
+        p->setPen(Qt::NoPen);
+        p->setBrush(mark == QLatin1String("broken") ? QColor(0xd0, 0x1f, 0x3c) : QColor(0x6b, 0x72, 0x80));
+        p->drawEllipse(badge);
+        QFont f = p->font();
+        f.setBold(true);
+        f.setPixelSize(12);
+        p->setFont(f);
+        p->setPen(Qt::white);
+        p->drawText(badge, Qt::AlignCenter, mark == QLatin1String("broken") ? QStringLiteral("!") : QStringLiteral("="));
+        p->restore();
     }
 
     // A green tick on a file that has been saved, so it's clear what's done.
@@ -168,6 +194,7 @@ public:
             QStyledItemDelegate::paint(p, option, index);
             if (saved)
                 drawSaved(p, QRectF(option.rect.right() - 22, option.rect.center().y() - 8, 16, 16));
+            drawMark(p, QRectF(option.rect.right() - (saved ? 42 : 22), option.rect.center().y() - 8, 16, 16), index.data(kMarkRole).toString());
             return;
         }
         QStyleOptionViewItem opt(option);
@@ -244,6 +271,7 @@ public:
         p->drawText(text, Qt::AlignHCenter | Qt::AlignTop, lines.join(QLatin1Char('\n')));
         if (saved)
             drawSaved(p, QRectF(opt.rect.right() - 22, opt.rect.top() + 5, 16, 16));
+        drawMark(p, QRectF(opt.rect.right() - (saved ? 42 : 22), opt.rect.top() + 5, 16, 16), index.data(kMarkRole).toString());
         p->restore();
     }
 
@@ -281,9 +309,16 @@ LostFilesModel::LostFilesModel(QObject *parent)
 {
 }
 
-bool LostFilesModel::passes(const lost::Found &f) const
+bool LostFilesModel::passes(int index) const
 {
+    const lost::Found &f = m_files[index];
     const LostFilter &w = m_filter;
+    if (w.hideSmallPictures && f.type >= 0 && filetypes::types()[f.type].category == filetypes::Category::Picture && f.size < LostFilter::kSmallPicture)
+        return false;
+    if (w.hideCopies && m_copyOf.contains(index))
+        return false;
+    if (w.hideBroken && !m_opens.value(index, true))
+        return false;
     if (w.category >= 0 && (f.type < 0 || int(filetypes::types()[f.type].category) != w.category))
         return false;
     if (w.hideDamaged && f.condition != lost::Condition::Good)
@@ -305,20 +340,33 @@ bool LostFilesModel::passes(const lost::Found &f) const
 
 void LostFilesModel::append(const QVector<lost::Found> &files)
 {
-    QVector<int> add;
-    for (int i = 0; i < files.size(); ++i) {
-        if (passes(files[i]))
-            add << int(m_files.size()) + i;
-    }
+    const int first = int(m_files.size());
     m_files += files;
+    QVector<int> add;
+    for (int i = first; i < m_files.size(); ++i) {
+        if (passes(i))
+            add << i;
+    }
     if (add.isEmpty())
         return;
-    if (m_filter.folder == LostFilter::kDeletedRecently) {
-        // In time order, so the list is made again.
-        beginResetModel();
-        m_shown += add;
-        sortShown();
-        endResetModel();
+    if (!inFoundOrder()) {
+        // Put in where they go, the view keeping what's picked (and where it's scrolled to).
+        Q_EMIT layoutAboutToBeChanged();
+        const QModelIndexList was = persistentIndexList();
+        QVector<int> files;
+        for (const QModelIndex &i : was)
+            files << fileIndex(i.row());
+        std::stable_sort(add.begin(), add.end(), [this](int a, int b) { return before(a, b); });
+        QVector<int> merged;
+        merged.reserve(m_shown.size() + add.size());
+        std::merge(m_shown.cbegin(), m_shown.cend(), add.cbegin(), add.cend(), std::back_inserter(merged), [this](int a, int b) { return before(a, b); });
+        m_shown = std::move(merged);
+        indexRows();
+        QModelIndexList now;
+        for (int f : std::as_const(files))
+            now << (f >= 0 ? index(m_rowOf.value(f)) : QModelIndex());
+        changePersistentIndexList(was, now);
+        Q_EMIT layoutChanged();
         return;
     }
     beginInsertRows({}, int(m_shown.size()), int(m_shown.size() + add.size() - 1));
@@ -335,6 +383,9 @@ void LostFilesModel::clear()
     m_saved.clear();
     m_thumbnails.clear();
     m_asked.clear();
+    m_copyOf.clear();
+    m_opens.clear();
+    m_rowOf.clear();
     endResetModel();
     Q_EMIT tickedChanged();
 }
@@ -346,17 +397,109 @@ void LostFilesModel::setFilter(const LostFilter &filter)
     m_filter.text = filter.text.trimmed();
     m_shown.clear();
     for (int i = 0; i < m_files.size(); ++i) {
-        if (passes(m_files[i]))
+        if (passes(i))
             m_shown << i;
     }
     sortShown();
     endResetModel();
 }
 
+bool LostFilesModel::before(int a, int b) const
+{
+    const lost::Found &x = m_files[a], &y = m_files[b];
+    if (m_filter.folder == LostFilter::kDeletedRecently) // newest deleted first, whatever else
+        return x.deletedAt != y.deletedAt ? x.deletedAt > y.deletedAt : a < b;
+    switch (m_filter.order) {
+    case LostFilter::Order::Name:
+        if (const int c = x.name.compare(y.name, Qt::CaseInsensitive))
+            return c < 0;
+        break;
+    case LostFilter::Order::Date: { // newest first, the ones without a date last
+        const qint64 dx = dateOf(x), dy = dateOf(y);
+        if (dx != dy)
+            return dy == 0 || (dx != 0 && dx > dy);
+        break;
+    }
+    case LostFilter::Order::Size:
+        if (x.size != y.size)
+            return x.size > y.size;
+        break;
+    case LostFilter::Order::Kind: {
+        const int cx = x.type >= 0 ? int(filetypes::types()[x.type].category) : 99, cy = y.type >= 0 ? int(filetypes::types()[y.type].category) : 99;
+        if (cx != cy)
+            return cx < cy;
+        const QString ex = x.name.section(QLatin1Char('.'), -1).toLower(), ey = y.name.section(QLatin1Char('.'), -1).toLower();
+        if (ex != ey)
+            return ex < ey;
+        if (const int c = x.name.compare(y.name, Qt::CaseInsensitive))
+            return c < 0;
+        break;
+    }
+    case LostFilter::Order::Found:
+        break;
+    }
+    return a < b;
+}
+
 void LostFilesModel::sortShown()
 {
-    if (m_filter.folder == LostFilter::kDeletedRecently)
-        std::stable_sort(m_shown.begin(), m_shown.end(), [this](int a, int b) { return m_files[a].deletedAt > m_files[b].deletedAt; });
+    if (!inFoundOrder())
+        std::stable_sort(m_shown.begin(), m_shown.end(), [this](int a, int b) { return before(a, b); });
+    indexRows();
+}
+
+void LostFilesModel::indexRows()
+{
+    m_rowOf.clear();
+    if (inFoundOrder())
+        return; // found order is index order: a binary search finds a row
+    m_rowOf.reserve(m_shown.size());
+    for (int row = 0; row < m_shown.size(); ++row)
+        m_rowOf.insert(m_shown[row], row);
+}
+
+int LostFilesModel::rowOf(int index) const
+{
+    if (!inFoundOrder())
+        return m_rowOf.value(index, -1);
+    const auto it = std::lower_bound(m_shown.cbegin(), m_shown.cend(), index);
+    return it != m_shown.cend() && *it == index ? int(it - m_shown.cbegin()) : -1;
+}
+
+void LostFilesModel::removeShown(int index)
+{
+    const int row = rowOf(index);
+    if (row < 0)
+        return;
+    beginRemoveRows({}, row, row);
+    m_shown.removeAt(row);
+    indexRows();
+    endRemoveRows();
+}
+
+void LostFilesModel::setCopies(const QHash<int, int> &copyOf)
+{
+    m_copyOf = copyOf;
+    if (m_filter.hideCopies)
+        setFilter(m_filter);
+    else if (!m_shown.isEmpty())
+        Q_EMIT dataChanged(index(0), index(int(m_shown.size()) - 1), {Qt::ToolTipRole, kMarkRole});
+}
+
+void LostFilesModel::setOpens(int index, bool opens)
+{
+    m_opens.insert(index, opens);
+    if (!opens && m_filter.hideBroken) {
+        removeShown(index);
+        return;
+    }
+    if (const int row = rowOf(index); row >= 0)
+        Q_EMIT dataChanged(this->index(row), this->index(row), {Qt::ToolTipRole, kMarkRole});
+}
+
+int LostFilesModel::brokenCount() const
+{
+    return int(std::count(m_opens.cbegin(), m_opens.cend(), false));
 }
 
 int LostFilesModel::count(int category) const
@@ -372,12 +515,8 @@ int LostFilesModel::count(int category) const
 void LostFilesModel::setThumbnail(int index, const QPixmap &thumbnail)
 {
     m_thumbnails.insert(index, thumbnail);
-    const auto it = m_filter.folder == LostFilter::kDeletedRecently ? std::find(m_shown.cbegin(), m_shown.cend(), index)
-                                                                   : std::lower_bound(m_shown.cbegin(), m_shown.cend(), index);
-    if (it != m_shown.cend() && *it == index) {
-        const QModelIndex row = createIndex(int(it - m_shown.cbegin()), 0);
-        Q_EMIT dataChanged(row, row, {Qt::DecorationRole});
-    }
+    if (const int row = rowOf(index); row >= 0)
+        Q_EMIT dataChanged(this->index(row), this->index(row), {Qt::DecorationRole});
 }
 
 QVector<lost::Found> LostFilesModel::ticked() const
@@ -398,7 +537,7 @@ QVector<int> LostFilesModel::tickedIndexes() const
 void LostFilesModel::markSaved(int index, const QString &path)
 {
     m_saved.insert(index, path);
-    const int row = int(m_shown.indexOf(index));
+    const int row = rowOf(index);
     if (row >= 0)
         Q_EMIT dataChanged(this->index(row), this->index(row), {kSavedRole, Qt::ToolTipRole});
 }
@@ -463,8 +602,14 @@ QVariant LostFilesModel::data(const QModelIndex &index, int role) const
             tip += QLatin1Char('\n') + tr("Deleted %1").arg(deleted);
         if (m_saved.contains(i))
             tip += QLatin1Char('\n') + tr("Saved to %1").arg(m_saved.value(i));
+        if (m_copyOf.contains(i))
+            tip += QLatin1Char('\n') + tr("The same as \"%1\"").arg(m_files[m_copyOf.value(i)].name);
+        if (!m_opens.value(i, true))
+            tip += QLatin1Char('\n') + tr("It didn't open when it was checked: it's probably damaged");
         return tip;
     }
+    case kMarkRole:
+        return !m_opens.value(i, true) ? QStringLiteral("broken") : m_copyOf.contains(i) ? QStringLiteral("copy") : QString();
     case Qt::UserRole:
         return i;
     case kNameRole:
@@ -612,18 +757,60 @@ LostFilesDialog::LostFilesDialog(UDisks *udisks, const QString &preferredPath, Q
     m_search->setPlaceholderText(tr("Search the names"));
     m_search->setClearButtonEnabled(true);
     search->addWidget(m_search, 1);
+    m_sort = new QComboBox;
+    m_sort->setObjectName(QStringLiteral("sort"));
+    m_sort->addItem(tr("In the order found"), int(LostFilter::Order::Found));
+    m_sort->addItem(tr("By name"), int(LostFilter::Order::Name));
+    m_sort->addItem(tr("By date, newest first"), int(LostFilter::Order::Date));
+    m_sort->addItem(tr("By size, biggest first"), int(LostFilter::Order::Size));
+    m_sort->addItem(tr("By kind"), int(LostFilter::Order::Kind));
+    m_sort->setToolTip(tr("The date is the one the drive kept, or for a file found by what's inside it, the one it carries "
+                          "(when a photo was taken, an email sent)"));
+    m_sort->setCurrentIndex(std::max(0, m_sort->findData(QSettings().value(QStringLiteral("lostFiles/order"), 0).toInt())));
+    search->addWidget(m_sort);
     m_grid->setAutoDefault(false);
     search->addWidget(m_grid);
     middleLayout->addLayout(search);
-    auto *filters = new QHBoxLayout;
+    // The filters wrap onto a second line where the window is narrow.
+    auto *filterBox = new QWidget;
+    auto *filters = new FlowLayout(filterBox);
+    filters->setContentsMargins(0, 0, 0, 0);
     m_deletedOnly->setObjectName(QStringLiteral("deletedOnly"));
     m_deletedOnly->setChecked(true);
     m_deletedOnly->setToolTip(tr("Files that weren't deleted are listed too, for a drive whose file system won't open. "
                                  "Untick this to see them."));
     filters->addWidget(m_deletedOnly);
     filters->addWidget(m_hideDamaged);
-    filters->addStretch();
-    middleLayout->addLayout(filters);
+    m_hideSmall = new QCheckBox(tr("Hide small pictures"));
+    m_hideSmall->setObjectName(QStringLiteral("hideSmall"));
+    m_hideSmall->setToolTip(tr("Pictures under %1: icons, and the small copies web browsers and programs keep, which often outnumber the photos")
+                                .arg(formatSize(LostFilter::kSmallPicture)));
+    filters->addWidget(m_hideSmall);
+    m_hideCopies = new QCheckBox;
+    m_hideCopies->setObjectName(QStringLiteral("hideCopies"));
+    m_hideCopies->hide(); // once copies were looked for
+    filters->addWidget(m_hideCopies);
+    m_hideBroken = new QCheckBox;
+    m_hideBroken->setObjectName(QStringLiteral("hideBroken"));
+    m_hideBroken->hide(); // once they were checked
+    filters->addWidget(m_hideBroken);
+    m_organise = new QToolButton;
+    m_organise->setObjectName(QStringLiteral("organise"));
+    m_organise->setText(tr("Organise"));
+    m_organise->setPopupMode(QToolButton::InstantPopup);
+    m_organise->setEnabled(false); // once the search is done
+    auto *organise = new QMenu(m_organise);
+    organise->setToolTipsVisible(true);
+    m_findCopies = organise->addAction(tr("Find Copies"));
+    m_findCopies->setObjectName(QStringLiteral("findCopies"));
+    m_findCopies->setToolTip(tr("Finds the files that are the same as another one found, byte for byte, so each needs saving once"));
+    m_checkOpen = organise->addAction(tr("Check They Open"));
+    m_checkOpen->setObjectName(QStringLiteral("checkOpen"));
+    m_checkOpen->setToolTip(tr("Opens each file shown the way its preview does (safely, apart from DiskForge), and marks the ones "
+                               "that don't open: they're probably damaged or partly overwritten"));
+    m_organise->setMenu(organise);
+    filters->addWidget(m_organise);
+    middleLayout->addWidget(filterBox);
     m_view->setObjectName(QStringLiteral("files"));
     m_view->setModel(m_model);
     m_view->setViewMode(QListView::IconMode);
@@ -739,6 +926,19 @@ LostFilesDialog::LostFilesDialog(UDisks *udisks, const QString &preferredPath, Q
         refreshFolderCounts();
         filterChanged();
     });
+    for (QCheckBox *box : {m_hideSmall, m_hideCopies, m_hideBroken})
+        connect(box, &QCheckBox::toggled, this, &LostFilesDialog::filterChanged);
+    connect(m_sort, &QComboBox::currentIndexChanged, this, [this] {
+        QSettings().setValue(QStringLiteral("lostFiles/order"), m_sort->currentData().toInt());
+        filterChanged();
+    });
+    connect(m_findCopies, &QAction::triggered, this, &LostFilesDialog::findCopies);
+    connect(m_checkOpen, &QAction::triggered, this, [this] {
+        if (m_checker)
+            stopChecking();
+        else
+            checkTheyOpen();
+    });
     connect(m_grid, &QPushButton::clicked, this, [this] {
         const bool toList = m_view->viewMode() == QListView::IconMode;
         m_view->setViewMode(toList ? QListView::ListMode : QListView::IconMode);
@@ -834,7 +1034,11 @@ void LostFilesDialog::stopWorkers()
         m_saver->cancel();
     if (m_thumbs)
         m_thumbs->stop();
-    for (QThread *t : {m_quickThread, m_scanThread, m_copyThread, m_saveThread, m_thumbThread}) {
+    if (m_copyFinder)
+        m_copyFinder->cancel();
+    if (m_checker)
+        m_checker->stop();
+    for (QThread *t : {m_quickThread, m_scanThread, m_copyThread, m_saveThread, m_thumbThread, m_copyFinderThread, m_checkerThread}) {
         if (t) {
             t->quit();
             t->wait();
@@ -845,7 +1049,9 @@ void LostFilesDialog::stopWorkers()
     m_copyScan = nullptr;
     m_saver = nullptr;
     m_thumbs = nullptr;
-    m_quickThread = m_scanThread = m_copyThread = m_saveThread = m_thumbThread = nullptr;
+    m_copyFinder = nullptr;
+    m_checker = nullptr;
+    m_quickThread = m_scanThread = m_copyThread = m_saveThread = m_thumbThread = m_copyFinderThread = m_checkerThread = nullptr;
 }
 
 void LostFilesDialog::fillDrives(const QString &preferredPath)
@@ -1173,7 +1379,136 @@ void LostFilesDialog::scanDone(bool stopped)
     m_status->setText(text);
     refreshFolderCounts();
     updateTicked();
+    m_organise->setEnabled(m_model->fileCount() > 0);
+    m_findCopies->setEnabled(m_model->fileCount() > 1);
 }
+
+void LostFilesDialog::findCopies()
+{
+    if (m_copyFinder || m_scanning)
+        return;
+    QVector<int> indexes(m_model->fileCount());
+    std::iota(indexes.begin(), indexes.end(), 0);
+    m_copyFinder = new lost::CopyFinder(m_source, m_model->files(), indexes);
+    m_findCopies->setEnabled(false);
+    m_organise->setText(tr("Finding copies…"));
+    connect(m_copyFinder, &lost::CopyFinder::progress, this, [this](quint64 done, quint64 total) {
+        m_organise->setText(tr("Finding copies… %1%").arg(total ? done * 100 / total : 0));
+    });
+    connect(m_copyFinder, &lost::CopyFinder::finished, this, [this](const QHash<int, int> &copyOf, quint64 bytes, bool stopped) {
+        if (m_copyFinderThread)
+            m_copyFinderThread->quit();
+        m_copyFinder = nullptr;
+        m_organise->setText(m_checker ? m_organise->text() : tr("Organise"));
+        m_findCopies->setEnabled(true);
+        if (stopped)
+            return;
+        m_model->setCopies(copyOf);
+        m_hideCopies->setText(copyOf.isEmpty() ? tr("No copies") : tr("Hide copies (%1, %2)").arg(copyOf.size()).arg(formatSize(bytes)));
+        m_hideCopies->setEnabled(!copyOf.isEmpty());
+        m_hideCopies->show();
+        if (m_previewIndex >= 0)
+            showPreview();
+    });
+    m_copyFinderThread = startOnThread(this, m_copyFinder);
+}
+
+std::optional<bool> LostFilesDialog::opened(int type, const QImage &image, const QString &text, const QStringList &facts, bool failed)
+{
+    if (failed)
+        return false;
+    if (type < 0 || type >= filetypes::types().size())
+        return {};
+    switch (filetypes::types()[type].category) {
+    case filetypes::Category::Picture:
+        return !image.isNull();
+    case filetypes::Category::Document:
+        return !image.isNull() || !text.isEmpty() || !facts.isEmpty(); // a PDF's page, a document's words
+    case filetypes::Category::Archive:
+    case filetypes::Category::Music:
+    case filetypes::Category::Video:
+        return !image.isNull() || !text.isEmpty();
+    case filetypes::Category::Other:
+        break;
+    }
+    return {}; // a database or the like: the previews can't tell
+}
+
+void LostFilesDialog::checkTheyOpen()
+{
+    if (m_checker || m_scanning)
+        return;
+    m_checkQueue.clear();
+    for (int row = 0; row < m_model->rowCount(); ++row) {
+        const int i = m_model->fileIndex(row);
+        if (i >= 0 && !m_model->file(i).nameOnly && !m_model->checkedOpen(i))
+            m_checkQueue << i;
+    }
+    if (m_checkQueue.isEmpty())
+        return;
+    m_checkDone = 0;
+    m_checkTotal = int(m_checkQueue.size());
+    m_checker = new PreviewLoader(m_source);
+    connect(m_checker, &PreviewLoader::ready, this,
+            [this](int index, int, const QImage &image, const QString &text, const QStringList &facts, bool failed) {
+                if (index != m_checkWaiting)
+                    return;
+                m_checkWaiting = -1;
+                const std::optional<bool> opens = opened(m_model->file(index).type, image, text, facts, failed);
+                if (opens.has_value())
+                    m_model->setOpens(index, *opens);
+                if (!image.isNull())
+                    m_model->setThumbnail(index, QPixmap::fromImage(image));
+                ++m_checkDone;
+                checkNext();
+            });
+    connect(m_checker, &PreviewLoader::dropped, this, [this](int index) {
+        if (index == m_checkWaiting) { // let go of unanswered: asked again
+            m_checkWaiting = -1;
+            m_checkQueue.prepend(index);
+            checkNext();
+        }
+    });
+    m_checkerThread = startOnThread(this, m_checker);
+    m_checkOpen->setText(tr("Stop Checking"));
+    checkNext();
+}
+
+void LostFilesDialog::checkNext()
+{
+    if (!m_checker)
+        return;
+    if (m_checkQueue.isEmpty()) {
+        stopChecking();
+        return;
+    }
+    m_organise->setText(tr("Checking %1 of %2…").arg(m_checkDone + 1).arg(m_checkTotal));
+    m_checkWaiting = m_checkQueue.takeFirst();
+    m_checker->want(m_checkWaiting, m_model->file(m_checkWaiting), 128);
+}
+
+void LostFilesDialog::stopChecking()
+{
+    if (m_checker)
+        m_checker->stop();
+    if (m_checkerThread) {
+        m_checkerThread->quit();
+        m_checkerThread->wait();
+    }
+    m_checker = nullptr;
+    m_checkerThread = nullptr;
+    m_checkWaiting = -1;
+    m_checkQueue.clear();
+    m_checkOpen->setText(tr("Check They Open"));
+    m_organise->setText(m_copyFinder ? m_organise->text() : tr("Organise"));
+    const int broken = m_model->brokenCount();
+    m_hideBroken->setText(broken == 0 ? tr("All checked ones open") : tr("Hide ones that don't open (%1)").arg(broken));
+    m_hideBroken->setEnabled(broken > 0);
+    m_hideBroken->show();
+    if (m_previewIndex >= 0)
+        showPreview();
+}
+
 
 void LostFilesDialog::addFolders(const QVector<lost::Found> &files)
 {
@@ -1258,6 +1593,10 @@ void LostFilesDialog::filterChanged()
     filter.category = chosenCategory();
     filter.hideDamaged = m_hideDamaged->isChecked();
     filter.deletedOnly = m_deletedOnly->isChecked();
+    filter.hideSmallPictures = m_hideSmall->isChecked();
+    filter.hideCopies = m_hideCopies->isChecked();
+    filter.hideBroken = m_hideBroken->isChecked();
+    filter.order = LostFilter::Order(m_sort->currentData().toInt());
     filter.text = m_search->text();
     if (const QTreeWidgetItem *folder = m_folders->currentItem())
         filter.folder = folder->data(0, Qt::UserRole).toString();
@@ -1308,8 +1647,14 @@ void LostFilesDialog::showPreview()
     QString html = QStringLiteral("<b>%1</b><br>%2, %3<br>")
                        .arg(f.name.toHtmlEscaped(), type.name.toHtmlEscaped(), f.nameOnly ? tr("size not known") : formatSize(f.size));
     if (f.origin == lost::Origin::Contents) {
-        html += tr("Found by what's inside it, %1 into the drive. Its real name and folder aren't known, so it has a made-up name.")
+        static const QRegularExpression madeUp(QStringLiteral("^\\S+ \\d{6}\\.[^.]+$"));
+        html += (madeUp.match(f.name).hasMatch()
+                     ? tr("Found by what's inside it, %1 into the drive. Its real name and folder aren't known, so it has a made-up name.")
+                     : tr("Found by what's inside it, %1 into the drive. Its real name and folder aren't known; this name is from what it "
+                          "says inside it."))
                     .arg(formatSize(where));
+        if (f.inside > 0)
+            html += QStringLiteral("<br>") + tr("Its own date: %1").arg(QLocale().toString(QDateTime::fromMSecsSinceEpoch(f.inside), QLocale::LongFormat));
     } else {
         html += (f.deleted ? tr("Was in %1") : tr("In %1")).arg(f.folder.toHtmlEscaped());
         if (f.nameGuessed)
@@ -1320,6 +1665,10 @@ void LostFilesDialog::showPreview()
     }
     if (const QString saved = m_model->savedTo(i); !saved.isEmpty())
         html += QStringLiteral("<br>") + tr("Saved to %1").arg(saved.toHtmlEscaped());
+    if (const int original = m_model->copyOf(i); original >= 0)
+        html += QStringLiteral("<br>") + tr("The same as \"%1\", byte for byte.").arg(m_model->file(original).name.toHtmlEscaped());
+    if (!m_model->opens(i))
+        html += QStringLiteral("<br><span style=\"color:#ff3355\">●</span> ") + tr("It didn't open when it was checked: it's probably damaged.");
     html += QStringLiteral("<br><br><span style=\"color:%1\">●</span> %2").arg(colour.name(), conditionWords(f).toHtmlEscaped());
     if (!f.note.isEmpty())
         html += QStringLiteral("<br>") + f.note.toHtmlEscaped();

@@ -43,6 +43,7 @@ struct Found {
     qint64 changed = 0;  // NTFS: when its record last changed (renamed, moved, deleted...)
     bool accessedDayOnly = false;
     qint64 deletedAt = 0; // when it was deleted, the same way (NTFS's change journal, the Recycle Bin)
+    qint64 inside = 0;    // the date it carries itself (a photo's, an email's...), for one found by its contents
     bool nameOnly = false; // only its name and folder are left: nothing to save
     bool nameGuessed = false;   // FAT lost the first letter, and nothing said what it was
     bool piecesGuessed = false; // where its bytes are is worked out, not known
@@ -186,6 +187,32 @@ private:
     QSet<quint64> m_skipStarts;
 };
 
+// Finds the files that are the same as another found one, byte for byte (the same photo found
+// in a folder and again by its contents, or kept twice): files of one size are compared by the
+// SHA-256 of their start, then of all of them. Each copy is reported with the one it's a copy
+// of, the first of them in the list.
+class CopyFinder : public QObject
+{
+    Q_OBJECT
+public:
+    // `indexes`: each file's place in the list, reported back.
+    CopyFinder(std::shared_ptr<Source> source, QVector<Found> files, QVector<int> indexes);
+    void cancel() { m_cancel = true; }
+
+public Q_SLOTS:
+    void run();
+
+Q_SIGNALS:
+    void progress(quint64 done, quint64 total); // bytes read
+    void finished(const QHash<int, int> &copyOf, quint64 copyBytes, bool stopped);
+
+private:
+    std::shared_ptr<Source> m_source;
+    QVector<Found> m_files;
+    QVector<int> m_indexes;
+    std::atomic<bool> m_cancel{false};
+};
+
 // Saves found files into `folder`/Recovered <date and time>/, never over anything that's there,
 // keeping going past files that fail. Writes "What was saved.txt" next to them.
 class Saver : public QObject
@@ -215,5 +242,8 @@ private:
 QString cleanName(const QString &name);
 // The made-up name for a file found by its contents: "Picture 000042.jpg".
 QString carvedName(int type, int number);
+// A better one, from what's inside it (naming.h), and the date it carries; the made-up one stays
+// when nothing inside says. Reads a little of the file.
+void nameFromContents(Found &file, Source &source);
 
 } // namespace lost

@@ -10,6 +10,7 @@
 // addresses. Found files can hold anything, so every walk has a limit.
 
 #include <QByteArray>
+#include <QDateTime>
 #include <QString>
 #include <QStringList>
 
@@ -23,5 +24,12 @@ QString text(int type, const QByteArray &data, int most = 4000);
 // What it says about itself, a "label\tvalue" per line: an email's sender, recipients, subject,
 // date and attachments; how many messages, events or contacts; a document's title and author.
 QStringList properties(int type, const QByteArray &data);
+
+// An email's subject and when it was sent; a web page's or RTF document's title and date.
+struct Heading {
+    QString title;
+    QDateTime when;
+};
+Heading heading(int type, const QByteArray &data);
 
 } // namespace texts

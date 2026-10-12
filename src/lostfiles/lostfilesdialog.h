@@ -13,8 +13,11 @@
 #include <QSet>
 
 #include <memory>
+#include <optional>
 
 class QCheckBox;
+class QComboBox;
+class QToolButton;
 class QLabel;
 class QLineEdit;
 class QListView;
@@ -37,14 +40,20 @@ class UDisks;
 
 // Which of the found files are shown.
 struct LostFilter {
+    enum class Order { Found, Name, Date, Size, Kind };
     int category = -1;       // a filetypes::Category, -1: every kind
     bool hideDamaged = false;
     bool deletedOnly = false;
+    bool hideSmallPictures = false; // icons and thumbnails: pictures smaller than kSmallPicture
+    bool hideCopies = false;        // files found to be copies of another (Find Copies)
+    bool hideBroken = false;        // files found not to open (Check They Open)
+    Order order = Order::Found;
     QString folder;          // and what's in it, or kFoundByContents or kDeletedRecently; empty: everywhere
     QString text;
 
     static inline const QString kFoundByContents = QStringLiteral("\x01contents");
     static inline const QString kDeletedRecently = QStringLiteral("\x01recent"); // what's known to have been deleted when, newest first
+    static constexpr quint64 kSmallPicture = 32 * 1024;
 };
 
 // What Find Lost Files found, filtered by kind, folder and what's typed, with a tick box each and
@@ -59,9 +68,10 @@ public:
     void clear();
     void setFilter(const LostFilter &filter);
     const lost::Found &file(int index) const { return m_files[index]; }
+    const QVector<lost::Found> &files() const { return m_files; }
     int fileCount() const { return int(m_files.size()); }
     int fileIndex(int row) const { return m_shown.value(row, -1); }
-    int rowOf(int index) const { return int(m_shown.indexOf(index)); } // -1 when it isn't shown
+    int rowOf(int index) const; // -1 when it isn't shown
     int count(int category) const; // how many of a kind were found
     void setThumbnail(int index, const QPixmap &thumbnail);
     // Its thumbnail was never made (the request was let go): ask again when it's shown.
@@ -74,6 +84,17 @@ public:
     QString savedTo(int index) const { return m_saved.value(index); }
     quint64 tickedSize() const;
     void tickShown(bool tick);
+    // Copies (lost::CopyFinder): file index → the one it's a copy of.
+    void setCopies(const QHash<int, int> &copyOf);
+    int copyOf(int index) const { return m_copyOf.value(index, -1); }
+    int copyCount() const { return int(m_copyOf.size()); }
+    // Whether a file opened when it was checked (Check They Open).
+    void setOpens(int index, bool opens);
+    bool checkedOpen(int index) const { return m_opens.contains(index); }
+    bool opens(int index) const { return m_opens.value(index, true); }
+    int brokenCount() const;
+    // The date a file is put in order by: the file system's, else the one it carries itself.
+    static qint64 dateOf(const lost::Found &f) { return f.modified > 0 ? f.modified : f.inside; }
 
     int rowCount(const QModelIndex &parent = {}) const override;
     QVariant data(const QModelIndex &index, int role) const override;
@@ -85,7 +106,12 @@ Q_SIGNALS:
     void tickedChanged();
 
 private:
-    bool passes(const lost::Found &f) const;
+    bool passes(int index) const;
+    bool before(int a, int b) const; // in the order the filter asks for
+    bool inFoundOrder() const { return m_filter.order == LostFilter::Order::Found && m_filter.folder != LostFilter::kDeletedRecently; }
+    void indexRows();
+    // Takes rows out of the list, keeping what's picked.
+    void removeShown(int index);
 
     QVector<lost::Found> m_files;
     void sortShown();
@@ -96,6 +122,9 @@ private:
     QHash<int, QPixmap> m_thumbnails;
     mutable QSet<int> m_asked;
     LostFilter m_filter;
+    QHash<int, int> m_copyOf;
+    QHash<int, bool> m_opens;
+    QHash<int, int> m_rowOf; // file index → row, while the list isn't in the order found
 };
 
 // Find Lost Files: pick a drive, a partition or a disk image, look through it for files that
@@ -150,6 +179,14 @@ private:
     void saveFiles(const QVector<int> &indexes, const QString &folder);
     QVector<int> selectedIndexes() const;
     void showFilesMenu(const QPoint &at);
+    // Organising: copies of the same file (lost::CopyFinder), and which files actually open
+    // (each one through the preview helper, in its sandbox).
+    void findCopies();
+    void checkTheyOpen();
+    void checkNext();
+    void stopChecking();
+    // Whether a preview says the file opened: true or false, or nothing when it can't be told.
+    static std::optional<bool> opened(int type, const QImage &image, const QString &text, const QStringList &facts, bool failed);
     // A copy of a found file to look at, kept off the drive it's on (a progress window for a
     // big one). Empty when there's none; it's said why.
     QString lookCopy(int index);
@@ -201,6 +238,20 @@ private:
     QLineEdit *m_search;
     QCheckBox *m_hideDamaged;
     QCheckBox *m_deletedOnly;
+    QComboBox *m_sort = nullptr;
+    QCheckBox *m_hideSmall = nullptr;
+    QCheckBox *m_hideCopies = nullptr;
+    QCheckBox *m_hideBroken = nullptr;
+    QToolButton *m_organise = nullptr; // a menu: Find Copies, Check They Open; says how they're doing
+    QAction *m_findCopies = nullptr;
+    QAction *m_checkOpen = nullptr;
+    lost::CopyFinder *m_copyFinder = nullptr;
+    QThread *m_copyFinderThread = nullptr;
+    PreviewLoader *m_checker = nullptr;
+    QThread *m_checkerThread = nullptr;
+    QList<int> m_checkQueue;
+    int m_checkWaiting = -1; // the file the helper is checking now
+    int m_checkDone = 0, m_checkTotal = 0;
     QPushButton *m_grid;
     QListView *m_view;
     QLabel *m_previewImage;

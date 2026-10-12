@@ -70,6 +70,7 @@ add_library(diskforge-core STATIC
     src/lostfiles/officetext.cpp src/lostfiles/officetext.h
     src/lostfiles/ole.cpp src/lostfiles/ole.h
     src/lostfiles/textkinds.cpp src/lostfiles/textkinds.h
+    src/lostfiles/naming.cpp src/lostfiles/naming.h
     src/viruses/virusscan.cpp src/viruses/virusscan.h
     src/viruses/reghive.cpp src/viruses/reghive.h
     src/viruses/winstartup.cpp src/viruses/winstartup.h
@@ -155,6 +156,7 @@ add_library(diskforge-ui STATIC
     src/usb/stickcheckdialog.cpp src/usb/stickcheckdialog.h
     src/health/blockmapwidget.cpp src/health/blockmapwidget.h
     src/common/jobui.cpp src/common/jobui.h
+    src/common/flowlayout.cpp src/common/flowlayout.h
     src/backup/copydialogs.cpp src/backup/copydialogs.h
     src/tools/usagedialog.cpp src/tools/usagedialog.h
     src/viruses/virusdialog.cpp src/viruses/virusdialog.h
