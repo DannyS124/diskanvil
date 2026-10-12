@@ -213,6 +213,36 @@ private:
     std::atomic<bool> m_cancel{false};
 };
 
+// Looks through the source for words someone remembers from a lost document or email, kept as
+// text (UTF-8, UTF-16 as Windows and Word keep it, or Windows' western code page; capitals don't
+// matter): where all of them are close together, the text around them is found, as text to look
+// at and save. Packed files (Word 2007 and later, zipped) don't keep their words as text, so
+// they're found by their kind instead; Word's older files, its AutoRecover files, emails and the
+// page file do.
+class WordSearch : public QObject
+{
+    Q_OBJECT
+public:
+    // `known`: the files found already, so text inside one of them says so.
+    WordSearch(std::shared_ptr<Source> source, QStringList words, QVector<Found> known);
+    void cancel() { m_cancel = true; }
+
+public Q_SLOTS:
+    void run();
+
+Q_SIGNALS:
+    void found(const QVector<lost::Found> &files);
+    void progress(quint64 done, quint64 total);
+    void finished(bool stopped, int places);
+
+private:
+    static constexpr quint64 kChunk = 16 * 1024 * 1024;
+    std::shared_ptr<Source> m_source;
+    QStringList m_words;
+    QVector<Found> m_known;
+    std::atomic<bool> m_cancel{false};
+};
+
 // Saves found files into `folder`/Recovered <date and time>/, never over anything that's there,
 // keeping going past files that fail. Writes "What was saved.txt" next to them.
 class Saver : public QObject

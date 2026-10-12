@@ -182,6 +182,8 @@ private:
     // Organising: copies of the same file (lost::CopyFinder), and which files actually open
     // (each one through the preview helper, in its sandbox).
     void findCopies();
+    // Finds text by words remembered from it (lost::WordSearch), all through the drive.
+    void findByWords(const QString &words);
     void checkTheyOpen();
     void checkNext();
     void stopChecking();
@@ -220,6 +222,8 @@ public:
     void setChangedCopyTarget(const QString &path) { m_changedCopyTarget = path; }
     void hearFromViewer(const QByteArray &said) { viewerSaid(said); }
     void repairForTests(int index, const QString &reference = {}) { repairCopy(index, reference); }
+    void findByWordsForTests(const QString &words) { findByWords(words); }
+    bool searchingWords() const { return m_wordSearch != nullptr; }
     bool repairing() const { return m_repairing; }
     int viewerIndex() const { return m_viewerIndex; }
     int viewerShown() const { return m_viewerShown; } // the file it said it has on the screen, -1 for none
@@ -256,6 +260,9 @@ private:
     QToolButton *m_organise = nullptr; // a menu: Find Copies, Check They Open; says how they're doing
     QAction *m_findCopies = nullptr;
     QAction *m_checkOpen = nullptr;
+    QAction *m_findWords = nullptr;
+    lost::WordSearch *m_wordSearch = nullptr;
+    QThread *m_wordThread = nullptr;
     lost::CopyFinder *m_copyFinder = nullptr;
     QThread *m_copyFinderThread = nullptr;
     PreviewLoader *m_checker = nullptr;

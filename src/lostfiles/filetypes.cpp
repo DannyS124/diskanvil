@@ -1628,6 +1628,8 @@ int filetypes::typeForName(const QString &fileName)
         {QStringLiteral("dot"), QStringLiteral("doc")},  {QStringLiteral("xlt"), QStringLiteral("xls")},
         {QStringLiteral("pps"), QStringLiteral("ppt")},  {QStringLiteral("tgz"), QStringLiteral("gz")},
         {QStringLiteral("htm"), QStringLiteral("html")}, {QStringLiteral("vcard"), QStringLiteral("vcf")},
+        // Word's AutoRecover and backup copies are Word documents.
+        {QStringLiteral("asd"), QStringLiteral("doc")},  {QStringLiteral("wbk"), QStringLiteral("doc")},
     };
     return typeNumber(also.value(ext, ext));
 }

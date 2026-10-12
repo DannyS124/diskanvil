@@ -10,6 +10,10 @@
 #include "naming.h"
 
 #include <QCoreApplication>
+#include <QSet>
+#include <QStringEncoder>
+#include <QStringDecoder>
+#include <QByteArrayMatcher>
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
@@ -132,7 +136,12 @@ void lost::QuickScan::run()
                 if (f.deleted) {
                     deleted.push_back(std::move(f));
                 } else {
-                    addRanges(f);
+                    // The page file, swap and hibernation file hold pieces of what was open
+                    // (pictures, documents): the deep scan looks through them too.
+                    static const QStringList swap = {QStringLiteral("pagefile.sys"), QStringLiteral("swapfile.sys"),
+                                                     QStringLiteral("hiberfil.sys"), QStringLiteral("swapfile"), QStringLiteral("swap.img")};
+                    if (!swap.contains(f.name, Qt::CaseInsensitive))
+                        addRanges(f);
                     shown.push_back(std::move(f));
                 }
             }
@@ -459,6 +468,159 @@ QString lost::cleanName(const QString &name)
         clean.remove(cut, 1);
     }
     return clean;
+}
+
+lost::WordSearch::WordSearch(std::shared_ptr<Source> source, QStringList words, QVector<Found> known)
+    : m_source(std::move(source))
+    , m_words(std::move(words))
+    , m_known(std::move(known))
+{
+}
+
+namespace {
+
+// ASCII letters in lower case: the search ignores capitals (other letters are matched as they are).
+void lowerAscii(char *p, qsizetype n)
+{
+    for (qsizetype i = 0; i < n; ++i) {
+        if (p[i] >= 'A' && p[i] <= 'Z')
+            p[i] = char(p[i] + 32);
+    }
+}
+
+bool textLike(uchar c)
+{
+    return c >= 0x20 || c == '\t' || c == '\n' || c == '\r';
+}
+
+} // namespace
+
+void lost::WordSearch::run()
+{
+    // Each word, in the ways text is kept: UTF-8, UTF-16 (Windows, Word), and Windows' western code page.
+    struct Pattern {
+        QByteArrayMatcher matcher;
+        int word;
+        bool wide;
+        qsizetype length;
+    };
+    QVector<Pattern> patterns;
+    QStringEncoder western("windows-1252");
+    for (int w = 0; w < m_words.size(); ++w) {
+        const QString word = m_words[w];
+        QByteArray utf8 = word.toUtf8(), wide(reinterpret_cast<const char *>(word.utf16()), word.size() * 2);
+        lowerAscii(utf8.data(), utf8.size());
+        lowerAscii(wide.data(), wide.size());
+        patterns.push_back({QByteArrayMatcher(utf8), w, false, utf8.size()});
+        patterns.push_back({QByteArrayMatcher(wide), w, true, wide.size()});
+        if (western.isValid()) {
+            QByteArray old = western(word);
+            lowerAscii(old.data(), old.size());
+            if (!western.hasError() && old != utf8)
+                patterns.push_back({QByteArrayMatcher(old), w, false, old.size()});
+        }
+    }
+    qsizetype longest = 0;
+    for (const Pattern &p : std::as_const(patterns))
+        longest = std::max(longest, p.length);
+    struct Hit {
+        quint64 at;
+        int word;
+        bool wide;
+    };
+    QVector<Hit> hits;
+    const quint64 size = m_source->size();
+    QByteArray chunk(qsizetype(kChunk + quint64(longest)), Qt::Uninitialized);
+    for (quint64 pos = 0; pos < size && !m_cancel && hits.size() < 1000000; pos += kChunk) {
+        const qsizetype n = qsizetype(std::min<quint64>(quint64(chunk.size()), size - pos));
+        m_source->read(pos, chunk.data(), quint64(n));
+        lowerAscii(chunk.data(), n);
+        const QByteArrayView view(chunk.constData(), n);
+        for (const Pattern &p : std::as_const(patterns)) {
+            for (qsizetype at = p.matcher.indexIn(view); at >= 0 && quint64(at) < kChunk; at = p.matcher.indexIn(view, at + 1))
+                hits.push_back({pos + quint64(at), p.word, p.wide});
+        }
+        Q_EMIT progress(std::min(pos + kChunk, size), size);
+    }
+    std::sort(hits.begin(), hits.end(), [](const Hit &a, const Hit &b) { return a.at < b.at; });
+    // Places where every word is, close together (within 8 KiB of the one before).
+    QVector<Found> out;
+    int count = 0;
+    for (qsizetype i = 0; i < hits.size() && !m_cancel;) {
+        qsizetype j = i + 1;
+        while (j < hits.size() && hits[j].at - hits[j - 1].at <= 8192)
+            ++j;
+        QSet<int> words;
+        bool wide = false;
+        for (qsizetype k = i; k < j; ++k) {
+            words.insert(hits[k].word);
+            wide = wide || hits[k].wide;
+        }
+        if (words.size() == m_words.size()) {
+            // The text around them, to where it stops being text (256 KiB each way at most).
+            const quint64 first = hits[i].at, last = hits[j - 1].at;
+            const quint64 from = first > 256 * 1024 ? first - 256 * 1024 : 0;
+            const quint64 to = std::min(size, last + 256 * 1024);
+            QByteArray around(qsizetype(to - from), Qt::Uninitialized);
+            m_source->read(from, around.data(), quint64(around.size()));
+            qsizetype start = qsizetype(first - from), end = qsizetype(last - from);
+            const int step = wide ? 2 : 1;
+            const auto text = [&around, wide](qsizetype at) {
+                if (at < 0 || at + (wide ? 1 : 0) >= around.size())
+                    return false;
+                return wide ? textLike(uchar(around[at])) && uchar(around[at + 1]) < 0x20 && (uchar(around[at + 1]) == 0 || uchar(around[at]) >= 0x20)
+                            : textLike(uchar(around[at]));
+            };
+            while (text(start - step))
+                start -= step;
+            while (text(end))
+                end += step;
+            QString content;
+            if (wide) {
+                content = QString::fromUtf16(reinterpret_cast<const char16_t *>(around.constData() + start), (end - start) / 2);
+            } else {
+                QStringDecoder utf8(QStringDecoder::Utf8);
+                content = utf8(around.mid(start, end - start));
+                if (utf8.hasError())
+                    content = QString::fromLatin1(around.mid(start, end - start));
+            }
+            Found f;
+            ++count;
+            f.name = cleanName(QStringLiteral("%1 %2").arg(QCoreApplication::translate("lostscan", "Text with"), m_words.join(QLatin1Char(' ')))
+                                   .left(80))
+                   + QStringLiteral(" %1.txt").arg(count, 4, 10, QLatin1Char('0'));
+            f.folder = QCoreApplication::translate("lostscan", "Found by their words");
+            f.data = QByteArray("\xEF\xBB\xBF") + content.toUtf8(); // as UTF-8 text, whatever it was kept as
+            f.size = quint64(f.data.size());
+            f.extents = {{from + quint64(start), quint64(end - start)}};
+            f.origin = Origin::FileSystem;
+            f.deleted = true;
+            f.condition = Condition::Good;
+            // Inside a file that was found already?
+            for (const Found &known : std::as_const(m_known)) {
+                for (const Extent &e : known.extents) {
+                    if (!e.zeros() && first >= e.start && first < e.end()) {
+                        f.note = QCoreApplication::translate("lostscan", "It's inside \"%1\", which was found already.").arg(known.name);
+                        break;
+                    }
+                }
+                if (!f.note.isEmpty())
+                    break;
+            }
+            if (f.note.isEmpty())
+                f.note = QCoreApplication::translate("lostscan", "The text found around the words, %1 into the drive%2.")
+                             .arg(first)
+                             .arg(wide ? QCoreApplication::translate("lostscan", " (kept the way Windows and Word keep text)") : QString());
+            out.push_back(f);
+            if (out.size() >= 250) {
+                Q_EMIT found(std::exchange(out, {}));
+            }
+        }
+        i = j;
+    }
+    if (!out.isEmpty())
+        Q_EMIT found(out);
+    Q_EMIT finished(m_cancel, count);
 }
 
 lost::CopyFinder::CopyFinder(std::shared_ptr<Source> source, QVector<Found> files, QVector<int> indexes)

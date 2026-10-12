@@ -2843,6 +2843,45 @@ void repairs()
     report(true, QStringLiteral("repair: %1 damaged files repaired or refused without a crash").arg(runs));
 }
 
+// Text found by words remembered from it, however it was kept.
+void wordSearch()
+{
+    QByteArray drive = noise(1024 * 1024, 4242);
+    const auto put = [&drive](qsizetype at, const QByteArray &bytes) { drive.replace(at, bytes.size(), bytes); };
+    put(100000, QByteArray(1, '\0') + "Hi Alex,\nMeet me at the FERRY pier on Sunday at 07:30.\nSam" + QByteArray(1, '\0'));
+    const QString wide = QStringLiteral("The quarterly report for Smith is late again.");
+    put(300000, QByteArray(2, '\0') + QByteArray(reinterpret_cast<const char *>(wide.utf16()), wide.size() * 2) + QByteArray(2, '\0'));
+    put(500000, QByteArray(1, '\0') + QByteArray("Budget: caf\xE9 cr\xE8me, 3.75") + QByteArray(1, '\0')); // Windows' western code page
+    put(700000, QByteArray(1, '\0') + "a ferry ticket alone" + QByteArray(1, '\0'));
+    put(900000, QByteArray(1, '\0') + "Sunday, much later" + QByteArray(1, '\0'));
+    const auto source = lost::Source::fromMemory(drive);
+    lost::Found known;
+    known.name = QStringLiteral("letter.doc");
+    known.extents = {{99000, 4000}};
+    const auto search = [&](const QStringList &words) {
+        QVector<lost::Found> got;
+        lost::WordSearch s(source, words, {known});
+        QObject::connect(&s, &lost::WordSearch::found, [&got](const QVector<lost::Found> &files) { got += files; });
+        s.run();
+        return got;
+    };
+    const auto text = [](const lost::Found &f) { return QString::fromUtf8(f.data.mid(3)); };
+    const QVector<lost::Found> ferry = search({QStringLiteral("ferry"), QStringLiteral("sunday")});
+    report(ferry.size() == 1 && text(ferry[0]) == QLatin1String("Hi Alex,\nMeet me at the FERRY pier on Sunday at 07:30.\nSam")
+               && ferry[0].note.contains(QLatin1String("letter.doc")) && ferry[0].folder == QLatin1String("Found by their words"),
+           QStringLiteral("words: found close together, capitals or not, with all the text around them, and the file it's in"),
+           ferry.isEmpty() ? QString() : text(ferry[0]) + QStringLiteral(" | ") + ferry[0].note);
+    const QVector<lost::Found> report1 = search({QStringLiteral("Quarterly"), QStringLiteral("smith")});
+    report(report1.size() == 1 && text(report1[0]) == wide && report1[0].note.contains(QLatin1String("Windows")),
+           QStringLiteral("words: in UTF-16, the way Windows and Word keep text"), report1.isEmpty() ? QString() : text(report1[0]));
+    const QVector<lost::Found> cafe = search({QStringLiteral("café"), QStringLiteral("crème")});
+    report(cafe.size() == 1 && text(cafe[0]) == QStringLiteral("Budget: café crème, 3.75"), QStringLiteral("words: in Windows' western code page"),
+           cafe.isEmpty() ? QString() : text(cafe[0]));
+    report(search({QStringLiteral("ferry"), QStringLiteral("smith")}).isEmpty() && search({QStringLiteral("ticket"), QStringLiteral("sunday")}).isEmpty(),
+           QStringLiteral("words: far apart, they're not a place where all of them are"));
+    report(search({QStringLiteral("ferry")}).size() == 2, QStringLiteral("words: one word, every place it is"));
+}
+
 void lostFilesTests()
 {
     previewQueue();
@@ -2866,4 +2905,5 @@ void lostFilesTests()
     namesFromContents();
     fileStructure();
     repairs();
+    wordSearch();
 }

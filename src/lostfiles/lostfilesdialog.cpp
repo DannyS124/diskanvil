@@ -35,6 +35,7 @@
 #include <QHeaderView>
 #include <QIcon>
 #include <QImageReader>
+#include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListView>
@@ -810,6 +811,10 @@ LostFilesDialog::LostFilesDialog(UDisks *udisks, const QString &preferredPath, Q
     m_checkOpen->setObjectName(QStringLiteral("checkOpen"));
     m_checkOpen->setToolTip(tr("Opens each file shown the way its preview does (safely, apart from DiskForge), and marks the ones "
                                "that don't open: they're probably damaged or partly overwritten"));
+    m_findWords = organise->addAction(tr("Find by Words…"));
+    m_findWords->setObjectName(QStringLiteral("findWords"));
+    m_findWords->setToolTip(tr("Looks all through the drive for words you remember from a lost document or email, and shows the text "
+                               "around them"));
     m_organise->setMenu(organise);
     filters->addWidget(m_organise);
     middleLayout->addWidget(filterBox);
@@ -935,6 +940,19 @@ LostFilesDialog::LostFilesDialog(UDisks *udisks, const QString &preferredPath, Q
         filterChanged();
     });
     connect(m_findCopies, &QAction::triggered, this, &LostFilesDialog::findCopies);
+    connect(m_findWords, &QAction::triggered, this, [this] {
+        if (m_wordSearch) {
+            m_wordSearch->cancel();
+            return;
+        }
+        bool ok = false;
+        const QString words = QInputDialog::getText(this, tr("Find by Words"),
+                                                    tr("Words you remember from it, as they were written (capitals don't matter). Every one "
+                                                       "of them has to be there, close together:"),
+                                                    QLineEdit::Normal, QString(), &ok);
+        if (ok && !words.trimmed().isEmpty())
+            findByWords(words);
+    });
     connect(m_checkOpen, &QAction::triggered, this, [this] {
         if (m_checker)
             stopChecking();
@@ -1038,9 +1056,11 @@ void LostFilesDialog::stopWorkers()
         m_thumbs->stop();
     if (m_copyFinder)
         m_copyFinder->cancel();
+    if (m_wordSearch)
+        m_wordSearch->cancel();
     if (m_checker)
         m_checker->stop();
-    for (QThread *t : {m_quickThread, m_scanThread, m_copyThread, m_saveThread, m_thumbThread, m_copyFinderThread, m_checkerThread}) {
+    for (QThread *t : {m_quickThread, m_scanThread, m_copyThread, m_saveThread, m_thumbThread, m_copyFinderThread, m_checkerThread, m_wordThread}) {
         if (t) {
             t->quit();
             t->wait();
@@ -1053,7 +1073,8 @@ void LostFilesDialog::stopWorkers()
     m_thumbs = nullptr;
     m_copyFinder = nullptr;
     m_checker = nullptr;
-    m_quickThread = m_scanThread = m_copyThread = m_saveThread = m_thumbThread = m_copyFinderThread = m_checkerThread = nullptr;
+    m_wordSearch = nullptr;
+    m_quickThread = m_scanThread = m_copyThread = m_saveThread = m_thumbThread = m_copyFinderThread = m_checkerThread = m_wordThread = nullptr;
 }
 
 void LostFilesDialog::fillDrives(const QString &preferredPath)
@@ -1383,6 +1404,47 @@ void LostFilesDialog::scanDone(bool stopped)
     updateTicked();
     m_organise->setEnabled(m_model->fileCount() > 0);
     m_findCopies->setEnabled(m_model->fileCount() > 1);
+}
+
+void LostFilesDialog::findByWords(const QString &typed)
+{
+    if (m_wordSearch || m_scanning || !m_source)
+        return;
+    // Words, and "phrases in quotes" kept together.
+    QStringList words;
+    static const QRegularExpression split(QStringLiteral("\"([^\"]+)\"|(\\S+)"));
+    for (auto it = split.globalMatch(typed); it.hasNext();) {
+        const QRegularExpressionMatch m = it.next();
+        const QString word = m.captured(1).isEmpty() ? m.captured(2) : m.captured(1);
+        if (word.size() >= 2 && !words.contains(word, Qt::CaseInsensitive))
+            words << word;
+    }
+    if (words.isEmpty())
+        return;
+    m_wordSearch = new lost::WordSearch(m_source, words, m_model->files());
+    m_findWords->setText(tr("Stop Finding by Words"));
+    m_organise->setText(tr("Finding words…"));
+    connect(m_wordSearch, &lost::WordSearch::found, this, [this](const QVector<lost::Found> &files) {
+        m_model->append(files);
+        addFolders(files);
+        refreshCategories();
+    });
+    connect(m_wordSearch, &lost::WordSearch::progress, this, [this](quint64 done, quint64 total) {
+        m_organise->setText(tr("Finding words… %1%").arg(total ? done * 100 / total : 0));
+    });
+    connect(m_wordSearch, &lost::WordSearch::finished, this, [this, words](bool stopped, int places) {
+        if (m_wordThread)
+            m_wordThread->quit();
+        m_wordSearch = nullptr;
+        m_findWords->setText(tr("Find by Words…"));
+        m_organise->setText(tr("Organise"));
+        const QString said = words.join(QStringLiteral(", "));
+        m_status->setText(places == 0 ? tr("\"%1\" wasn't found anywhere on the drive as text.").arg(said)
+                          : QCoreApplication::translate("LostFilesDialog", "\"%1\" was found in %n place(s): see \"Found by their words\".", nullptr, places)
+                                .arg(said)
+                              + (stopped ? QLatin1Char(' ') + tr("(Stopped before the end of the drive.)") : QString()));
+    });
+    m_wordThread = startOnThread(this, m_wordSearch);
 }
 
 void LostFilesDialog::findCopies()

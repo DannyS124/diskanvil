@@ -3587,8 +3587,14 @@ void lostFilesOrganised()
     hideBroken->setChecked(true);
     report(hideBroken->text() == QLatin1String("Hide ones that don't open (1)") && model->rowCount() == 4,
            QStringLiteral("organise: the damaged picture is found not to open, and can be hidden"), hideBroken->text());
+    // Find by Words: the camera's name is in each photo's EXIF, as text.
+    hideBroken->setChecked(false);
+    const int beforeWords = model->rowCount();
+    dialog.findByWordsForTests(QStringLiteral("\"test cam\""));
+    waitUntil([&] { return !dialog.searchingWords(); }, 60000);
+    report(status->text().startsWith(QLatin1String("\"test cam\" was found in 2 places")) && model->rowCount() == beforeWords + 2,
+           QStringLiteral("organise: words remembered are found, and the text around them listed"), status->text());
     if (qEnvironmentVariableIsSet("DISKFORGE_UITEST_SHOTS")) {
-        hideBroken->setChecked(false);
         QCoreApplication::processEvents();
         dialog.grab().save(qEnvironmentVariable("DISKFORGE_UITEST_SHOTS") + QStringLiteral("/lostfiles-organised.png"));
     }
