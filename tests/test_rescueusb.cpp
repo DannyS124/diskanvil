@@ -10,6 +10,8 @@
 #include "../src/usb/filecopy.h"
 #include "../src/usb/isofs.h"
 #include "../src/usb/rescuestick.h"
+#include "../src/usb/liveonpc.h"
+#include "../src/common/format.h"
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -457,6 +459,109 @@ void fromStickTests(const QString &dir)
     rescue::bootOptionsPath = realOptions;
 }
 
+// Put DiskAnvil Live on This PC: where it goes (the end of the biggest free space, GPT only), and
+// the script that adds it to the boot menu, run against a pretend efibootmgr that keeps its own
+// boot menu in a file (this PC's is never touched): an old entry of the same name is replaced and
+// the new one goes last, after what was there.
+QByteArray readFile(const QString &path)
+{
+    QFile f(path);
+    return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
+}
+
+void liveOnPcTests()
+{
+    constexpr quint64 MiB = 1024 * 1024, GiB = 1024 * MiB;
+    Disk disk;
+    disk.tableType = QStringLiteral("gpt");
+    disk.size = 100 * GiB;
+    Volume a;
+    a.offset = MiB;
+    a.size = 60 * GiB;
+    a.number = 1;
+    disk.volumes << a;
+    const quint64 size = rescue::partitionSize(900 * MiB);
+    report(size == 2 * GiB && rescue::partitionSize(2 * GiB) == 3 * GiB + 256 * MiB,
+           QStringLiteral("Live on this PC: 2 GB for a 900 MB image, half again for a bigger one"), formatSize(rescue::partitionSize(2 * GiB)));
+    const liveonpc::Place place = liveonpc::placeOn(disk, size);
+    report(place.ok() && place.offset + place.size == disk.size - MiB && place.offset % MiB == 0 && place.freeBytes == 40 * GiB - 2 * MiB,
+           QStringLiteral("Live on this PC: it goes at the end of the free space, leaving GPT's last MiB"),
+           QStringLiteral("%1 + %2, free %3").arg(place.offset).arg(place.size).arg(place.freeBytes));
+    disk.volumes[0].size = disk.size - 2 * GiB;
+    const liveonpc::Place tight = liveonpc::placeOn(disk, size);
+    report(!tight.ok() && tight.why.contains(QLatin1String("Shrink a partition first")), QStringLiteral("Live on this PC: too little free space says to shrink one"), tight.why);
+    disk.tableType = QStringLiteral("dos");
+    report(!liveonpc::placeOn(disk, size).ok() && liveonpc::placeOn(disk, size).why.contains(QLatin1String("GPT")),
+           QStringLiteral("Live on this PC: an MBR drive is refused, saying why"));
+    report(liveonpc::orderWithLast({2, 1, 5}, 5) == QVector<int>({2, 1, 5}) && liveonpc::orderWithLast({2, 1}, 3) == QVector<int>({2, 1, 3}),
+           QStringLiteral("Live on this PC: the new entry goes last in the boot order"));
+
+    if (QStandardPaths::findExecutable(QStringLiteral("bash")).isEmpty() || QStandardPaths::findExecutable(QStringLiteral("comm")).isEmpty()) {
+        out << "SKIP  Live on this PC's boot menu script: bash or comm isn't here" << Qt::endl;
+        return;
+    }
+    QTemporaryDir dir;
+    // The pretend boot menu: "number<TAB>label<TAB>where" lines, and its order.
+    const QString state = dir.filePath(QStringLiteral("entries")), order = dir.filePath(QStringLiteral("order"));
+    writeFile(state, "0002\tWindows Boot Manager\tHD(1,GPT)/\\EFI\\Microsoft\\Boot\\bootmgfw.efi\n0004\tDiskAnvil Live\tHD(9,GPT)/old\n0007\tDiskAnvil Live tools\tHD(3,GPT)/x\n");
+    writeFile(order, "0002,0004,0007");
+    writeFile(dir.filePath(QStringLiteral("efibootmgr")), QStringLiteral(R"SH(#!/bin/bash
+state=%1; order=%2
+num=; label=; disk=; part=; loader=; create=; delete=; neworder=
+while [ $# -gt 0 ]; do
+    case $1 in
+    -q) ;;
+    -b) num=$2; shift ;;
+    -B) delete=1 ;;
+    -C) create=1 ;;
+    -c) echo "-c would put it first" >&2; exit 9 ;;
+    -d) disk=$2; shift ;;
+    -p) part=$2; shift ;;
+    -l) loader=$2; shift ;;
+    -L) label=$2; shift ;;
+    -o) neworder=$2; shift ;;
+    *) echo "unknown $1" >&2; exit 9 ;;
+    esac
+    shift
+done
+if [ -n "$delete" ]; then
+    grep -v "^$num	" "$state" > "$state.new"; mv "$state.new" "$state"
+    tr , '\n' < "$order" | grep -vx "$num" | paste -sd, > "$order.new"; mv "$order.new" "$order"
+elif [ -n "$create" ]; then
+    n=0; while grep -q "^$(printf %04X $n)	" "$state"; do n=$((n + 1)); done
+    printf '%04X\t%s\tHD(%s,GPT)/%s on %s\n' $n "$label" "$part" "$loader" "$disk" >> "$state"
+elif [ -n "$neworder" ]; then
+    echo "$neworder" > "$order"
+else
+    echo "BootCurrent: 0002"
+    echo "BootOrder: $(cat "$order")"
+    while IFS='	' read -r n l w; do printf 'Boot%s* %s\t%s\n' "$n" "$l" "$w"; done < "$state"
+fi
+)SH").arg(state, order).toUtf8());
+    QFile::setPermissions(dir.filePath(QStringLiteral("efibootmgr")), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+    const auto run = [&](const QString &script, const QStringList &args, QString *said) {
+        QProcess bash;
+        QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        env.insert(QStringLiteral("PATH"), dir.path() + QLatin1Char(':') + env.value(QStringLiteral("PATH")));
+        bash.setProcessEnvironment(env);
+        bash.setProcessChannelMode(QProcess::MergedChannels);
+        bash.start(QStringLiteral("bash"), QStringList{QStringLiteral("-c"), script, QStringLiteral("diskanvil")} + args);
+        bash.waitForFinished(30000);
+        *said = QString::fromUtf8(bash.readAll()).trimmed();
+        return bash.exitCode() == 0;
+    };
+    QString said;
+    const bool added = run(liveonpc::addScript(), {QStringLiteral("/dev/nvme0n1"), QStringLiteral("5")}, &said);
+    const QString entries = QString::fromUtf8(readFile(state)), now = QString::fromUtf8(readFile(order)).trimmed();
+    report(added && said == QLatin1String("Boot0000") && entries.contains(QLatin1String("0000\tDiskAnvil Live\tHD(5,GPT)/\\EFI\\BOOT\\BOOTX64.EFI on /dev/nvme0n1"))
+               && !entries.contains(QLatin1String("HD(9,GPT)/old")) && entries.contains(QLatin1String("DiskAnvil Live tools")) && now == QLatin1String("0002,0007,0000"),
+           QStringLiteral("Live on this PC: the script replaces an old entry of that name (not similar ones) and puts the new one last"),
+           said + QStringLiteral(" | ") + now + QStringLiteral(" | ") + entries);
+    const bool removed = run(liveonpc::removeScript(), {}, &said);
+    report(removed && !QString::fromUtf8(readFile(state)).contains(QLatin1String("\tDiskAnvil Live\t")) && QString::fromUtf8(readFile(order)).trimmed() == QLatin1String("0002,0007"),
+           QStringLiteral("Live on this PC: and Take It Off takes it out again, leaving the rest"), said);
+}
+
 void rescueUsbTests()
 {
     QTemporaryDir dir;
@@ -464,6 +569,7 @@ void rescueUsbTests()
     fromStickTests(dir.path());
     parserTests();
     biosBootTests(dir.path());
+    liveOnPcTests();
     if (QStandardPaths::findExecutable(QStringLiteral("xorriso")).isEmpty()) {
         out << "SKIP  xorriso isn't installed, so there are no test images" << Qt::endl;
         return;

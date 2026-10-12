@@ -250,10 +250,7 @@ const Volume *RescueUsbDialog::rescueVolume(const Disk &disk) const
 
 quint64 RescueUsbDialog::systemSize() const
 {
-    // Room for this version and bigger ones: half again, 2 GB at least, in 256 MB steps.
-    const quint64 step = 256ull * 1024 * 1024;
-    const quint64 wanted = std::max<quint64>(2 * GiB, (m_inspected.bytes + kRoomForLogs) * 3 / 2);
-    return (wanted + step - 1) / step * step;
+    return rescue::partitionSize(m_inspected.bytes);
 }
 
 bool RescueUsbDialog::laidOut(const Disk &disk) const

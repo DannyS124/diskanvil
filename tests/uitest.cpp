@@ -13,6 +13,8 @@
 #include "../src/app/oldname.h"
 #include "../src/tools/remotehelp.h"
 #include "../src/tools/remotehelpdialog.h"
+#include "../src/usb/liveonpc.h"
+#include "../src/usb/liveonpcdialog.h"
 #include "../src/addons/addonoutput.h"
 #include "../src/addons/addonform.h"
 #include "../src/addons/addonmaker.h"
@@ -3000,6 +3002,172 @@ void testBootWindow()
     cleanUpLoop(udisks, loopPath);
 }
 
+// Put DiskAnvil Live on This PC, on a loop device standing in for the PC's drive (GPT, a partition
+// and free space): the partition goes at the end of the free space with every file checked, the
+// boot menu script gets that drive and partition (handed to the test, not run: this PC's boot menu
+// is never touched); Update keeps the logs; Take It Off removes the entry and the partition.
+void liveOnPcWindow()
+{
+    QTemporaryDir dir;
+    const QString tree = dir.filePath(QStringLiteral("tree"));
+    QMap<QString, QByteArray> files;
+    files[QStringLiteral(".disk/diskanvil-live")] = "DiskAnvil Live\nversion=0.0.4\nbuilt=2026-10-12\nid=test\n";
+    files[QStringLiteral("EFI/BOOT/BOOTX64.EFI")] = QByteArray(300000, 'x');
+    files[QStringLiteral("live/filesystem.squashfs")] = QByteArray(9 * 1024 * 1024, 's');
+    QByteArray sums;
+    for (auto it = files.cbegin(); it != files.cend(); ++it) {
+        QDir().mkpath(QFileInfo(tree + QLatin1Char('/') + it.key()).path());
+        QFile f(tree + QLatin1Char('/') + it.key());
+        if (f.open(QIODevice::WriteOnly))
+            f.write(it.value());
+        sums += QCryptographicHash::hash(it.value(), QCryptographicHash::Sha256).toHex() + "  ./" + it.key().toUtf8() + "\n";
+    }
+    QFile sumsFile(tree + QStringLiteral("/sha256sum.txt"));
+    if (sumsFile.open(QIODevice::WriteOnly))
+        sumsFile.write(sums);
+    sumsFile.close();
+    const QString iso = dir.filePath(QStringLiteral("live.iso"));
+    if (sh(QStringLiteral("xorriso"), {QStringLiteral("-as"), QStringLiteral("mkisofs"), QStringLiteral("-quiet"), QStringLiteral("-J"), QStringLiteral("-joliet-long"),
+                                       QStringLiteral("-R"), QStringLiteral("-o"), iso, tree}) != 0) {
+        out << "SKIP  Live on this PC: xorriso isn't installed" << Qt::endl;
+        return;
+    }
+    const QString image = dir.filePath(QStringLiteral("pc.img"));
+    sh(QStringLiteral("truncate"), {QStringLiteral("-s"), QStringLiteral("4G"), image});
+    QProcess sfdisk;
+    sfdisk.start(QStringLiteral("sfdisk"), {QStringLiteral("-q"), image});
+    sfdisk.waitForStarted();
+    sfdisk.write("label: gpt\nstart=2048, size=2097152, type=L\n");
+    sfdisk.closeWriteChannel();
+    sfdisk.waitForFinished();
+    const QString loopPath = userLoop(image);
+    report(!loopPath.isEmpty(), QStringLiteral("Live on this PC: a 4 GB loop device stands in for the PC's drive"));
+    if (loopPath.isEmpty())
+        return;
+    UDisks udisks;
+    udisks.setInteractive(false);
+    const Disk *pc = nullptr;
+    waitUntil([&] {
+        udisks.refresh();
+        pc = udisks.diskByPath(loopPath);
+        return pc && pc->volumes.size() == 1;
+    }, 15000);
+    const QString device = pc ? pc->device : QString();
+    const quint64 driveSize = pc ? pc->size : 0;
+    LiveOnPcDialog::allowLoopDevicesForTest = true;
+    QStringList scripts, scriptArgs;
+    LiveOnPcDialog::rootForTest = [&](const QString &script, const QStringList &args, QString *said) {
+        scripts << script;
+        scriptArgs << args.join(QLatin1Char(' '));
+        *said = QStringLiteral("Boot0009");
+        return true;
+    };
+    QStringList boxes;
+    Answerer answerer;
+    answerer.answer = [&](QWidget *modal) {
+        if (auto *box = qobject_cast<QMessageBox *>(modal)) {
+            boxes << box->text();
+            if (box->button(QMessageBox::Yes))
+                box->button(QMessageBox::Yes)->click();
+            else
+                box->accept();
+            return true;
+        }
+        return false;
+    };
+    const auto pick = [&](LiveOnPcDialog &dialog) {
+        auto *targets = dialog.findChild<QComboBox *>();
+        for (int i = 0; i < targets->count(); ++i) {
+            if (targets->itemData(i).toString() == loopPath)
+                targets->setCurrentIndex(i);
+        }
+    };
+    const auto livePart = [&]() -> const Volume * {
+        udisks.refresh();
+        pc = udisks.diskByPath(loopPath);
+        for (const Volume &v : pc ? pc->volumes : QVector<Volume>()) {
+            if (v.label == QLatin1String("DISKANVIL"))
+                return &v;
+        }
+        return nullptr;
+    };
+    {
+        LiveOnPcDialog dialog(&udisks);
+        dialog.show();
+        dialog.findChild<QLineEdit *>(QStringLiteral("image"))->setText(iso);
+        pick(dialog);
+        QPushButton *put = findButton(&dialog, QStringLiteral("Put It on This PC"));
+        auto *plan = dialog.findChild<QLabel *>(QStringLiteral("plan"));
+        report(put && put->isEnabled() && plan->text().contains(QLatin1String("2.00 GB partition")), QStringLiteral("Live on this PC: it says what it'll do"), plan->text());
+        put->click();
+        waitUntil([&] { return boxes.size() >= 2; }, 180000);
+        waitUntil([&] { const Volume *v = livePart(); return v && v->mounts().isEmpty(); }, 15000);
+    }
+    const Volume *part = livePart();
+    report(boxes.value(1).startsWith(QLatin1String("DiskAnvil Live is on this PC")), QStringLiteral("Live on this PC: done"), boxes.join(QStringLiteral(" | ")).left(300));
+    report(part && part->fsType == QLatin1String("vfat") && part->number == 2 && part->size == 2048ull * 1024 * 1024 && part->offset + part->size == driveSize - 1024 * 1024
+               && part->mounts().isEmpty(),
+           QStringLiteral("Live on this PC: a 2 GB FAT32 DISKANVIL partition at the end of the free space, unmounted after"),
+           part ? QStringLiteral("%1 %2 at %3 size %4").arg(part->fsType).arg(part->number).arg(part->offset).arg(part->size) : QString());
+    report(scripts.value(0) == liveonpc::addScript() && scriptArgs.value(0) == device + QStringLiteral(" 2"),
+           QStringLiteral("Live on this PC: the boot menu script gets that drive and partition"), scriptArgs.join(QStringLiteral(" | ")));
+    if (part) {
+        const QString root = mountStick(udisks, loopPath, QStringLiteral("DISKANVIL"));
+        int listed = 0;
+        const int good = filesMatchingSums(root, &listed);
+        report(listed > 0 && good == listed, QStringLiteral("Live on this PC: every file on it matches sha256sum.txt"), QStringLiteral("%1 of %2").arg(good).arg(listed));
+        QDir().mkpath(root + QStringLiteral("/logs/2026-10-12 10.00"));
+        QFile log(root + QStringLiteral("/logs/2026-10-12 10.00/boot.log"));
+        if (log.open(QIODevice::WriteOnly))
+            log.write("log");
+        log.close();
+        QFile old(root + QStringLiteral("/left-from-before.txt"));
+        if (old.open(QIODevice::WriteOnly))
+            old.write("old");
+        old.close();
+        sh(QStringLiteral("sync"), {});
+    }
+    // Update: this version over it, its logs kept, the boot menu left alone.
+    boxes.clear();
+    scripts.clear();
+    {
+        LiveOnPcDialog dialog(&udisks);
+        dialog.show();
+        dialog.findChild<QLineEdit *>(QStringLiteral("image"))->setText(iso);
+        pick(dialog);
+        QPushButton *update = findButton(&dialog, QStringLiteral("Update It"));
+        report(update && update->isVisibleTo(&dialog) && update->isEnabled(), QStringLiteral("Live on this PC: opened again, it offers Update and Take It Off"));
+        if (update)
+            update->click();
+        waitUntil([&] { return !boxes.isEmpty(); }, 180000);
+        waitUntil([&] { const Volume *v = livePart(); return v && v->mounts().isEmpty(); }, 15000);
+    }
+    const QString again = mountStick(udisks, loopPath, QStringLiteral("DISKANVIL"));
+    report(boxes.value(0).contains(QLatin1String("updated")) && scripts.isEmpty() && QFile::exists(again + QStringLiteral("/logs/2026-10-12 10.00/boot.log"))
+               && !QFile::exists(again + QStringLiteral("/left-from-before.txt")) && QFile::exists(again + QStringLiteral("/live/filesystem.squashfs")),
+           QStringLiteral("Live on this PC: Update replaces it and keeps the logs, without touching the boot menu"), boxes.join(QStringLiteral(" | ")).left(200));
+    if (const Volume *v = livePart())
+        udisks.unmount(*v);
+    waitUntil([&] { const Volume *v = livePart(); return v && v->mounts().isEmpty(); }, 10000);
+    // Take It Off.
+    boxes.clear();
+    {
+        LiveOnPcDialog dialog(&udisks);
+        dialog.show();
+        pick(dialog);
+        QPushButton *off = findButton(&dialog, QStringLiteral("Take It Off"));
+        if (off)
+            off->click();
+        waitUntil([&] { return boxes.size() >= 2; }, 60000);
+    }
+    waitUntil([&] { return livePart() == nullptr; }, 15000);
+    report(!livePart() && scripts.value(0) == liveonpc::removeScript() && pc && pc->volumes.size() == 1,
+           QStringLiteral("Live on this PC: Take It Off removes the entry and the partition, and nothing else"), boxes.join(QStringLiteral(" | ")).left(300));
+    LiveOnPcDialog::allowLoopDevicesForTest = false;
+    LiveOnPcDialog::rootForTest = nullptr;
+    cleanUpLoop(udisks, loopPath);
+}
+
 // Let Someone Help: on a PC it says what to use instead; on DiskAnvil Live (stand-ins for x11vnc
 // and the helper here) it shows the address and passwords, says who connected and when they've
 // gone, and Stop ends the screen sharing and switches SSH off.
@@ -5931,7 +6099,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},

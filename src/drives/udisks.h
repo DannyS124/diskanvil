@@ -278,10 +278,13 @@ public:
 #endif
     // passphrase non-empty: LUKS2 container with the filesystem inside
     void format(const Volume &volume, const QString &fsType, const QString &label, const QString &passphrase = {});
-    void deletePartition(const Volume &volume);
-    // rounded to 1 MiB, clamped to the free range
+    // besideSystem: on the running system's drive too, for a partition that isn't the system's own
+    // (DiskAnvil Live's, from Put DiskAnvil Live on This PC); nothing else on that drive changes.
+    void deletePartition(const Volume &volume, bool besideSystem = false);
+    // rounded to 1 MiB, clamped to the free range; besideSystem: in free space on the running
+    // system's drive too (Put DiskAnvil Live on This PC), which leaves its other partitions alone
     void createPartition(const Disk &disk, quint64 offset, quint64 size, const QString &fsType, const QString &label,
-                         const QString &passphrase = {});
+                         const QString &passphrase = {}, bool besideSystem = false);
     void createPartitionTable(const Disk &disk, const QString &tableType); // "gpt" or "dos"
     // shrink: fs then partition; grow: partition then fs
     void resize(const Volume &volume, quint64 newSize);

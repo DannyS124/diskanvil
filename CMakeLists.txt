@@ -138,6 +138,7 @@ add_library(diskanvil-core STATIC
     src/usb/windowsusb.cpp src/usb/windowsusb.h
     src/common/hostprocess.cpp src/common/hostprocess.h
     src/usb/rescuestick.cpp src/usb/rescuestick.h
+    src/usb/liveonpc.cpp src/usb/liveonpc.h
     src/usb/stickcheck.cpp src/usb/stickcheck.h
     src/drives/partscan.cpp src/drives/partscan.h
 )
@@ -180,6 +181,7 @@ add_library(diskanvil-ui STATIC
     src/app/dialogs.cpp src/app/dialogs.h
     src/app/tools.cpp src/app/tools.h
     src/usb/rescueusbdialog.cpp src/usb/rescueusbdialog.h
+    src/usb/liveonpcdialog.cpp src/usb/liveonpcdialog.h
     src/drives/udiskssteps.cpp src/drives/udiskssteps.h
     src/usb/usbprep.cpp src/usb/usbprep.h
     src/drives/isomount.cpp src/drives/isomount.h

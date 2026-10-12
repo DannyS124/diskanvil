@@ -66,6 +66,9 @@ extern QString rescanHelperPath;
 // have left logs there.
 Info stickInfo(const QString &root);
 int logFolders(const QString &root);
+// The size of a partition DiskAnvil Live goes on (a stick's, or one on a PC's drive): room for
+// this version, its logs and bigger versions later: half again, 2 GB at least, in 256 MB steps.
+quint64 partitionSize(quint64 imageBytes);
 
 // Copies a rescue image's files onto a mounted, empty FAT32 stick, with filecopy: each file
 // is checked against the image's sha256sum.txt while it's copied, then read back from the

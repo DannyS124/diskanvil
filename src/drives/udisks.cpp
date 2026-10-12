@@ -798,10 +798,10 @@ void UDisks::format(const Volume &volume, const QString &fsType, const QString &
     }, true);
 }
 
-void UDisks::deletePartition(const Volume &volume)
+void UDisks::deletePartition(const Volume &volume, bool besideSystem)
 {
     const QString name = shortDevice(volume.device);
-    if (refuseSystem(diskOf(volume), tr("Couldn't delete %1").arg(name)))
+    if (!(besideSystem && !volume.isSystem) && refuseSystem(diskOf(volume), tr("Couldn't delete %1").arg(name)))
         return;
     const QString failure = tr("Couldn't delete %1").arg(name);
     const QString path = volume.objectPath;
@@ -812,11 +812,11 @@ void UDisks::deletePartition(const Volume &volume)
 }
 
 void UDisks::createPartition(const Disk &disk, quint64 offset, quint64 size, const QString &fsType, const QString &label,
-                             const QString &passphrase)
+                             const QString &passphrase, bool besideSystem)
 {
     const QString name = shortDevice(disk.device);
     const QString failure = tr("Couldn't create a partition on %1").arg(name);
-    if (refuseSystem(&disk, failure))
+    if (!besideSystem && refuseSystem(&disk, failure))
         return;
 
     // 1 MiB aligned; keep the last MiB free for the GPT backup header

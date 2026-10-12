@@ -1459,11 +1459,11 @@ void UDisks::createPartitionTable(const Disk &disk, const QString &tableType)
 }
 
 void UDisks::createPartition(const Disk &disk, quint64 offset, quint64 size, const QString &fsType, const QString &label,
-                             const QString &passphrase)
+                             const QString &passphrase, bool besideSystem)
 {
     const QString name = shortDevice(disk.device);
     const QString failure = tr("Couldn't create a partition on %1").arg(name);
-    if (refuseSystem(&disk, failure))
+    if (!besideSystem && refuseSystem(&disk, failure))
         return;
     const FsType *fs = filesystem(fsType);
     const QString windows = windowsFs(fsType);
@@ -1535,12 +1535,12 @@ void UDisks::createPartition(const Disk &disk, quint64 offset, quint64 size, con
             });
 }
 
-void UDisks::deletePartition(const Volume &volume)
+void UDisks::deletePartition(const Volume &volume, bool besideSystem)
 {
     const QString name = shortDevice(volume.device);
     const QString failure = tr("Couldn't delete %1").arg(name);
     const Disk *disk = diskOf(volume);
-    if (refuseSystem(disk, failure))
+    if (!(besideSystem && !volume.isSystem) && refuseSystem(disk, failure))
         return;
     if (!disk || volume.number == 0) {
         QTimer::singleShot(0, this, [this, failure] { emit operationFinished(false, failure + reasonAfter(failure) + tr("it isn't a partition")); });

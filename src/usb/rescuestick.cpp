@@ -195,6 +195,13 @@ rescue::Info rescue::stickInfo(const QString &root)
     return {};
 }
 
+quint64 rescue::partitionSize(quint64 imageBytes)
+{
+    const quint64 step = 256ull * 1024 * 1024, logs = 64ull * 1024 * 1024;
+    const quint64 wanted = std::max<quint64>(2048ull * 1024 * 1024, (imageBytes + logs) * 3 / 2);
+    return (wanted + step - 1) / step * step;
+}
+
 int rescue::logFolders(const QString &root)
 {
     return int(QDir(root + QStringLiteral("/logs")).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size());

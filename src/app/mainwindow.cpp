@@ -17,6 +17,7 @@
 #include "closedsets.h"
 #include "writeblock.h"
 #include "remotehelpdialog.h"
+#include "liveonpcdialog.h"
 #include "clonezilladialog.h"
 #include "copydialogs.h"
 #include "erasedialog.h"
@@ -555,6 +556,10 @@ void MainWindow::createActions()
         WriteImageDialog(m_udisks, d ? d->blockPath : QString(), toolParent()).exec();
     });
 
+    m_liveOnPc = new QAction(themeIcon("system-reboot", "drive-harddisk"), tr("Put DiskAnvil Live on This &PC…"), this);
+    m_liveOnPc->setObjectName(QStringLiteral("liveOnPc"));
+    m_liveOnPc->setToolTip(tr("DiskAnvil Live on a partition of this PC's drive, in its boot menu: no stick needed"));
+    connect(m_liveOnPc, &QAction::triggered, this, [this] { LiveOnPcDialog(m_udisks, toolParent()).exec(); });
     m_rescueUsb = new QAction(themeIcon("tools-media-optical-burn", "media-flash"), tr("Make a DiskAnvil &Live USB…"), this);
     connect(m_rescueUsb, &QAction::triggered, this, [this] {
         const Disk *d = selectedDisk();
@@ -895,7 +900,7 @@ void MainWindow::createActions()
     });
 
     QMenu *file = menuBar()->addMenu(tr("&File"));
-    file->addActions({m_openImage, m_findFilesImage, m_testBootImage, m_writeImage, m_windowsUsb, m_rescueUsb});
+    file->addActions({m_openImage, m_findFilesImage, m_testBootImage, m_writeImage, m_windowsUsb, m_rescueUsb, m_liveOnPc});
     file->addSeparator();
     file->addAction(m_refresh);
     file->addSeparator();
@@ -1708,6 +1713,7 @@ void MainWindow::updateActions()
     m_openImage->setEnabled(!busy);
     m_writeImage->setEnabled(!busy);
     m_rescueUsb->setEnabled(!busy);
+    m_liveOnPc->setEnabled(!busy);
     m_windowsUsb->setEnabled(!busy);
     m_findFiles->setEnabled(!busy);
     m_findFilesImage->setEnabled(!busy);
@@ -1807,6 +1813,7 @@ bool MainWindow::openTool(const QString &name)
                                              {QStringLiteral("write-image"), m_writeImage},
                                              {QStringLiteral("windows-usb"), m_windowsUsb},
                                              {QStringLiteral("rescue-usb"), m_rescueUsb},
+                                             {QStringLiteral("live-on-pc"), m_liveOnPc},
                                              {QStringLiteral("check-stick"), m_checkStick},
                                              {QStringLiteral("lost-files"), m_findFiles},
                                              {QStringLiteral("virus-scan"), m_virusScan},
