@@ -22,6 +22,9 @@ It was called DiskForge up to 0.5.1. Same program, new name: settings move over 
 - <img src="docs/icons/mount.svg" width="22" height="22" align="top" alt="">&nbsp; **Mounting**: mount, unmount and safely remove drives, or make one mount every time the PC starts
 - <img src="docs/icons/lock.svg" width="22" height="22" align="top" alt="">&nbsp; **Encryption**: unlock and lock encrypted partitions, LUKS and BitLocker, and change a LUKS passphrase (a BitLocker password on Windows)
 - <img src="docs/icons/disc.svg" width="22" height="22" align="top" alt="">&nbsp; **Disk images**: open .iso and .img files like a drive
+- <img src="docs/icons/lock.svg" width="22" height="22" align="top" alt="">&nbsp; **More encryption**: VeraCrypt volumes (PIM, keyfiles, hidden and system ones), and a backup of a LUKS header to put back if it gets damaged
+- <img src="docs/icons/raid.svg" width="22" height="22" align="top" alt="">&nbsp; **NAS and dynamic disks**: a NAS's drives, RAID arrays and Windows dynamic disks opened read-only, so their files can be copied off
+- <img src="docs/icons/format.svg" width="22" height="22" align="top" alt="">&nbsp; **Format as an SD Card**: the SD Association's own layout for the card's size, which cameras expect
 
 What each file system supports:
 
@@ -40,27 +43,32 @@ What each file system supports:
 - <img src="docs/icons/badsectors.svg" width="22" height="22" align="top" alt="">&nbsp; **Scan for Bad Sectors**: reads every sector and draws a map (fine, slow, unreadable). Repair rewrites the unreadable blocks so the drive swaps in spare ones, and keeps everything around them
 - <img src="docs/icons/firmware.svg" width="22" height="22" align="top" alt="">&nbsp; **Firmware and self-tests**: runs the drive's own self-tests (short, long, and conveyance on hard drives), lists the last ones, turns SMART on if it's off, and checks for firmware updates through fwupd
 - <img src="docs/icons/benchmark.svg" width="22" height="22" align="top" alt="">&nbsp; **Benchmark**: read speed on any drive, plus an optional write test with a temporary file
+- <img src="docs/icons/health.svg" width="22" height="22" align="top" alt="">&nbsp; **What the drive's maker knows**: Seagate's own FARM hours next to SMART's (a wiped history shows), eMMC wear, SMR drives, known firmware bugs, partitions that aren't aligned, the failure rate Backblaze measured for the model, and What's That Noise?
 - <img src="docs/icons/settings.svg" width="22" height="22" align="top" alt="">&nbsp; **Drive settings**: power saving, the write cache and read-ahead for every SATA drive, SSDs too, plus spin-down, seek noise and Sleep Now for hard drives. DiskAnvil Live also finds a hidden area (HPA) at the end of a drive and can give that space back
 
 ### <img src="docs/icons/partitions.svg" width="28" height="28" align="top" alt="">&nbsp; Repair and rescue
 
-- <img src="docs/icons/findfiles.svg" width="22" height="22" align="top" alt="">&nbsp; **Find Lost Files**: gets deleted files back with their names and folders from FAT, exFAT and NTFS (the Recycle Bin too), from Windows' earlier versions of a drive, and by what's inside them when a drive was formatted or won't open. It reads virtual machines' disks, previews pictures, PDFs, documents, music and films, says if each file looks complete, and only ever reads the drive it looks through
+- <img src="docs/icons/repair.svg" width="22" height="22" align="top" alt="">&nbsp; **What Happened?**: start from what went wrong (deleted, formatted, won't open, clicking, ransomware...). It gives honest odds, what not to do, and the tools to use, in order
+- <img src="docs/icons/findfiles.svg" width="22" height="22" align="top" alt="">&nbsp; **Find Lost Files**: gets deleted files back with their names and folders from FAT, exFAT and NTFS (the Recycle Bin too), from Windows' earlier versions of a drive, and by what's inside them when a drive was formatted or won't open. It reads virtual machines' disks and backups, and only ever reads the drive it looks through
+- <img src="docs/icons/findfiles.svg" width="22" height="22" align="top" alt="">&nbsp; **Look before you save**: a viewer for pictures, PDFs, films, songs and documents, each file's dates and photo details, an Inside view with the damage marked, a hex editor for a copy, Repair a Copy (PNG, JPEG, Office, PDF, SQLite, films without their index), text by the words you remember, Windows' thumbnail caches, ransomware signs and a timeline
 - <img src="docs/icons/virus.svg" width="22" height="22" align="top" alt="">&nbsp; **Scan for Viruses**: ClamAV (or Microsoft Defender on Windows) on a drive or folder, plus everything that starts with Windows, its boot files and Secure Boot. It finds files dressed up as others (`invoice.pdf.exe`), switches startup entries off with a backup, and deletes nothing until you've seen the list
 - <img src="docs/icons/partitions.svg" width="22" height="22" align="top" alt="">&nbsp; **Recover Partitions**: puts a lost partition table back from GPT's backup copy, from a layout DiskAnvil saw before (it keeps the last 10), or by scanning the drive. It remembers the old table, so you can undo it
 - <img src="docs/icons/rescuecopy.svg" width="22" height="22" align="top" alt="">&nbsp; **Rescue Copy**: copies a failing drive to an image file or another drive, easy parts first. It can stop and carry on later, its map file works with GNU ddrescue, and it can go easy on a hot or struggling drive
 - <img src="docs/icons/repair.svg" width="22" height="22" align="top" alt="">&nbsp; **Check and Repair**: runs the file system's own checker (see the table above)
 - <img src="docs/icons/inspect.svg" width="22" height="22" align="top" alt="">&nbsp; **Inspect Partition Table**: shows the MBR, both GPT copies with their checksums, and any sector in hex. Read-only, so it works on the system drive too
+- <img src="docs/icons/repair.svg" width="22" height="22" align="top" alt="">&nbsp; **Try the Repair First**: a stand-in takes a file system repair, so you can see what it would do before the drive changes
+- <img src="docs/icons/windows.svg" width="22" height="22" align="top" alt="">&nbsp; **A PC that won't start**: Save My Files (folders and bookmarks), Boot Menu Entries, Repair Linux Boot, Windows Drivers and Services (switch a bad driver off), the Windows Product Key, and Make Room for Windows Recovery (update error 0x80070643)
 
 Files Find Lost Files can recover:
 
 | Kind | Types |
 |---|---|
-| Pictures | JPEG, PNG, GIF, BMP, WebP, HEIC, AVIF, Canon raw (CR3) |
-| Documents | PDF, Word, Excel, PowerPoint, OpenDocument text, spreadsheets and presentations, EPUB |
-| Video | MP4, MOV, 3GP, AVI, Ogg video |
-| Music | MP3, WAV, M4A, Ogg, Opus |
-| Archives | ZIP, 7-Zip, JAR, APK |
-| Other | SQLite databases |
+| Pictures | JPEG, PNG, GIF, BMP, WebP, HEIC, AVIF, TIFF, PSD, SVG, camera raw (CR2, CR3, NEF, ARW, DNG, ORF, RW2...) |
+| Documents | PDF, Word, Excel, PowerPoint (also the old 97 kinds), OpenDocument, EPUB, RTF, web pages |
+| Video | MP4, MOV, 3GP, AVI, MKV, WebM, WMV, Ogg video |
+| Music | MP3, WAV, M4A, FLAC, Ogg, Opus |
+| Archives | ZIP, 7-Zip, RAR, gzip, JAR, APK |
+| Mail and the rest | emails (.eml), mailboxes, Outlook files, calendars, contacts, SQLite databases |
 
 These are the kinds it finds by what's inside them. Found that way, they get made-up names sorted by kind. Deleted
 files that FAT, exFAT or NTFS still remember come back with their real names and folders, whatever their kind.
@@ -70,18 +78,21 @@ files that FAT, exFAT or NTFS still remember come back with their real names and
 - <img src="docs/icons/writeimage.svg" width="22" height="22" align="top" alt="">&nbsp; **Write Image to USB**: .iso and .img files, also compressed (.xz, .gz, .bz2, .lzma, .zst, .zip), checked after writing against an MD5, SHA-1, SHA-256 or SHA-512 checksum or a SHA256SUMS file. It can also copy a Linux ISO's files so the stick stays usable, with persistence for Ubuntu and Debian live sticks
 - <img src="docs/icons/windows.svg" width="22" height="22" align="top" alt="">&nbsp; **Make a Windows USB**: a Windows 10 or 11 install stick that starts with Secure Boot on. Windows 11 options: skip the TPM, Secure Boot and RAM check, no Microsoft account, a local account, skip the privacy questions, no automatic BitLocker
 - <img src="docs/icons/checkstick.svg" width="22" height="22" align="top" alt="">&nbsp; **Check a USB Stick**: finds bad spots and fake sticks that claim more space than they have, says how much a fake one really holds, and can make it safe to use
-- <img src="docs/icons/livestick.svg" width="22" height="22" align="top" alt="">&nbsp; **Make a DiskAnvil Live USB**: puts the rescue system on a stick as normal files and makes it start UEFI and old BIOS PCs (more below)
+- <img src="docs/icons/livestick.svg" width="22" height="22" align="top" alt="">&nbsp; **Make a DiskAnvil Live USB**: puts the rescue system on a stick as normal files and makes it start UEFI and old BIOS PCs, with your changes kept between starts and a drive for files if you want (more below)
+- <img src="docs/icons/livestick.svg" width="22" height="22" align="top" alt="">&nbsp; **Put DiskAnvil Live on This PC**: on a partition of the PC's own drive, in its boot menu, for when there's no stick to hand
 
 ### <img src="docs/icons/backup.svg" width="28" height="28" align="top" alt="">&nbsp; Backups, cleanup and erasing
 
-- <img src="docs/icons/backup.svg" width="22" height="22" align="top" alt="">&nbsp; **Back Up and Restore**: a drive or partition to a compressed .img.zst file with a checksum, checked before anything is restored
+- <img src="docs/icons/backup.svg" width="22" height="22" align="top" alt="">&nbsp; **Back Up and Restore**: a drive or partition to a compressed .img.zst file with a checksum, checked before anything is restored. Find Lost Files reads a backup without restoring it, and Clonezilla images restore too
+- <img src="docs/icons/disc.svg" width="22" height="22" align="top" alt="">&nbsp; **Try Starting It**: a drive or a disk image started in a virtual machine, read-only, to see if it starts
+- <img src="docs/icons/backup.svg" width="22" height="22" align="top" alt="">&nbsp; **Evidence images**: E01 files with a case report, written and read by DiskAnvil's own code
 - <img src="docs/icons/clone.svg" width="22" height="22" align="top" alt="">&nbsp; **Clone Drive**: copies a drive onto another one, skips empty space, can grow the last partition onto a bigger drive, and keeps the same IDs or gives new ones
 - <img src="docs/icons/newids.svg" width="22" height="22" align="top" alt="">&nbsp; **Give New IDs**: gives a copied drive its own IDs, so both can be plugged in at once, and fixes a Linux on it to match. A bar warns you when two drives are copies of each other
 - <img src="docs/icons/usage.svg" width="22" height="22" align="top" alt="">&nbsp; **Disk Usage**: a map of what's using the space on a drive
 - <img src="docs/icons/cleanup.svg" width="22" height="22" align="top" alt="">&nbsp; **Disk Cleanup**: old package files, the cache of packages you've uninstalled, old system logs, your cache folder and the trash
 - <img src="docs/icons/optimize.svg" width="22" height="22" align="top" alt="">&nbsp; **Optimize Drives**: TRIM your SSDs now, or every week
 - <img src="docs/icons/snapshots.svg" width="22" height="22" align="top" alt="">&nbsp; **Btrfs**: your snapshots (snapper), error counts, and a scrub now or every month
-- <img src="docs/icons/wipe.svg" width="22" height="22" align="top" alt="">&nbsp; **Wipe Disk**: overwrites every byte with zeros, and can be stopped
+- <img src="docs/icons/wipe.svg" width="22" height="22" align="top" alt="">&nbsp; **Wipe Disk**: overwrites every byte with zeros, and can be stopped. Afterwards it gives you a certificate of erasure (PDF), and Check It reads the drive back
 - <img src="docs/icons/secure.svg" width="22" height="22" align="top" alt="">&nbsp; **Secure Erase**: tells the drive to erase itself (normal or enhanced on SATA, user data or crypto erase or a sanitize on NVMe), and walks you through unfreezing a frozen drive. [Guide with pictures](docs/SECURE-ERASE.md)
 
 ### <img src="docs/icons/addons.svg" width="28" height="28" align="top" alt="">&nbsp; Extras
@@ -122,6 +133,13 @@ the ones it can use (Arch names):
 | Scan for Viruses | `clamav` |
 | Look-only add-ons, and Find Lost Files' previews in a sandbox | `bubblewrap` |
 | More picture kinds in previews (WebP, TIFF...), and a frame from films | `qt6-imageformats`, `ffmpeg` |
+| Playing films and songs in Find Lost Files' viewer | `qt6-multimedia`, `qt6-multimedia-ffmpeg` |
+| Seagate FARM hours, more health details | `smartmontools` |
+| Repairing SQLite files, Firefox bookmarks in Save My Files | `sqlite` |
+| RAID and NAS drives, LVM | `mdadm`, `lvm2` |
+| Windows dynamic disks | `ldmtool` (from the AUR on Arch; DiskAnvil Live has it) |
+| Btrfs files deleted since an older copy | `btrfs-progs` |
+| Try Starting It | `qemu-desktop`, `edk2-ovmf` |
 
 ### Windows
 DiskAnvil runs on Windows too: 64-bit Windows 10 or 11 (I test it on 11). Each release has two downloads for it:
@@ -145,6 +163,10 @@ Most of it works the same as on Linux. What's different:
   Windows' temporary files, the Recycle Bin, error reports and update files
 - Windows won't format FAT32 over 32 GB, so DiskAnvil does it with its own formatter
 - Scan for Viruses uses Microsoft Defender when ClamAV isn't installed
+- Only on Windows: Make Room for Windows Recovery, for update error 0x80070643
+- Left to DiskAnvil Live, because a running Windows is in the way or can't do them: Write-Protect Every Drive (Windows
+  writes to a drive the moment it's plugged in), Let Someone Help (Windows has Quick Assist), Start Other PCs from
+  This One, Repair Linux Boot, the sector size switch, NAS and RAID drives, and VeraCrypt
 
 ## <img src="rescue/art/diskanvil-live-icon.svg" width="32" height="32" align="top" alt="">&nbsp; DiskAnvil Live
 
@@ -161,6 +183,23 @@ any PC, new or old, even one whose own system won't start, and it opens on the s
 
 Made this way, the stick still works for files and keeps logs of every start. Rufus, balenaEtcher or dd work too,
 but then the stick is read-only. More in [docs/DISKANVIL-LIVE.md](docs/DISKANVIL-LIVE.md).
+
+When you make the stick you can also tick:
+
+- **Keep my changes between starts**: settings, downloads and programs you add are still there next time
+- **A drive for my files**: the rest of the stick as an exFAT drive any computer reads. ISO files copied into its
+  ISOs folder start from the boot menu too (Other ISOs on this stick, with Secure Boot off)
+
+A stick made with those can be updated to a new version without wiping it.
+
+In DiskAnvil Live, Tools also has:
+
+- **Write-Protect Every Drive** (also in the boot menu): every drive but the stick is read-only, for evidence or a
+  drive that mustn't change; one can be let through to save to
+- **Let Someone Help**: someone you trust on the same network sees the screen or gets a terminal, with passwords
+  made up each time
+- **Start Other PCs from This One**: other PCs on the same network start DiskAnvil Live from this one over a cable,
+  with nothing installed on them
 
 ## How do I...
 
@@ -224,6 +263,11 @@ DiskAnvil is free and it's staying free. If it got your files back or saved you 
 want to say thanks, you can buy me a coffee on Ko-fi. It helps me keep working on it.
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/K0C528JI83)
+
+## Thanks
+The drive failure rates in Disk Health come from [Backblaze Drive Stats](https://www.backblaze.com/cloud-storage/resources/hard-drive-test-data),
+Backblaze's published records of the drives in its data centres. They're free to use as long as Backblaze is named as
+the source, so: thank you, Backblaze. DiskAnvil Live is built from Debian.
 
 ## License
 GPL-3.0-or-later (0.3.0 and 0.4.0 were MIT).

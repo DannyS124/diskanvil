@@ -57,7 +57,8 @@ AboutDialog::AboutDialog(const QString &udisksVersion, QWidget *parent)
     header->addWidget(title, 1);
 
     auto *tabs = new QTabWidget;
-    tabs->addTab(richLabel(tr("<p>A disk manager for Linux that works like Windows Disk Management.</p>"
+    tabs->addTab(richLabel(tr("<p>A disk manager for Linux and Windows that works like Windows Disk Management, and a rescue "
+                              "system on a USB stick, DiskAnvil Live.</p>"
                               "<p>© 2026 %1<br>Released under the GNU General Public License, version 3 or later. "
                               "This program comes with absolutely no warranty.</p>"
                               "<p>%2<br>%3</p>"
@@ -70,6 +71,14 @@ AboutDialog::AboutDialog(const QString &udisksVersion, QWidget *parent)
                                .arg(QStringLiteral(APP_AUTHOR),
                                     link(QStringLiteral(APP_AUTHOR_URL)))),
                  tr("A&uthor"));
+    tabs->addTab(richLabel(tr("<p>Drive failure rates in Disk Health come from %1: Backblaze's published records of the drives in "
+                              "its data centres, free to use when they're named as the source.</p>"
+                              "<p>DiskAnvil runs these as separate programs when they're there: ClamAV, smartmontools, "
+                              "efibootmgr, QEMU, dnsmasq, x11vnc, OpenSSH, sqlite3, wimlib, cryptsetup, btrfs-progs, mdadm, "
+                              "LVM and ldmtool. DiskAnvil Live is built from Debian.</p>")
+                               .arg(link(QStringLiteral("https://www.backblaze.com/cloud-storage/resources/hard-drive-test-data"),
+                                         tr("Backblaze Drive Stats")))),
+                 tr("&Thanks"));
 
     auto *license = new QTextBrowser;
     license->setPlainText(resourceText(QStringLiteral(":/LICENSE")));

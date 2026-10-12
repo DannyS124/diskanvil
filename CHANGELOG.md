@@ -25,12 +25,68 @@ New:
 - DiskAnvil Live shows a hidden area (HPA) at the end of a SATA drive in Properties, and can give that space back
 - BitLocker drives show as BitLocker and unlock with their password or their 48-digit recovery key. On Windows, Change BitLocker Password too
 - Help → Support DiskAnvil (Ko-fi), and a line about it in About
-- `--open virus-scan`
+- `--open virus-scan`, `remote-help`, `net-boot`, `live-on-pc`
+
+Getting files back:
+- What Happened? (Tools): start from what went wrong. It gives honest odds (an SSD with TRIM on erases deleted files within minutes), what not to do, and which tool to use. On a failing drive it makes a Rescue Copy before anything checks it
+- Find Lost Files shows when a file was made, changed, last opened and deleted (FAT, exFAT, NTFS), a photo's details (when it was taken, the camera and lens, where), and a PDF's or Office file's own properties
+- A viewer for found files before they're saved: pictures to zoom into and page through, PDFs page by page, films and songs that play, a document's words and the bytes of anything else. It's a program of its own, sandboxed on Linux, so a damaged file can't take DiskAnvil down
+- Found files open in their own program or drag out to a folder. The copies for that never go on the drive being searched, and they're gone when Find Lost Files closes
+- More kinds of files found and shown: camera raw photos, TIFF, PSD, RAR, MKV, FLAC, WMV, gzip, Office 97 files, emails and mailboxes, RTF, web pages, SVG, calendars and contacts
+- Found files get names from what's inside them (a photo's date and camera, a document's title, a song's tags), can be sorted by kind and date, show small pictures, have their copies marked and are checked to see if they open
+- Inside: each found file's parts, with the damage marked, and a hex editor that works on a copy
+- Repair a Copy fixes PNG, JPEG, Office, PDF, gzip, WAV and SQLite files, and films that lost their index (with a working film from the same camera)
+- Find text by the words you remember, in deleted files, Windows' page file and Word's AutoRecover files
+- The small pictures Windows keeps of photos (thumbcache, Thumbs.db), even of ones that are gone
+- Ransomware: its notes and the endings it adds are spotted, its family named, and it says what can be done (a free decryptor, Windows' earlier versions, the deleted originals)
+- On a failing drive, Find Lost Files keeps a Rescue Copy of everything it reads, so nothing has to be read twice
+- Btrfs files deleted since an older copy of its file tree (needs btrfs-progs)
+- A timeline of what the drive kept, by date, saved as CSV or PDF
+
+Drives:
+- Disk Health: eMMC wear, whether partitions are aligned, SMR drives, known firmware bugs (Samsung 980 and 990 PRO), and What's That Noise?
+- Disk Health compares a Seagate drive's own FARM hours with SMART's, which shows a history that was wiped
+- Disk Health shows Backblaze's lifetime failure rate for the drive models in their records (Backblaze Drive Stats)
+- Format as an SD Card: the SD Association's layout for the card's size, with our own exFAT and FAT16
+- Bad Sectors: Refresh Slow Areas on an SSD (experimental): slow spots are read and written back unchanged
+- Sector Size, in DiskAnvil Live: switches an ATA drive between 512 and 4096-byte sectors, when the drive can
+- Properties shows a USB drive's speed, port and controller, and says so when a USB 3 drive runs at USB 2 speed
+- LUKS: back up the encryption header and put it back (the same bytes cryptsetup writes)
+- VeraCrypt volumes unlock, with a PIM, keyfiles, hidden and system volumes
+- RAID arrays, NAS drives and Windows dynamic disks open read-only, from a bar that says they're there or from Tools
+
+Fixing a PC:
+- Windows Product Key: the one in the PC's firmware and each Windows install's, with generic keys explained
+- Windows Drivers and Services: newest first with their makers. A suspect one can be switched off, with a backup
+- Save My Files: people's folders and browser bookmarks off a drive, going on past what can't be read
+- Boot Menu Entries (Tools): change the order, pick what starts next time, switch entries on and off, add and remove them, and a report of how the PC starts
+- Repair Linux Boot, in DiskAnvil Live: GRUB, Fedora's shim and systemd-boot put back by the install's own tools
+- Try the Repair First: a stand-in takes a file system repair, so you can look at the result before the drive changes
+- Make Room for Windows Recovery (Windows): Microsoft's steps for update error 0x80070643 (KB5028997), done for you
+
+Backups and records:
+- Backups use zstd's seekable format, so Find Lost Files can read one without restoring it
+- Restore from Clonezilla: partclone images, split and packed ones too, checked by their checksums
+- Try Starting It: a drive or a disk image started in a virtual machine (QEMU), read-only, its changes thrown away
+- A certificate of erasure (PDF) after a wipe, with Check It to read the drive back; Disk Health's report and benchmark results as PDFs too
+- Evidence images: E01 files written and read by our own code (libewf reads them the same), with a case report
+
+DiskAnvil Live:
+- Make a DiskAnvil Live USB can keep your changes between starts (settings, downloads, programs) and add a drive for files (exFAT) on the rest of the stick. A stick made that way can be updated without wiping it
+- ISO files copied into that drive's ISOs folder start from the boot menu, under Other ISOs on this stick (needs Secure Boot off)
+- Put DiskAnvil Live on This PC (File menu): a partition in free space on the PC's own drive, last in its boot menu, so no stick is needed. Update It and Take It Off too. UEFI PCs only
+- Start Other PCs from This One: PCs on the same network start DiskAnvil Live from it, with nothing installed on them, Secure Boot on or off
+- Let Someone Help: someone you trust on the same network sees the screen (VNC) or gets a terminal (SSH), with passwords made up each time
+- Write-Protect Every Drive: every drive but the stick is read-only, drives plugged in later too, from the boot menu or Tools; one can be let through to save to
 
 Changed:
 - Disk Usage says why a drive counts more space as used than its files add up to
 
 Fixed:
+- Find Lost Files was cut off on small screens. It fits any screen now, and remembers its sizes
+- Saving found files closed Find Lost Files, and so did Enter. It stays open now, and marks what's been saved
+- Thumbnails scrolled away and back could stay a blank card, and big PDFs only showed as ".pdf"
+- Backups with something after their end are called that again, not damaged
 - Typing a drive's name to confirm in Clone, Restore or Rescue Copy could move the keyboard to another button, so a space pressed Cancel
 - Check a USB Stick's map stayed yellow after a good check. Now it turns green
 - Tall windows could run off a small screen

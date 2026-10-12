@@ -445,8 +445,12 @@ std::unique_ptr<lost::Layer> open(const QString &path, Info *info)
                                info);
                 }
             } else if ((type == "volume" || type == "disk") && body.size() >= 24) {
-                reader->chunkSize = quint64(qFromLittleEndian<quint32>(body.constData() + 8)) * qFromLittleEndian<quint32>(body.constData() + 12);
-                info->sectorSize = int(qFromLittleEndian<quint32>(body.constData() + 12));
+                // Sectors of 512 to 4096 bytes, chunks of up to 32768 of them (what EWF tools make); a damaged
+                // file's other values would ask for any amount of memory.
+                const quint32 perChunk = qFromLittleEndian<quint32>(body.constData() + 8), bytes = qFromLittleEndian<quint32>(body.constData() + 12);
+                const bool sane = bytes >= 512 && bytes <= 4096 && (bytes & (bytes - 1)) == 0 && perChunk >= 1 && perChunk <= 32768;
+                reader->chunkSize = sane ? quint64(perChunk) * bytes : 0;
+                info->sectorSize = sane ? int(bytes) : 512;
                 sectors = qFromLittleEndian<quint64>(body.constData() + 16);
             } else if (type == "sectors") {
                 sectorsStart = at;

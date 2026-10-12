@@ -51,6 +51,15 @@ the stick, type the stick's name to confirm. The stick can then start any PC, ne
 whose own system won't start, with DiskAnvil and other repair tools on a small desktop. Secure Boot can stay on,
 except for the memory test. Every start leaves its logs in the logs folder on the stick; when you plug it back in, Make a DiskAnvil Live USB
 has an Open Logs button for them.</p>
+<p><b>Keep changes on the Live stick, and a drive for files:</b> when you make it, tick "Keep my changes between
+starts" (settings, downloads and programs you add are still there next time) and "A drive for my files" (the rest of
+the stick as exFAT, which Windows, Macs and Linux all read). Linux ISOs copied into that drive's ISOs folder start
+from the boot menu, under Other ISOs on this stick, with Secure Boot off. A stick made that way can be updated to a
+new version without wiping it: tick "Only update DiskAnvil Live".</p>
+<p><b>DiskAnvil Live without a stick:</b> File → Put DiskAnvil Live on This PC. It makes a partition in free space on
+the PC's own drive (shrink one first with Resize if there's none), copies DiskAnvil Live there and puts it last in
+the PC's boot menu, so the PC starts as before. Press the boot menu key while it starts to pick it. Update It and Take
+It Off are in the same window. UEFI PCs only.</p>
 <p><b>Unplug a USB drive:</b> right-click the disk on the left, Safely Remove. Everything gets unmounted and
 the drive is powered off, so it's safe to pull out.</p>
 <p><b>Check for errors:</b> right-click the partition, Check for Errors. If problems are found, DiskAnvil
@@ -166,6 +175,44 @@ them again whenever the drive shows up. In DiskAnvil Live, Properties also says 
 <p><b>RAID and LVM:</b> software RAID arrays and LVM volume groups show up like drives. A RAID array shows whether it's
 degraded or rebuilding, and Check RAID Array reads it all and compares the copies. LVM needs the udisks2-lvm2 package;
 for now you can mount, open and check logical volumes, but not create or resize them.</p>
+<p><b>Not sure where to start?</b> Tools → What Happened? Pick what went wrong (deleted, formatted, won't open,
+clicking, ransomware, Windows won't start...) and the drive. It says how likely the files are to come back, what not to
+do, and which tools to use, in order.</p>
+<p><b>Look at a found file before saving it:</b> in Find Lost Files, double-click it. The viewer zooms pictures, pages
+through PDFs, plays films and songs and shows a document's words. Details shows its dates and a photo's camera and
+place; Inside shows its parts with any damage marked, and can edit a copy in hex. Repair a Copy fixes what can be fixed
+(PNG, JPEG, Office, PDF, SQLite, a film without its index). Organise → Find by Words finds text you remember.</p>
+<p><b>Ransomware:</b> Find Lost Files says when files look locked by ransomware, which family it is, and what can be
+done: a free decryptor if one exists, Windows' earlier versions of the drive, or the deleted originals.</p>
+<p><b>Is it the drive?</b> Disk Health also shows a Seagate drive's own FARM hours next to SMART's (a history that was
+wiped shows up), eMMC wear, SMR drives, known firmware bugs, partitions that aren't aligned, the failure rate Backblaze
+measured for the model (Backblaze Drive Stats), and What's That Noise? for clicks and beeps.</p>
+<p><b>Format a camera's SD card:</b> right-click the card, Format as an SD Card. It uses the SD Association's layout
+for the card's size, which cameras expect.</p>
+<p><b>Encrypted drives:</b> VeraCrypt volumes unlock with their password (and PIM, keyfiles, hidden or system volume).
+For LUKS, right-click the partition, Back Up Encryption Header: if the header gets damaged, Put Back Encryption
+Header makes the drive open again.</p>
+<p><b>A NAS's drives, RAID or Windows dynamic disks:</b> a bar says when they're there; Open Read-Only (or Tools →
+Open RAID, NAS and Dynamic Disks) opens them without changing anything, so their files can be copied off.</p>
+<p><b>A PC that won't start:</b> from DiskAnvil Live, Tools → Save My Files copies people's folders and bookmarks off.
+Boot Menu Entries shows and fixes the PC's boot menu; Repair Linux Boot puts GRUB or systemd-boot back; Windows
+Drivers and Services switches off a driver that stopped Windows starting (with a backup); Windows Product Key shows
+the key before a reinstall.</p>
+<p><b>Try a repair safely:</b> when Check for Errors finds problems, Try the Repair First runs it on a stand-in, so you
+can look at the result before the drive itself changes.</p>
+<p><b>Windows update error 0x80070643:</b> on Windows, Tools → Make Room for Windows Recovery does Microsoft's steps
+(KB5028997) for you.</p>
+<p><b>Does this drive start?</b> Right-click it (or File → Try Starting a Disk Image), Try Starting It. It starts in a
+virtual machine, read-only; whatever it writes is thrown away.</p>
+<p><b>Proof a drive was erased:</b> after Wipe Disk or Secure Erase, a bar offers the Certificate of Erasure: save it as
+a PDF, and Check It reads the drive back to show it's blank. Tools → Erasure Certificates lists them.</p>
+<p><b>Evidence:</b> right-click a drive, Make an Evidence Image, saves an E01 file with its checksums and a case report. Start
+DiskAnvil Live with "Drives write-protected" first, so nothing writes to the drive.</p>
+<p><b>Clonezilla images:</b> right-click a partition, Restore from Clonezilla, and pick the image's folder.</p>
+<p><b>In DiskAnvil Live:</b> Tools → Write-Protect Every Drive makes every drive but the stick read-only (one can be let
+through to save to). Let Someone Help lets someone you trust on the same network see the screen or use a terminal,
+with passwords made up each time. Start Other PCs from This One lets PCs on the same network start DiskAnvil Live from
+this one over a cable.</p>
 <p><b>Change the look:</b> View → Theme. System uses your desktop's colors; there's also Classic, Deadshadow and High
 Contrast, or Make a Theme for your own. Whatever the theme, red still means danger.</p>
 
