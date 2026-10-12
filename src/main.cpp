@@ -111,8 +111,8 @@ int main(int argc, char *argv[])
     const QCommandLineOption logOption(QStringLiteral("log"),
                                        QStringLiteral("Write what DiskAnvil does to <file>. DISKANVIL_LOG=<file> does the same."),
                                        QStringLiteral("file"));
-    const QCommandLineOption openOption(QStringLiteral("open"),
-                                        QStringLiteral("Open just one tool: write-image, windows-usb, rescue-usb, check-stick, lost-files or virus-scan."),
+    const QString tools = QStringLiteral("what-happened, write-image, windows-usb, rescue-usb, live-on-pc, check-stick, lost-files, virus-scan, save-files, remote-help, net-boot, product-key, drivers, boot-menu, linux-boot, make-room, certificates or open-sets");
+    const QCommandLineOption openOption(QStringLiteral("open"), QStringLiteral("Open just one tool: ") + tools + QLatin1Char('.'),
                                         QStringLiteral("tool"));
     const QCommandLineOption homeOption(QStringLiteral("home"), QStringLiteral("Be DiskAnvil Live's home screen (its desktop)."));
     parser.addOptions({dumpOption, screenshotOption, selectOption, menuOption, logOption, openOption, homeOption});
@@ -190,9 +190,9 @@ int main(int argc, char *argv[])
         // Just the tool, for launchers like the ones on DiskAnvil Live's desktop: no main
         // window behind it, and DiskAnvil closes with it.
         const QString tool = parser.value(openOption);
-        QTimer::singleShot(0, &window, [&window, tool] {
+        QTimer::singleShot(0, &window, [&window, tool, tools] {
             if (!window.openTool(tool)) {
-                QTextStream(stderr) << "No tool called " << tool << " (write-image, windows-usb, rescue-usb, check-stick, lost-files, virus-scan)\n";
+                QTextStream(stderr) << "No tool called " << tool << " (" << tools << ")\n";
                 QCoreApplication::exit(2);
                 return;
             }

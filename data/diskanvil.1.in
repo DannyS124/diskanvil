@@ -38,13 +38,25 @@ and exit. Works with
 .TP
 .BI \-\-open " tool"
 Open just one tool, without the main window:
+.BR what-happened ,
 .BR write-image ,
 .BR windows-usb ,
 .BR rescue-usb ,
+.BR live-on-pc ,
 .BR check-stick ,
-.B lost-files
+.BR lost-files ,
+.BR virus-scan ,
+.BR save-files ,
+.BR remote-help ,
+.BR net-boot ,
+.BR product-key ,
+.BR drivers ,
+.BR boot-menu ,
+.BR linux-boot ,
+.BR make-room ,
+.B certificates
 or
-.BR virus-scan .
+.BR open-sets .
 DiskAnvil closes when the tool is closed.
 .TP
 .B \-\-home

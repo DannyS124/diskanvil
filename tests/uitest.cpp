@@ -3559,6 +3559,11 @@ void writeBlockMode()
 void rescueUsbLayout()
 {
     QTemporaryDir dir;
+    // DISKANVIL_TEST_RESCUE_ISO: the real DiskAnvil Live ISO instead of a made-up one, and
+    // DISKANVIL_TEST_LAYOUT_STICK: where the stick is kept afterwards, laid out with kept changes and
+    // a files drive, to start in a VM.
+    const QString realIso = qEnvironmentVariable("DISKANVIL_TEST_RESCUE_ISO");
+    const QString keptStick = qEnvironmentVariable("DISKANVIL_TEST_LAYOUT_STICK");
     const QString tree = dir.filePath(QStringLiteral("tree"));
     QMap<QString, QByteArray> files;
     files[QStringLiteral(".disk/diskanvil-live")] = "DiskAnvil Live\nversion=0.0.2\nbuilt=2026-10-12\nid=test\n";
@@ -3578,14 +3583,15 @@ void rescueUsbLayout()
     if (sumsFile.open(QIODevice::WriteOnly))
         sumsFile.write(sums);
     sumsFile.close();
-    const QString iso = dir.filePath(QStringLiteral("rescue.iso"));
-    if (sh(QStringLiteral("xorriso"), {QStringLiteral("-as"), QStringLiteral("mkisofs"), QStringLiteral("-quiet"), QStringLiteral("-J"), QStringLiteral("-joliet-long"),
-                                       QStringLiteral("-R"), QStringLiteral("-o"), iso, tree}) != 0) {
+    const QString iso = realIso.isEmpty() ? dir.filePath(QStringLiteral("rescue.iso")) : realIso;
+    if (realIso.isEmpty() && sh(QStringLiteral("xorriso"), {QStringLiteral("-as"), QStringLiteral("mkisofs"), QStringLiteral("-quiet"), QStringLiteral("-J"), QStringLiteral("-joliet-long"),
+                                                            QStringLiteral("-R"), QStringLiteral("-o"), iso, tree}) != 0) {
         out << "SKIP  Live USB layout: xorriso isn't installed" << Qt::endl;
         return;
     }
-    const QString stickImage = dir.filePath(QStringLiteral("stick.img"));
-    sh(QStringLiteral("truncate"), {QStringLiteral("-s"), QStringLiteral("5G"), stickImage});
+    const QString stickImage = keptStick.isEmpty() ? dir.filePath(QStringLiteral("stick.img")) : keptStick;
+    QFile::remove(stickImage);
+    sh(QStringLiteral("truncate"), {QStringLiteral("-s"), realIso.isEmpty() ? QStringLiteral("5G") : QStringLiteral("8G"), stickImage});
     const QString loopPath = userLoop(stickImage);
     report(!loopPath.isEmpty(), QStringLiteral("Live USB layout: a 5 GB loop device stands in for the stick"));
     if (loopPath.isEmpty())
@@ -3632,7 +3638,8 @@ void rescueUsbLayout()
             parts << QStringLiteral("%1:%2:%3").arg(v.fsType, v.label).arg(v.size / (1024 * 1024));
         return parts.size() == 3;
     }, 20000);
-    report(parts.size() == 3 && parts[0] == QLatin1String("vfat:DISKANVIL:2048") && parts[1] == QLatin1String("ext4:persistence:1024")
+    const QString systemMiB = QString::number(rescue::partitionSize(rescue::inspect(iso).bytes) / (1024 * 1024));
+    report(parts.size() == 3 && parts[0] == QStringLiteral("vfat:DISKANVIL:") + systemMiB && parts[1] == QLatin1String("ext4:persistence:1024")
                && parts[2].startsWith(QLatin1String("exfat:ANVIL-FILES:")),
            QStringLiteral("Live USB layout: DiskAnvil Live's 2 GB, 1 GB keeping changes, and the files drive on the rest"), parts.join(QStringLiteral(", ")));
     const QString persistence = mountStick(udisks, loopPath, QStringLiteral("persistence"));
@@ -3671,6 +3678,14 @@ void rescueUsbLayout()
                && QFile::exists(systemAgain + QStringLiteral("/live/filesystem.squashfs")) && QFile::exists(persistenceAgain + QStringLiteral("/kept-change.txt"))
                && QFile::exists(filesAgain + QStringLiteral("/saved.txt")) && QFile::exists(persistenceAgain + QStringLiteral("/persistence.conf")),
            QStringLiteral("Live USB layout: the update replaced DiskAnvil Live's files, and kept its logs, the changes and the files"));
+    if (!realIso.isEmpty()) {
+        // Kept as it is, for a VM: it isn't made again with only the files drive.
+        RescueUsbDialog::allowLoopDevicesForTest = false;
+        RescueUsbDialog::openStickForTest = nullptr;
+        cleanUpLoop(udisks, loopPath);
+        out << "kept the stick at " << stickImage << Qt::endl;
+        return;
+    }
     // Made again with only the files drive: two partitions, and no persistence.conf anywhere.
     boxes.clear();
     {

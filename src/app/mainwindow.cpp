@@ -1826,7 +1826,14 @@ bool MainWindow::openTool(const QString &name)
                                              {QStringLiteral("virus-scan"), m_virusScan},
                                              {QStringLiteral("save-files"), m_saveFiles},
                                              {QStringLiteral("remote-help"), m_remoteHelp},
-                                             {QStringLiteral("net-boot"), m_netBoot}};
+                                             {QStringLiteral("net-boot"), m_netBoot},
+                                             {QStringLiteral("product-key"), m_productKey},
+                                             {QStringLiteral("drivers"), m_drivers},
+                                             {QStringLiteral("boot-menu"), m_bootMenu},
+                                             {QStringLiteral("linux-boot"), m_linuxBoot},
+                                             {QStringLiteral("make-room"), m_winRe},
+                                             {QStringLiteral("certificates"), m_certificates},
+                                             {QStringLiteral("open-sets"), m_openSets}};
     QAction *action = tools.value(name);
     if (!action)
         return false;
