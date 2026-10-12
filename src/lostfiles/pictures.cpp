@@ -124,6 +124,8 @@ QByteArray readerFormat(const QString &id)
         return "heif";
     if (id == QLatin1String("tif"))
         return "tiff";
+    if (id == QLatin1String("svg"))
+        return "svg"; // drawn by Qt's own SVG reader, which runs no scripts
     if (id == QLatin1String("png") || id == QLatin1String("gif") || id == QLatin1String("bmp") || id == QLatin1String("webp")
         || id == QLatin1String("avif"))
         return id.toLatin1();

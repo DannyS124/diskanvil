@@ -69,6 +69,7 @@ add_library(diskforge-core STATIC
     src/lostfiles/lookcopies.cpp src/lostfiles/lookcopies.h
     src/lostfiles/officetext.cpp src/lostfiles/officetext.h
     src/lostfiles/ole.cpp src/lostfiles/ole.h
+    src/lostfiles/textkinds.cpp src/lostfiles/textkinds.h
     src/viruses/virusscan.cpp src/viruses/virusscan.h
     src/viruses/reghive.cpp src/viruses/reghive.h
     src/viruses/winstartup.cpp src/viruses/winstartup.h

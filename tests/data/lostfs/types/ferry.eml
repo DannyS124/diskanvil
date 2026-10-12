@@ -1,0 +1,50 @@
+From: Sam =?utf-8?q?T=C3=ABster?= <sam@example.com>
+To: Alex Example <alex@example.com>
+Subject: =?utf-8?q?F=C3=A4hre=3A?= the tickets for Sunday
+Date: Sun, 14 Jul 2024 13:22:05 +0000
+Message-ID: <ferry-1@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="===============1755738425057584270=="
+
+--===============1755738425057584270==
+Content-Type: multipart/alternative;
+ boundary="===============6640417524076083784=="
+
+--===============6640417524076083784==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+Hi Alex,
+
+The ferry tickets are attached. Caf=C3=A9 at pier 3 at 07:30?
+
+See you there. See you there. See you there. See you there. See you there. Se=
+e you there. See you there. See you there. See you there. See you there. See =
+you there. See you there. See you there. See you there. See you there. See yo=
+u there. See you there. See you there. See you there. See you there. See you =
+there. See you there. See you there. See you there. See you there. See you th=
+ere. See you there. See you there. See you there. See you there. See you ther=
+e. See you there. See you there. See you there. See you there. See you there.=
+ See you there. See you there. See you there. See you there.=20
+
+Sam
+
+--===============6640417524076083784==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<html><body><p>Hi Alex,</p><p>The <b>ferry</b> tickets are attached.</p></bod=
+y></html>
+
+--===============6640417524076083784==--
+
+--===============1755738425057584270==
+Content-Type: application/pdf
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename*=utf-8''F%C3%A4hre%20tickets.pdf
+MIME-Version: 1.0
+
+JVBERi0xLjQKJSBhIG1hZGUtdXAgdGlja2V0Cg==
+
+--===============1755738425057584270==--

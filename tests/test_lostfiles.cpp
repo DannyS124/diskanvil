@@ -19,6 +19,7 @@
 #include "../src/lostfiles/officetext.h"
 #include "../src/lostfiles/ole.h"
 #include "../src/lostfiles/pictures.h"
+#include "../src/lostfiles/textkinds.h"
 #include "../src/lostfiles/preview.h"
 #include "../src/lostfiles/previewloader.h"
 #include "../src/lostfiles/viewer.h"
@@ -31,6 +32,7 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QImage>
+#include <QImageReader>
 #include <QPainter>
 #include <QRandomGenerator>
 #include <QTemporaryDir>
@@ -2169,6 +2171,56 @@ void newKinds()
            QStringLiteral("rar: what's in a RAR 5 and a RAR 4 archive"),
            QStringLiteral("%1 %2 / %3 %4").arg(rar5List.value(0).path).arg(rar5List.value(0).size).arg(rar4List.value(0).path).arg(rar4List.value(0).size));
 
+    // Text kinds: found whole when the rest of their last sector is zeros, as a drive leaves it.
+    const Case textCases[] = {{"ferry.eml", "eml"},    {"Inbox.mbox", "mbox"}, {"notes.rtf", "rtf"}, {"notes.html", "html"},
+                              {"drawing.svg", "svg"},  {"settings.xml", "xml"}, {"trip.ics", "ics"}, {"phone.vcf", "vcf"}};
+    for (const Case &c : textCases) {
+        const QByteArray d = typesFile(QString::fromLatin1(c.file));
+        files.insert(QString::fromLatin1(c.file), d);
+        const filetypes::Measured m = measured(d + QByteArray(512 - d.size() % 512, '\0'));
+        const QString got = m.type >= 0 && m.type < filetypes::types().size() ? filetypes::types()[m.type].id : QStringLiteral("nothing");
+        report(!d.isEmpty() && got == QLatin1String(c.type) && m.complete && m.size == quint64(d.size()),
+               QStringLiteral("%1: found as %2, whole, to the byte").arg(QString::fromLatin1(c.file), got),
+               QStringLiteral("%1 bytes of %2, %3").arg(m.size).arg(d.size()).arg(m.complete ? QStringLiteral("whole") : QStringLiteral("not whole")));
+    }
+    const QString eml = texts::text(type("eml"), files.value(QStringLiteral("ferry.eml")), 100000);
+    const QStringList emlFacts = texts::properties(type("eml"), files.value(QStringLiteral("ferry.eml")));
+    report(eml.startsWith(QStringLiteral("From: Sam Tëster <sam@example.com>\nTo: Alex Example <alex@example.com>\nSent: "))
+               && eml.contains(QStringLiteral("\nSubject: Fähre: the tickets for Sunday\nAttached: Fähre tickets.pdf\n\nHi Alex,"))
+               && eml.contains(QStringLiteral("Café at pier 3 at 07:30?")) && eml.endsWith(QLatin1String("Sam"))
+               && fact(emlFacts, QStringLiteral("Sent")).contains(QLatin1String("2024")),
+           QStringLiteral("eml: headers decoded, the readable part, the attachment's name"), eml.left(240));
+    const QString box = texts::text(type("mbox"), files.value(QStringLiteral("Inbox.mbox")));
+    report(fact(texts::properties(type("mbox"), files.value(QStringLiteral("Inbox.mbox"))), QStringLiteral("Messages")) == QLatin1String("3")
+               && box.indexOf(QLatin1String("Lunch on Friday?")) < box.indexOf(QLatin1String("Photos from the lake"))
+               && box.contains(QLatin1String("Re: Photos from the lake")),
+           QStringLiteral("mbox: its messages, in order"), box);
+    const QString rtfText = texts::text(type("rtf"), files.value(QStringLiteral("notes.rtf")), 100000);
+    const QStringList rtfFacts = texts::properties(type("rtf"), files.value(QStringLiteral("notes.rtf")));
+    report(rtfText.startsWith(QLatin1String("Pack the blue tent and the camera.\nThe ferry leaves at 07:45 from pier 3, so don't be late."))
+               && rtfText.contains(QStringLiteral("Unicode check: café, naïve, Straße, 東京.")) && rtfText.endsWith(QLatin1String("Line 120 of the packing list."))
+               && fact(rtfFacts, QStringLiteral("Title")) == QLatin1String("Holiday plans") && fact(rtfFacts, QStringLiteral("Author")) == QLatin1String("Sam Tester")
+               && fact(rtfFacts, QStringLiteral("Created")).contains(QLatin1String("2024")),
+           QStringLiteral("rtf: its words without the markup, its title, author and date"), rtfText.left(160) + QStringLiteral(" | ") + rtfFacts.join(QStringLiteral(" | ")));
+    const QString page = texts::text(type("html"), files.value(QStringLiteral("notes.html")), 100000);
+    report(page.contains(QLatin1String("Pack the blue tent and the camera.")) && page.contains(QStringLiteral("Straße, 東京"))
+               && !page.contains(QLatin1Char('<')) && fact(texts::properties(type("html"), files.value(QStringLiteral("notes.html"))), QStringLiteral("Title")) == QLatin1String("Holiday plans"),
+           QStringLiteral("html: its words and title"), page.left(160));
+    const QString events = texts::text(type("ics"), files.value(QStringLiteral("trip.ics")));
+    report(events.contains(QLatin1String("Ferry to the island (Pier 3)")) && events.contains(QLatin1String("Walk up the mountain, if it's dry"))
+               && fact(texts::properties(type("ics"), files.value(QStringLiteral("trip.ics"))), QStringLiteral("Events")) == QLatin1String("2"),
+           QStringLiteral("ics: the events"), events);
+    const QString people = texts::text(type("vcf"), files.value(QStringLiteral("phone.vcf")));
+    report(people == QStringLiteral("Alex Example · +1 555 0100 · alex@example.com\nJörg Müller · +49 555 0101")
+               && fact(texts::properties(type("vcf"), files.value(QStringLiteral("phone.vcf"))), QStringLiteral("Contacts")) == QLatin1String("2"),
+           QStringLiteral("vcf: names, numbers and addresses, old phones' encoded ones too"), people);
+    if (QImageReader::supportedImageFormats().contains("svg")) {
+        const QImage drawing = pictures::decode(files.value(QStringLiteral("drawing.svg")), type("svg"), 0);
+        report(drawing.size() == QSize(96, 64) && qRed(drawing.pixel(30, 30)) > 200, QStringLiteral("svg: drawn"));
+    } else {
+        report(true, QStringLiteral("svg: skipped, Qt's SVG reader isn't installed here"));
+    }
+
     // The viewer shows each in its own way.
     const auto kind = [](const char *name) { return viewer::kindFor(filetypes::typeForName(QString::fromLatin1(name)), QString::fromLatin1(name)); };
     report(kind("a.nef") == viewer::Kind::Picture && kind("b.psd") == viewer::Kind::Picture && kind("c.mkv") == viewer::Kind::Film
@@ -2192,6 +2244,20 @@ void newKinds()
             ole::properties(f);
             previewOf(bad, type(c.type), 64);
             measured(bad);
+        }
+    }
+    for (const Case &c : textCases) {
+        const QByteArray good = files.value(QString::fromLatin1(c.file));
+        for (int round = 0; round < 80; ++round, ++runs) {
+            QByteArray bad = good;
+            for (int k = 0, n = 1 + int(rng.bounded(16)); k < n; ++k)
+                bad[int(rng.bounded(quint32(bad.size())))] = char(round % 2 ? rng.bounded(256) : "{}\\<>=?:\n\r-"[rng.bounded(12)]);
+            if (round % 3 == 0)
+                bad.truncate(qsizetype(rng.bounded(quint32(bad.size()))));
+            texts::text(type(c.type), bad, 20000);
+            texts::properties(type(c.type), bad);
+            previewOf(bad, type(c.type), 64);
+            measured(bad + QByteArray(512, '\0'));
         }
     }
     for (int round = 0; round < 300; ++round, ++runs) {

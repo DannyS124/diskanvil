@@ -1,0 +1,33 @@
+From MAILER-DAEMON Mon Oct 12 01:06:17 2026
+From: Sam Tester <sam@example.com>
+To: alex@example.com
+Subject: Lunch on Friday?
+Date: Sun, 14 Jul 2024 13:22:05 +0000
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+MIME-Version: 1.0
+
+Message 1.
+
+From MAILER-DAEMON Mon Oct 12 01:06:17 2026
+From: Sam Tester <sam@example.com>
+To: alex@example.com
+Subject: Photos from the lake
+Date: Mon, 15 Jul 2024 13:22:05 +0000
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+MIME-Version: 1.0
+
+Message 2.
+
+From MAILER-DAEMON Mon Oct 12 01:06:17 2026
+From: Sam Tester <sam@example.com>
+To: alex@example.com
+Subject: Re: Photos from the lake
+Date: Tue, 16 Jul 2024 13:22:05 +0000
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+MIME-Version: 1.0
+
+Message 3.
+

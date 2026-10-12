@@ -11,6 +11,7 @@
 #include "ole.h"
 #include "pictures.h"
 #include "preview.h"
+#include "textkinds.h"
 
 #include <QAbstractScrollArea>
 #include <QApplication>
@@ -94,7 +95,7 @@ Kind kindFor(int type, const QString &name)
         const filetypes::Type &t = filetypes::types()[type];
         if (t.id == QLatin1String("pdf"))
             return Kind::Pdf;
-        if (t.id == QLatin1String("ole"))
+        if (t.id == QLatin1String("ole") || t.id == QLatin1String("xml"))
             return Kind::Words;
         switch (t.category) {
         case filetypes::Category::Picture:
@@ -848,6 +849,10 @@ void Window::present(const Show &show)
             text = ole::text(compound, 2000000);
             if (text.isEmpty() && ole::locked(compound))
                 why = tr("It's locked with a password, so its words can't be shown.");
+        } else if (type && QStringList{QStringLiteral("eml"), QStringLiteral("mbox"), QStringLiteral("rtf"), QStringLiteral("html"), QStringLiteral("xml"),
+                                       QStringLiteral("ics"), QStringLiteral("vcf")}
+                               .contains(type->id)) {
+            text = texts::text(show.type, data, 2000000);
         } else if (type && type->category == filetypes::Category::Document) {
             text = officetext::text(show.type, data, 2000000);
         }

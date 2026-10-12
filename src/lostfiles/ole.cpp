@@ -3,6 +3,8 @@
 
 #include "ole.h"
 
+#include "textkinds.h"
+
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QHash>
@@ -570,15 +572,7 @@ Mail mail(const File &f)
         m.sent = mailTime(f, 0x0E060040); // when it arrived
     m.body = mailString(f, {}, 0x1000);
     if (m.body.isEmpty()) { // only as a web page: its words without the markup
-        QString html = QString::fromUtf8(f.stream(QStringLiteral("__substg1.0_10130102"), 8 * 1024 * 1024));
-        static const QRegularExpression hidden(QStringLiteral("<(script|style|head)[^>]*>.*?</\\1>"),
-                                               QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
-        static const QRegularExpression breaks(QStringLiteral("<(br|/p|/div|/tr|/h\\d)[^>]*>"), QRegularExpression::CaseInsensitiveOption);
-        static const QRegularExpression tags(QStringLiteral("<[^>]*>"));
-        html.remove(hidden).replace(breaks, QStringLiteral("\n")).remove(tags);
-        html.replace(QLatin1String("&nbsp;"), QLatin1String(" ")).replace(QLatin1String("&lt;"), QLatin1String("<"));
-        html.replace(QLatin1String("&gt;"), QLatin1String(">")).replace(QLatin1String("&quot;"), QLatin1String("\"")).replace(QLatin1String("&amp;"), QLatin1String("&"));
-        m.body = html;
+        m.body = texts::fromHtml(QString::fromUtf8(f.stream(QStringLiteral("__substg1.0_10130102"), 8 * 1024 * 1024)));
     }
     for (const File::Entry &e : f.entries()) {
         if (!e.storage || e.path.contains(QLatin1Char('/')) || !e.path.startsWith(QLatin1String("__attach_version1.0_#")))

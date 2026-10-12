@@ -7,6 +7,8 @@
 #   reader, lists every compound file in the container, as a check.
 # - ffmpeg makes the films and songs (Matroska, WebM, FLAC, Windows Media) with tags and covers.
 # - Python's PIL makes the TIFF; gzip and tar the archives.
+# - Python's email and mailbox modules make the email and the mailbox; texts.py writes the
+#   calendar, contacts, SVG and XML. LibreOffice makes the RTF and the web page.
 # Only needed when changing them:
 #   tests/data/lostfs/types/make.sh
 set -euo pipefail
@@ -25,12 +27,14 @@ podman run --rm -v "$work:/work:Z" docker.io/library/debian:trixie bash -c '
     soffice --headless --convert-to "doc:MS Word 97" notes.fodt >/dev/null
     soffice --headless --convert-to "xls:MS Excel 97" budget.fods >/dev/null
     soffice --headless --convert-to "ppt:MS PowerPoint 97" slides.fodp >/dev/null
+    soffice --headless --convert-to rtf notes.fodt >/dev/null
+    soffice --headless --convert-to "html:HTML (StarWriter)" notes.fodt >/dev/null
     python3 -I office.py /work macros
     for f in notes.doc budget.xls slides.ppt ferry.msg macros.doc; do
         python3 -I -c "import olefile, sys; o = olefile.OleFileIO(sys.argv[1]); print(sys.argv[1], sorted(\"/\".join(p) for p in o.listdir()))" "$f"
     done
     chown '"$(id -u):$(id -g)"' /work/*'
-cp "$work"/{notes.doc,ferry.msg,macros.doc} "$here/"
+cp "$work"/{notes.doc,ferry.msg,macros.doc,notes.rtf,notes.html} "$here/"
 # These two are big for what they hold (LibreOffice puts a picture in every PowerPoint file).
 zstd -q -19 -f "$work/budget.xls" -o "$here/budget.xls.zst"
 zstd -q -19 -f "$work/slides.ppt" -o "$here/slides.ppt.zst"
@@ -60,6 +64,8 @@ ff -f lavfi -i sine=frequency=440:duration=1.5 -i "$work/cover.jpg" -map 0 -map 
 ff -f lavfi -i testsrc=size=64x48:rate=10:duration=2 -f lavfi -i sine=frequency=440:duration=2 -c:v wmv2 -c:a wmav2 \
     "${tags[@]}" "$here/trip.wmv"
 ff -f lavfi -i sine=frequency=440:duration=1.5 -c:a wmav2 "${tags[@]}" "$here/song.wma"
+
+python3 -I "$here/texts.py" "$here"
 
 printf 'Pack the blue tent.\n' > "$work/notes.txt"
 gzip -9 -c "$work/notes.txt" > "$here/notes.txt.gz" # keeps the name: notes.txt

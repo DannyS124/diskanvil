@@ -154,7 +154,8 @@ enum TypeNumber {
     Jpg, Png, Gif, Bmp, Webp, Heic, Avif, Cr3, Pdf, Docx, Xlsx, Pptx, Odt, Ods, Odp, Epub,
     Mp4, Mov, ThreeGp, Avi, Ogv, Mp3, Wav, M4a, Ogg, Opus, Zip, SevenZip, Jar, Apk, Sqlite,
     // Added in 0.5.2, at the end so the numbers before stay the same.
-    Tif, Cr2, Nef, Arw, Dng, Orf, Rw2, Pef, Raf, Psd, Rar, Mkv, Webm, Flac, Wmv, Wma, Doc, Xls, Ppt, Msg, Ole, Gz, TypeCount
+    Tif, Cr2, Nef, Arw, Dng, Orf, Rw2, Pef, Raf, Psd, Rar, Mkv, Webm, Flac, Wmv, Wma, Doc, Xls, Ppt, Msg, Ole, Gz,
+    Eml, Mbox, Rtf, Html, Xml, Svg, Ics, Vcf, TypeCount
 };
 
 filetypes::Measured incomplete(int type, quint64 size)
@@ -1322,6 +1323,215 @@ filetypes::Measured measureGz(Stream &s)
     }
 }
 
+// --- Text that starts in a way that says what it is: emails and mailboxes, RTF, web pages, XML
+// and SVG, calendars and contacts. Nothing in it says how long it is, so it runs to where its
+// bytes stop looking like text, and it's whole when zeros follow it to the end of that sector
+// (that's how a file's last sector is left). The kinds with a closing mark end there.
+
+bool textByte(uchar c)
+{
+    return c >= 0x20 ? c != 0x7F : c == '\t' || c == '\n' || c == '\r' || c == '\f';
+}
+
+// Where the text from `from` stops, and whether only zeros follow to the sector's end.
+quint64 textEnd(Stream &s, quint64 from, quint64 most, bool *zeros)
+{
+    const quint64 limit = std::min(s.limit(), from + most);
+    quint64 pos = from;
+    while (pos < limit) {
+        int n = int(std::min<quint64>(64 * 1024, limit - pos));
+        const uchar *p = s.peek(pos, n);
+        while (!p && n > 1) // near the end of what there is: smaller pieces
+            p = s.peek(pos, n /= 2);
+        if (!p)
+            break;
+        int i = 0;
+        while (i < n && textByte(p[i]))
+            ++i;
+        pos += quint64(i);
+        if (i < n)
+            break;
+    }
+    *zeros = false;
+    quint32 c = 0;
+    if (s.u8(pos, c) && c == 0) {
+        *zeros = true;
+        for (quint64 q = pos + 1; *zeros && q % 512 != 0; ++q)
+            *zeros = s.u8(q, c) && c == 0;
+    }
+    return pos;
+}
+
+filetypes::Measured textRun(Stream &s, int type, quint64 from = 0)
+{
+    bool zeros = false;
+    const quint64 end = textEnd(s, from, filetypes::sizeLimit(type), &zeros);
+    if (end <= from + 16)
+        return {};
+    return zeros ? complete(type, end) : incomplete(type, end);
+}
+
+// Up to the last `closing` (in either case) inside the text, and the line end after it.
+filetypes::Measured textUpTo(Stream &s, int type, const QByteArray &closing)
+{
+    bool zeros = false;
+    const quint64 end = textEnd(s, 0, filetypes::sizeLimit(type), &zeros);
+    quint64 last = ~quint64(0);
+    for (const QByteArray &mark : {closing.toLower(), closing.toUpper()}) {
+        for (quint64 at = s.find(0, mark); at != ~quint64(0) && at < end; at = s.find(at + 1, mark))
+            last = last == ~quint64(0) ? at : std::max(last, at);
+    }
+    if (last == ~quint64(0) || last + quint64(closing.size()) > end)
+        return end > 16 ? incomplete(type, end) : filetypes::Measured{};
+    quint64 after = last + quint64(closing.size());
+    quint32 c = 0;
+    if (s.u8(after, c) && c == '\r')
+        ++after;
+    if (s.u8(after, c) && c == '\n')
+        ++after;
+    return complete(type, after);
+}
+
+// An email's header lines: "Name: value", or carrying on the one before with a space.
+bool mailHeaders(const uchar *h, int n, bool strict)
+{
+    static const char *const known[] = {"Return-Path:", "Received:", "From:", "Delivered-To:", "MIME-Version:", "Message-ID:", "Message-Id:",
+                                        "Date:", "To:", "Subject:", "DKIM-Signature:", "ARC-Seal:", "Authentication-Results:", "X-"};
+    bool first = false;
+    for (const char *k : known)
+        first = first || (n >= int(strlen(k)) && memcmp(h, k, strlen(k)) == 0);
+    if (!first)
+        return false;
+    int lines = 0;
+    bool from = false, other = false;
+    for (int at = 0; at < n;) {
+        int end = at;
+        while (end < n && h[end] != '\n')
+            ++end;
+        if (end == n)
+            break; // a line cut off by the end of what's looked at
+        const int length = end - at - (end > at && h[end - 1] == '\r' ? 1 : 0);
+        if (length == 0)
+            return lines >= 3 && (!strict || (from && other)); // the blank line before the message
+        if (h[at] != ' ' && h[at] != '\t') {
+            int colon = at;
+            while (colon < at + length && h[colon] != ':' && h[colon] > 0x20 && h[colon] < 0x7F)
+                ++colon;
+            if (colon == at || colon == at + length || h[colon] != ':')
+                return false;
+            const QByteArray name(reinterpret_cast<const char *>(h + at), colon - at);
+            from = from || name.compare("From", Qt::CaseInsensitive) == 0;
+            other = other || name.compare("Date", Qt::CaseInsensitive) == 0 || name.compare("Subject", Qt::CaseInsensitive) == 0
+                 || name.compare("Message-ID", Qt::CaseInsensitive) == 0;
+        }
+        for (int i = at; i < at + length; ++i) {
+            if (!textByte(h[i]))
+                return false;
+        }
+        ++lines;
+        at = end + 1;
+    }
+    return !strict && lines >= 3; // the header carries on past what's looked at
+}
+
+filetypes::Measured measureMail(Stream &s)
+{
+    // Its whole header, to the blank line, must read as one (at most 256 KiB of it).
+    const quint64 blank = s.find(0, QByteArrayLiteral("\n\n")), crlf = s.find(0, QByteArrayLiteral("\r\n\r\n"));
+    const quint64 end = std::min(blank, crlf);
+    if (end == ~quint64(0) || end > 256 * 1024)
+        return {};
+    const int n = int(end + (end == crlf ? 4 : 2));
+    const uchar *h = s.peek(0, n);
+    if (!h || !mailHeaders(h, n, true))
+        return {};
+    return textRun(s, Eml);
+}
+
+// A mailbox (mbox), as Thunderbird and others keep them: messages one after another, each after
+// a "From " line.
+filetypes::Measured measureMbox(Stream &s)
+{
+    const uchar *h = s.peek(0, 512);
+    if (!h || memcmp(h, "From ", 5) != 0)
+        return {};
+    int line = 5;
+    while (line < 200 && h[line] != '\n')
+        ++line;
+    if (line >= 200 || line < 20 || !mailHeaders(h + line + 1, 511 - line, false))
+        return {};
+    return textRun(s, Mbox);
+}
+
+// RTF: groups in braces, to where the first one closes.
+filetypes::Measured measureRtf(Stream &s)
+{
+    if (!s.is(0, "{\\rtf"))
+        return {};
+    int depth = 0;
+    for (quint64 pos = 0; pos < s.limit();) {
+        const uchar *p = s.peek(pos, 1);
+        if (!p)
+            return incomplete(Rtf, pos);
+        const uchar c = *p;
+        if (c == '\\') {
+            // \binN: N bytes of anything follow
+            if (s.is(pos + 1, "bin")) {
+                quint64 n = 0, q = pos + 4;
+                quint32 d = 0;
+                while (s.u8(q, d) && d >= '0' && d <= '9' && n < (1ull << 40))
+                    n = n * 10 + (d - '0'), ++q;
+                if (s.u8(q, d) && d == ' ')
+                    ++q;
+                pos = q + n;
+                continue;
+            }
+            pos += 2; // an escaped character, or the start of a control word
+            continue;
+        }
+        if (c == '{')
+            ++depth;
+        else if (c == '}' && --depth == 0) {
+            quint64 end = pos + 1;
+            quint32 d = 0;
+            while (end < pos + 3 && s.u8(end, d) && (d == '\r' || d == '\n'))
+                ++end;
+            return complete(Rtf, end);
+        } else if (!textByte(c)) {
+            return incomplete(Rtf, pos);
+        }
+        ++pos;
+    }
+    return incomplete(Rtf, s.reached());
+}
+
+filetypes::Measured measureMarkup(Stream &s)
+{
+    const uchar *h = s.peek(0, 512);
+    if (!h)
+        return {};
+    const QByteArray head = QByteArray(reinterpret_cast<const char *>(h), 512).toLower();
+    if (head.startsWith("<?xml")) {
+        if (head.contains("<svg"))
+            return textUpTo(s, Svg, QByteArrayLiteral("</svg>"));
+        if (head.contains("<html"))
+            return textUpTo(s, Html, QByteArrayLiteral("</html>"));
+        return textRun(s, Xml);
+    }
+    if (head.startsWith("<svg"))
+        return textUpTo(s, Svg, QByteArrayLiteral("</svg>"));
+    return textUpTo(s, Html, QByteArrayLiteral("</html>"));
+}
+
+filetypes::Measured measureCards(Stream &s)
+{
+    if (s.is(0, "BEGIN:VCALENDAR"))
+        return textUpTo(s, Ics, QByteArrayLiteral("END:VCALENDAR"));
+    if (s.is(0, "BEGIN:VCARD"))
+        return textUpTo(s, Vcf, QByteArrayLiteral("END:VCARD"));
+    return {};
+}
+
 const QVector<filetypes::Type> &filetypes::types()
 {
     using C = Category;
@@ -1379,6 +1589,14 @@ const QVector<filetypes::Type> &filetypes::types()
         {QStringLiteral("msg"), C::Document, tr("Outlook email")},
         {QStringLiteral("ole"), C::Other, tr("Compound file")},
         {QStringLiteral("gz"), C::Archive, tr("gzip file")},
+        {QStringLiteral("eml"), C::Document, tr("Email")},
+        {QStringLiteral("mbox"), C::Document, tr("Mailbox")},
+        {QStringLiteral("rtf"), C::Document, tr("Rich text document")},
+        {QStringLiteral("html"), C::Document, tr("Web page")},
+        {QStringLiteral("xml"), C::Other, tr("XML file")},
+        {QStringLiteral("svg"), C::Picture, tr("SVG drawing")},
+        {QStringLiteral("ics"), C::Document, tr("Calendar")},
+        {QStringLiteral("vcf"), C::Document, tr("Contacts")},
     };
     Q_ASSERT(list.size() == TypeCount);
     return list;
@@ -1409,6 +1627,7 @@ int filetypes::typeForName(const QString &fileName)
         {QStringLiteral("mka"), QStringLiteral("mkv")},  {QStringLiteral("asf"), QStringLiteral("wmv")},
         {QStringLiteral("dot"), QStringLiteral("doc")},  {QStringLiteral("xlt"), QStringLiteral("xls")},
         {QStringLiteral("pps"), QStringLiteral("ppt")},  {QStringLiteral("tgz"), QStringLiteral("gz")},
+        {QStringLiteral("htm"), QStringLiteral("html")}, {QStringLiteral("vcard"), QStringLiteral("vcf")},
     };
     return typeNumber(also.value(ext, ext));
 }
@@ -1449,6 +1668,11 @@ int filetypes::startType(int type)
         return Tif;
     case Webm:
         return Mkv;
+    case Xml:
+    case Svg:
+        return Html;
+    case Vcf:
+        return Ics;
     case Wma:
         return Wmv;
     case Xls:
@@ -1577,6 +1801,20 @@ QVector<int> filetypes::candidates(const uchar *h, int len)
     }
     if (memcmp(h + 4, "ftyp", 4) == 0)
         out << Mp4; // measureBmff says which
+    // Text kinds, by how they start.
+    if (h[0] == '<') {
+        QByteArray start = QByteArray(reinterpret_cast<const char *>(h), 16).toLower();
+        if (start.startsWith("<?xml") || start.startsWith("<!doctype html") || start.startsWith("<html") || start.startsWith("<svg"))
+            out << Html; // measureMarkup says which
+    } else if (h[0] == '{' && memcmp(h, "{\\rtf", 5) == 0) {
+        out << Rtf;
+    } else if (h[0] == 'B' && (memcmp(h, "BEGIN:VCALENDAR", 15) == 0 || memcmp(h, "BEGIN:VCARD", 11) == 0)) {
+        out << Ics; // or Vcf
+    } else if (memcmp(h, "From ", 5) == 0) {
+        out << Mbox;
+    } else if (h[0] >= 'A' && h[0] <= 'Z' && mailHeaders(h, len, false)) {
+        out << Eml;
+    }
     return out;
 }
 
@@ -1629,6 +1867,17 @@ quint64 filetypes::sizeLimit(int type)
     case Msg:
     case Ole:
         return 1 * kGiB;
+    case Mbox:
+        return 16 * kGiB;
+    case Eml:
+    case Rtf:
+    case Xml:
+        return 512 * kMiB;
+    case Html:
+    case Svg:
+    case Ics:
+    case Vcf:
+        return 64 * kMiB;
     default:
         return 2 * kGiB;
     }
@@ -1681,6 +1930,16 @@ filetypes::Measured measureOne(int type, Stream &s)
         return measureOle(s);
     case Gz:
         return measureGz(s);
+    case Eml:
+        return measureMail(s);
+    case Mbox:
+        return measureMbox(s);
+    case Rtf:
+        return measureRtf(s);
+    case Html:
+        return measureMarkup(s);
+    case Ics:
+        return measureCards(s);
     default:
         return {};
     }

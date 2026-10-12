@@ -10,6 +10,7 @@
 #include "officetext.h"
 #include "ole.h"
 #include "pictures.h"
+#include "textkinds.h"
 
 #include <QBuffer>
 #include <QCoreApplication>
@@ -277,6 +278,13 @@ Result make(const Request &r)
         out.facts = ole::properties(file);
         if (out.text.isEmpty() && ole::locked(file))
             out.text = tr("It's locked with a password, so its words can't be shown.");
+        return out;
+    }
+    if (QStringList{QStringLiteral("eml"), QStringLiteral("mbox"), QStringLiteral("rtf"), QStringLiteral("html"), QStringLiteral("xml"),
+                    QStringLiteral("ics"), QStringLiteral("vcf")}
+            .contains(id)) {
+        out.text = texts::text(r.type, r.data);
+        out.facts = texts::properties(r.type, r.data);
         return out;
     }
     if (type && type->category == filetypes::Category::Document) {
