@@ -690,10 +690,10 @@ void UDisks::mount(const Volume &volume, bool readOnly)
          tr("Couldn't mount %1").arg(name));
 }
 
-void UDisks::unmount(const Volume &volume)
+void UDisks::unmount(const Volume &volume, bool besideSystem)
 {
     const QString name = shortDevice(volume.device);
-    if (refuseSystem(diskOf(volume), tr("Couldn't unmount %1").arg(name)))
+    if (!(besideSystem && !volume.isSystem) && refuseSystem(diskOf(volume), tr("Couldn't unmount %1").arg(name)))
         return;
     call(volume.filesystemPath(), kFilesystem, QStringLiteral("Unmount"), {options()},
          [name](const QDBusMessage &) { return tr("Unmounted %1").arg(name); },

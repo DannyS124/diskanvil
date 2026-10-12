@@ -1030,11 +1030,11 @@ void UDisks::mount(const Volume &volume, bool readOnly)
     });
 }
 
-void UDisks::unmount(const Volume &volume)
+void UDisks::unmount(const Volume &volume, bool besideSystem)
 {
     const QString name = shortDevice(volume.device);
     const QString failure = tr("Couldn't unmount %1").arg(name);
-    if (refuseSystem(diskOf(volume), failure))
+    if (!(besideSystem && !volume.isSystem) && refuseSystem(diskOf(volume), failure))
         return;
     unmountThen({volume}, failure, [this, name] {
         refresh();

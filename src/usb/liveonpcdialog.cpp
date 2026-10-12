@@ -356,7 +356,7 @@ void LiveOnPcDialog::copyInto(const QString &root, bool fresh)
         for (const Disk &d : m_udisks->disks()) {
             for (const Volume &v : d.volumes) {
                 if (v.objectPath == m_volumePath)
-                    m_udisks->unmount(v);
+                    m_udisks->unmount(v, true);
             }
         }
         if (!ok)
