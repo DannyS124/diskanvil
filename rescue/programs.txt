@@ -23,3 +23,4 @@ x11vnc         Let Someone Help (the screen)
 sshd           Let Someone Help (a terminal)
 ssh-keygen     Let Someone Help (its own host keys)
 dnsmasq        Start Other PCs from This One (network start)
+qemu-system-x86_64 Try Starting It

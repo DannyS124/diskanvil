@@ -151,5 +151,9 @@ x11vnc
 openssh-server
 # Start Other PCs from This One: proxy DHCP and TFTP for network starts (only while it's on)
 dnsmasq-base
+# Try Starting It: a drive started in a virtual machine (UEFI and BIOS firmware)
+qemu-system-x86
+ovmf
+seabios
 # more picture kinds in those previews (WebP, TIFF...)
 qt6-image-formats-plugins
