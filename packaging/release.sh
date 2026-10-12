@@ -133,7 +133,9 @@ case "$cmd" in
     # someone updating would. That's how the 0.4.1 -> 0.4.2 update broke.
     if gh release view "v$old" -R "$repo" >/dev/null 2>&1; then
         echo "==> building the current release ($old), then updating to $v in the same folder"
-        cp "$pkgbuild" "$tmp/pkg/PKGBUILD"
+        # The PKGBUILD people have now: GitHub's main branch, as the last publish left it (0.5.1's
+        # is DiskForge's, under the name it had then).
+        git show "origin/main:packaging/arch/PKGBUILD" > "$tmp/pkg/PKGBUILD" 2>/dev/null || cp "$pkgbuild" "$tmp/pkg/PKGBUILD"
         try_makepkg "the current release $old doesn't build"
     else
         echo "==> no release on GitHub to update from, building $v on its own"
