@@ -60,6 +60,7 @@ add_library(diskforge-core STATIC
     src/usb/imagesource.cpp src/usb/imagesource.h
     src/lostfiles/lostsource.cpp src/lostfiles/lostsource.h
     src/lostfiles/lostscan.cpp src/lostfiles/lostscan.h
+    src/lostfiles/timeline.cpp src/lostfiles/timeline.h
     src/lostfiles/lostfs.cpp src/lostfiles/lostfs.h src/lostfiles/lostntfs.cpp src/lostfiles/lostraw.h
     src/lostfiles/vshadow.cpp src/lostfiles/vshadow.h
     src/lostfiles/vdisk.cpp src/lostfiles/vdisk.h
@@ -166,6 +167,7 @@ add_library(diskforge-ui STATIC
     src/app/homewindow.cpp src/app/homewindow.h
     src/app/whathappened.cpp src/app/whathappened.h
     src/lostfiles/lostfilesdialog.cpp src/lostfiles/lostfilesdialog.h
+    src/lostfiles/timelinedialog.cpp src/lostfiles/timelinedialog.h
     src/lostfiles/preview.cpp src/lostfiles/preview.h
     src/lostfiles/pictures.cpp src/lostfiles/pictures.h
     src/lostfiles/previewloader.cpp src/lostfiles/previewloader.h

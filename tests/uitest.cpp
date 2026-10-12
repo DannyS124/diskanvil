@@ -22,6 +22,7 @@
 #include "../src/lostfiles/btrfsdialog.h"
 #include "../src/app/whathappened.h"
 #include "../src/lostfiles/lostfilesdialog.h"
+#include "../src/lostfiles/timelinedialog.h"
 #include "../src/lostfiles/filetypes.h"
 #include "../src/common/jobui.h"
 #include "../src/lostfiles/preview.h"
@@ -117,6 +118,8 @@
 #include <QMenuBar>
 #include <QPushButton>
 #include <QSpinBox>
+#include <QTimeZone>
+#include <QTableView>
 #include <QRadioButton>
 #include <QElapsedTimer>
 #include <QMessageBox>
@@ -3875,6 +3878,56 @@ void lostFilesFromShadowCopies()
 
 // NTFS's change journal (tests/data/lostfs/journal-job.cmd): "Deleted recently" lists what's known
 // to have been deleted when, newest first, and a file only its name is left of can't be ticked.
+// The timeline: its rules on made-up files (dates that can't be real left out, oldest first,
+// CSV quoted where needed), then on an NTFS drive whose change journal kept three deletions.
+void timelineWindow()
+{
+    const qint64 day = 24LL * 3600 * 1000;
+    const qint64 now = QDateTime(QDate(2026, 10, 12), QTime(12, 0), QTimeZone::UTC).toMSecsSinceEpoch();
+    QVector<lost::Found> made(2);
+    made[0].name = QStringLiteral("a, \"quoted\".txt");
+    made[0].modified = now - 10 * day;
+    made[0].created = now - 20 * day;
+    made[0].accessed = 1000; // 1970: not real
+    made[0].deleted = false;
+    made[1].name = QStringLiteral("photo.jpg");
+    made[1].inside = now - 30 * day;
+    made[1].deletedAt = now - day;
+    made[1].modified = now + 30 * day; // in the future: not real
+    const QVector<timeline::Event> events = timeline::events(made, now);
+    QStringList kinds;
+    for (const timeline::Event &e : events)
+        kinds << timeline::kindName(e.kind).section(QLatin1Char(' '), 0, 0);
+    const QByteArray csv = timeline::csv(events, made);
+    report(kinds == QStringList({QStringLiteral("Its"), QStringLiteral("Made"), QStringLiteral("Written"), QStringLiteral("Deleted")})
+               && csv.contains("\"a, \"\"quoted\"\".txt\"") && csv.count('\n') == 5,
+           QStringLiteral("timeline: oldest first, unreal dates left out, CSV quoted"), kinds.join(QLatin1Char(',')));
+
+    QTemporaryDir dir;
+    const QString path = unpackLostFsImage(QStringLiteral("ntfs-journal"), dir);
+    if (path.isEmpty())
+        return;
+    UDisks udisks;
+    LostFilesDialog lost(&udisks, QString());
+    lost.show();
+    lost.scanImage(path);
+    auto *status = lost.findChild<QLabel *>(QStringLiteral("status"));
+    waitUntil([&] { return status->text().startsWith(QLatin1String("Done")); }, 60000);
+    TimelineDialog dialog(lost.files(), QStringLiteral("test drive"));
+    dialog.show();
+    const int all = dialog.shown();
+    auto *view = dialog.findChild<QTableView *>(QStringLiteral("timeline"));
+    int deletions = 0;
+    for (int r = 0; r < view->model()->rowCount(); ++r)
+        deletions += view->model()->index(r, 1).data().toString() == QLatin1String("Deleted") ? 1 : 0;
+    dialog.findChild<QCheckBox *>(QStringLiteral("deletedOnly"))->setChecked(true);
+    const int deletedFiles = dialog.shown();
+    dialog.findChild<QLineEdit *>(QStringLiteral("words"))->setText(QStringLiteral("beach"));
+    report(all > 10 && deletions >= 3 && deletedFiles < all && dialog.shown() > 0 && dialog.shown() < deletedFiles,
+           QStringLiteral("timeline: the drive's events, its three deletions among them, filtered by deleted files and by name"),
+           QStringLiteral("%1 events, %2 deletions, %3 of deleted files, %4 for beach").arg(all).arg(deletions).arg(deletedFiles).arg(dialog.shown()));
+}
+
 void lostFilesDeletedRecently()
 {
     QTemporaryDir dir;
@@ -5482,7 +5535,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},

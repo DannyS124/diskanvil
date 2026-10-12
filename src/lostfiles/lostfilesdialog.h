@@ -141,6 +141,8 @@ public:
 
     // Looks through a disk image file straight away.
     void scanImage(const QString &path);
+    // What was found (for the timeline, and the tests).
+    const QVector<lost::Found> &files() const { return m_model->files(); }
     // Looks through a source that's already open (and the tests' way in). diskDevice is the
     // drive it's on (/dev/sdb), so saving there can be refused; empty for an image.
     void scanSource(std::shared_ptr<lost::Source> source, const QString &title, const QString &diskDevice);

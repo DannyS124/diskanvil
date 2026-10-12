@@ -16,6 +16,7 @@
 #include "previewloader.h"
 #include "repair.h"
 #include "thumbcache.h"
+#include "timelinedialog.h"
 #include "ransomware.h"
 #include "readthrough.h"
 #include "rescuestick.h"
@@ -861,6 +862,10 @@ LostFilesDialog::LostFilesDialog(UDisks *udisks, const QString &preferredPath, Q
     m_findWords->setObjectName(QStringLiteral("findWords"));
     m_findWords->setToolTip(tr("Looks all through the drive for words you remember from a lost document or email, and shows the text "
                                "around them"));
+    QAction *timelineAction = organise->addAction(tr("Timeline…"));
+    timelineAction->setObjectName(QStringLiteral("timeline"));
+    timelineAction->setToolTip(tr("Every time the drive kept of the files found, in order: what was made, opened and deleted when"));
+    connect(timelineAction, &QAction::triggered, this, [this] { TimelineDialog(m_model->files(), m_title, this).exec(); });
     m_organise->setMenu(organise);
     filters->addWidget(m_organise);
     middleLayout->addWidget(filterBox);
