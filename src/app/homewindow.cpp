@@ -491,8 +491,15 @@ void HomeWindow::updateStatus()
     if (m_mode == Mode::Desktop && rescue::runningInRescue()) {
         const QString medium = QStringLiteral("/run/live/medium");
         const bool onStick = QStorageInfo(medium).fileSystemType() == "vfat";
-        m_logs->setText(onStick ? dot(color("green"), tr("Logs are saved on the stick"))
-                                : dot(color("dim"), tr("Logs stay in memory (started from a CD or ISO)")));
+        // Started from its partition on the PC's own drive (Put DiskAnvil Live on This PC), not a stick.
+        bool onPc = false;
+        for (const Disk &d : m_udisks->disks()) {
+            for (const Volume &v : d.volumes)
+                onPc = onPc || (v.mounts().contains(medium) && !d.removable && d.bus != QLatin1String("usb"));
+        }
+        m_logs->setText(!onStick ? dot(color("dim"), tr("Logs stay in memory (started from a CD or ISO)"))
+                        : onPc   ? dot(color("green"), tr("Logs are saved on its partition on this PC"))
+                                 : dot(color("green"), tr("Logs are saved on the stick")));
         QFile cmdline(QStringLiteral("/proc/cmdline"));
         const bool kept = cmdline.open(QIODevice::ReadOnly) && cmdline.readAll().split(' ').contains("persistence");
         m_kept->setText(kept ? dot(color("green"), tr("Changes are kept on the stick")) : dot(color("dim"), tr("Changes go when it's turned off")));
