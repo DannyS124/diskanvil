@@ -3370,6 +3370,53 @@ void virusScanOnDrive()
     cleanUpLoop(udisks, loopPath);
 }
 
+// Windows' thumbnail caches on a drive: their small pictures are listed after a search.
+void lostFilesThumbnails()
+{
+    if (QStandardPaths::findExecutable(QStringLiteral("mkfs.fat")).isEmpty() || QStandardPaths::findExecutable(QStringLiteral("mcopy")).isEmpty()) {
+        report(true, QStringLiteral("thumbnails: skipped, mkfs.fat and mtools aren't here"));
+        return;
+    }
+    QTemporaryDir dir;
+    const QString image = dir.filePath(QStringLiteral("windows.img"));
+    const QString data = QStringLiteral(SOURCE_DIR "/tests/data/lostfs/types/");
+    const auto run = [](const QString &program, const QStringList &args) {
+        QProcess p;
+        p.start(program, args);
+        return p.waitForFinished(30000) && p.exitCode() == 0;
+    };
+    bool made = run(QStringLiteral("truncate"), {QStringLiteral("-s"), QStringLiteral("40M"), image})
+             && run(QStringLiteral("mkfs.fat"), {QStringLiteral("-F"), QStringLiteral("32"), image});
+    for (const char *folder : {"Users", "Users/Sam", "Users/Sam/AppData", "Users/Sam/AppData/Local", "Users/Sam/AppData/Local/Microsoft",
+                               "Users/Sam/AppData/Local/Microsoft/Windows", "Users/Sam/AppData/Local/Microsoft/Windows/Explorer", "Old photos"})
+        made = made && run(QStringLiteral("mmd"), {QStringLiteral("-i"), image, QStringLiteral("::/") + QString::fromLatin1(folder)});
+    made = made && run(QStringLiteral("mcopy"), {QStringLiteral("-i"), image, data + QStringLiteral("thumbcache_256.db"),
+                                                 QStringLiteral("::/Users/Sam/AppData/Local/Microsoft/Windows/Explorer/")})
+        && run(QStringLiteral("mcopy"), {QStringLiteral("-i"), image, data + QStringLiteral("Thumbs.db"), QStringLiteral("::/Old photos/")});
+    if (!made) {
+        report(false, QStringLiteral("thumbnails: make the FAT image"));
+        return;
+    }
+    UDisks udisks;
+    LostFilesDialog dialog(&udisks, QString());
+    dialog.show();
+    dialog.scanImage(image);
+    auto *status = dialog.findChild<QLabel *>(QStringLiteral("status"));
+    waitUntil([&] { return status->text().contains(QLatin1String("small pictures")); }, 60000);
+    auto *deletedOnly = dialog.findChild<QCheckBox *>(QStringLiteral("deletedOnly"));
+    deletedOnly->setChecked(true);
+    auto *view = dialog.findChild<QListView *>(QStringLiteral("files"));
+    const auto *model = qobject_cast<const LostFilesModel *>(view->model());
+    QStringList names;
+    for (int i = 0; i < model->fileCount(); ++i) {
+        if (model->file(i).folder == QLatin1String("Small pictures Windows kept"))
+            names << model->file(i).name;
+    }
+    names.sort();
+    report(status->text().contains(QLatin1String("Windows kept 6 small pictures")) && names.size() == 6 && names.contains(QStringLiteral("beach (small copy).jpg")),
+           QStringLiteral("thumbnails: a search lists the small pictures in Windows' caches on the drive"), names.join(QLatin1Char(',')));
+}
+
 // Repairing through the window: a copy is repaired, and joins the list to be looked at and saved.
 void lostFilesRepaired()
 {
@@ -3933,7 +3980,7 @@ int userScenarios(const QStringList &only)
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
         {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
-        {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
+        {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},
         {"previews", previewsThroughHelper}, {"viruses", virusScanThroughWindow}, {"virusdrive", virusScanOnDrive}, {"viruswindows", virusScanWindowsDrive}, {"virusboot", virusScanBoot}, {"viruslookup", virusLookUpOnline}, {"newids", newIdsThroughWindow},
     };

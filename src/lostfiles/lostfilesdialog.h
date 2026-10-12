@@ -182,6 +182,8 @@ private:
     // Organising: copies of the same file (lost::CopyFinder), and which files actually open
     // (each one through the preview helper, in its sandbox).
     void findCopies();
+    // The small pictures in Windows' thumbnail caches among the files found, listed as files of their own.
+    void findThumbnails();
     // Finds text by words remembered from it (lost::WordSearch), all through the drive.
     void findByWords(const QString &words);
     void checkTheyOpen();
@@ -263,6 +265,7 @@ private:
     QAction *m_findWords = nullptr;
     lost::WordSearch *m_wordSearch = nullptr;
     QThread *m_wordThread = nullptr;
+    QThread *m_thumbnailThread = nullptr;
     lost::CopyFinder *m_copyFinder = nullptr;
     QThread *m_copyFinderThread = nullptr;
     PreviewLoader *m_checker = nullptr;

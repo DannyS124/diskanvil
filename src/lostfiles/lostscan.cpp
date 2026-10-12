@@ -8,6 +8,7 @@
 #include "filetypes.h"
 #include "lostfs.h"
 #include "naming.h"
+#include "thumbcache.h"
 
 #include <QCoreApplication>
 #include <QSet>
@@ -19,6 +20,7 @@
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QFileInfo>
 #include <QHash>
 
 #include <cerrno>
@@ -468,6 +470,58 @@ QString lost::cleanName(const QString &name)
         clean.remove(cut, 1);
     }
     return clean;
+}
+
+QVector<lost::Extent> lost::slice(const QVector<Extent> &extents, quint64 from, quint64 length)
+{
+    QVector<Extent> out;
+    quint64 pos = 0;
+    for (const Extent &e : extents) {
+        const quint64 end = pos + e.length;
+        if (end > from && pos < from + length) {
+            const quint64 a = std::max(from, pos), b = std::min(from + length, end);
+            out.push_back({e.zeros() ? Extent::kZeros : e.start + (a - pos), b - a});
+        }
+        pos = end;
+        if (pos >= from + length)
+            break;
+    }
+    return out;
+}
+
+QVector<lost::Found> lost::thumbnailsIn(const std::shared_ptr<Source> &source, const Found &cache)
+{
+    QVector<Found> out;
+    if (cache.nameOnly || cache.size == 0 || cache.size > 1024ull * 1024 * 1024)
+        return out;
+    FileReader reader(cache.from ? cache.from : source, cache);
+    const QByteArray bytes = reader.head(qint64(cache.size));
+    const QString where = cache.folder.isEmpty() ? cache.name : cache.folder + QLatin1Char('/') + cache.name;
+    int number = 0;
+    for (const thumbcache::Thumb &t : thumbcache::read(bytes)) {
+        Found f;
+        ++number;
+        const QString base = t.name.isEmpty() ? QCoreApplication::translate("lostscan", "Small picture %1").arg(number, 5, 10, QLatin1Char('0'))
+                                              : QCoreApplication::translate("lostscan", "%1 (small copy)").arg(QFileInfo(t.name).completeBaseName());
+        f.name = cleanName(base + QLatin1Char('.') + t.kind);
+        f.folder = QCoreApplication::translate("lostscan", "Small pictures Windows kept");
+        f.type = filetypes::typeForName(f.name);
+        f.size = t.size;
+        if (t.data.isEmpty()) {
+            f.extents = slice(cache.extents, t.offset, t.size);
+            f.from = cache.from;
+        } else {
+            f.data = t.data;
+        }
+        f.origin = Origin::FileSystem;
+        f.deleted = true;
+        f.condition = cache.condition;
+        f.modified = cache.modified;
+        f.note = QCoreApplication::translate("lostscan", "Windows kept this small copy of a photo or film in %1. The photo itself may be gone.")
+                     .arg(where);
+        out.push_back(f);
+    }
+    return out;
 }
 
 lost::WordSearch::WordSearch(std::shared_ptr<Source> source, QStringList words, QVector<Found> known)

@@ -66,6 +66,9 @@ ff -f lavfi -i testsrc=size=64x48:rate=10:duration=2 -f lavfi -i sine=frequency=
 ff -f lavfi -i sine=frequency=440:duration=1.5 -c:a wmav2 "${tags[@]}" "$here/song.wma"
 
 python3 -I "$here/texts.py" "$here"
+# Windows' thumbnail caches (office.py's own writer; needs PIL here).
+python3 -I "$here/office.py" "$work" thumbs
+cp "$work/thumbcache_256.db" "$work/Thumbs.db" "$here/"
 
 printf 'Pack the blue tent.\n' > "$work/notes.txt"
 gzip -9 -c "$work/notes.txt" > "$here/notes.txt.gz" # keeps the name: notes.txt

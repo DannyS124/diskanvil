@@ -15,6 +15,7 @@
 #include "lostfs.h"
 #include "previewloader.h"
 #include "repair.h"
+#include "thumbcache.h"
 #include "viewer.h"
 #include "udisks.h"
 #include "vdisk.h"
@@ -1060,6 +1061,8 @@ void LostFilesDialog::stopWorkers()
         m_wordSearch->cancel();
     if (m_checker)
         m_checker->stop();
+    if (m_thumbnailThread)
+        m_thumbnailThread->wait(); // reading a cache file or two: not long
     for (QThread *t : {m_quickThread, m_scanThread, m_copyThread, m_saveThread, m_thumbThread, m_copyFinderThread, m_checkerThread, m_wordThread}) {
         if (t) {
             t->quit();
@@ -1404,6 +1407,42 @@ void LostFilesDialog::scanDone(bool stopped)
     updateTicked();
     m_organise->setEnabled(m_model->fileCount() > 0);
     m_findCopies->setEnabled(m_model->fileCount() > 1);
+    if (!stopped)
+        findThumbnails();
+}
+
+void LostFilesDialog::findThumbnails()
+{
+    QVector<lost::Found> caches;
+    for (const lost::Found &f : m_model->files()) {
+        if (thumbcache::isCache(f.name) && !f.nameOnly)
+            caches << f;
+    }
+    if (caches.isEmpty() || m_thumbnailThread)
+        return;
+    QPointer<LostFilesDialog> self(this);
+    m_thumbnailThread = QThread::create([self, caches, source = m_source] {
+        QVector<lost::Found> pictures;
+        for (const lost::Found &cache : caches)
+            pictures += lost::thumbnailsIn(source, cache);
+        QMetaObject::invokeMethod(qApp, [self, pictures] {
+            if (!self || pictures.isEmpty())
+                return;
+            self->m_model->append(pictures);
+            self->addFolders(pictures);
+            self->refreshCategories();
+            self->m_status->setText(self->m_status->text() + QLatin1Char(' ')
+                                    + QCoreApplication::translate("LostFilesDialog",
+                                                                  "Windows kept %n small picture(s) of photos and films, some maybe deleted: see "
+                                                                  "\"Small pictures Windows kept\".",
+                                                                  nullptr, int(pictures.size())));
+        }, Qt::QueuedConnection);
+    });
+    connect(m_thumbnailThread, &QThread::finished, this, [this] {
+        m_thumbnailThread->deleteLater();
+        m_thumbnailThread = nullptr;
+    });
+    m_thumbnailThread->start();
 }
 
 void LostFilesDialog::findByWords(const QString &typed)

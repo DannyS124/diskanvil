@@ -196,6 +196,48 @@ mail = [
 with open(f"{out}/ferry.msg", "wb") as f:
     f.write(compound(mail))
 
+# Windows' thumbnail caches (run here, it needs PIL): a thumbcache_256.db as Windows 10 writes them
+# (the "CMMM" header, then entries of a hash, sizes, the picture's width and height, checksums, an
+# identifier and the picture), with an empty entry among them as Windows leaves; and an XP Thumbs.db,
+# a compound file with a Catalog naming each photo and a stream per picture.
+if len(sys.argv) > 2 and sys.argv[2] == "thumbs":
+    import io
+    from PIL import Image, ImageDraw
+
+    def thumb(colour, kind, size=(96, 64)):
+        img = Image.new("RGB", size, colour)
+        ImageDraw.Draw(img).ellipse((10, 10, 50, 50), fill=(255, 255, 255))
+        out = io.BytesIO()
+        img.save(out, kind)
+        return out.getvalue()
+
+    pictures = [thumb((255, 51, 85), "JPEG"), thumb((43, 238, 138), "PNG"), b"", thumb((31, 111, 255), "JPEG")]
+    body = b""
+    first = 24
+    for i, data in enumerate(pictures):
+        ident = ("%016x" % (0x1234abcd0000 + i)).encode("utf-16-le")
+        header = 56 + len(ident)
+        padding = (-(header + len(data))) % 8
+        entry = b"CMMM" + struct.pack("<IQIIIIIIQQ", header + padding + len(data), 0x9e1f + i, len(ident), padding, len(data),
+                                      96 if data else 0, 64 if data else 0, 0, 0, 0)
+        body += entry + ident + b"\0" * padding + data
+    with open(f"{out}/thumbcache_256.db", "wb") as f:
+        f.write(b"CMMM" + struct.pack("<IIIII", 0x20, 2, 0, first, first + len(body)) + body)
+
+    names = {1: "beach.jpg", 2: "dog.png", 10: "party.jpg"}
+    catalog = struct.pack("<HHIII", 16, 7, len(names), 96, 96)
+    for number, name in names.items():
+        text = name.encode("utf-16-le") + b"\0\0"
+        text += b"\0" * ((-len(text)) % 4)
+        catalog += struct.pack("<IIQ", 16 + len(text), number, filetime(sent)) + text
+    streams = [("Catalog", catalog)]
+    for number, (colour, kind) in zip(names, [((250, 200, 20), "JPEG"), ((120, 60, 200), "JPEG"), ((10, 160, 160), "JPEG")]):
+        data = thumb(colour, kind)
+        streams.append((str(number)[::-1], struct.pack("<III", 12, 1, len(data)) + data))
+    with open(f"{out}/Thumbs.db", "wb") as f:
+        f.write(compound(streams))
+    sys.exit(0)
+
 # The Word document again with a macro project in it, the way Word keeps one: the scanner and
 # viewer must notice and not open it in Word. (Run after LibreOffice made notes.doc.)
 if len(sys.argv) > 2 and sys.argv[2] == "macros":

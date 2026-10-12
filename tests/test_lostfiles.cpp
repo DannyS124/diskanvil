@@ -21,6 +21,7 @@
 #include "../src/lostfiles/pictures.h"
 #include "../src/lostfiles/structure.h"
 #include "../src/lostfiles/repair.h"
+#include "../src/lostfiles/thumbcache.h"
 #include "../src/common/hostprocess.h"
 #include "../src/lostfiles/textkinds.h"
 #include "../src/lostfiles/preview.h"
@@ -2882,6 +2883,72 @@ void wordSearch()
     report(search({QStringLiteral("ferry")}).size() == 2, QStringLiteral("words: one word, every place it is"));
 }
 
+// The small pictures Windows keeps of photos, out of its thumbnail caches.
+void thumbnailCaches()
+{
+    const QByteArray cache = typesFile(QStringLiteral("thumbcache_256.db")), xp = typesFile(QStringLiteral("Thumbs.db"));
+    const QVector<thumbcache::Thumb> modern = thumbcache::read(cache);
+    bool open = modern.size() == 3;
+    for (const thumbcache::Thumb &t : modern)
+        open = open && !QImage::fromData(cache.mid(qsizetype(t.offset), qsizetype(t.size))).isNull();
+    report(open && modern[0].kind == QLatin1String("jpg") && modern[1].kind == QLatin1String("png"),
+           QStringLiteral("thumbnails: the pictures in a thumbcache file (Windows 10), the empty entry passed over"),
+           QStringLiteral("%1 found").arg(modern.size()));
+    const QVector<thumbcache::Thumb> old = thumbcache::read(xp);
+    QStringList names;
+    bool oldOpen = old.size() == 3;
+    for (const thumbcache::Thumb &t : old) {
+        names << t.name;
+        oldOpen = oldOpen && !QImage::fromData(t.data).isNull();
+    }
+    names.sort();
+    report(oldOpen && names == QStringList{QStringLiteral("beach.jpg"), QStringLiteral("dog.png"), QStringLiteral("party.jpg")},
+           QStringLiteral("thumbnails: the pictures in an XP Thumbs.db, with the photos' names (one in stream \"01\")"), names.join(QLatin1Char(',')));
+    report(thumbcache::isCache(QStringLiteral("thumbcache_1024.db")) && thumbcache::isCache(QStringLiteral("Thumbs.db"))
+               && !thumbcache::isCache(QStringLiteral("thumbcache_1024.db.txt")) && !thumbcache::isCache(QStringLiteral("photos.db")),
+           QStringLiteral("thumbnails: the caches are known by their names"));
+    // On a drive, the cache in two pieces: each picture is read from where it is, across the gap too.
+    QByteArray drive = noise(256 * 1024, 77);
+    const qsizetype half = cache.size() / 2;
+    drive.replace(4096, half, cache.left(half));
+    drive.replace(100000, cache.size() - half, cache.mid(half));
+    lost::Found file;
+    file.name = QStringLiteral("thumbcache_256.db");
+    file.folder = QStringLiteral("Users/Sam/AppData/Local/Microsoft/Windows/Explorer");
+    file.size = quint64(cache.size());
+    file.extents = {{4096, quint64(half)}, {100000, quint64(cache.size() - half)}};
+    const auto source = lost::Source::fromMemory(drive);
+    const QVector<lost::Found> found = lost::thumbnailsIn(source, file);
+    bool read = found.size() == 3;
+    for (const lost::Found &f : found)
+        read = read && !QImage::fromData(lost::FileReader(source, f).head(qint64(f.size))).isNull() && f.folder == QLatin1String("Small pictures Windows kept");
+    report(read && found[0].note.contains(QLatin1String("Explorer/thumbcache_256.db")),
+           QStringLiteral("thumbnails: listed as files of their own, read from the cache's pieces on the drive"),
+           found.isEmpty() ? QString() : found[0].name + QStringLiteral(" | ") + found[0].note);
+    lost::Found xpFile = file;
+    xpFile.name = QStringLiteral("Thumbs.db");
+    xpFile.size = quint64(xp.size());
+    xpFile.data = xp;
+    xpFile.extents.clear();
+    const QVector<lost::Found> named = lost::thumbnailsIn(source, xpFile);
+    QStringList namedFiles;
+    for (const lost::Found &f : named)
+        namedFiles << f.name;
+    namedFiles.sort();
+    report(namedFiles == QStringList{QStringLiteral("beach (small copy).jpg"), QStringLiteral("dog (small copy).jpg"), QStringLiteral("party (small copy).jpg")},
+           QStringLiteral("thumbnails: an XP cache's pictures named after their photos"), namedFiles.join(QLatin1Char(',')));
+    QRandomGenerator rng(321);
+    for (int round = 0; round < 400; ++round) {
+        QByteArray bad = round % 2 ? cache : xp;
+        for (int k = 0, n = 1 + int(rng.bounded(16)); k < n; ++k)
+            bad[int(rng.bounded(quint32(bad.size())))] = char(rng.bounded(256));
+        if (round % 3 == 0)
+            bad.truncate(qsizetype(rng.bounded(quint32(bad.size()))) + 1);
+        thumbcache::read(bad);
+    }
+    report(true, QStringLiteral("thumbnails: 400 damaged caches read without a crash"));
+}
+
 void lostFilesTests()
 {
     previewQueue();
@@ -2906,4 +2973,5 @@ void lostFilesTests()
     fileStructure();
     repairs();
     wordSearch();
+    thumbnailCaches();
 }

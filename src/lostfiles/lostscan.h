@@ -270,6 +270,12 @@ private:
 
 // A file name any file system takes (FAT and NTFS included), from whatever a drive said.
 QString cleanName(const QString &name);
+// The part of a file's extents from byte `from` of it, `length` long.
+QVector<Extent> slice(const QVector<Extent> &extents, quint64 from, quint64 length);
+// The small pictures in one of Windows' thumbnail caches (thumbcache.h) found on the source, as
+// files of their own (pointing into the cache's bytes where they're in one piece there).
+QVector<Found> thumbnailsIn(const std::shared_ptr<Source> &source, const Found &cache);
+
 // The made-up name for a file found by its contents: "Picture 000042.jpg".
 QString carvedName(int type, int number);
 // A better one, from what's inside it (naming.h), and the date it carries; the made-up one stays
