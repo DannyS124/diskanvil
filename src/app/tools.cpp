@@ -768,10 +768,10 @@ void HealthDialog::checkFarm()
         return;
 #ifdef Q_OS_WIN
     // smartctl names Windows' drives /dev/pd0, /dev/pd1... (PhysicalDrive0, 1...).
-    const QString device = QStringLiteral("/dev/pd") + disk->device.section(QLatin1String("PhysicalDrive"), -1);
-    const QString program = QCoreApplication::applicationDirPath() + QStringLiteral("/smartctl.exe");
+    // (blockPath is \\.\PhysicalDriveN; device is "Disk N", for people.)
+    const QString device = QStringLiteral("/dev/pd") + disk->blockPath.section(QLatin1String("PhysicalDrive"), -1);
     QStringList command = farm::command(device);
-    command[0] = QFileInfo::exists(program) ? program : QStringLiteral("smartctl");
+    command[0] = host::windowsProgram(QStringLiteral("smartctl"));
 #else
     const QString device = disk->device;
     // smartctl talks to the drive itself, which takes admin rights: DiskAnvil Live has them.

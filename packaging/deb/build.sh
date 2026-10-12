@@ -21,7 +21,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq >/dev/null
 apt-get install -y -qq --no-install-recommends build-essential cmake ninja-build pkg-config file dpkg-dev \
     qt6-base-dev qt6-base-dev-tools qt6-tools-dev qt6-tools-dev-tools qt6-l10n-tools qt6-svg-plugins \
-    libzstd-dev zlib1g-dev libssl-dev libblkid-dev libarchive-dev libpoppler-qt6-dev clamav \
+    libzstd-dev zlib1g-dev libssl-dev libblkid-dev libarchive-dev libpoppler-qt6-dev qt6-multimedia-dev clamav \
     fdisk e2fsprogs dosfstools mtools btrfs-progs cryptsetup-bin systemd ffmpeg zstd xorriso >/dev/null
 echo "Debian $(cat /etc/debian_version), Qt $(dpkg-query -W -f='${Version}' qt6-base-dev), gcc $(gcc -dumpversion)"
 mkdir -p /src && tar -xf /work/src.tar -C /src

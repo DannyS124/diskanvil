@@ -10,7 +10,7 @@ root=$(cd "$(dirname "$0")/../.." && pwd)
 work=$(realpath -m "${1:-${DISKANVIL_WINDOWS_WORK:-$HOME/.cache/diskanvil-windows}}")
 mkdir -p "$work"
 
-python3 "$root/packaging/windows/fetch-msys2.py" "$work" qt6-base qt6-svg qt6-imageformats qt6-translations zstd libarchive openssl poppler-qt6
+python3 "$root/packaging/windows/fetch-msys2.py" "$work" qt6-base qt6-svg qt6-imageformats qt6-translations qt6-multimedia qt6-multimedia-wmf zstd libarchive openssl poppler-qt6 sqlite3
 qt=$(sed -n 's/^set(PACKAGE_VERSION "\([0-9.]*\)")$/\1/p' "$work/sysroot/ucrt64/lib/cmake/Qt6Core/Qt6CoreConfigVersionImpl.cmake")
 hostqt="$work/hostqt/$qt/gcc_64"
 if [[ ! -x $hostqt/libexec/moc ]]; then
@@ -28,6 +28,9 @@ version=$(sed -n 's/^ *VERSION \([0-9.]*\)$/\1/p' "$root/CMakeLists.txt" | head 
 rm -rf "$work/DiskAnvil"
 "$root/packaging/windows/deploy.sh" "$work/build/diskanvil.exe" "$work/DiskAnvil" "$work/sysroot"
 cp "$root/LICENSE" "$work/DiskAnvil/LICENSE.txt"
+# sqlite3.exe (public domain), with what it needs: repairing SQLite files, and Firefox bookmarks in
+# Save My Files.
+"$root/packaging/windows/deploy.sh" "$work/sysroot/ucrt64/bin/sqlite3.exe" "$work/DiskAnvil" "$work/sysroot"
 python3 -I "$root/packaging/windows/icons.py" "$root/rescue/icons/DiskAnvil-Live" "$work/DiskAnvil/icons"
 (cd "$work" && rm -f "DiskAnvil-$version-windows.zip" && python3 -m zipfile -c "DiskAnvil-$version-windows.zip" DiskAnvil)
 echo "==> $work/DiskAnvil-$version-windows.zip"

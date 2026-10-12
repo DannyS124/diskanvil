@@ -12,7 +12,10 @@ search=("$sysroot/bin" /usr/x86_64-w64-mingw32/bin)
 # offscreen: for --dump and --screenshot, which draw without a screen.
 plugins=(platforms/qwindows.dll platforms/qoffscreen.dll styles/qmodernwindowsstyle.dll iconengines/qsvgicon.dll
     imageformats/qgif.dll imageformats/qico.dll imageformats/qjpeg.dll imageformats/qsvg.dll
-    imageformats/qwebp.dll imageformats/qtiff.dll tls/qschannelbackend.dll)
+    imageformats/qwebp.dll imageformats/qtiff.dll tls/qschannelbackend.dll
+    multimedia/windowsmediaplugin.dll)
+# Films and songs in Find Lost Files' viewer play through Windows' own Media Foundation (MSYS2's
+# qt6-multimedia-wmf): Qt's FFmpeg one would bring over a hundred megabytes of codecs Windows has.
 for p in "${plugins[@]}"; do
     if [[ -f $sysroot/share/qt6/plugins/$p ]]; then
         mkdir -p "$out/$(dirname "$p")"

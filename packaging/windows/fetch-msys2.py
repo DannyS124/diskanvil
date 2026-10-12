@@ -14,7 +14,8 @@ import urllib.request
 
 REPO = "https://repo.msys2.org/mingw/ucrt64"
 PREFIX = "mingw-w64-ucrt-x86_64-"
-# Things a package lists as needed that aren't needed to build or run DiskAnvil on Windows.
+# Things a package lists as needed that aren't needed to build or run DiskAnvil on Windows (asked
+# for by name, they still come: sqlite3, for its sqlite3.exe).
 SKIP = {"python", "perl", "tcl", "tk", "sqlite3", "gdb", "cmake", "ninja", "pkgconf"}
 
 
@@ -76,7 +77,7 @@ def resolve(wanted, packages, provides):
         seen.add(name)
         if name not in packages:
             sys.exit(f"not in the repository: {name}")
-        if name.removeprefix(PREFIX) in SKIP:
+        if name.removeprefix(PREFIX) in SKIP and name.removeprefix(PREFIX) not in wanted:
             continue
         order.append(name)
         todo.extend(d for d in packages[name].get("DEPENDS", []) if d.startswith(PREFIX))

@@ -113,8 +113,8 @@ QStringList arguments(const Options &o, const QString &ovmfCode, const QString &
 QProcess *start(const Options &given, QObject *parent, QString *error)
 {
     Options o = given;
-    const int fd = o.fd;
 #ifndef Q_OS_WIN
+    const int fd = o.fd;
     struct stat st {};
     if (fd >= 0 && ::fstat(fd, &st) == 0)
         o.device = S_ISBLK(st.st_mode);

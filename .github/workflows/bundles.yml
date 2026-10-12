@@ -47,7 +47,9 @@ jobs:
       - uses: jurplel/install-qt-action@a9c63c7c123f3069cff414e7e482d95dfa9d8125 # v4.4.1
         with:
           version: '6.8.*'
-          modules: qtimageformats # WebP, TIFF... in Find Lost Files' previews
+          # WebP, TIFF... in Find Lost Files' previews; films and songs that play in its viewer (Qt's
+          # FFmpeg backend, which comes with its own FFmpeg)
+          modules: qtimageformats qtmultimedia
           cache: true
       - name: Build
         run: |
@@ -94,9 +96,12 @@ jobs:
       - name: Check it starts
         run: |
           [ "$(QT_QPA_PLATFORM=offscreen APPIMAGE_EXTRACT_AND_RUN=1 ./DiskAnvil-x86_64.AppImage --version)" = "diskanvil $(sed -n 's/^    VERSION //p' CMakeLists.txt)" ]
-          # and that it has what the other builds have: PDF pages and the extra picture kinds
+          # and that it has what the other builds have: PDF pages, the extra picture kinds, and films
+          # and songs that play, with everything the media plugin needs
           ./DiskAnvil-x86_64.AppImage --appimage-extract >/dev/null
-          ls squashfs-root/usr/lib/libpoppler-qt6.so.* squashfs-root/usr/plugins/imageformats/libqwebp.so
+          ls squashfs-root/usr/lib/libpoppler-qt6.so.* squashfs-root/usr/plugins/imageformats/libqwebp.so \
+            squashfs-root/usr/lib/libQt6Multimedia.so.6 squashfs-root/usr/plugins/multimedia/libffmpegmediaplugin.so
+          ! LD_LIBRARY_PATH=squashfs-root/usr/lib ldd squashfs-root/usr/plugins/multimedia/libffmpegmediaplugin.so | grep 'not found'
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: DiskAnvil-x86_64.AppImage

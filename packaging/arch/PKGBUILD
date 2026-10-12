@@ -6,7 +6,7 @@ pkgdesc='Disk manager for Linux that works like Windows Disk Management'
 arch=('x86_64')
 url='https://github.com/DannyS124/diskanvil'
 license=('GPL-3.0-or-later')
-depends=('glibc' 'hicolor-icon-theme' 'libgcc' 'libstdc++' 'openssl' 'qt6-base' 'qt6-svg' 'udisks2' 'util-linux-libs' 'zstd' 'zlib' 'libarchive' 'poppler-qt6')
+depends=('glibc' 'hicolor-icon-theme' 'libgcc' 'libstdc++' 'openssl' 'qt6-base' 'qt6-svg' 'qt6-multimedia' 'udisks2' 'util-linux-libs' 'zstd' 'zlib' 'libarchive' 'poppler-qt6')
 makedepends=('cmake' 'qt6-tools')
 # It was called DiskForge up to 0.5.1.
 provides=('diskforge')
@@ -27,6 +27,15 @@ optdepends=(
   'fwupd: look for drive firmware updates in Disk Health'
   'udisks2-lvm2: show LVM volume groups'
   'wimlib: Make a Windows USB from ISOs with an install.wim over 4 GB'
+  "qt6-multimedia-ffmpeg: play films and songs in Find Lost Files' viewer (Qt's FFmpeg backend)"
+  'smartmontools: Seagate FARM hours and more in Disk Health'
+  'sqlite: repair SQLite files, and Firefox bookmarks in Save My Files'
+  'mdadm: open RAID arrays and NAS drives'
+  'lvm2: open LVM volumes on NAS drives'
+  'efibootmgr: Boot Menu Entries, and Put DiskAnvil Live on This PC'
+  'qemu-desktop: Try Starting It'
+  'edk2-ovmf: Try Starting It, for UEFI drives'
+  'ldmtool: open Windows dynamic disks (from the AUR)'
 )
 source=("$pkgname-$pkgver.tar.gz::$url/releases/download/v$pkgver/$pkgname-$pkgver.tar.gz")
 sha256sums=('fa15799a32afd502a564479164095112987e8108d9bf78757d034b7026fe6995')
