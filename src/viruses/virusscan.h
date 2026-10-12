@@ -87,8 +87,8 @@ Q_SIGNALS:
     void progress(quint64 done, quint64 total);
     void found(const virus::Detection &detection);
     // unreadable: files the scanner couldn't open (another user's, the system's, in use)
-    // Of the files that couldn't be read, the ones Windows keeps compressed (wof.h): its own
-    // files, which Linux can't read. Before finished().
+    // Of the files that couldn't be read, the ones Windows keeps compressed (wof.h), which Linux
+    // can't read. Before finished().
     void compressedByWindows(int count);
     void finished(bool completed, int scanned, int unreadable, const QString &problem);
 
@@ -104,6 +104,7 @@ private:
     QStringList m_also;
     Depth m_depth;
     std::atomic<bool> m_cancel{false};
+    int m_compressedLinks = 0; // files kept compressed that ntfs-3g shows as links (wof.h)
 };
 
 // Gets the newest list with freshclam: everything the first time, the changes after that.

@@ -319,6 +319,7 @@ qint64 Scan::listFiles(QIODevice *list)
     const QSet<QString> mounted = mountPoints();
 #endif
     qint64 count = 0;
+    m_compressedLinks = 0;
     QSet<QString> listed;
     for (const QString &file : std::as_const(m_also)) {
         if (list && !file.contains(QLatin1Char('\n')) && QFileInfo(file).isFile() && !listed.contains(file)) {
@@ -337,6 +338,8 @@ qint64 Scan::listFiles(QIODevice *list)
                                                                      QDir::Unsorted);
             for (const QFileInfo &fi : entries) {
                 const QString path = fi.filePath();
+                if (fi.isSymbolicLink() && list && (m_depth != Depth::Quick || quickScanWants(fi.fileName())) && wof::compressed(path))
+                    ++m_compressedLinks;
                 if (fi.isSymbolicLink() || fi.isJunction() || skipped(path))
                     continue;
                 if (fi.isDir() && !fi.isShortcut()) {
@@ -439,9 +442,9 @@ void Scan::runClamAv(const QString &list, qint64 total)
                         tr("ClamAV stopped with an error: %1").arg(errors.section(QLatin1Char('\n'), -3).simplified()));
         return;
     }
-    qCInfo(lcOps).noquote() << "Scan for Viruses: done," << done << "files," << hits << "found," << unreadable << "unreadable," << compressed
+    qCInfo(lcOps).noquote() << "Scan for Viruses: done," << done << "files," << hits << "found," << unreadable << "unreadable," << compressed + m_compressedLinks
                             << "kept compressed by Windows";
-    Q_EMIT compressedByWindows(compressed);
+    Q_EMIT compressedByWindows(compressed + m_compressedLinks);
     Q_EMIT finished(true, int(done), unreadable, QString());
 }
 

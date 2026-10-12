@@ -247,9 +247,10 @@ have one; on tiling window managers you start one yourself (polkit-kde-agent, po
 <p><b>"Device or resource busy":</b> something still has files open on the drive. Close it and try again.</p>
 <p><b>A drive is missing:</b> press F5. Empty card readers are hidden.</p>
 <p><b>Some of Windows' files can't be read from Linux or DiskAnvil Live:</b> on small drives (cheap laptops' eMMC
-especially) Windows keeps its own files compressed (CompactOS). Windows reads them as usual, but Linux can't. Windows
-Drivers and Services marks them as Windows' own, and Scan for Viruses counts them apart: Microsoft Defender, in
-Windows, checks those.</p>
+especially) Windows keeps its own files compressed (CompactOS), and compact.exe or CompactGUI can do that to any
+others. Windows reads them as usual, but Linux can't. Windows Drivers and Services marks the ones in the Windows
+folder as Windows' own and says "Can't tell" for the rest, and Scan for Viruses counts them apart: Microsoft
+Defender, in Windows, checks those.</p>
 <p><b>A USB stick still shows two partitions after it held an ISO:</b> a Linux ISO leaves its own layout on the stick,
 and formatting doesn't clear it. Right-click the stick, Wipe Disk, then New Partition Table and make one new partition.</p>
 <p><b>A Secure Erase got cut off and now the drive is locked:</b> during the erase the drive has the temporary

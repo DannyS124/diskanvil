@@ -867,7 +867,7 @@ void VirusDialog::scanFinished(bool completed, int scanned, int unreadable, cons
     if (unreadable > 0)
         text += QLatin1Char(' ') + tr("%n file(s) couldn't be read: another user's or the system's, or in use.", nullptr, unreadable);
     if (m_compressed > 0)
-        text += QLatin1Char(' ') + tr("%n of Windows' own file(s) are kept compressed by Windows (CompactOS), which Linux can't read: "
+        text += QLatin1Char(' ') + tr("%n file(s) are kept compressed by Windows (CompactOS or compact.exe), which Linux can't read: "
                                       "Microsoft Defender, in Windows, checks those.", nullptr, m_compressed);
     int odd = 0;
     for (const startup::Entry &e : std::as_const(m_startup.entries))

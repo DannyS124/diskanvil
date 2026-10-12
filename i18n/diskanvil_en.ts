@@ -125,7 +125,7 @@
 <context>
     <name>DriversDialog</name>
     <message numerus="yes">
-        <location filename="../src/viruses/driversdialog.cpp" line="162"/>
+        <location filename="../src/viruses/driversdialog.cpp" line="165"/>
         <source>%n driver(s) and service(s)</source>
         <translation>
             <numerusform>%n driver and service</numerusform>
@@ -133,7 +133,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/viruses/driversdialog.cpp" line="162"/>
+        <location filename="../src/viruses/driversdialog.cpp" line="165"/>
         <source>%n of Windows&apos; own hidden</source>
         <translation>
             <numerusform>%n of Windows' own hidden</numerusform>
@@ -141,7 +141,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/viruses/driversdialog.cpp" line="216"/>
+        <location filename="../src/viruses/driversdialog.cpp" line="219"/>
         <source>Switched off %n. The backup, and how to undo it, is in %1.</source>
         <translation>
             <numerusform>Switched off %n. The backup, and how to undo it, is in %1.</numerusform>
@@ -721,6 +721,13 @@
     </message>
     <message numerus="yes">
         <location filename="../src/viruses/virusdialog.cpp" line="870"/>
+        <source>%n file(s) are kept compressed by Windows (CompactOS or compact.exe), which Linux can&apos;t read: Microsoft Defender, in Windows, checks those.</source>
+        <translation>
+            <numerusform>%n file are kept compressed by Windows (CompactOS or compact.exe), which Linux can't read: Microsoft Defender, in Windows, checks those.</numerusform>
+            <numerusform>%n files are kept compressed by Windows (CompactOS or compact.exe), which Linux can't read: Microsoft Defender, in Windows, checks those.</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
         <source>%n of Windows&apos; own file(s) are kept compressed by Windows (CompactOS), which Linux can&apos;t read: Microsoft Defender, in Windows, checks those.</source>
         <translation>
             <numerusform>%n of Windows' own file are kept compressed by Windows (CompactOS), which Linux can't read: Microsoft Defender, in Windows, checks those.</numerusform>

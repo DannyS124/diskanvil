@@ -7,13 +7,18 @@
 
 #include "testkit.h"
 
+#include "../src/drives/udisks.h"
 #include "../src/viruses/virusscan.h"
+#include "../src/viruses/wof.h"
 
 #include <QCryptographicHash>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QStandardPaths>
+#include <QStorageInfo>
+#include <QDBusMessage>
+#include <QDBusConnection>
 #include <QTemporaryDir>
 #include <QtEndian>
 
@@ -31,11 +36,15 @@ void writeFile(const QString &path, const QByteArray &data)
 }
 
 QVector<virus::Detection> scan(const virus::Engine &engine, const QStringList &folders, virus::Depth depth, bool *completed = nullptr,
-                               int *scanned = nullptr, QString *problem = nullptr, int *unreadable = nullptr)
+                               int *scanned = nullptr, QString *problem = nullptr, int *unreadable = nullptr, int *compressed = nullptr)
 {
     virus::Scan s(engine, folders, depth);
     QVector<virus::Detection> found;
     QObject::connect(&s, &virus::Scan::found, [&found](const virus::Detection &d) { found << d; });
+    QObject::connect(&s, &virus::Scan::compressedByWindows, [compressed](int n) {
+        if (compressed)
+            *compressed = n;
+    });
     QObject::connect(&s, &virus::Scan::finished, [&](bool ok, int n, int couldntRead, const QString &why) {
         if (completed)
             *completed = ok;
@@ -242,6 +251,114 @@ void finding(const QString &dir)
         qputenv("XDG_DATA_HOME", oldHome);
 }
 
+// Files Windows keeps compressed (WOF), on a volume Windows made (tests/data/wof), with each of
+// Linux's NTFS drivers here: they're read, or told apart from files that can't be read for other
+// reasons. ntfs3 reads them when it's built to (Arch's is; Debian's isn't); ntfs-3g shows them as
+// links unless its plugin is there.
+void compressedWith(const QString &root, const QString &driver, const QString &dir)
+{
+    const QString name = QStringLiteral("compressed files (%1): ").arg(driver);
+    QStringList lines;
+    for (int i = 1; i <= 2000; ++i)
+        lines << QStringLiteral("DiskAnvil compressed file test, line %1").arg(i);
+    const QByteArray text = lines.join(QStringLiteral("\r\n")).toUtf8();
+    auto read = [](const QString &path) {
+        QFile f(path);
+        return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
+    };
+    const QString plain = root + QStringLiteral("/plain.txt");
+    report(read(plain) == text && !wof::compressed(plain), name + QStringLiteral("a file Windows left as it is reads, and isn't called compressed"));
+    QStringList how;
+    int links = 0;
+    bool ok = true;
+    for (const QString &file : {QStringLiteral("/Windows/System32/drivers/anvil.sys"), QStringLiteral("/Program Files/Tool/tool.exe")}) {
+        const QString path = root + file;
+        if (read(path) == text) {
+            how << QStringLiteral("read");
+            ok = ok && !wof::compressed(path);
+        } else {
+            const bool link = QFileInfo(path).isSymbolicLink();
+            links += link;
+            how << (link ? QStringLiteral("a link") : QStringLiteral("can't be read"));
+            ok = ok && wof::compressed(path) && wof::changed(path).date().year() >= 2026;
+        }
+    }
+    report(ok, name + QStringLiteral("the ones Windows compressed are read, or known as compressed"), how.join(QStringLiteral(", ")));
+    report(wof::inWindowsFolder(root, root + QStringLiteral("/Windows/System32/drivers/anvil.sys"))
+               && wof::inWindowsFolder(root, root + QStringLiteral("/WINDOWS/system32/x.dll"))
+               && !wof::inWindowsFolder(root, root + QStringLiteral("/Program Files/Tool/tool.exe"))
+               && !wof::inWindowsFolder(root, root + QStringLiteral("/Users/a/Windows/x.exe")),
+           name + QStringLiteral("only the Windows folder's count as Windows' own"));
+
+    const QString clamscan = QStandardPaths::findExecutable(QStringLiteral("clamscan"));
+    if (clamscan.isEmpty()) {
+        out << "SKIP  ClamAV isn't installed: compressed files aren't scanned" << Qt::endl;
+        return;
+    }
+    const QString db = dir + QStringLiteral("/wof-db");
+    writeFile(db + QStringLiteral("/diskanvil-test.hdb"), QCryptographicHash::hash("nothing here", QCryptographicHash::Md5).toHex() + ":12:DiskAnvil.Test.None\n");
+    virus::Engine engine;
+    engine.kind = virus::Engine::Kind::ClamAV;
+    engine.scanner = clamscan;
+    engine.database = db;
+    bool completed = false;
+    int scanned = 0, unreadable = -1, packed = -1;
+    scan(engine, {root}, virus::Depth::Everything, &completed, &scanned, nullptr, &unreadable, &packed);
+    // ntfs-3g's links aren't handed to ClamAV; ntfs3's unreadable files are, and come back unread.
+    report(completed && scanned == 3 - links && unreadable == 0 && packed == int(how.size() - how.count(QStringLiteral("read"))),
+           name + QStringLiteral("the scan counts them apart from files it couldn't read"),
+           QStringLiteral("%1 scanned, %2 unreadable, %3 compressed").arg(scanned).arg(unreadable).arg(packed));
+}
+
+void compressed(const QString &dir)
+{
+    const QString image = dir + QStringLiteral("/wof.img");
+    int code = -1;
+    sh(QStringLiteral("zstd"), {QStringLiteral("-dqf"), QStringLiteral(SOURCE_DIR "/tests/data/wof/wof.img.zst"), QStringLiteral("-o"), image}, &code);
+    QString error = QStringLiteral("zstd isn't installed");
+    const QString loop = code == 0 ? loopSetup(image, &error) : QString();
+    if (loop.isEmpty()) {
+        out << "SKIP  compressed files: no loop device (" << error << ")" << Qt::endl;
+        return;
+    }
+    UDisks udisks;
+    udisks.setInteractive(false);
+    const Disk *disk = waitForDisk(udisks, image, [](const Disk &d) { return !d.volumes.isEmpty() && d.volumes.first().fsType == QLatin1String("ntfs"); });
+    report(disk, QStringLiteral("compressed files: the volume Windows made is there"));
+    // The driver UDisks picks, then UDisks' "ntfs" (ntfs-3g, where it's installed).
+    QStringList seen;
+    for (const QString &fstype : {QString(), QStringLiteral("ntfs")}) {
+        if (!disk)
+            break;
+        const Volume volume = disk->volumes.first();
+        QVariantMap options{{QStringLiteral("options"), QStringLiteral("ro")}, {QStringLiteral("auth.no_user_interaction"), true}};
+        if (!fstype.isEmpty())
+            options.insert(QStringLiteral("fstype"), fstype);
+        QDBusMessage call = QDBusMessage::createMethodCall(QStringLiteral("org.freedesktop.UDisks2"), volume.objectPath,
+                                                           QStringLiteral("org.freedesktop.UDisks2.Filesystem"), QStringLiteral("Mount"));
+        call << options;
+        const QDBusMessage reply = QDBusConnection::systemBus().call(call, QDBus::Block, 60000);
+        if (reply.type() != QDBusMessage::ReplyMessage) {
+            if (fstype.isEmpty())
+                report(false, QStringLiteral("compressed files: the volume mounts"), reply.errorMessage());
+            else
+                out << "SKIP  compressed files: no ntfs-3g (" << reply.errorMessage() << ")" << Qt::endl;
+            continue;
+        }
+        const QString root = reply.arguments().value(0).toString();
+        const QString driver = QStorageInfo(root).fileSystemType() == "fuseblk" ? QStringLiteral("ntfs-3g") : QString::fromUtf8(QStorageInfo(root).fileSystemType());
+        if (!seen.contains(driver)) {
+            seen << driver;
+            compressedWith(root, driver, dir);
+        }
+        disk = waitForDisk(udisks, image, [](const Disk &d) { return !d.volumes.isEmpty() && !d.volumes.first().mountPoints.isEmpty(); });
+        if (disk)
+            run(udisks, QStringLiteral("compressed files: unmount"), [&] { udisks.unmount(disk->volumes.first()); });
+        disk = waitForDisk(udisks, image, [](const Disk &d) { return !d.volumes.isEmpty() && d.volumes.first().mountPoints.isEmpty(); });
+    }
+    loopDelete(loop);
+}
+
 } // namespace
 
 void virusTests()
@@ -250,4 +367,5 @@ void virusTests()
     parsing();
     scanning(dir.path());
     finding(dir.path());
+    compressed(dir.path());
 }

@@ -101,14 +101,17 @@ void DriversDialog::load()
                 // maker had Microsoft test are signed by its "Hardware Compatibility Publisher").
                 r.windowsOwn = r.maker.startsWith(QLatin1String("Microsoft"))
                             || (r.signer.startsWith(QLatin1String("Microsoft Windows")) && !r.signer.contains(QLatin1String("Hardware Compatibility")));
-                // Kept compressed by Windows (CompactOS), which only does that to its own files:
-                // Linux can't read them, but whose they are is known.
-                if (data.isEmpty() && file.size() > 0 && wof::compressed(e.file)) {
-                    r.maker = tr("Windows (kept compressed)");
-                    r.windowsOwn = true;
-                }
                 if (r.maker.isEmpty())
                     r.maker = r.signer;
+            }
+            // Kept compressed by Windows, which Linux can't always read (with ntfs-3g it doesn't
+            // even open). In the Windows folder that's CompactOS, done to Windows' own files;
+            // anywhere else someone may have done it to any program.
+            if (r.maker.isEmpty() && !e.file.isEmpty() && wof::compressed(e.file)) {
+                const bool inWindows = wof::inWindowsFolder(root, e.file);
+                r.maker = inWindows ? tr("Windows (kept compressed)") : tr("Can't tell (kept compressed)");
+                r.windowsOwn = inWindows;
+                r.changed = wof::changed(e.file);
             }
             rows << r;
         }
