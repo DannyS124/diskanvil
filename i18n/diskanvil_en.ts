@@ -833,7 +833,7 @@
 <context>
     <name>newids</name>
     <message numerus="yes">
-        <location filename="../src/backup/newids.cpp" line="75"/>
+        <location filename="../src/backup/newids.cpp" line="77"/>
         <source>%n partition ID(s)</source>
         <translation>
             <numerusform>%n partition ID</numerusform>
