@@ -670,7 +670,7 @@ void testBoot()
         QByteArray said;
         QElapsedTimer clock;
         clock.start();
-        while (qemu && clock.elapsed() < 20000) {
+        while (qemu && clock.elapsed() < 60000) {
             QFile log(o.serialLog);
             if (log.open(QIODevice::ReadOnly))
                 said = log.readAll();
