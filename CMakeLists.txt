@@ -105,6 +105,7 @@ add_library(diskanvil-core STATIC
     src/tools/testboot.cpp src/tools/testboot.h
     src/viruses/peinfo.cpp src/viruses/peinfo.h
     src/viruses/wof.cpp src/viruses/wof.h
+    src/viruses/activity.cpp src/viruses/activity.h
     src/backup/newids.cpp src/backup/newids.h
     src/lostfiles/filetypes.cpp src/lostfiles/filetypes.h
     src/usb/checksums.cpp src/usb/checksums.h
@@ -176,6 +177,7 @@ add_library(diskanvil-ui STATIC
     src/lostfiles/lostfilesdialog.cpp src/lostfiles/lostfilesdialog.h
     src/lostfiles/timelinedialog.cpp src/lostfiles/timelinedialog.h
     src/lostfiles/placesmap.cpp src/lostfiles/placesmap.h
+    src/viruses/activitydialog.cpp src/viruses/activitydialog.h
     src/lostfiles/placesdialog.cpp src/lostfiles/placesdialog.h
     src/lostfiles/preview.cpp src/lostfiles/preview.h
     src/lostfiles/pictures.cpp src/lostfiles/pictures.h

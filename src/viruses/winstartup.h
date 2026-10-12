@@ -147,6 +147,15 @@ struct Machine {
 };
 Report collect(const Machine &machine);
 
+// Opens the Windows on the drive mounted at `root`: its SOFTWARE and SYSTEM hives, each user's
+// NTUSER.DAT, the control set, and `local` to find its files here. Nothing when there's no
+// Windows there. Shared by the startup scan and "What This PC Did" (activity.h).
+std::optional<Machine> openMachine(const QString &root);
+#ifdef Q_OS_WIN
+// The Windows that's running, through its registry API.
+Machine openRunningMachine();
+#endif
+
 // The program a command line starts, as Windows would name it, with the environment variables
 // in `env` (lower-case names) filled in. `exists` says whether a Windows path is a file.
 QString programOf(const QString &command, const QHash<QString, QString> &env, const std::function<bool(const QString &)> &exists);

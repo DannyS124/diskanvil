@@ -267,7 +267,7 @@
 <context>
     <name>MainWindow</name>
     <message numerus="yes">
-        <location filename="../src/app/mainwindow.cpp" line="1395"/>
+        <location filename="../src/app/mainwindow.cpp" line="1407"/>
         <source>%n more drive(s) need a look; their health is in the Status column.</source>
         <translation>
             <numerusform>%n more drive need a look; their health is in the Status column.</numerusform>
@@ -275,7 +275,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/app/mainwindow.cpp" line="2694"/>
+        <location filename="../src/app/mainwindow.cpp" line="2706"/>
         <source>%n add-on command(s) still running. Stop them and quit?</source>
         <translation>
             <numerusform>%n add-on command still running. Stop them and quit?</numerusform>
@@ -831,6 +831,17 @@
         <translation>
             <numerusform>Switched off %n thing. The backup, and how to undo it, is in %1.</numerusform>
             <numerusform>Switched off %n things. The backup, and how to undo it, is in %1.</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
+    <name>activity</name>
+    <message numerus="yes">
+        <location filename="../src/viruses/activity.cpp" line="174"/>
+        <source>%n time(s)</source>
+        <translation>
+            <numerusform>%n time</numerusform>
+            <numerusform>%n times</numerusform>
         </translation>
     </message>
 </context>

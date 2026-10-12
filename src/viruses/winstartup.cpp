@@ -1065,13 +1065,12 @@ Report collect(const Machine &machine)
     return report;
 }
 
-Report find(const QString &root)
+std::optional<Machine> openMachine(const QString &root)
 {
-    Report report;
     auto resolver = std::make_shared<Resolver>(root);
     const QString config = resolver->local(QStringLiteral("C:\\Windows\\System32\\config"));
     if (config.isEmpty())
-        return report;
+        return std::nullopt;
     Machine m;
     m.local = [resolver](const QString &path) { return resolver->local(path); };
     m.softwareFile = resolver->local(QStringLiteral("C:\\Windows\\System32\\config\\SOFTWARE"));
@@ -1110,7 +1109,13 @@ Report find(const QString &root)
             user.keys = std::make_shared<HiveKeys>(hive);
         m.users << user;
     }
-    return collect(m);
+    return m;
+}
+
+Report find(const QString &root)
+{
+    const std::optional<Machine> m = openMachine(root);
+    return m ? collect(*m) : Report();
 }
 
 } // namespace startup

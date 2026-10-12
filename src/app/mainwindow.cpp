@@ -54,6 +54,7 @@
 #include "powerbox.h"
 #include "productkeydialog.h"
 #include "windowspicker.h"
+#include "activitydialog.h"
 #include "driversdialog.h"
 #include "theme.h"
 #include "testbootdialog.h"
@@ -775,6 +776,16 @@ void MainWindow::createActions()
             DriversDialog(picker.root(), this).exec();
     });
 
+    m_activity = new QAction(themeIcon("view-history", "document-open-recent"), tr("What This PC &Did…"), this);
+    m_activity->setObjectName(QStringLiteral("activity"));
+    m_activity->setToolTip(tr("What a Windows is and what it was used for, from its own records: USB drives plugged in, programs run, "
+                              "files opened, searches, networks joined, accounts"));
+    connect(m_activity, &QAction::triggered, this, [this] {
+        WindowsPicker picker(m_udisks, false, tr("Which Windows? One on a drive is mounted read-only to read its records."), this);
+        if (picker.exec() == QDialog::Accepted)
+            ActivityDialog(picker.root(), this).exec();
+    });
+
     m_productKey = new QAction(themeIcon("dialog-password", "document-encrypt"), tr("Windows Product &Key…"), this);
     m_productKey->setObjectName(QStringLiteral("productKey"));
     m_productKey->setToolTip(tr("The key in this PC's firmware, and the ones Windows installs here use: to have before reinstalling"));
@@ -825,7 +836,7 @@ void MainWindow::createActions()
             const QHash<QString, QAction *> actions = {{QStringLiteral("lost-files"), m_findFiles},  {QStringLiteral("rescue-copy"), m_rescue},
                                                        {QStringLiteral("health"), m_health},         {QStringLiteral("recover-partitions"), m_recover},
                                                        {QStringLiteral("rescue-usb"), m_rescueUsb},  {QStringLiteral("virus-scan"), m_virusScan},
-                                                       {QStringLiteral("drivers"), m_drivers},       {QStringLiteral("save-files"), m_saveFiles},
+                                                       {QStringLiteral("drivers"), m_drivers}, {QStringLiteral("activity"), m_activity},       {QStringLiteral("save-files"), m_saveFiles},
                                                        {QStringLiteral("boot-menu"), m_bootMenu}};
             if (QAction *action = actions.value(tool)) {
                 updateActions();
@@ -974,12 +985,13 @@ void MainWindow::createActions()
         tools->addAction(m_bootMenu);
         tools->addAction(m_linuxBoot);
         tools->addAction(m_drivers);
+        tools->addAction(m_activity);
         tools->addAction(m_productKey);
         tools->addAction(m_certificates);
         tools->addSeparator();
 #ifdef Q_OS_WIN
         // Quick Fixes' tools, and add-ons (Linux commands), aren't in the Windows version yet.
-        tools->addActions({m_saveFiles, m_virusScan, m_bootMenu, m_drivers, m_winRe, m_productKey, m_certificates, m_usage, m_cleanup, m_optimize, m_snapshots});
+        tools->addActions({m_saveFiles, m_virusScan, m_bootMenu, m_drivers, m_activity, m_winRe, m_productKey, m_certificates, m_usage, m_cleanup, m_optimize, m_snapshots});
         return;
 #endif
         tools->addAction(themeIcon("tools-wizard", "system-run"), tr("&Quick Fixes…"), this, [this] {
@@ -1828,7 +1840,7 @@ bool MainWindow::openTool(const QString &name)
                                              {QStringLiteral("remote-help"), m_remoteHelp},
                                              {QStringLiteral("net-boot"), m_netBoot},
                                              {QStringLiteral("product-key"), m_productKey},
-                                             {QStringLiteral("drivers"), m_drivers},
+                                             {QStringLiteral("drivers"), m_drivers}, {QStringLiteral("activity"), m_activity},
                                              {QStringLiteral("boot-menu"), m_bootMenu},
                                              {QStringLiteral("linux-boot"), m_linuxBoot},
                                              {QStringLiteral("make-room"), m_winRe},

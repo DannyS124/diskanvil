@@ -9,6 +9,7 @@
 
 #include "testkit.h"
 
+#include "../src/viruses/activity.h"
 #include "../src/viruses/shelllink.h"
 #include "../src/viruses/winstartup.h"
 
@@ -213,6 +214,95 @@ void commands()
     }
 }
 
+// What This PC Did: hives with our own values where Windows keeps what it was used for
+// (activity.ps1), and a shortcut in the Recent folder.
+void activityRecords(const QString &dir)
+{
+    const QString root = dir + QStringLiteral("/used");
+    put(root + QStringLiteral("/Windows/System32/config/SOFTWARE"), readAll(kData + QStringLiteral("activity-software.hiv")));
+    put(root + QStringLiteral("/Windows/System32/config/SYSTEM"), readAll(kData + QStringLiteral("activity-system.hiv")));
+    put(root + QStringLiteral("/Users/tester/NTUSER.DAT"), readAll(kData + QStringLiteral("activity-ntuser.hiv")));
+    const QString recent = root + QStringLiteral("/Users/tester/AppData/Roaming/Microsoft/Windows/Recent/notes.lnk");
+    put(recent, readAll(kData + QStringLiteral("notes.lnk")));
+    const QDateTime opened(QDate(2024, 6, 9), QTime(12, 0), QTimeZone::UTC);
+    {
+        QFile f(recent);
+        if (f.open(QIODevice::ReadWrite))
+            f.setFileTime(opened, QFileDevice::FileModificationTime);
+    }
+    const activity::Report r = activity::read(root);
+    const activity::Overview &o = r.overview;
+    report(r.windows && o.product == QLatin1String("Windows 11 Pro") && o.release == QLatin1String("23H2") && o.build == QLatin1String("22631")
+               && o.computerName == QLatin1String("ANVIL-PC") && o.owner == QLatin1String("Sam Tester") && o.organisation == QLatin1String("Anvil Test")
+               && o.installed == QDateTime::fromSecsSinceEpoch(1704100000, QTimeZone::UTC)
+               && o.lastShutdown == QDateTime(QDate(2024, 6, 10), QTime(22, 15), QTimeZone::UTC) && o.timeZone == QLatin1String("GMT Standard Time"),
+           QStringLiteral("activity: what the PC is (Windows 11 told from 10 by its build), its name, owner, install and last shutdown"),
+           QStringLiteral("%1 %2 %3 %4 %5").arg(o.product, o.release, o.computerName, o.installed.toString(Qt::ISODate), o.lastShutdown.toString(Qt::ISODate)));
+    const auto find = [&r](const QString &what) -> const activity::Event * {
+        for (const activity::Event &e : r.events) {
+            if (e.what == what)
+                return &e;
+        }
+        return nullptr;
+    };
+    const activity::Event *stick = find(QStringLiteral("USB drive: SanDisk Cruzer Blade USB Device"));
+    const activity::Event *generic = find(QStringLiteral("USB drive: Generic Flash Disk"));
+    report(stick && stick->when == QDateTime(QDate(2024, 6, 9), QTime(17, 45), QTimeZone::UTC) && stick->detail.contains(QLatin1String("4C530001230508116054"))
+               && stick->detail.contains(QLatin1String("first plugged in")) && generic
+               && generic->when == QDateTime(QDate(2023, 11, 5), QTime(12, 0), QTimeZone::UTC) && !generic->detail.contains(QLatin1String("serial")),
+           QStringLiteral("activity: USB drives, with their serial (not one Windows made up) and when they were plugged in, both ways Windows keeps it"),
+           stick ? stick->detail : QStringLiteral("no stick"));
+    const activity::Event *cleaner = find(QStringLiteral("Ran cleaner.exe"));
+    const activity::Event *notepad = find(QStringLiteral("Ran notepad++.exe"));
+    bool session = false;
+    for (const activity::Event &e : r.events)
+        session = session || e.what.contains(QLatin1String("UEME"));
+    report(cleaner && cleaner->when == QDateTime(QDate(2024, 6, 8), QTime(21, 0), QTimeZone::UTC) && cleaner->detail.contains(QLatin1String("5 time"))
+               && cleaner->user == QLatin1String("tester") && notepad && notepad->detail.startsWith(QLatin1String("C:\\Program Files\\Notepad++\\notepad++.exe"))
+               && notepad->detail.contains(QLatin1String("12 time")) && !session,
+           QStringLiteral("activity: programs run, how often and when last (UserAssist, its folder IDs turned into folders)"),
+           notepad ? notepad->detail : QStringLiteral("no notepad++"));
+    int statements = 0;
+    for (const activity::Event &e : r.events)
+        statements += e.what == QLatin1String("Opened bank statement.pdf");
+    const activity::Event *link = find(QStringLiteral("Opened notes"));
+    report(statements == 1 && find(QStringLiteral("Searched for \"tax return\"")) && find(QStringLiteral("Went to \\\\nas\\photos"))
+               && find(QStringLiteral("Typed in the Run box: cmd")) && link && link->detail.contains(QLatin1String("notepad.exe")) && link->when == opened,
+           QStringLiteral("activity: files opened (once each), searches, folders and commands typed, a shortcut's target and time"),
+           link ? link->detail + QLatin1Char(' ') + link->when.toString(Qt::ISODate) : QStringLiteral("no shortcut"));
+    const activity::Event *cafe = find(QStringLiteral("Joined the network \"Cafe Wifi\""));
+    report(cafe && cafe->when == QDateTime(QDate(2024, 6, 2), QTime(18, 30), QTimeZone::UTC) && cafe->detail.contains(QLatin1String("first joined"))
+               && find(QStringLiteral("Account: tester")),
+           QStringLiteral("activity: networks joined, and the accounts"));
+    bool newestFirst = true;
+    for (qsizetype i = 1; i < r.events.size(); ++i) {
+        if (r.events[i].when.isValid() && (!r.events[i - 1].when.isValid() || r.events[i].when > r.events[i - 1].when))
+            newestFirst = false;
+    }
+    report(newestFirst && r.events.first().when == QDateTime(QDate(2024, 6, 9), QTime(17, 45), QTimeZone::UTC),
+           QStringLiteral("activity: newest first, the ones without a time last"));
+    const QString html = activity::html(r, r.events, QStringLiteral("ANVIL-PC"));
+    const QByteArray csv = activity::csv(r.events);
+    report(html.contains(QLatin1String("Cafe Wifi")) && html.contains(QLatin1String("Windows 11 Pro")) && csv.contains("cleaner.exe")
+               && csv.count('\n') == r.events.size() + 1,
+           QStringLiteral("activity: saved as a web page and CSV"));
+    // Small pieces, and nonsense in them.
+    report(activity::rot13(QStringLiteral("Pyrnare.rkr")) == QLatin1String("Cleaner.exe") && activity::tidyUsbName(QStringLiteral("Disk&Ven_&Prod_X&Rev_1")) == QLatin1String("X")
+               && !activity::fromSystemTime(QByteArray(16, '\xff')).isValid() && !activity::fromSystemTime(QByteArray(3, '\0')).isValid()
+               && !activity::fromFileTime(1).isValid(),
+           QStringLiteral("activity: ROT13, USB names, and times that are nonsense left out"));
+    QRandomGenerator rng(99);
+    const QByteArray user = readAll(kData + QStringLiteral("activity-ntuser.hiv"));
+    for (int round = 0; round < 60; ++round) {
+        QByteArray bad = user;
+        for (int i = 0; i < 40; ++i)
+            bad[qsizetype(rng.bounded(quint32(bad.size())))] = char(rng.bounded(256));
+        put(root + QStringLiteral("/Users/tester/NTUSER.DAT"), bad);
+        activity::read(root);
+    }
+    report(true, QStringLiteral("activity: 60 damaged hives read without a crash"));
+}
+
 void realWindows()
 {
     const QString root = qEnvironmentVariable("DISKANVIL_REAL_WINDOWS");
@@ -233,6 +323,21 @@ void realWindows()
     }
     report(r.windows && r.entries.size() > 50, QStringLiteral("startup: a real Windows, in %1 ms").arg(t.elapsed()),
            QStringLiteral("%1 entries, %2 look odd; %3").arg(r.entries.size()).arg(odd).arg(r.notes.join(QStringLiteral("; "))));
+    t.restart();
+    const activity::Report a = activity::read(root);
+    QHash<int, int> kinds;
+    for (const activity::Event &e : a.events)
+        ++kinds[int(e.kind)];
+    for (int i = 0; i < std::min<qsizetype>(12, a.events.size()); ++i)
+        out << "      " << a.events[i].when.toString(Qt::ISODate) << ' ' << a.events[i].what << " | " << a.events[i].detail.left(100) << Qt::endl;
+    report(a.windows && a.overview.found() && !a.events.isEmpty(), QStringLiteral("activity: a real Windows, in %1 ms").arg(t.elapsed()),
+           QStringLiteral("%1 %2 %3, %4 events: %5 USB, %6 programs, %7 files, %8 networks")
+               .arg(a.overview.product, a.overview.release, a.overview.computerName)
+               .arg(a.events.size())
+               .arg(kinds.value(int(activity::Kind::UsbDevice)))
+               .arg(kinds.value(int(activity::Kind::ProgramRun)))
+               .arg(kinds.value(int(activity::Kind::FileOpened)))
+               .arg(kinds.value(int(activity::Kind::Network))));
 }
 
 } // namespace
@@ -243,5 +348,6 @@ void startupTests()
     shortcuts();
     commands();
     offline(dir.path());
+    activityRecords(dir.path());
     realWindows();
 }

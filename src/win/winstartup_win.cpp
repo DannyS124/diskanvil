@@ -219,7 +219,7 @@ bool switchOffRunning(const Entry &e, const QString &backup, QString *message)
     return ok;
 }
 
-Report findRunning()
+Machine openRunningMachine()
 {
     Machine m;
     m.software = std::make_shared<LiveKeys>(HKEY_LOCAL_MACHINE, QStringLiteral("SOFTWARE"));
@@ -256,7 +256,12 @@ Report findRunning()
         }
         m.users << user;
     }
-    return collect(m);
+    return m;
+}
+
+Report findRunning()
+{
+    return collect(openRunningMachine());
 }
 
 } // namespace startup

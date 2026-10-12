@@ -72,6 +72,7 @@ private:
     QString m_writeBlockKey;
     QAction *m_productKey = nullptr;
     QAction *m_drivers = nullptr;
+    QAction *m_activity = nullptr;
     QAction *m_saveFiles = nullptr;
     QAction *m_bootMenu = nullptr;
     QAction *m_linuxBoot = nullptr;
