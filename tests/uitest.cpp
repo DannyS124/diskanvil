@@ -3417,6 +3417,64 @@ void lostFilesThumbnails()
            QStringLiteral("thumbnails: a search lists the small pictures in Windows' caches on the drive"), names.join(QLatin1Char(',')));
 }
 
+// Files locked by ransomware: the window says so and explains what can be done.
+void lostFilesRansomware()
+{
+    if (QStandardPaths::findExecutable(QStringLiteral("mkfs.fat")).isEmpty() || QStandardPaths::findExecutable(QStringLiteral("mcopy")).isEmpty()) {
+        report(true, QStringLiteral("ransomware: skipped, mkfs.fat and mtools aren't here"));
+        return;
+    }
+    QTemporaryDir dir;
+    const QString image = dir.filePath(QStringLiteral("locked.img"));
+    const auto run = [](const QString &program, const QStringList &args) {
+        QProcess p;
+        p.start(program, args);
+        return p.waitForFinished(30000) && p.exitCode() == 0;
+    };
+    bool made = run(QStringLiteral("truncate"), {QStringLiteral("-s"), QStringLiteral("40M"), image}) && run(QStringLiteral("mkfs.fat"), {QStringLiteral("-F"), QStringLiteral("32"), image})
+             && run(QStringLiteral("mmd"), {QStringLiteral("-i"), image, QStringLiteral("::/Docs")});
+    for (int i = 0; i < 4 && made; ++i) {
+        const QString name = dir.filePath(QStringLiteral("report%1.docx.locky").arg(i));
+        QFile f(name);
+        made = f.open(QIODevice::WriteOnly) && f.write(QByteArray(3000, char(0x5A + i))) > 0;
+        f.close();
+        made = made && run(QStringLiteral("mcopy"), {QStringLiteral("-i"), image, name, QStringLiteral("::/Docs/")});
+    }
+    const QString note = dir.filePath(QStringLiteral("_Locky_recover_instructions.txt"));
+    QFile n(note);
+    made = made && n.open(QIODevice::WriteOnly) && n.write("Your files are encrypted.\n") > 0;
+    n.close();
+    made = made && run(QStringLiteral("mcopy"), {QStringLiteral("-i"), image, note, QStringLiteral("::/Docs/")});
+    if (!made) {
+        report(false, QStringLiteral("ransomware: make the FAT image"));
+        return;
+    }
+    UDisks udisks;
+    LostFilesDialog dialog(&udisks, QString());
+    dialog.show();
+    dialog.scanImage(image);
+    auto *bar = dialog.findChild<QWidget *>(QStringLiteral("ransomBar"));
+    auto *text = dialog.findChild<QLabel *>(QStringLiteral("ransom"));
+    auto *status = dialog.findChild<QLabel *>(QStringLiteral("status"));
+    waitUntil([&] { return status->text().startsWith(QLatin1String("Done")); }, 60000);
+    report(bar->isVisible() && text->text().contains(QLatin1String("Locky")) && text->text().contains(QLatin1String("4 files end in .locky")),
+           QStringLiteral("ransomware: the window says the files look locked, and by what"), text->text());
+    QStringList boxes;
+    Answerer answerer;
+    answerer.answer = [&](QWidget *modal) {
+        if (auto *box = qobject_cast<QMessageBox *>(modal)) {
+            boxes << box->text();
+            box->close();
+            return true;
+        }
+        return false;
+    };
+    dialog.findChild<QPushButton *>(QStringLiteral("ransomWhatToDo"))->click();
+    report(boxes.size() == 1 && boxes[0].contains(QLatin1String("No More Ransom")) && boxes[0].contains(QLatin1String("Don't pay"))
+               && boxes[0].contains(QLatin1String("No free decryptor for it is known yet")),
+           QStringLiteral("ransomware: What to Do explains, with No More Ransom"), boxes.value(0).left(120));
+}
+
 // Repairing through the window: a copy is repaired, and joins the list to be looked at and saved.
 void lostFilesRepaired()
 {
@@ -3980,7 +4038,7 @@ int userScenarios(const QStringList &only)
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
         {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
-        {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
+        {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},
         {"previews", previewsThroughHelper}, {"viruses", virusScanThroughWindow}, {"virusdrive", virusScanOnDrive}, {"viruswindows", virusScanWindowsDrive}, {"virusboot", virusScanBoot}, {"viruslookup", virusLookUpOnline}, {"newids", newIdsThroughWindow},
     };

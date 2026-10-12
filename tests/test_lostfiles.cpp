@@ -22,6 +22,7 @@
 #include "../src/lostfiles/structure.h"
 #include "../src/lostfiles/repair.h"
 #include "../src/lostfiles/thumbcache.h"
+#include "../src/lostfiles/ransomware.h"
 #include "../src/common/hostprocess.h"
 #include "../src/lostfiles/textkinds.h"
 #include "../src/lostfiles/preview.h"
@@ -2949,6 +2950,56 @@ void thumbnailCaches()
     report(true, QStringLiteral("thumbnails: 400 damaged caches read without a crash"));
 }
 
+// Signs of ransomware among found files: its family, its endings, its notes, the deleted originals.
+void ransomwareSigns()
+{
+    const auto file = [](const QString &folder, const QString &name, bool deleted = false) {
+        lost::Found f;
+        f.folder = folder;
+        f.name = name;
+        f.deleted = deleted;
+        return f;
+    };
+    QVector<lost::Found> locky;
+    for (int i = 0; i < 10; ++i) {
+        locky << file(QStringLiteral("Docs"), QStringLiteral("report%1.docx.locky").arg(i));
+        locky << file(QStringLiteral("Docs"), QStringLiteral("report%1.docx").arg(i), true); // the original, deleted
+    }
+    locky << file(QStringLiteral("Docs"), QStringLiteral("_Locky_recover_instructions.txt"));
+    const ransomware::Finding a = ransomware::look(locky);
+    report(a.found() && a.family == QLatin1String("Locky") && a.ending == QLatin1String(".locky") && a.locked == 10 && a.deletedOriginals == 10
+               && a.notes.size() == 1 && a.decryptor.isEmpty(),
+           QStringLiteral("ransomware: Locky, its files, its note, and the originals it deleted"), QStringLiteral("%1 %2 %3").arg(a.family).arg(a.locked).arg(a.deletedOriginals));
+    QVector<lost::Found> djvu;
+    for (int i = 0; i < 25; ++i)
+        djvu << file(QStringLiteral("Pictures"), QStringLiteral("IMG_%1.jpg.qweq").arg(i));
+    djvu << file(QStringLiteral("Pictures"), QStringLiteral("_readme.txt"));
+    const ransomware::Finding b = ransomware::look(djvu);
+    report(b.family == QLatin1String("STOP/Djvu") && b.ending == QLatin1String(".qweq") && b.locked == 25 && !b.decryptor.isEmpty(),
+           QStringLiteral("ransomware: STOP/Djvu, known by its note though its ending is new"), b.family + QLatin1Char(' ') + b.decryptor);
+    QVector<lost::Found> dharma;
+    for (int i = 0; i < 5; ++i)
+        dharma << file(QStringLiteral("Share"), QStringLiteral("budget%1.xlsx.id-1E857D00.[restore@mail.example].wallet").arg(i));
+    report(ransomware::look(dharma).family == QLatin1String("Dharma (CrySiS)"), QStringLiteral("ransomware: Dharma, its id and address before its ending"));
+    QVector<lost::Found> unknown;
+    for (int i = 0; i < 25; ++i)
+        unknown << file(QStringLiteral("Work"), QStringLiteral("plan%1.pdf.zzqx").arg(i));
+    unknown << file(QStringLiteral("Work"), QStringLiteral("HOW_TO_DECRYPT_FILES.txt"));
+    const ransomware::Finding c = ransomware::look(unknown);
+    report(c.found() && c.family.isEmpty() && c.ending == QLatin1String(".zzqx") && c.notes.size() == 1,
+           QStringLiteral("ransomware: one not in the table, by its pattern and note"));
+    QVector<lost::Found> ordinary;
+    for (int i = 0; i < 40; ++i) {
+        ordinary << file(QStringLiteral("Pictures"), QStringLiteral("IMG_%1.jpg").arg(i)) << file(QStringLiteral("Pictures"), QStringLiteral("IMG_%1.jpg.bak").arg(i))
+                 << file(QStringLiteral("Downloads"), QStringLiteral("film%1.mp4.part").arg(i));
+    }
+    ordinary << file(QStringLiteral("Program"), QStringLiteral("README.txt")) << file(QStringLiteral("x"), QStringLiteral("backup.tar.gz"))
+             << file(QStringLiteral("x"), QStringLiteral("a.docx.zzqx")); // one alone is no pattern
+    const ransomware::Finding quiet = ransomware::look(ordinary);
+    report(!quiet.found(), QStringLiteral("ransomware: backups, downloads and ordinary files say nothing"),
+           QStringLiteral("%1 %2 %3").arg(quiet.ending).arg(quiet.locked).arg(quiet.notes.join(QLatin1Char(','))));
+}
+
 void lostFilesTests()
 {
     previewQueue();
@@ -2974,4 +3025,5 @@ void lostFilesTests()
     repairs();
     wordSearch();
     thumbnailCaches();
+    ransomwareSigns();
 }

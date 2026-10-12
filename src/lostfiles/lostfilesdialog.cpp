@@ -16,6 +16,7 @@
 #include "previewloader.h"
 #include "repair.h"
 #include "thumbcache.h"
+#include "ransomware.h"
 #include "viewer.h"
 #include "udisks.h"
 #include "vdisk.h"
@@ -738,6 +739,24 @@ LostFilesDialog::LostFilesDialog(UDisks *udisks, const QString &preferredPath, Q
     copies->addWidget(m_copiesLook);
     m_copiesBar->hide();
     resultsLayout->addWidget(m_copiesBar);
+    m_ransomBar = new QWidget;
+    m_ransomBar->setObjectName(QStringLiteral("ransomBar"));
+    auto *ransom = new QHBoxLayout(m_ransomBar);
+    ransom->setContentsMargins(0, 0, 0, 0);
+    auto *ransomIcon = new QLabel;
+    ransomIcon->setPixmap(QIcon::fromTheme(QStringLiteral("dialog-warning")).pixmap(22, 22));
+    m_ransomText = new QLabel;
+    m_ransomText->setObjectName(QStringLiteral("ransom"));
+    m_ransomText->setWordWrap(true);
+    auto *whatToDo = new QPushButton(tr("What to Do…"));
+    whatToDo->setObjectName(QStringLiteral("ransomWhatToDo"));
+    whatToDo->setAutoDefault(false);
+    ransom->addWidget(ransomIcon);
+    ransom->addWidget(m_ransomText, 1);
+    ransom->addWidget(whatToDo);
+    m_ransomBar->hide();
+    resultsLayout->addWidget(m_ransomBar);
+    connect(whatToDo, &QPushButton::clicked, this, &LostFilesDialog::explainRansomware);
 
     auto *split = new QSplitter;
     // On the left: kinds of file, and below them the folders the file systems still name.
@@ -1409,6 +1428,69 @@ void LostFilesDialog::scanDone(bool stopped)
     m_findCopies->setEnabled(m_model->fileCount() > 1);
     if (!stopped)
         findThumbnails();
+    lookForRansomware();
+}
+
+void LostFilesDialog::lookForRansomware()
+{
+    const ransomware::Finding f = ransomware::look(m_model->files());
+    if (!f.found()) {
+        m_ransomBar->hide();
+        return;
+    }
+    QString text = f.family.isEmpty() ? tr("These files look locked by ransomware") : tr("These files look locked by ransomware (%1)").arg(f.family);
+    if (f.locked > 0)
+        text += QLatin1String(": ") + QCoreApplication::translate("LostFilesDialog", "%n file(s) end in %1", nullptr, f.locked).arg(f.ending);
+    if (!f.notes.isEmpty())
+        text += (f.locked > 0 ? QStringLiteral(", and ") : QStringLiteral(": "))
+              + (f.notes.size() == 1 ? tr("its note is here") : tr("%1 of its notes are here").arg(f.notes.size()));
+    m_ransomText->setText(text + QLatin1Char('.'));
+    m_ransomBar->show();
+}
+
+void LostFilesDialog::explainRansomware()
+{
+    const ransomware::Finding f = ransomware::look(m_model->files());
+    int copies = 0;
+    for (const lost::Volume &v : std::as_const(m_volumes))
+        copies += int(v.copies.size());
+    const auto list = [](const QStringList &items) {
+        QStringList shown;
+        for (const QString &item : items.mid(0, 3))
+            shown << QStringLiteral("<i>%1</i>").arg(item.toHtmlEscaped());
+        return shown.join(QStringLiteral(", ")) + (items.size() > 3 ? QStringLiteral("…") : QString());
+    };
+    QString html = QStringLiteral("<p>%1</p><ul>").arg(f.family.isEmpty() ? tr("These files look locked by ransomware, a program that locks people's files "
+                                                                               "and asks for money to unlock them.")
+                                                                          : tr("These files look locked by ransomware: <b>%1</b>, by what it leaves behind.")
+                                                                                .arg(f.family.toHtmlEscaped()));
+    if (f.locked > 0)
+        html += QStringLiteral("<li>%1</li>").arg(QCoreApplication::translate("LostFilesDialog", "%n file(s) end in <b>%1</b>, for example %2.", nullptr, f.locked)
+                                                      .arg(f.ending.toHtmlEscaped(), list(f.examples)));
+    if (!f.notes.isEmpty())
+        html += QStringLiteral("<li>%1</li>").arg(tr("Its notes: %1.").arg(list(f.notes)));
+    html += QStringLiteral("</ul><p><b>%1</b></p><ol>").arg(tr("What can be done"));
+    html += QStringLiteral("<li>%1</li>").arg(tr("Don't pay, and don't delete the locked files or its notes: a free way to unlock them can come out "
+                                                  "later, and it will need them."));
+    html += QStringLiteral("<li>%1</li>").arg(copies > 0 ? tr("Windows kept %n earlier version(s) of this drive: <b>Look in Them</b>, above, shows the files "
+                                                              "as they were.", nullptr, copies)
+                                                         : tr("Windows kept no earlier versions of this drive (most ransomware deletes them)."));
+    html += QStringLiteral("<li>%1</li>").arg(f.deletedOriginals > 0
+                                                   ? tr("Many of these programs write a locked copy and delete the original. The originals of %n locked "
+                                                        "file(s) are among the deleted files found here: tick them and save them.",
+                                                        nullptr, f.deletedOriginals)
+                                                   : tr("Many of these programs write a locked copy and delete the original: look for the originals among "
+                                                        "the deleted files found here (\"Only deleted files\")."));
+    html += QStringLiteral("<li>%1 %2</li>")
+                .arg(f.decryptor.isEmpty() ? tr("No free decryptor for it is known yet.") : tr("A free decryptor has been made public: %1.").arg(f.decryptor.toHtmlEscaped()),
+                     tr("<a href=\"https://www.nomoreransom.org/crypto-sheriff.php\">No More Ransom</a> (the police and security companies' "
+                        "project) looks at two locked files and the note, and points to the right decryptor when there is one."));
+    html += QStringLiteral("<li>%1</li></ol>").arg(tr("Tell the police: they collect the keys, and that's how many decryptors came about."));
+    QMessageBox box(QMessageBox::Warning, tr("Ransomware"), html, QMessageBox::Close, this);
+    box.setTextFormat(Qt::RichText);
+    box.setTextInteractionFlags(Qt::TextBrowserInteraction);
+    box.setObjectName(QStringLiteral("ransomExplained"));
+    box.exec();
 }
 
 void LostFilesDialog::findThumbnails()

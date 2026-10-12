@@ -184,6 +184,9 @@ private:
     void findCopies();
     // The small pictures in Windows' thumbnail caches among the files found, listed as files of their own.
     void findThumbnails();
+    // Signs of ransomware among the files found (ransomware.h): a bar saying so, and what can be done.
+    void lookForRansomware();
+    void explainRansomware();
     // Finds text by words remembered from it (lost::WordSearch), all through the drive.
     void findByWords(const QString &words);
     void checkTheyOpen();
@@ -302,6 +305,8 @@ private:
     QWidget *m_copiesBar = nullptr;
     QLabel *m_copiesText = nullptr;
     QPushButton *m_copiesLook = nullptr;
+    QWidget *m_ransomBar = nullptr;
+    QLabel *m_ransomText = nullptr;
     QLabel *m_tickedInfo;
     QPushButton *m_save;
     // Saving, in a strip under the files: the results stay there for more
