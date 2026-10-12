@@ -211,6 +211,8 @@ add_library(diskanvil-ui STATIC
     src/tools/testbootdialog.cpp src/tools/testbootdialog.h
     src/tools/remotehelpdialog.cpp src/tools/remotehelpdialog.h
     src/tools/remotehelp.cpp src/tools/remotehelp.h
+    src/tools/netboot.cpp src/tools/netboot.h
+    src/tools/netbootdialog.cpp src/tools/netbootdialog.h
     src/backup/newidsdialog.cpp src/backup/newidsdialog.h
     src/tools/systemtools.cpp src/tools/systemtools.h
     src/drives/erasedialog.cpp src/drives/erasedialog.h

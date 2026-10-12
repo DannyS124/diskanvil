@@ -130,6 +130,16 @@ cp /usr/lib/grub/i386-pc/boot.img "$work/stick-boot.img"
 printf '\x90\x90' | dd of="$work/stick-boot.img" bs=1 seek=$((0x66)) conv=notrunc status=none
 cp "$work/stick-boot.img" "$iso/boot/grub/i386-pc/stick-boot.img"
 
+# Start Other PCs from This One (network start, diskanvil-live-netboot): Debian's signed GRUB
+# for network starts after shim on UEFI, and GRUB's own PXE image for old BIOS PCs. Both read
+# grub/grub.cfg from the TFTP server, which the helper writes. The live system's initrd already
+# has the network cards' drivers.
+mkdir -p "$iso/boot/grub/netboot"
+cp /usr/lib/grub/x86_64-efi-signed/grubnetx64.efi.signed "$iso/boot/grub/netboot/grubx64.efi"
+grub-mkimage -O i386-pc-pxe -p '(tftp)/grub' -o "$work/pxecore.img" \
+    pxe tftp net normal linux echo test configfile sleep reboot halt
+cat /usr/lib/grub/i386-pc/pxeboot.img "$work/pxecore.img" > "$iso/boot/grub/netboot/core.0"
+
 cp /usr/share/grub/unicode.pf2 "$iso/boot/grub/fonts/"
 # The boot menu's own fonts (theme.txt names them) and its selection bar.
 dejavu=/usr/share/fonts/truetype/dejavu

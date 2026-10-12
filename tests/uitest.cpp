@@ -15,6 +15,8 @@
 #include "../src/tools/remotehelpdialog.h"
 #include "../src/usb/liveonpc.h"
 #include "../src/usb/liveonpcdialog.h"
+#include "../src/tools/netboot.h"
+#include "../src/tools/netbootdialog.h"
 #include "../src/addons/addonoutput.h"
 #include "../src/addons/addonform.h"
 #include "../src/addons/addonmaker.h"
@@ -3000,6 +3002,139 @@ void testBootWindow()
     }
     TestBootDialog::serialForTest.clear();
     cleanUpLoop(udisks, loopPath);
+}
+
+// Start Other PCs from This One: the HTTP server hands out live/ and nothing else; the helper
+// (dry run, stand-in files and address) writes the right menu and dnsmasq command; the window
+// lists the PCs as dnsmasq (a stand-in) and the server see them, and Stop ends it.
+void netBootWindow()
+{
+    QTemporaryDir dir;
+    const QString medium = dir.filePath(QStringLiteral("medium"));
+    const QByteArray system = QByteArray(6 * 1024 * 1024 + 123, 's');
+    const auto put = [](const QString &path, const QByteArray &data) {
+        QDir().mkpath(QFileInfo(path).path());
+        QFile f(path);
+        return f.open(QIODevice::WriteOnly) && f.write(data) == data.size();
+    };
+    put(medium + QStringLiteral("/live/filesystem.squashfs"), system);
+    put(medium + QStringLiteral("/live/vmlinuz"), "kernel");
+    put(medium + QStringLiteral("/live/initrd.img"), "initrd");
+    put(medium + QStringLiteral("/EFI/BOOT/BOOTX64.EFI"), "shim");
+    put(medium + QStringLiteral("/boot/grub/netboot/grubx64.efi"), "grubnet");
+    put(medium + QStringLiteral("/boot/grub/netboot/core.0"), "pxe");
+    put(medium + QStringLiteral("/.disk/diskanvil-live"), "DiskAnvil Live\nversion=0.0.5\n");
+    put(dir.filePath(QStringLiteral("secret.txt")), "secret");
+    // A request, and what came back.
+    const auto ask = [](quint16 port, const QByteArray &request) {
+        QTcpSocket socket;
+        socket.connectToHost(QHostAddress::LocalHost, port);
+        if (!socket.waitForConnected(3000))
+            return QByteArray();
+        socket.write(request);
+        QByteArray got;
+        QElapsedTimer t;
+        t.start();
+        while (t.elapsed() < 10000) {
+            QCoreApplication::processEvents();
+            if (socket.waitForReadyRead(50))
+                got += socket.readAll();
+            if (socket.state() == QAbstractSocket::UnconnectedState)
+                break;
+        }
+        return got + socket.readAll();
+    };
+    {
+        QTcpServer busy;
+        busy.listen(QHostAddress::AnyIPv4, 8099);
+        netboot::FileServer server(medium);
+        QStringList finished;
+        QObject::connect(&server, &netboot::FileServer::finished, [&](const QString &pc, bool whole) { finished << pc + (whole ? QStringLiteral(" whole") : QStringLiteral(" cut")); });
+        const bool listening = server.listen();
+        report(listening && busy.isListening() && server.port() > 8099 && server.port() <= 8199,
+               QStringLiteral("netboot: the server takes the next port when one is busy"), QString::number(server.port()));
+        const QByteArray got = ask(server.port(), "GET /live/filesystem.squashfs HTTP/1.1\r\nHost: x\r\n\r\n");
+        const qsizetype body = got.indexOf("\r\n\r\n");
+        report(got.startsWith("HTTP/1.1 200 OK") && got.contains("Content-Length: " + QByteArray::number(system.size())) && body > 0 && got.mid(body + 4) == system,
+               QStringLiteral("netboot: the system file comes over HTTP whole"), QString::number(got.size()));
+        waitUntil([&] { return !finished.isEmpty(); }, 3000);
+        report(finished.value(0).endsWith(QLatin1String("whole")), QStringLiteral("netboot: and the server says that PC has it all"), finished.join(QLatin1Char(',')));
+        bool refused = true;
+        for (const QByteArray &path : {QByteArrayLiteral("/../secret.txt"), QByteArrayLiteral("/live/../../secret.txt"), QByteArrayLiteral("/secret.txt"),
+                                       QByteArrayLiteral("/live/"), QByteArrayLiteral("/live/%2e%2e/x"), QByteArrayLiteral("/EFI/BOOT/BOOTX64.EFI")})
+            refused = refused && ask(server.port(), "GET " + path + " HTTP/1.1\r\n\r\n").startsWith("HTTP/1.1 404");
+        report(refused, QStringLiteral("netboot: nothing outside live/ is handed out"));
+        report(ask(server.port(), "POST /live/vmlinuz HTTP/1.1\r\n\r\n").startsWith("HTTP/1.1 405") && ask(server.port(), "HEAD /live/vmlinuz HTTP/1.1\r\n\r\n").endsWith("\r\n\r\n"),
+               QStringLiteral("netboot: only GET (and HEAD, without the file)"));
+    }
+    // The helper, dry: its menu, links and dnsmasq command, for 192.168.37.42/22.
+    const QString helper = QStringLiteral(SOURCE_DIR "/rescue/files/usr/local/bin/diskanvil-live-netboot");
+    const QString state = dir.filePath(QStringLiteral("state"));
+    QProcess dry;
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.insert(QStringLiteral("DISKANVIL_NETBOOT_MEDIUM"), medium);
+    env.insert(QStringLiteral("DISKANVIL_NETBOOT_STATE"), state);
+    env.insert(QStringLiteral("DISKANVIL_NETBOOT_ADDRESS"), QStringLiteral("192.168.37.42/22"));
+    env.insert(QStringLiteral("DISKANVIL_NETBOOT_DRY"), QStringLiteral("1"));
+    dry.setProcessEnvironment(env);
+    dry.start(QStringLiteral("bash"), {helper, QStringLiteral("start"), QStringLiteral("eth9"), QStringLiteral("8123")});
+    dry.waitForFinished(10000);
+    const QStringList args = QString::fromUtf8(dry.readAllStandardOutput()).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+    QFile menu(state + QStringLiteral("/grub/grub.cfg"));
+    const QString cfg = menu.open(QIODevice::ReadOnly) ? QString::fromUtf8(menu.readAll()) : QString();
+    report(dry.exitCode() == 0 && args.contains(QStringLiteral("--dhcp-range=192.168.36.0,proxy")) && args.contains(QStringLiteral("--interface=eth9"))
+               && args.contains(QStringLiteral("--tftp-root=") + state) && args.contains(QStringLiteral("--pxe-service=X86-64_EFI,DiskAnvil Live,bootx64.efi")),
+           QStringLiteral("netboot: dnsmasq answers as a proxy for the card's own network"), args.join(QLatin1Char(' ')) + QString::fromUtf8(dry.readAllStandardError()));
+    report(cfg.contains(QLatin1String("fetch=http://192.168.37.42:8123/live/filesystem.squashfs")) && cfg.contains(QLatin1String("DiskAnvil Live 0.0.5"))
+               && QFileInfo(state + QStringLiteral("/bootx64.efi")).canonicalFilePath() == QFileInfo(medium + QStringLiteral("/EFI/BOOT/BOOTX64.EFI")).canonicalFilePath()
+               && QFileInfo(state + QStringLiteral("/grubx64.efi")).canonicalFilePath() == QFileInfo(medium + QStringLiteral("/boot/grub/netboot/grubx64.efi")).canonicalFilePath()
+               && QFile::exists(state + QStringLiteral("/live/initrd.img")) && QFile::exists(state + QStringLiteral("/core.0")),
+           QStringLiteral("netboot: the menu says where the system is, and the boot files are linked from the stick"), cfg.left(400));
+    QProcess bad;
+    bad.setProcessEnvironment(env);
+    bad.start(QStringLiteral("bash"), {helper, QStringLiteral("start"), QStringLiteral("eth0;reboot"), QStringLiteral("8123")});
+    bad.waitForFinished(10000);
+    QProcessEnvironment noFiles = env;
+    noFiles.insert(QStringLiteral("DISKANVIL_NETBOOT_MEDIUM"), dir.filePath(QStringLiteral("nothing")));
+    QProcess missing;
+    missing.setProcessEnvironment(noFiles);
+    missing.start(QStringLiteral("bash"), {helper, QStringLiteral("start"), QStringLiteral("eth9"), QStringLiteral("8123")});
+    missing.waitForFinished(10000);
+    report(bad.exitCode() == 2 && missing.exitCode() == 3 && QString::fromUtf8(missing.readAllStandardError()).contains(QLatin1String("own files")),
+           QStringLiteral("netboot: an odd card name, or no stick to hand out, is refused"));
+
+    // The window, with a stand-in for dnsmasq that says what a real one does.
+    if (netboot::cards().isEmpty()) {
+        out << "SKIP  netboot window: this PC has no network" << Qt::endl;
+        return;
+    }
+    QFile fake(dir.filePath(QStringLiteral("netboot")));
+    if (fake.open(QIODevice::WriteOnly))
+        fake.write("#!/bin/sh\necho \"$3\" > " + dir.path().toUtf8() + "/port\necho \"dnsmasq-dhcp: 123 PXE(eth9) 52:54:00:AA:BB:CC proxy\" >&2\n"
+                   "sleep 0.3\necho \"dnsmasq-tftp: sent /run/diskanvil-live/netboot/live/initrd.img to 10.9.8.7\" >&2\nexec sleep 60\n");
+    fake.close();
+    fake.setPermissions(fake.permissions() | QFileDevice::ExeOwner);
+    netboot::helperForTest = fake.fileName();
+    netboot::mediumForTest = medium;
+    {
+        NetBootDialog dialog;
+        dialog.show();
+        auto *pcs = dialog.findChild<QLabel *>(QStringLiteral("pcs"));
+        findButton(&dialog, QStringLiteral("Start"))->click();
+        waitUntil([&] { return pcs->text().contains(QLatin1String("10.9.8.7")); }, 5000);
+        report(pcs->text().contains(QLatin1String("52:54:00:aa:bb:cc</b>: asked")) && pcs->text().contains(QLatin1String("10.9.8.7</b>: has the start files")),
+               QStringLiteral("netboot window: it lists the PCs that asked, and what they've had"), pcs->text());
+        QFile portFile(dir.filePath(QStringLiteral("port")));
+        const quint16 port = portFile.open(QIODevice::ReadOnly) ? quint16(portFile.readAll().trimmed().toUInt()) : 0;
+        const QByteArray got = ask(port, "GET /live/filesystem.squashfs HTTP/1.1\r\n\r\n");
+        waitUntil([&] { return pcs->text().contains(QLatin1String("has DiskAnvil Live")); }, 3000);
+        report(got.endsWith(system) && pcs->text().contains(QLatin1String("127.0.0.1</b>: has DiskAnvil Live")),
+               QStringLiteral("netboot window: a PC that took the system shows up as having it"), pcs->text());
+        findButton(&dialog, QStringLiteral("Stop"))->click();
+        report(!dialog.serving() && ask(port, "GET /live/vmlinuz HTTP/1.1\r\n\r\n").isEmpty(), QStringLiteral("netboot window: Stop ends dnsmasq and the server"));
+    }
+    netboot::helperForTest.clear();
+    netboot::mediumForTest.clear();
 }
 
 // Put DiskAnvil Live on This PC, on a loop device standing in for the PC's drive (GPT, a partition
@@ -6099,7 +6234,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},

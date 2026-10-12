@@ -17,6 +17,7 @@
 #include "closedsets.h"
 #include "writeblock.h"
 #include "remotehelpdialog.h"
+#include "netbootdialog.h"
 #include "liveonpcdialog.h"
 #include "clonezilladialog.h"
 #include "copydialogs.h"
@@ -789,6 +790,11 @@ void MainWindow::createActions()
     m_remoteHelp->setToolTip(tr("Someone you trust, on the same network, sees this screen and can use it, or works in a terminal"));
     connect(m_remoteHelp, &QAction::triggered, this, [this] { RemoteHelpDialog(toolParent()).exec(); });
 
+    m_netBoot = new QAction(themeIcon("network-server", "network-wired"), tr("Start Other PCs from This One…"), this);
+    m_netBoot->setObjectName(QStringLiteral("netBoot"));
+    m_netBoot->setToolTip(tr("Other PCs on the same network start DiskAnvil Live from this one, with nothing installed on them"));
+    connect(m_netBoot, &QAction::triggered, this, [this] { NetBootDialog(toolParent()).exec(); });
+
     m_writeBlock = new QAction(themeIcon("object-locked", "document-encrypt"), tr("Write-Protect Every Drive"), this);
     m_writeBlock->setObjectName(QStringLiteral("writeBlock"));
     m_writeBlock->setCheckable(true);
@@ -964,6 +970,7 @@ void MainWindow::createActions()
         }
         tools->addAction(m_writeBlock);
         tools->addAction(m_remoteHelp);
+        tools->addAction(m_netBoot);
         tools->addAction(m_bootMenu);
         tools->addAction(m_linuxBoot);
         tools->addAction(m_drivers);
@@ -1818,7 +1825,8 @@ bool MainWindow::openTool(const QString &name)
                                              {QStringLiteral("lost-files"), m_findFiles},
                                              {QStringLiteral("virus-scan"), m_virusScan},
                                              {QStringLiteral("save-files"), m_saveFiles},
-                                             {QStringLiteral("remote-help"), m_remoteHelp}};
+                                             {QStringLiteral("remote-help"), m_remoteHelp},
+                                             {QStringLiteral("net-boot"), m_netBoot}};
     QAction *action = tools.value(name);
     if (!action)
         return false;

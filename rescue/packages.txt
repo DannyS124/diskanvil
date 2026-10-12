@@ -149,5 +149,7 @@ bubblewrap
 # Let Someone Help: the screen over VNC, a terminal over SSH (both off until switched on)
 x11vnc
 openssh-server
+# Start Other PCs from This One: proxy DHCP and TFTP for network starts (only while it's on)
+dnsmasq-base
 # more picture kinds in those previews (WebP, TIFF...)
 qt6-image-formats-plugins

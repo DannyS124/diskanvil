@@ -324,6 +324,8 @@ QVector<HomeWindow::Tile> HomeWindow::allTiles() const
             .desktopId = QStringLiteral("featherpad");
         add(QStringLiteral("help"), QStringLiteral("preferences-desktop-remote-desktop"), QStringLiteral("network-connect"), tr("Let Someone Help"), {})
             .tool = QStringLiteral("remote-help");
+        add(QStringLiteral("netboot"), QStringLiteral("network-server"), QStringLiteral("network-wired"), tr("Start Other PCs"), {}).tool =
+            QStringLiteral("net-boot");
         add(QStringLiteral("logs"), QStringLiteral("diskanvil-live-logs"), QStringLiteral("text-x-log"), tr("Save Logs"), {}).desktopId =
             QStringLiteral("diskanvil-live-logs");
         add(QStringLiteral("readme"), QStringLiteral("diskanvil-live-readme"), QStringLiteral("help-about"), tr("Read Me"), {}).desktopId =

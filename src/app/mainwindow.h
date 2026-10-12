@@ -66,6 +66,7 @@ private:
     // DiskAnvil Live's write protection (writeblock.h): every drive read-only but its own stick.
     QAction *m_writeBlock = nullptr;
     QAction *m_remoteHelp = nullptr;
+    QAction *m_netBoot = nullptr;
     void setWriteBlock(const QStringList &args);
     void updateWriteBlockNotice();
     QString m_writeBlockKey;
