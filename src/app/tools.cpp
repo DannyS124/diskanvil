@@ -31,6 +31,7 @@
 #include <QButtonGroup>
 #include <QCheckBox>
 #include <QClipboard>
+#include <QApplication>
 #include <QComboBox>
 #include <QDir>
 #include <QDialogButtonBox>
@@ -266,6 +267,91 @@ WipeDialog::WipeDialog(const Disk &disk, int diskNumber, QWidget *parent)
 }
 
 // --- Health -------------------------------------------------------------------
+
+// --- Sector size ----------------------------------------------------------------
+
+SectorSizeDialog::SectorSizeDialog(UDisks *udisks, const Disk &disk, const drivepower::SectorSizes &sizes, QWidget *parent)
+    : QDialog(parent)
+    , m_udisks(udisks)
+    , m_disk(disk)
+    , m_size(new QComboBox)
+    , m_confirm(new QLineEdit)
+    , m_change(new QPushButton(tr("Change")))
+{
+    setWindowTitle(tr("Sector Size of %1").arg(disk.model));
+    for (int size : sizes.supported) {
+        if (size != sizes.logical)
+            m_size->addItem(tr("%1 bytes").arg(size), size);
+    }
+    m_size->setObjectName(QStringLiteral("sectorSize"));
+    QString text = tr("<p><b>%1</b></p><p>It uses %2-byte sectors now (%3-byte inside). This drive can be switched to another "
+                      "size: 4096 suits a drive that only holds data (a NAS, ZFS, a backup drive), and 512 is what older systems "
+                      "and every Windows can start from.</p>")
+                       .arg(diskTitle(disk).toHtmlEscaped())
+                       .arg(sizes.logical)
+                       .arg(sizes.physical);
+    text += redText(tr("Everything on the drive is lost, and its partitions have to be made again. Many drives only change after "
+                       "being switched off and on. Older PCs, and Windows 7 and earlier, can't start from a drive with 4096-byte sectors."));
+    if (!diskWarning(disk).isEmpty())
+        text += QStringLiteral("<br>") + redText(diskWarning(disk));
+    const QString name = shortDevice(disk.device);
+    m_confirm->setPlaceholderText(name);
+    m_confirm->setObjectName(QStringLiteral("confirm"));
+    m_change->setEnabled(false);
+    connect(m_confirm, &QLineEdit::textChanged, this, [this, name](const QString &t) {
+        m_change->setEnabled(t.trimmed() == name && m_size->count() > 0 && !m_disk.isSystem);
+    });
+    connect(m_change, &QPushButton::clicked, this, &SectorSizeDialog::change);
+    auto *close = new QPushButton(tr("Close"));
+    connect(close, &QPushButton::clicked, this, &QDialog::reject);
+    auto *buttons = new QHBoxLayout;
+    buttons->addStretch();
+    buttons->addWidget(m_change);
+    buttons->addWidget(close);
+    auto *form = new QFormLayout;
+    form->addRow(tr("New size:"), m_size);
+    auto *layout = new QVBoxLayout(this);
+    layout->addWidget(wrappingLabel(text));
+    layout->addLayout(form);
+    layout->addWidget(new QLabel(tr("Type <b>%1</b> to confirm:").arg(name)));
+    layout->addWidget(m_confirm);
+    layout->addLayout(buttons);
+    resize(540, sizeHint().height());
+}
+
+void SectorSizeDialog::change()
+{
+    const int size = m_size->currentData().toInt();
+    if (size <= 0 || m_disk.isSystem)
+        return;
+    const QStringList command = QStringList{QStringLiteral("sudo"), QStringLiteral("-n")} + drivepower::setSectorSizeCommand(m_disk.device, size);
+    QString said;
+    bool ok = false;
+    if (runForTest) {
+        ok = runForTest(command, &said);
+    } else {
+        // Its own drive's sectors: a few seconds, though some drives take a minute.
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        QProcess hdparm;
+        hdparm.setProcessChannelMode(QProcess::MergedChannels);
+        hdparm.start(command.first(), command.mid(1));
+        ok = hdparm.waitForFinished(180000) && hdparm.exitStatus() == QProcess::NormalExit && hdparm.exitCode() == 0;
+        said = QString::fromLocal8Bit(hdparm.readAll()).trimmed();
+        QApplication::restoreOverrideCursor();
+    }
+    qCInfo(lcOps).noquote() << "Sector size of" << m_disk.device << "to" << size << (ok ? "done" : "failed:") << said;
+    m_udisks->rescan(m_disk.blockPath);
+    if (ok) {
+        QMessageBox::information(this, windowTitle(),
+                                 tr("Done: %1 now uses %2-byte sectors. If it still shows the old size, switch the PC off fully and on "
+                                    "again. Then make a new partition table on it.")
+                                     .arg(shortDevice(m_disk.device))
+                                     .arg(size));
+        accept();
+    } else {
+        QMessageBox::warning(this, windowTitle(), tr("The drive wouldn't: %1").arg(said));
+    }
+}
 
 // --- SD cards -----------------------------------------------------------------
 

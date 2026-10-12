@@ -4,6 +4,7 @@
 #pragma once
 
 #include "blockmapdata.h"
+#include "drivepower.h"
 #include "firmware.h"
 #include "isomode.h"
 #include "udisks.h"
@@ -11,6 +12,8 @@
 #include <QDialog>
 #include <QMap>
 #include <QSet>
+
+#include <functional>
 
 class IsoCopy;
 class QCheckBox;
@@ -96,6 +99,26 @@ private:
     QThread *m_thread = nullptr;
     QMetaObject::Connection m_openConn;
     bool m_running = false;
+};
+
+// Switches an ATA drive that can to another logical sector size (hdparm --set-sector-size), on
+// DiskForge Live. Everything on it goes: type-to-confirm.
+class SectorSizeDialog : public QDialog
+{
+    Q_OBJECT
+public:
+    SectorSizeDialog(UDisks *udisks, const Disk &disk, const drivepower::SectorSizes &sizes, QWidget *parent = nullptr);
+    // For the tests: runs instead of the command (nothing reaches a drive). True for done.
+    static inline std::function<bool(const QStringList &command, QString *said)> runForTest;
+
+private:
+    void change();
+
+    UDisks *m_udisks;
+    Disk m_disk;
+    QComboBox *m_size;
+    QLineEdit *m_confirm;
+    QPushButton *m_change;
 };
 
 class HealthDialog : public QDialog

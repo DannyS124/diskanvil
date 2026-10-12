@@ -15,7 +15,7 @@
 <context>
     <name>BadSectorsDialog</name>
     <message numerus="yes">
-        <location filename="../src/app/tools.cpp" line="1717"/>
+        <location filename="../src/app/tools.cpp" line="1853"/>
         <source>%n area(s) read slowly. Slow spots often turn into bad sectors later, so keep a backup.</source>
         <translation>
             <numerusform>%n area read slowly. Slow spots often turn into bad sectors later, so keep a backup.</numerusform>
@@ -23,7 +23,15 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/app/tools.cpp" line="1745"/>
+        <location filename="../src/app/tools.cpp" line="1929"/>
+        <source>%n piece(s) couldn&apos;t be read and were left alone: scan again, then Repair.</source>
+        <translation>
+            <numerusform>%n piece couldn't be read and were left alone: scan again, then Repair.</numerusform>
+            <numerusform>%n pieces couldn't be read and were left alone: scan again, then Repair.</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/app/tools.cpp" line="1951"/>
         <source>Repair %n bad sector(s) on %1?</source>
         <translation>
             <numerusform>Repair %n bad sector on %1?</numerusform>
@@ -31,7 +39,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/app/tools.cpp" line="1792"/>
+        <location filename="../src/app/tools.cpp" line="1998"/>
         <source>%n block(s)</source>
         <translation>
             <numerusform>%n block</numerusform>
@@ -200,7 +208,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/app/mainwindow.cpp" line="2080"/>
+        <location filename="../src/app/mainwindow.cpp" line="2112"/>
         <source>%n add-on command(s) still running. Stop them and quit?</source>
         <translation>
             <numerusform>%n add-on command still running. Stop them and quit?</numerusform>
@@ -227,7 +235,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/app/tools.cpp" line="109"/>
+        <location filename="../src/app/tools.cpp" line="110"/>
         <source>%n sector(s)</source>
         <translation>
             <numerusform>%n sector</numerusform>

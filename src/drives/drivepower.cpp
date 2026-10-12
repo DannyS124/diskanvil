@@ -106,6 +106,30 @@ QString drivepower::stateText(int state)
     }
 }
 
+drivepower::SectorSizes drivepower::parseHdparmI(const QString &output)
+{
+    SectorSizes s;
+    static const QRegularExpression logical(QStringLiteral("Logical(?:/Physical)?\\s+Sector size:\\s*(\\d+) bytes(?:\\s*\\[ Supported:([\\d ]+)\\])?"));
+    static const QRegularExpression physical(QStringLiteral("Physical Sector size:\\s*(\\d+) bytes"));
+    const QRegularExpressionMatch l = logical.match(output);
+    if (!l.hasMatch())
+        return s;
+    s.logical = l.captured(1).toInt();
+    const QRegularExpressionMatch p = physical.match(output);
+    s.physical = p.hasMatch() ? p.captured(1).toInt() : s.logical;
+    for (const QString &size : l.captured(2).split(QLatin1Char(' '), Qt::SkipEmptyParts)) {
+        const int n = size.toInt();
+        if (n >= 512 && !s.supported.contains(n))
+            s.supported << n;
+    }
+    return s;
+}
+
+QStringList drivepower::setSectorSizeCommand(const QString &device, int size)
+{
+    return {QStringLiteral("hdparm"), QStringLiteral("--set-sector-size"), QString::number(size), QStringLiteral("--please-destroy-my-drive"), device};
+}
+
 drivepower::HiddenArea drivepower::parseHdparmN(const QString &output)
 {
     HiddenArea a;

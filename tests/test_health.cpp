@@ -59,6 +59,17 @@ void hiddenArea()
     const auto odd = parseHdparmN(QStringLiteral("/dev/sdc:\n SG_IO: bad/missing sense data\n"));
     report(none.known && none.hidden() == 0 && some.known && some.hidden() == 2113 && !odd.known,
            QStringLiteral("hidden area: hdparm -N's answer is read, and what's hidden worked out"));
+    // hdparm -I's sector size lines, in its own layout (identify.c: "\t%-31s %11u bytes").
+    const auto switchable = drivepower::parseHdparmI(QStringLiteral("\tLogical  Sector size:                   512 bytes [ Supported: 512 4096 ]\n"
+                                                                     "\tPhysical Sector size:                  4096 bytes\n"));
+    const auto fixed = drivepower::parseHdparmI(QStringLiteral("\tLogical  Sector size:                   512 bytes\n\tPhysical Sector size:                  4096 bytes\n"));
+    const auto old = drivepower::parseHdparmI(QStringLiteral("\tLogical/Physical Sector size:           512 bytes\n"));
+    report(switchable.logical == 512 && switchable.physical == 4096 && switchable.canChange() && switchable.supported == QVector<int>{512, 4096}
+               && fixed.logical == 512 && !fixed.canChange() && old.logical == 512 && old.physical == 512 && drivepower::parseHdparmI(QString()).logical == 0,
+           QStringLiteral("sector size: hdparm -I's sizes, and which ones a drive can be switched to"));
+    report(drivepower::setSectorSizeCommand(QStringLiteral("/dev/sdb"), 4096).join(QLatin1Char(' '))
+               == QLatin1String("hdparm --set-sector-size 4096 --please-destroy-my-drive /dev/sdb"),
+           QStringLiteral("sector size: hdparm's command to switch"));
     drivepower::Changes c;
     c.aam = 128;
     c.lookahead = 0;

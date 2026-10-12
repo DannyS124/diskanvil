@@ -1607,6 +1607,8 @@ void MainWindow::showProperties()
             add(tr("Temperature"), QStringLiteral("%1 °C").arg(qRound(d->health.temperatureC)));
         if (d->isSystem)
             add(tr("System disk"), tr("%1. This app won't modify it.").arg(d->systemReason));
+        if (!d->nvmeNamespace && !d->isLoop)
+            add(tr("Sector size"), tr("%1 bytes").arg(d->sectorSize));
         if (d->nvmeNamespace) {
             if (d->nvmeSectorSize > 0) {
                 QStringList others;
@@ -1672,6 +1674,36 @@ void MainWindow::showProperties()
                                                : hidden.hidden() == 0     ? tr("None")
                                                                           : tr("%1 hidden by the drive's own settings").arg(formatSize(hidden.hidden() * 512))});
         Q_UNUSED(row)
+        // The sizes the drive itself says it can switch to (only hdparm asks, so only DiskForge Live).
+        if (rescue::runningInRescue()) {
+            QProcess hdparm;
+            hdparm.setProcessChannelMode(QProcess::MergedChannels);
+            hdparm.start(QStringLiteral("sudo"), {QStringLiteral("-n"), QStringLiteral("hdparm"), QStringLiteral("-I"), d->device});
+            const drivepower::SectorSizes sizes =
+                hdparm.waitForFinished(10000) ? drivepower::parseHdparmI(QString::fromLocal8Bit(hdparm.readAll())) : drivepower::SectorSizes();
+            if (sizes.logical > 0) {
+                QStringList others;
+                for (int size : sizes.supported) {
+                    if (size != sizes.logical)
+                        others << QString::number(size);
+                }
+                new QTreeWidgetItem(tree, {tr("Sector size (the drive's)"),
+                                           others.isEmpty() ? tr("%1 bytes (%2 inside)").arg(sizes.logical).arg(sizes.physical)
+                                                            : tr("%1 bytes (%2 inside); it can be switched to %3")
+                                                                  .arg(sizes.logical)
+                                                                  .arg(sizes.physical)
+                                                                  .arg(others.join(QStringLiteral(", ")))});
+            }
+            if (sizes.canChange() && !d->isSystem) {
+                auto *change = new QPushButton(tr("Change the Sector Size…"));
+                const QString path = d->blockPath;
+                connect(change, &QPushButton::clicked, &dialog, [this, &dialog, path, sizes] {
+                    if (const Disk *fresh = m_udisks->diskByPath(path))
+                        SectorSizeDialog(m_udisks, *fresh, sizes, &dialog).exec();
+                });
+                layout->addWidget(change, 0, Qt::AlignRight);
+            }
+        }
         if (hidden.known && hidden.hidden() > 0) {
             auto *show = new QPushButton(tr("Show the Hidden Area…"));
             show->setToolTip(tr("Makes the drive show all of itself again. Nothing on the part you see now changes."));

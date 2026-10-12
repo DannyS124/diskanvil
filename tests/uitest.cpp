@@ -1773,6 +1773,61 @@ void stickCheck()
     cleanUpLoop(udisks, loopPath);
 }
 
+// Change the Sector Size: the sizes offered, the type-to-confirm, and the exact hdparm command,
+// captured instead of run (nothing reaches a drive).
+void sectorSizeWindow()
+{
+    UDisks udisks;
+    udisks.setInteractive(false);
+    Disk disk;
+    disk.device = QStringLiteral("/dev/sdz");
+    disk.blockPath = QStringLiteral("/org/freedesktop/UDisks2/block_devices/sdz");
+    disk.model = QStringLiteral("Test drive");
+    disk.size = 4000ull * 1000 * 1000 * 1000;
+    drivepower::SectorSizes sizes;
+    sizes.logical = 512;
+    sizes.physical = 4096;
+    sizes.supported = {512, 4096};
+    QStringList ran;
+    SectorSizeDialog::runForTest = [&ran](const QStringList &command, QString *) {
+        ran = command;
+        return true;
+    };
+    QStringList boxes;
+    Answerer answerer;
+    answerer.answer = [&](QWidget *modal) {
+        if (auto *box = qobject_cast<QMessageBox *>(modal)) {
+            boxes << box->text();
+            box->accept();
+            return true;
+        }
+        return false;
+    };
+    {
+        SectorSizeDialog dialog(&udisks, disk, sizes);
+        dialog.show();
+        auto *size = dialog.findChild<QComboBox *>(QStringLiteral("sectorSize"));
+        QPushButton *change = findButton(&dialog, QStringLiteral("Change"));
+        report(size && size->count() == 1 && size->currentData().toInt() == 4096 && change && !change->isEnabled(),
+               QStringLiteral("sector size: only the other size is offered, and nothing starts before the name is typed"));
+        dialog.findChild<QLineEdit *>(QStringLiteral("confirm"))->setText(QStringLiteral("sdz"));
+        if (change && change->isEnabled())
+            change->click();
+        waitUntil([&] { return !boxes.isEmpty(); }, 10000);
+    }
+    report(ran.join(QLatin1Char(' ')) == QLatin1String("sudo -n hdparm --set-sector-size 4096 --please-destroy-my-drive /dev/sdz")
+               && boxes.join(QLatin1Char(' ')).contains(QLatin1String("4096-byte sectors")),
+           QStringLiteral("sector size: hdparm is asked to switch it, and it says what to do next"), ran.join(QLatin1Char(' ')) + QStringLiteral(" | ") + boxes.join(QLatin1Char(' ')));
+    disk.isSystem = true;
+    {
+        SectorSizeDialog dialog(&udisks, disk, sizes);
+        dialog.findChild<QLineEdit *>(QStringLiteral("confirm"))->setText(QStringLiteral("sdz"));
+        QPushButton *change = findButton(&dialog, QStringLiteral("Change"));
+        report(change && !change->isEnabled(), QStringLiteral("sector size: never on the drive the system runs from"));
+    }
+    SectorSizeDialog::runForTest = nullptr;
+}
+
 // Refresh Slow Areas on a loop device standing in for an SSD, after a scan whose reads are
 // given: two slow pieces. As root they're written back and the image is byte for byte the same;
 // as the user, opening the drive for writing is refused and the window says so.
@@ -4424,7 +4479,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},

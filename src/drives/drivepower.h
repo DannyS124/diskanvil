@@ -51,4 +51,16 @@ struct HiddenArea {
 };
 HiddenArea parseHdparmN(const QString &output);
 
+// The sector sizes an ATA drive reports to hdparm -I, and the ones it can be switched to (some
+// drives can: "Logical  Sector size: 512 bytes [ Supported: 512 4096 ]").
+struct SectorSizes {
+    int logical = 0;
+    int physical = 0;
+    QVector<int> supported; // empty: the drive can't change it
+    bool canChange() const { return supported.size() > 1; }
+};
+SectorSizes parseHdparmI(const QString &output);
+// hdparm's command to switch, which erases everything on the drive.
+QStringList setSectorSizeCommand(const QString &device, int size);
+
 } // namespace drivepower
