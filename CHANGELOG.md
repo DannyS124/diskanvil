@@ -87,6 +87,10 @@ Fixed:
 - Saving found files closed Find Lost Files, and so did Enter. It stays open now, and marks what's been saved
 - Thumbnails scrolled away and back could stay a blank card, and big PDFs only showed as ".pdf"
 - Backups with something after their end are called that again, not damaged
+- Windows' own files that Windows keeps compressed (CompactOS) are recognised: Windows Drivers and Services marks them as
+  Windows' own, and Scan for Viruses says why Linux can't read them instead of counting them as unreadable
+- On Windows, Make Room for Windows Recovery found no drive, and Windows Product Key and the Windows picker listed the
+  running Windows twice
 - Typing a drive's name to confirm in Clone, Restore or Rescue Copy could move the keyboard to another button, so a space pressed Cancel
 - Check a USB Stick's map stayed yellow after a good check. Now it turns green
 - Tall windows could run off a small screen
