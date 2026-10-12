@@ -3,7 +3,8 @@
 
 // Scan for Viruses' second layer, what starts with Windows: a Windows folder tree made from
 // the test hives (tests/data/registry), tasks written the way Windows writes them, and
-// shortcuts Windows made, with what malware would add.
+// shortcuts Windows made, with what malware would add. And What This PC Did (activity.h), on
+// Windows, Linux and Mac drives.
 //
 // DISKANVIL_REAL_WINDOWS=<folder>: also a real Windows drive, mounted there (read-only).
 
@@ -16,12 +17,16 @@
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
-#include <QRandomGenerator>
-#include <QTimeZone>
-#include <QStandardPaths>
 #include <QProcess>
+#include <QRandomGenerator>
+#include <QStandardPaths>
 #include <QStringDecoder>
 #include <QTemporaryDir>
+#include <QTimeZone>
+#include <QtEndian>
+
+#include <algorithm>
+#include <cstring>
 
 namespace {
 
@@ -352,6 +357,95 @@ void activityRecords(const QString &dir)
     report(true, QStringLiteral("activity: 60 damaged hives read without a crash"));
 }
 
+// One wtmp record, the way glibc writes them (384 bytes).
+QByteArray wtmpRecord(int type, const char *line, const char *user, const char *host, qint64 seconds)
+{
+    QByteArray r(384, '\0');
+    qToLittleEndian<qint16>(qint16(type), r.data());
+    std::memcpy(r.data() + 8, line, std::min<size_t>(32, qstrlen(line)));
+    std::memcpy(r.data() + 44, user, std::min<size_t>(32, qstrlen(user)));
+    std::memcpy(r.data() + 76, host, std::min<size_t>(256, qstrlen(host)));
+    qToLittleEndian<qint32>(qint32(seconds), r.data() + 340);
+    return r;
+}
+
+// Linux and macOS drives: what system, and on Linux what it was used for.
+void otherSystems(const QString &dir)
+{
+    const QString root = dir + QStringLiteral("/linux");
+    put(root + QStringLiteral("/usr/lib/os-release"), "NAME=\"Arch Linux\"\nPRETTY_NAME=\"Arch Linux\"\nID=arch\nBUILD_ID=rolling\n");
+    QDir().mkpath(root + QStringLiteral("/etc"));
+    // Linked the way Arch and Debian do (relative), and the zone the way systemd does (absolute):
+    // both are this drive's files, not this PC's.
+    QFile::link(QStringLiteral("../usr/lib/os-release"), root + QStringLiteral("/etc/os-release"));
+    QFile::link(QStringLiteral("/usr/share/zoneinfo/Europe/London"), root + QStringLiteral("/etc/localtime"));
+    put(root + QStringLiteral("/etc/hostname"), "anvil-arch\n");
+    put(root + QStringLiteral("/etc/passwd"), "root:x:0:0::/root:/bin/bash\nbin:x:1:1::/:/usr/bin/nologin\nsam:x:1000:1000:Sam:/home/sam:/bin/bash\n");
+    QDir().mkpath(root + QStringLiteral("/usr/lib/modules/6.9.2-arch1-1"));
+    QDir().mkpath(root + QStringLiteral("/usr/lib/modules/6.10.1-arch1-1"));
+    put(root + QStringLiteral("/var/log/pacman.log"), "[2024-01-02T10:00:00+0000] [PACMAN] Running 'pacstrap'\n"
+                                                      "[2024-01-02T10:00:05+0000] [ALPM] installed linux (6.9.2.arch1-1)\n"
+                                                      "[2024-06-01T18:20:00+0100] [ALPM] upgraded firefox (126.0-1 -> 127.0-1)\n"
+                                                      "[2024-06-03T09:00:00+0100] [ALPM] installed veracrypt (1.26.7-1)\n"
+                                                      "[2024-06-04T09:00:00+0100] [ALPM] removed veracrypt (1.26.7-1)\n");
+    put(root + QStringLiteral("/var/log/dpkg.log"), "2024-06-05 11:00:00 install nmap:amd64 <none> 7.94+git20230807-1\n"
+                                                    "2024-06-05 11:00:01 status installed nmap:amd64 7.94+git20230807-1\n");
+    put(root + QStringLiteral("/var/log/wtmp"), wtmpRecord(2, "~", "reboot", "6.10.1-arch1-1", 1717400000) + wtmpRecord(7, "tty1", "sam", "", 1717400060)
+                                                    + wtmpRecord(7, "pts/0", "sam", "192.168.1.20", 1717401000)
+                                                    + wtmpRecord(1, "~", "shutdown", "6.10.1-arch1-1", 1717409000) + QByteArray(100, 'x'));
+    put(root + QStringLiteral("/home/sam/.local/share/recently-used.xbel"),
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<xbel version=\"1.0\" xmlns:bookmark=\"http://www.freedesktop.org/standards/desktop-bookmarks\">\n"
+        "<bookmark href=\"file:///home/sam/Documents/payslip%20june.pdf\" added=\"2024-06-06T08:00:00.000000Z\" modified=\"2024-06-06T08:00:00.000000Z\" "
+        "visited=\"2024-06-06T08:05:00.000000Z\"><info><metadata owner=\"http://freedesktop.org\"><bookmark:applications>"
+        "<bookmark:application name=\"Okular\" exec=\"okular %u\" modified=\"2024-06-06T08:05:00Z\" count=\"2\"/></bookmark:applications>"
+        "</metadata></info></bookmark>\n</xbel>\n");
+
+    report(activity::systemOn(root) == QLatin1String("Linux") && activity::systemOn(dir + QStringLiteral("/nothing")).isEmpty(),
+           QStringLiteral("activity: a Linux drive is recognised (os-release, linked as distributions do)"));
+    const activity::Report r = activity::read(root);
+    const activity::Overview &o = r.overview;
+    report(r.system == QLatin1String("Linux") && o.product == QLatin1String("Arch Linux") && o.release == QLatin1String("rolling")
+               && o.build == QLatin1String("kernels 6.10.1-arch1-1, 6.9.2-arch1-1") && o.computerName == QLatin1String("anvil-arch") && o.timeZone == QLatin1String("Europe/London")
+               && o.installed == QDateTime(QDate(2024, 1, 2), QTime(10, 0), QTimeZone::UTC)
+               && o.lastShutdown == QDateTime::fromSecsSinceEpoch(1717409000, QTimeZone::UTC),
+           QStringLiteral("activity: which Linux, its newest kernel, name, time zone, when installed, last shut down"),
+           QStringLiteral("%1 %2 %3 %4 %5 %6").arg(o.product, o.release, o.build, o.computerName, o.timeZone, o.installed.toString(Qt::ISODate)));
+    const auto has = [&r](const QString &what, const QDateTime &when = {}) {
+        return std::any_of(r.events.cbegin(), r.events.cend(), [&](const activity::Event &e) { return e.what == what && (!when.isValid() || e.when == when); });
+    };
+    report(has(QStringLiteral("Account: sam")) && has(QStringLiteral("Account: root")) && !has(QStringLiteral("Account: bin"))
+               && has(QStringLiteral("Started up"), QDateTime::fromSecsSinceEpoch(1717400000, QTimeZone::UTC))
+               && has(QStringLiteral("Signed in: sam"), QDateTime::fromSecsSinceEpoch(1717401000, QTimeZone::UTC)) && has(QStringLiteral("Shut down")),
+           QStringLiteral("activity: Linux accounts (people's and root), start-ups, sign-ins and shut-downs from wtmp"));
+    report(has(QStringLiteral("Installed veracrypt"), QDateTime(QDate(2024, 6, 3), QTime(8, 0), QTimeZone::UTC)) && has(QStringLiteral("Removed veracrypt"))
+               && has(QStringLiteral("Installed nmap")) && !has(QStringLiteral("Installed firefox")),
+           QStringLiteral("activity: programs installed and removed, from pacman's and dpkg's logs"));
+    const auto payslip = std::find_if(r.events.cbegin(), r.events.cend(), [](const activity::Event &e) { return e.what == QLatin1String("Opened payslip june.pdf"); });
+    report(payslip != r.events.cend() && payslip->when == QDateTime(QDate(2024, 6, 6), QTime(8, 5), QTimeZone::UTC) && payslip->detail.contains(QLatin1String("Okular"))
+               && payslip->user == QLatin1String("sam"),
+           QStringLiteral("activity: recent files, with the program that opened them"), payslip != r.events.cend() ? payslip->detail : QStringLiteral("none"));
+    // Damaged logs: nothing made up.
+    QByteArray noise(384 * 50, '\0');
+    QRandomGenerator rng(5);
+    for (char &c : noise)
+        c = char(rng.bounded(256));
+    const QVector<activity::Session> junk = activity::readWtmp(noise);
+    report(std::all_of(junk.cbegin(), junk.cend(), [](const activity::Session &x) { return x.when.date().year() >= 1980 && x.when.date().year() < 2100; })
+               && activity::readPackageLog(noise).isEmpty() && activity::readRecentlyUsed(noise, QString()).isEmpty(),
+           QStringLiteral("activity: noise in the logs reads as nothing, or as nothing impossible"));
+
+    const QString mac = dir + QStringLiteral("/mac");
+    put(mac + QStringLiteral("/System/Library/CoreServices/SystemVersion.plist"),
+        "<?xml version=\"1.0\"?><plist version=\"1.0\"><dict><key>ProductBuildVersion</key><string>23F79</string><key>ProductName</key>"
+        "<string>macOS</string><key>ProductVersion</key><string>14.5</string></dict></plist>");
+    QDir().mkpath(mac + QStringLiteral("/Users/alex"));
+    QDir().mkpath(mac + QStringLiteral("/Users/Shared"));
+    const activity::Report m = activity::read(mac);
+    report(m.system == QLatin1String("macOS") && m.overview.product == QLatin1String("macOS") && m.overview.release == QLatin1String("14.5")
+               && m.overview.build == QLatin1String("23F79") && m.events.size() == 1 && m.events.first().what == QLatin1String("Account: alex"),
+           QStringLiteral("activity: a Mac drive: its version and accounts"));
+}
+
 void realWindows()
 {
     const QString root = qEnvironmentVariable("DISKANVIL_REAL_WINDOWS");
@@ -398,5 +492,6 @@ void startupTests()
     commands();
     offline(dir.path());
     activityRecords(dir.path());
+    otherSystems(dir.path());
     realWindows();
 }

@@ -837,7 +837,7 @@
 <context>
     <name>activity</name>
     <message numerus="yes">
-        <location filename="../src/viruses/activity.cpp" line="181"/>
+        <location filename="../src/viruses/activity.cpp" line="184"/>
         <source>%n time(s)</source>
         <translation>
             <numerusform>%n time</numerusform>

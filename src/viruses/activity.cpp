@@ -22,6 +22,9 @@
 #include <QTemporaryDir>
 #include <QTimeZone>
 #include <QUrl>
+#include <QHash>
+#include <QXmlStreamReader>
+#include <QVersionNumber>
 #include <QtEndian>
 
 #include <algorithm>
@@ -340,41 +343,41 @@ Event download(const QString &path, const QJsonObject &o, QDateTime when, const 
     return e;
 }
 
-void readBrowsers(const startup::Machine &m, const startup::Machine::User &user, Report &report, const std::atomic<bool> *cancel)
+// The browsers' folders: Chromium ones by name and where their profiles are, and Firefox's
+// profile folders.
+struct BrowserFolders {
+    QVector<std::pair<QString, QString>> chromium;
+    QStringList firefox;
+};
+
+void readBrowsers(const BrowserFolders &folders, const QString &userName, Report &report, const std::atomic<bool> *cancel)
 {
     constexpr int kMostVisits = 5000;
-    const QVector<std::pair<const char *, const char *>> chromium = {
-        {"Chrome", "\\AppData\\Local\\Google\\Chrome\\User Data"},
-        {"Edge", "\\AppData\\Local\\Microsoft\\Edge\\User Data"},
-        {"Brave", "\\AppData\\Local\\BraveSoftware\\Brave-Browser\\User Data"},
-        {"Vivaldi", "\\AppData\\Local\\Vivaldi\\User Data"},
-        {"Opera", "\\AppData\\Roaming\\Opera Software"},
-    };
-    for (const auto &[browser, place] : chromium) {
-        const QString data = m.local(user.profile + QLatin1String(place));
+    const QString user = userName;
+    for (const auto &[browser, data] : folders.chromium) {
         if (data.isEmpty())
             continue;
         for (const QFileInfo &profile : QDir(data).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
             const QString history = profile.filePath() + QStringLiteral("/History");
             if (stopped(cancel) || !QFileInfo(history).isFile())
                 continue;
-            const QString name = QLatin1String(browser) + (profile.fileName() == QLatin1String("Default") ? QString() : QStringLiteral(" (%1)").arg(profile.fileName()));
+            const QString name = browser + (profile.fileName() == QLatin1String("Default") ? QString() : QStringLiteral(" (%1)").arg(profile.fileName()));
             const QString visits = QStringLiteral("SELECT u.url AS url, u.title AS title, CAST(v.visit_time AS TEXT) AS t FROM visits v "
                                                   "JOIN urls u ON u.id = v.url ORDER BY v.visit_time DESC LIMIT %1;")
                                        .arg(kMostVisits);
             for (const QJsonValue &row : sqlite(history, visits))
-                report.events << visit(row.toObject(), chromiumTime(row.toObject().value(QStringLiteral("t"))), user.name, name);
+                report.events << visit(row.toObject(), chromiumTime(row.toObject().value(QStringLiteral("t"))), user, name);
             const QString downloads = QStringLiteral("SELECT target_path AS path, tab_url AS url, CAST(start_time AS TEXT) AS t FROM downloads "
                                                      "ORDER BY start_time DESC LIMIT 2000;");
             for (const QJsonValue &row : sqlite(history, downloads)) {
                 const QJsonObject o = row.toObject();
-                report.events << download(o.value(QStringLiteral("path")).toString(), o, chromiumTime(o.value(QStringLiteral("t"))), user.name, name);
+                report.events << download(o.value(QStringLiteral("path")).toString(), o, chromiumTime(o.value(QStringLiteral("t"))), user, name);
             }
         }
     }
-    const QString firefox = m.local(user.profile + QStringLiteral("\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles"));
+    for (const QString &firefox : folders.firefox) {
     if (firefox.isEmpty())
-        return;
+        continue;
     for (const QFileInfo &profile : QDir(firefox).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
         const QString places = profile.filePath() + QStringLiteral("/places.sqlite");
         if (stopped(cancel) || !QFileInfo(places).isFile())
@@ -384,7 +387,7 @@ void readBrowsers(const startup::Machine &m, const startup::Machine::User &user,
                                               "JOIN moz_places p ON p.id = v.place_id ORDER BY v.visit_date DESC LIMIT %1;")
                                    .arg(kMostVisits);
         for (const QJsonValue &row : sqlite(places, visits))
-            report.events << visit(row.toObject(), firefoxTime(row.toObject().value(QStringLiteral("t"))), user.name, name);
+            report.events << visit(row.toObject(), firefoxTime(row.toObject().value(QStringLiteral("t"))), user, name);
         // Downloads are notes on the page they came from, saying where the file went.
         const QString downloads = QStringLiteral("SELECT a.content AS path, p.url AS url, CAST(a.dateAdded AS TEXT) AS t FROM moz_annos a "
                                                  "JOIN moz_anno_attributes n ON n.id = a.anno_attribute_id JOIN moz_places p ON p.id = a.place_id "
@@ -392,9 +395,237 @@ void readBrowsers(const startup::Machine &m, const startup::Machine::User &user,
         for (const QJsonValue &row : sqlite(places, downloads)) {
             const QJsonObject o = row.toObject();
             const QUrl file(o.value(QStringLiteral("path")).toString());
-            report.events << download(file.isLocalFile() ? file.toLocalFile() : file.toString(), o, firefoxTime(o.value(QStringLiteral("t"))), user.name, name);
+            report.events << download(file.isLocalFile() ? file.toLocalFile() : file.toString(), o, firefoxTime(o.value(QStringLiteral("t"))), user, name);
         }
     }
+    }
+}
+
+BrowserFolders windowsBrowsers(const startup::Machine &m, const startup::Machine::User &user)
+{
+    BrowserFolders f;
+    for (const auto &[browser, place] : {std::pair{"Chrome", "\\AppData\\Local\\Google\\Chrome\\User Data"},
+                                         std::pair{"Edge", "\\AppData\\Local\\Microsoft\\Edge\\User Data"},
+                                         std::pair{"Brave", "\\AppData\\Local\\BraveSoftware\\Brave-Browser\\User Data"},
+                                         std::pair{"Vivaldi", "\\AppData\\Local\\Vivaldi\\User Data"},
+                                         std::pair{"Opera", "\\AppData\\Roaming\\Opera Software"}})
+        f.chromium.push_back({QLatin1String(browser), m.local(user.profile + QLatin1String(place))});
+    f.firefox << m.local(user.profile + QStringLiteral("\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles"));
+    return f;
+}
+
+// --- Linux and macOS.
+
+// A file on the mounted system, following its links the way that system would: a link to
+// "/usr/lib/os-release" means the one on that drive, not this PC's.
+QString onDrive(const QString &root, QString path)
+{
+    for (int hops = 0; hops < 8; ++hops) {
+        const QFileInfo fi(root + path);
+        if (!fi.isSymLink())
+            return root + path;
+        const QString target = fi.readSymLink();
+        path = QDir::cleanPath(target.startsWith(QLatin1Char('/')) ? target : QFileInfo(path).path() + QLatin1Char('/') + target);
+        if (path.startsWith(QLatin1String("..")))
+            return {};
+    }
+    return {};
+}
+
+QByteArray readOn(const QString &root, const QString &path, qint64 most = 8 * 1024 * 1024, bool start = false)
+{
+    QFile f(onDrive(root, path));
+    if (!f.open(QIODevice::ReadOnly))
+        return {};
+    // A log's newest part is at its end.
+    if (!start && f.size() > most)
+        f.seek(f.size() - most);
+    return f.read(most);
+}
+
+QHash<QString, QString> osRelease(const QString &root)
+{
+    QHash<QString, QString> v;
+    QByteArray text = readOn(root, QStringLiteral("/etc/os-release"), 64 * 1024);
+    if (text.isEmpty())
+        text = readOn(root, QStringLiteral("/usr/lib/os-release"), 64 * 1024);
+    for (const QByteArray &line : text.split('\n')) {
+        const qsizetype eq = line.indexOf('=');
+        if (eq <= 0)
+            continue;
+        QString value = QString::fromUtf8(line.mid(eq + 1)).trimmed();
+        if (value.size() >= 2 && (value.startsWith(QLatin1Char('"')) || value.startsWith(QLatin1Char('\''))))
+            value = value.mid(1, value.size() - 2);
+        v.insert(QString::fromUtf8(line.left(eq)).trimmed(), value);
+    }
+    return v;
+}
+
+// macOS's SystemVersion.plist: <key>ProductVersion</key><string>14.5</string>.
+QHash<QString, QString> plistStrings(const QByteArray &xml)
+{
+    QHash<QString, QString> v;
+    static const QRegularExpression pair(QStringLiteral("<key>([^<]{1,80})</key>\\s*<string>([^<]{0,200})</string>"));
+    for (auto it = pair.globalMatch(QString::fromUtf8(xml)); it.hasNext();) {
+        const QRegularExpressionMatch m = it.next();
+        v.insert(m.captured(1), m.captured(2));
+    }
+    return v;
+}
+
+struct LinuxUser {
+    QString name, home;
+};
+
+QVector<LinuxUser> linuxUsers(const QString &root)
+{
+    QVector<LinuxUser> users;
+    for (const QByteArray &line : readOn(root, QStringLiteral("/etc/passwd"), 1024 * 1024).split('\n')) {
+        const QList<QByteArray> f = line.split(':');
+        if (f.size() < 7)
+            continue;
+        const int uid = f[2].toInt();
+        if ((uid >= 1000 && uid < 60000) || uid == 0)
+            users.push_back({QString::fromUtf8(f[0]), QString::fromUtf8(f[5])});
+    }
+    return users;
+}
+
+void readLinux(const QString &root, Report &report, const std::atomic<bool> *cancel)
+{
+    report.system = QStringLiteral("Linux");
+    Overview &o = report.overview;
+    const QHash<QString, QString> release = osRelease(root);
+    o.product = release.value(QStringLiteral("PRETTY_NAME"), release.value(QStringLiteral("NAME"), QStringLiteral("Linux")));
+    o.release = release.value(QStringLiteral("VERSION_ID"), release.value(QStringLiteral("BUILD_ID")));
+    // Its newest kernel.
+    QStringList kernels;
+    for (const QString &modules : {QStringLiteral("/usr/lib/modules"), QStringLiteral("/lib/modules")})
+        kernels += QDir(onDrive(root, modules)).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    kernels.removeDuplicates();
+    std::sort(kernels.begin(), kernels.end(), [](const QString &a, const QString &b) { return QVersionNumber::fromString(a) < QVersionNumber::fromString(b); });
+    // Its kernels, newest first (it may start any of them).
+    std::reverse(kernels.begin(), kernels.end());
+    if (kernels.size() == 1)
+        o.build = tr("kernel %1").arg(kernels.first());
+    else if (!kernels.isEmpty())
+        o.build = tr("kernels %1").arg(kernels.mid(0, 4).join(QStringLiteral(", ")));
+    o.computerName = QString::fromUtf8(readOn(root, QStringLiteral("/etc/hostname"), 256)).trimmed();
+    const QString zone = QFileInfo(root + QStringLiteral("/etc/localtime")).readSymLink();
+    o.timeZone = zone.contains(QLatin1String("zoneinfo/")) ? zone.section(QStringLiteral("zoneinfo/"), 1)
+                                                            : QString::fromUtf8(readOn(root, QStringLiteral("/etc/timezone"), 256)).trimmed();
+
+    for (const LinuxUser &u : linuxUsers(root)) {
+        Event e;
+        e.kind = Kind::Account;
+        e.what = tr("Account: %1").arg(u.name);
+        e.detail = u.home;
+        e.source = QStringLiteral("/etc/passwd");
+        report.events << e;
+    }
+    // Sign-ins, start-ups and shut-downs: wtmp, or wtmpdb's database (Debian 13 and later).
+    // wtmp's newest 20000 records (they're 384 bytes each, from the file's start).
+    QByteArray wtmp;
+    if (QFile f(onDrive(root, QStringLiteral("/var/log/wtmp"))); f.open(QIODevice::ReadOnly)) {
+        f.seek(std::max<qint64>(0, f.size() - 384LL * 20000) / 384 * 384);
+        wtmp = f.read(384LL * 20000);
+    }
+    QVector<Session> sessions = readWtmp(wtmp);
+    const QString wtmpdb = onDrive(root, QStringLiteral("/var/lib/wtmpdb/wtmp.db"));
+    if (sessions.isEmpty() && QFileInfo(wtmpdb).isFile()) {
+        for (const QJsonValue &row : sqlite(wtmpdb, QStringLiteral("SELECT Type AS type, User AS user, TTY AS line, RemoteHost AS host, "
+                                                                   "CAST(Login AS TEXT) AS login, CAST(Logout AS TEXT) AS logout FROM wtmp "
+                                                                   "ORDER BY Login DESC LIMIT 20000;"))) {
+            const QJsonObject r = row.toObject();
+            Session in;
+            in.type = r.value(QStringLiteral("type")).toInt() == 2 ? 2 : 7;
+            in.user = r.value(QStringLiteral("user")).toString();
+            in.line = r.value(QStringLiteral("line")).toString();
+            in.host = r.value(QStringLiteral("host")).toString();
+            in.when = QDateTime::fromMSecsSinceEpoch(r.value(QStringLiteral("login")).toString().toLongLong() / 1000, QTimeZone::UTC);
+            sessions << in;
+            const qint64 logout = r.value(QStringLiteral("logout")).toString().toLongLong();
+            if (in.type == 2 && logout > 0)
+                sessions << Session{1, QStringLiteral("shutdown"), QString(), QString(), QDateTime::fromMSecsSinceEpoch(logout / 1000, QTimeZone::UTC)};
+        }
+    }
+    for (const Session &s : std::as_const(sessions)) {
+        if (stopped(cancel))
+            return;
+        Event e;
+        e.kind = Kind::Login;
+        e.when = s.when;
+        e.source = QFileInfo::exists(wtmpdb) && !QFileInfo::exists(onDrive(root, QStringLiteral("/var/log/wtmp"))) ? tr("the sign-in database (wtmpdb)")
+                                                                                                                     : tr("the sign-in log (wtmp)");
+        if (s.type == 7) {
+            e.what = tr("Signed in: %1").arg(s.user);
+            e.user = s.user;
+            e.detail = s.host.isEmpty() ? tr("on %1").arg(s.line) : tr("on %1, from %2").arg(s.line, s.host);
+        } else if (s.type == 2) {
+            e.what = tr("Started up");
+            e.detail = s.host; // the kernel it started
+        } else if (s.type == 1 && s.user == QLatin1String("shutdown")) {
+            e.what = tr("Shut down");
+            if (!o.lastShutdown.isValid() || s.when > o.lastShutdown)
+                o.lastShutdown = s.when;
+        } else {
+            continue;
+        }
+        report.events << e;
+    }
+    // Programs installed and removed, from the package manager's own log.
+    for (const QString &log : {QStringLiteral("/var/log/pacman.log"), QStringLiteral("/var/log/dpkg.log"), QStringLiteral("/var/log/dpkg.log.1")}) {
+        const QVector<Event> packages = readPackageLog(readOn(root, log));
+        for (Event e : packages) {
+            e.source = log;
+            report.events << e;
+        }
+    }
+    // When it was put on the drive: the installer's own log, or the package log's first line.
+    const QFileInfo installer(onDrive(root, QStringLiteral("/var/log/installer")));
+    if (installer.exists())
+        o.installed = installer.lastModified();
+    else if (const QByteArray head = readOn(root, QStringLiteral("/var/log/pacman.log"), 64, true); head.startsWith('['))
+        o.installed = QDateTime::fromString(QString::fromLatin1(head.mid(1, head.indexOf(']') - 1)).left(24), Qt::ISODate);
+    // Each person's recent files and browsers.
+    for (const LinuxUser &u : linuxUsers(root)) {
+        if (stopped(cancel))
+            return;
+        const QString home = onDrive(root, u.home);
+        if (home.isEmpty() || !QFileInfo(home).isDir())
+            continue;
+        report.events += readRecentlyUsed(readOn(root, u.home + QStringLiteral("/.local/share/recently-used.xbel")), u.name);
+        BrowserFolders f;
+        for (const auto &[browser, place] : {std::pair{"Chrome", "/.config/google-chrome"}, std::pair{"Chromium", "/.config/chromium"},
+                                             std::pair{"Edge", "/.config/microsoft-edge"}, std::pair{"Brave", "/.config/BraveSoftware/Brave-Browser"},
+                                             std::pair{"Vivaldi", "/.config/vivaldi"}, std::pair{"Opera", "/.config/opera"},
+                                             std::pair{"Chromium (Flatpak)", "/.var/app/org.chromium.Chromium/config/chromium"}})
+            f.chromium.push_back({QLatin1String(browser), onDrive(root, u.home + QLatin1String(place))});
+        for (const char *place : {"/.mozilla/firefox", "/.var/app/org.mozilla.firefox/.mozilla/firefox", "/snap/firefox/common/.mozilla/firefox"})
+            f.firefox << onDrive(root, u.home + QLatin1String(place));
+        readBrowsers(f, u.name, report, cancel);
+    }
+    report.notes << tr("Linux keeps no list of USB drives outside its journal, so none are listed.");
+}
+
+void readMac(const QString &root, Report &report)
+{
+    report.system = QStringLiteral("macOS");
+    const QHash<QString, QString> v = plistStrings(readOn(root, QStringLiteral("/System/Library/CoreServices/SystemVersion.plist"), 64 * 1024));
+    report.overview.product = v.value(QStringLiteral("ProductName"), QStringLiteral("macOS"));
+    report.overview.release = v.value(QStringLiteral("ProductVersion"));
+    report.overview.build = v.value(QStringLiteral("ProductBuildVersion"));
+    for (const QString &name : QDir(root + QStringLiteral("/Users")).entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+        if (name == QLatin1String("Shared") || name.startsWith(QLatin1Char('.')))
+            continue;
+        Event e;
+        e.kind = Kind::Account;
+        e.what = tr("Account: %1").arg(name);
+        e.detail = QStringLiteral("/Users/") + name;
+        e.source = tr("the Users folder");
+        report.events << e;
+    }
+    report.notes << tr("For a Mac, only what it is and its accounts are read.");
 }
 
 // --- Networks joined (SOFTWARE\...\NetworkList\Profiles).
@@ -445,6 +676,10 @@ QString kindName(Kind kind)
         return tr("Network");
     case Kind::Account:
         return tr("Account");
+    case Kind::Login:
+        return tr("Sign-in or start-up");
+    case Kind::Software:
+        return tr("Program installed");
     }
     return QString();
 }
@@ -495,9 +730,125 @@ QDateTime fromSystemTime(const QByteArray &b)
     return QDateTime(date, time, QTimeZone::UTC);
 }
 
+QString systemOn(const QString &root)
+{
+    if (root.isEmpty())
+        return {};
+    if (startup::hasWindows(root))
+        return QStringLiteral("Windows");
+    if (!osRelease(root).isEmpty())
+        return QStringLiteral("Linux");
+    if (QFileInfo::exists(root + QStringLiteral("/System/Library/CoreServices/SystemVersion.plist")))
+        return QStringLiteral("macOS");
+    return {};
+}
+
+QVector<Session> readWtmp(const QByteArray &bytes)
+{
+    QVector<Session> out;
+    constexpr int kRecord = 384;
+    const auto text = [&bytes](qsizetype at, int len) {
+        const QByteArray field = bytes.mid(at, len);
+        const qsizetype zero = field.indexOf('\0');
+        return QString::fromUtf8(zero >= 0 ? field.left(zero) : field).simplified();
+    };
+    for (qsizetype at = 0; at + kRecord <= bytes.size(); at += kRecord) {
+        const auto *r = reinterpret_cast<const uchar *>(bytes.constData()) + at;
+        const int type = qFromLittleEndian<qint16>(r);
+        const qint64 seconds = qFromLittleEndian<qint32>(r + 340);
+        if (type < 1 || type > 9 || seconds < 315532800 || seconds > 4102444800)
+            continue;
+        Session s;
+        s.type = type;
+        s.line = text(at + 8, 32);
+        s.user = text(at + 44, 32);
+        s.host = text(at + 76, 256);
+        s.when = QDateTime::fromSecsSinceEpoch(seconds, QTimeZone::UTC);
+        out << s;
+    }
+    return out;
+}
+
+QVector<Event> readPackageLog(const QByteArray &log)
+{
+    QVector<Event> out;
+    // pacman: "[2024-06-01T10:00:00+0100] [ALPM] installed foo (1.2-3)" (older: "[2019-01-01 10:00]").
+    // dpkg: "2024-06-01 10:00:00 install foo:amd64 <none> 1.2-3".
+    static const QRegularExpression pacman(QStringLiteral("^\\[([0-9T:+ -]{16,24})\\] \\[ALPM\\] (installed|removed) (\\S+) \\(([^)]*)\\)"));
+    static const QRegularExpression dpkg(QStringLiteral("^(\\d{4}-\\d\\d-\\d\\d \\d\\d:\\d\\d:\\d\\d) (install|remove|purge) (\\S+) (\\S+) (\\S+)"));
+    for (const QByteArray &raw : log.split('\n')) {
+        const QString line = QString::fromUtf8(raw);
+        Event e;
+        e.kind = Kind::Software;
+        if (const QRegularExpressionMatch m = pacman.match(line); m.hasMatch()) {
+            QString when = m.captured(1).trimmed();
+            if (when.size() == 24 && (when[19] == QLatin1Char('+') || when[19] == QLatin1Char('-')))
+                when.insert(22, QLatin1Char(':'));
+            e.when = QDateTime::fromString(when.replace(QLatin1Char(' '), QLatin1Char('T')), Qt::ISODate);
+            e.what = (m.captured(2) == QLatin1String("installed") ? tr("Installed %1") : tr("Removed %1")).arg(m.captured(3));
+            e.detail = m.captured(4);
+        } else if (const QRegularExpressionMatch d = dpkg.match(line); d.hasMatch()) {
+            e.when = QDateTime::fromString(d.captured(1), QStringLiteral("yyyy-MM-dd HH:mm:ss"));
+            const QString package = d.captured(3).section(QLatin1Char(':'), 0, 0);
+            e.what = (d.captured(2) == QLatin1String("install") ? tr("Installed %1") : tr("Removed %1")).arg(package);
+            e.detail = d.captured(2) == QLatin1String("install") ? d.captured(5) : d.captured(4);
+        } else {
+            continue;
+        }
+        out << e;
+    }
+    return out;
+}
+
+QVector<Event> readRecentlyUsed(const QByteArray &xbel, const QString &user)
+{
+    QVector<Event> out;
+    QXmlStreamReader r(xbel);
+    Event *current = nullptr;
+    while (!r.atEnd() && out.size() < 5000) {
+        if (r.readNext() != QXmlStreamReader::StartElement)
+            continue;
+        if (r.name() == QLatin1String("bookmark")) {
+            const QUrl href(r.attributes().value(QStringLiteral("href")).toString());
+            QDateTime when = QDateTime::fromString(r.attributes().value(QStringLiteral("visited")).toString(), Qt::ISODateWithMs);
+            const QDateTime changed = QDateTime::fromString(r.attributes().value(QStringLiteral("modified")).toString(), Qt::ISODateWithMs);
+            if (!when.isValid() || (changed.isValid() && changed > when))
+                when = changed;
+            const QString path = href.isLocalFile() ? href.toLocalFile() : href.toString();
+            Event e;
+            e.kind = Kind::FileOpened;
+            e.when = when;
+            e.what = tr("Opened %1").arg(path.section(QLatin1Char('/'), -1));
+            e.detail = path;
+            e.user = user;
+            e.source = tr("the list of recent files");
+            out << e;
+            current = &out.last();
+        } else if (r.name() == QLatin1String("application") && current) {
+            const QString app = r.attributes().value(QStringLiteral("name")).toString();
+            if (!app.isEmpty() && !current->detail.contains(QLatin1String(" · ")))
+                current->detail += QStringLiteral(" · ") + tr("with %1").arg(app);
+        }
+    }
+    return out;
+}
+
 Report read(const QString &root, const std::atomic<bool> *cancel)
 {
     Report report;
+    if (!root.isEmpty() && !startup::hasWindows(root)) {
+        const QString system = systemOn(root);
+        if (system == QLatin1String("Linux"))
+            readLinux(root, report, cancel);
+        else if (system == QLatin1String("macOS"))
+            readMac(root, report);
+        std::stable_sort(report.events.begin(), report.events.end(), [](const Event &a, const Event &b) {
+            if (a.when.isValid() != b.when.isValid())
+                return a.when.isValid();
+            return a.when.isValid() ? a.when > b.when : false;
+        });
+        return report;
+    }
 #ifdef Q_OS_WIN
     const std::optional<startup::Machine> machine = root.isEmpty() ? std::optional(startup::openRunningMachine()) : startup::openMachine(root);
 #else
@@ -506,6 +857,7 @@ Report read(const QString &root, const std::atomic<bool> *cancel)
     if (!machine)
         return report;
     report.windows = true;
+    report.system = QStringLiteral("Windows");
     report.notes = machine->notes;
     const startup::Machine &m = *machine;
 
@@ -528,7 +880,7 @@ Report read(const QString &root, const std::atomic<bool> *cancel)
         readPrograms(u, report, cancel);
         readUserTrail(u, report, cancel);
         readRecentLinks(m, u, report, cancel);
-        readBrowsers(m, u, report, cancel);
+        readBrowsers(windowsBrowsers(m, u), u.name, report, cancel);
     }
 
     // Newest first; the ones with no time after, in the order they were read.
@@ -550,9 +902,9 @@ QString html(const Report &report, const QVector<Event> &events, const QString &
                                  "td,th{border:1px solid #bbb;padding:3px 6px;vertical-align:top;text-align:left}th{background:#eee}"
                                  ".about td:first-child{color:#555}</style></head><body>\n")
                       .arg(e(tr("What this PC did: %1").arg(where)));
-    out += QStringLiteral("<h1>%1</h1>\n<table class=\"about\">").arg(e(tr("What the Windows on %1 was used for").arg(where)));
+    out += QStringLiteral("<h1>%1</h1>\n<table class=\"about\">").arg(e(tr("What %1 was used for").arg(where)));
     const QVector<std::pair<QString, QString>> facts = {
-        {tr("Windows"), QStringList{o.product, o.release, o.build.isEmpty() ? QString() : tr("build %1").arg(o.build)}.join(QLatin1Char(' ')).simplified()},
+        {tr("System"), QStringList{o.product, o.product.contains(o.release) ? QString() : o.release, o.build}.join(QLatin1Char(' ')).simplified()},
         {tr("PC's name"), o.computerName},
         {tr("Registered to"), QStringList{o.owner, o.organisation}.join(QStringLiteral(", ")).remove(QRegularExpression(QStringLiteral("^, |, $")))},
         {tr("Installed"), when(o.installed)},

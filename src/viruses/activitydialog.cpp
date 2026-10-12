@@ -47,7 +47,7 @@ ActivityDialog::ActivityDialog(const QString &root, QWidget *parent)
     m_kind->addItem(tr("Everything"), -1);
     for (const activity::Kind k : {activity::Kind::UsbDevice, activity::Kind::ProgramRun, activity::Kind::FileOpened, activity::Kind::FolderOpened,
                                    activity::Kind::Search, activity::Kind::Typed, activity::Kind::Website, activity::Kind::Download,
-                                   activity::Kind::Network, activity::Kind::Account})
+                                   activity::Kind::Network, activity::Kind::Login, activity::Kind::Software, activity::Kind::Account})
         m_kind->addItem(activity::kindName(k), int(k));
     m_words->setObjectName(QStringLiteral("words"));
     m_words->setPlaceholderText(tr("Words to look for"));
@@ -75,9 +75,10 @@ ActivityDialog::ActivityDialog(const QString &root, QWidget *parent)
     buttons->addWidget(m_save);
     buttons->addWidget(close);
     auto *layout = new QVBoxLayout(this);
-    layout->addWidget(wrappingLabel(tr("What this Windows is, and what it was used for, read from its own records without starting it: USB "
-                                       "drives plugged in, programs run, files and folders opened, searches, networks joined and its accounts. "
-                                       "Nothing on the drive is changed.")));
+    layout->addWidget(wrappingLabel(tr("What system this is, and what it was used for, read from its own records without starting it: on "
+                                       "Windows, USB drives plugged in, programs run, files and folders opened, searches, websites and "
+                                       "downloads, networks joined and its accounts; on Linux, its accounts, sign-ins, programs installed, "
+                                       "recent files and websites. Nothing on the drive is changed.")));
     layout->addWidget(m_overview);
     layout->addLayout(filters);
     layout->addWidget(m_list, 1);
@@ -133,9 +134,9 @@ QVector<activity::Event> ActivityDialog::visible() const
 
 void ActivityDialog::fill()
 {
-    if (!m_report.windows) {
+    if (m_report.system.isEmpty()) {
         if (m_thread && m_thread->isFinished())
-            m_status->setText(redText(tr("There's no Windows there.")));
+            m_status->setText(redText(tr("No Windows, Linux or Mac system was found there.")));
         return;
     }
     const activity::Overview &o = m_report.overview;
@@ -145,7 +146,10 @@ void ActivityDialog::fill()
         if (!value.trimmed().isEmpty())
             rows << QStringLiteral("<tr><td style=\"padding-right:14px\"><b>%1</b></td><td>%2</td></tr>").arg(label.toHtmlEscaped(), value.toHtmlEscaped());
     };
-    row(tr("Windows"), QStringList{o.product, o.release, o.build.isEmpty() ? QString() : tr("(build %1)").arg(o.build)}.join(QLatin1Char(' ')).simplified());
+    row(tr("System"), QStringList{o.product, o.product.contains(o.release) ? QString() : o.release,
+                                  o.build.isEmpty() ? QString() : QStringLiteral("(%1)").arg(o.build.contains(QLatin1Char(' ')) ? o.build : tr("build %1").arg(o.build))}
+                          .join(QLatin1Char(' '))
+                          .simplified());
     row(tr("PC's name"), o.computerName);
     row(tr("Registered to"), QStringList{o.owner, o.organisation}.join(QStringLiteral(", ")).trimmed().remove(QRegularExpression(QStringLiteral("^, |, $"))));
     row(tr("Installed"), when(o.installed));

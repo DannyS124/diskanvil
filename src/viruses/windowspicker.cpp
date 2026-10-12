@@ -3,8 +3,10 @@
 
 #include "windowspicker.h"
 
+#include "activity.h"
 #include "dialogs.h"
 #include "format.h"
+#include "rescuestick.h"
 #include "udisks.h"
 #include "winstartup.h"
 
@@ -50,14 +52,15 @@ QStringList WindowsPicker::mounted(UDisks *udisks)
     return out;
 }
 
-WindowsPicker::WindowsPicker(UDisks *udisks, bool writable, const QString &purpose, QWidget *parent)
+WindowsPicker::WindowsPicker(UDisks *udisks, bool writable, const QString &purpose, QWidget *parent, bool anySystem)
     : QDialog(parent)
     , m_udisks(udisks)
     , m_writable(writable)
+    , m_anySystem(anySystem)
     , m_list(new QListWidget)
     , m_note(new QLabel)
 {
-    setWindowTitle(tr("Which Windows?"));
+    setWindowTitle(anySystem ? tr("Which System?") : tr("Which Windows?"));
     m_note->setWordWrap(true);
     m_list->setObjectName(QStringLiteral("windows"));
     auto *layout = new QVBoxLayout(this);
@@ -81,18 +84,30 @@ void WindowsPicker::fill()
 #ifdef Q_OS_WIN
     auto *self = new QListWidgetItem(tr("This PC's own Windows (running now)"), m_list);
     self->setData(Qt::UserRole + 1, kRunning);
+#else
+    // The Linux running now, but not DiskAnvil Live's own: that starts fresh every time.
+    if (m_anySystem && !rescue::runningInRescue()) {
+        auto *self = new QListWidgetItem(tr("This PC's own system (running now)"), m_list);
+        self->setData(Qt::UserRole + 1, kRunning);
+    }
 #endif
+    static const QStringList systems = {QStringLiteral("ntfs"), QStringLiteral("ext2"), QStringLiteral("ext3"), QStringLiteral("ext4"),
+                                        QStringLiteral("btrfs"), QStringLiteral("xfs"), QStringLiteral("f2fs"), QStringLiteral("hfsplus")};
     for (const Disk &d : m_udisks->disks()) {
         for (const Volume &v : d.volumes) {
             const QStringList mounts = v.mounts();
             const QString fs = v.effectiveFsType();
             QString text;
-            if (!mounts.isEmpty() && runningRoot(mounts.first()))
+            if (!mounts.isEmpty() && (runningRoot(mounts.first()) || (m_anySystem && mounts.contains(QStringLiteral("/")))))
                 continue;
-            if (!mounts.isEmpty() && startup::hasWindows(mounts.first()))
-                text = tr("Windows on %1 (%2)").arg(volumeTitle(v), QDir::toNativeSeparators(mounts.first()));
+            const QString system = mounts.isEmpty() ? QString() : m_anySystem ? activity::systemOn(mounts.first())
+                                                                               : startup::hasWindows(mounts.first()) ? QStringLiteral("Windows") : QString();
+            if (!system.isEmpty())
+                text = tr("%1 on %2 (%3)").arg(system, volumeTitle(v), QDir::toNativeSeparators(mounts.first()));
             else if (mounts.isEmpty() && fs == QLatin1String("ntfs") && v.canMount())
                 text = tr("%1: NTFS, not mounted yet").arg(volumeTitle(v));
+            else if (m_anySystem && mounts.isEmpty() && systems.contains(fs) && v.canMount())
+                text = tr("%1: %2, not mounted yet").arg(volumeTitle(v), fs);
             if (text.isEmpty())
                 continue;
             auto *item = new QListWidgetItem(text, m_list);
@@ -101,7 +116,8 @@ void WindowsPicker::fill()
     }
     m_ok->setEnabled(false);
     if (m_list->count() == 0)
-        m_note->setText(tr("No Windows was found. A drive locked with BitLocker has to be unlocked first."));
+        m_note->setText(m_anySystem ? tr("No system was found. A locked drive (BitLocker, LUKS) has to be unlocked first.")
+                                    : tr("No Windows was found. A drive locked with BitLocker has to be unlocked first."));
 }
 
 void WindowsPicker::choose()
@@ -111,7 +127,11 @@ void WindowsPicker::choose()
         return;
     if (item->data(Qt::UserRole + 1).toInt() == kRunning) {
         m_running = true;
+#ifdef Q_OS_WIN
         m_root.clear();
+#else
+        m_root = QStringLiteral("/");
+#endif
         accept();
         return;
     }
@@ -129,8 +149,8 @@ void WindowsPicker::choose()
     if (!v)
         return fill();
     const auto use = [this](const QString &mount) {
-        if (!startup::hasWindows(mount)) {
-            m_note->setText(redText(tr("There's no Windows on it.")));
+        if (m_anySystem ? activity::systemOn(mount).isEmpty() : !startup::hasWindows(mount)) {
+            m_note->setText(redText(m_anySystem ? tr("There's no Windows, Linux or Mac system on it.") : tr("There's no Windows on it.")));
             return;
         }
         m_root = mount;

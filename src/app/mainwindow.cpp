@@ -778,10 +778,10 @@ void MainWindow::createActions()
 
     m_activity = new QAction(themeIcon("view-history", "document-open-recent"), tr("What This PC &Did…"), this);
     m_activity->setObjectName(QStringLiteral("activity"));
-    m_activity->setToolTip(tr("What a Windows is and what it was used for, from its own records: USB drives plugged in, programs run, "
-                              "files opened, searches, networks joined, accounts"));
+    m_activity->setToolTip(tr("What system is on a drive and what it was used for, from its own records: USB drives plugged in, programs "
+                              "run, files opened, searches, websites, networks joined, sign-ins, programs installed, accounts"));
     connect(m_activity, &QAction::triggered, this, [this] {
-        WindowsPicker picker(m_udisks, false, tr("Which Windows? One on a drive is mounted read-only to read its records."), this);
+        WindowsPicker picker(m_udisks, false, tr("Which system? One on a drive is mounted read-only to read its records."), this, true);
         if (picker.exec() == QDialog::Accepted)
             ActivityDialog(picker.root(), this).exec();
     });

@@ -4,7 +4,9 @@
 #pragma once
 
 // "What This PC Did": what a Windows on a drive was used for, read from its own records without
-// starting it. Our own readers of its registry (reghive.h) and its shortcut files
+// starting it. Linux and macOS are recognised too: which one and which version, and on Linux its
+// accounts, sign-ins and start-ups, the programs installed and removed, recent files and browser
+// history, from its own logs and settings. Our own readers of its registry (reghive.h) and its shortcut files
 // (shelllink.h): which USB sticks were plugged in and when, which programs were run and how
 // often, which files and folders were opened, what was searched for and typed, which networks it
 // joined, and which accounts are on it. Everything here is read-only and says where it came from,
@@ -48,6 +50,8 @@ enum class Kind {
     Download,    // a file downloaded
     Network,     // a Wi-Fi or wired network joined
     Account,     // a user account on the PC
+    Login,       // someone signed in, or the PC started or shut down
+    Software,    // a program installed or removed
 };
 
 struct Event {
@@ -63,6 +67,7 @@ QString kindName(Kind kind);
 
 struct Report {
     bool windows = false;
+    QString system; // "Windows", "Linux" or "macOS"; empty when there's none there
     Overview overview;
     QVector<Event> events; // newest first (events without a time last)
     QStringList notes;     // what couldn't be read, or may be out of date
@@ -77,7 +82,18 @@ Report read(const QString &root, const std::atomic<bool> *cancel = nullptr);
 QString html(const Report &report, const QVector<Event> &events, const QString &where);
 QByteArray csv(const QVector<Event> &events);
 
+// Which system is on the drive mounted at `root`: "Windows", "Linux", "macOS", or empty.
+QString systemOn(const QString &root);
+
 // Pieces exposed for the tests.
+struct Session {
+    int type = 0;     // utmp's: 1 a shutdown or runlevel, 2 a start-up, 7 a sign-in, 8 a sign-out
+    QString user, line, host;
+    QDateTime when;
+};
+QVector<Session> readWtmp(const QByteArray &bytes); // Linux's /var/log/wtmp (glibc's 384-byte records)
+QVector<Event> readPackageLog(const QByteArray &log); // pacman.log or dpkg.log: installed and removed
+QVector<Event> readRecentlyUsed(const QByteArray &xbel, const QString &user); // ~/.local/share/recently-used.xbel
 QString rot13(const QString &text);           // UserAssist hides its names with it
 QString tidyUsbName(const QString &deviceId); // "Disk&Ven_SanDisk&Prod_Cruzer_Blade" -> "SanDisk Cruzer Blade"
 QDateTime fromSystemTime(const QByteArray &bytes); // a 16-byte Windows SYSTEMTIME (the network list's)
