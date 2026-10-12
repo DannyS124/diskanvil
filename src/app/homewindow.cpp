@@ -497,7 +497,10 @@ void HomeWindow::updateStatus()
             for (const Volume &v : d.volumes)
                 onPc = onPc || (v.mounts().contains(medium) && !d.removable && d.bus != QLatin1String("usb"));
         }
-        m_logs->setText(!onStick ? dot(color("dim"), tr("Logs stay in memory (started from a CD or ISO)"))
+        QFile cmdlineFile(QStringLiteral("/proc/cmdline"));
+        const bool overNetwork = cmdlineFile.open(QIODevice::ReadOnly) && cmdlineFile.readAll().contains(" fetch=");
+        m_logs->setText(overNetwork ? dot(color("dim"), tr("Logs stay in memory (started over the network)"))
+                        : !onStick ? dot(color("dim"), tr("Logs stay in memory (started from a CD or ISO)"))
                         : onPc   ? dot(color("green"), tr("Logs are saved on its partition on this PC"))
                                  : dot(color("green"), tr("Logs are saved on the stick")));
         QFile cmdline(QStringLiteral("/proc/cmdline"));

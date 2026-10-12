@@ -193,4 +193,7 @@ void NetBootDialog::showPcs()
     for (const QString &pc : std::as_const(m_order))
         lines << QStringLiteral("<b>%1</b>: %2").arg(pc.toHtmlEscaped(), m_state.value(pc).toHtmlEscaped());
     m_pcs->setText(lines.join(QStringLiteral("<br>")));
+    // Taller as PCs turn up, so the words above them don't get squeezed out.
+    if (sizeHint().height() > height())
+        resize(width(), sizeHint().height());
 }
