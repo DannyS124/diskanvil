@@ -101,7 +101,8 @@ sed "s/@ID@/$build_id/g" "$rescue/boot/find-stick.cfg" > "$iso/EFI/BOOT/grub.cfg
 cp "$iso/EFI/BOOT/grub.cfg" "$iso/EFI/debian/grub.cfg"
 # Its modules, from the same GRUB version, for what isn't built into it (exFAT, for Other ISOs on
 # the files drive). It only loads them with Secure Boot off.
-[ "$(dpkg-query -W -f='${Version}' grub-efi-amd64-bin)" = "$(dpkg-query -W -f='${Version}' grub-efi-amd64-signed | sed 's/+.*//')" ] ||
+# (The signed package's version is the same with "1+" in front and + for -: 1+2.12+9+deb13u2.)
+[ "$(dpkg-query -W -f='${Version}' grub-efi-amd64-bin)" = "$(dpkg-query -W -f='${Version}' grub-efi-amd64-signed | sed 's/^1+//; s/+/-/')" ] ||
     echo "note: grub-efi-amd64-bin $(dpkg-query -W -f='${Version}' grub-efi-amd64-bin) and the signed GRUB $(dpkg-query -W -f='${Version}' grub-efi-amd64-signed) differ"
 cp /usr/lib/grub/x86_64-efi/*.mod /usr/lib/grub/x86_64-efi/*.lst "$iso/boot/grub/x86_64-efi/"
 
