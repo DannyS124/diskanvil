@@ -13,7 +13,9 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QMap>
+#include <QProcess>
 #include <QSaveFile>
+#include <QStandardPaths>
 #include <QtEndian>
 
 #include <cstring>
@@ -681,14 +683,27 @@ Result riff(const Bytes &b, QFileDevice &out)
 
 // --- SQLite: sqlite3's own .recover, into a new database
 
+// sqlite3 runs where DiskAnvil does, not on the host: the Flatpak's runtime has its own, and the
+// files it works on are where this process sees them. Windows' comes with DiskAnvil.
+QString sqlite3()
+{
+#ifdef Q_OS_WIN
+    const QString program = host::windowsProgram(QStringLiteral("sqlite3"));
+    return program == QLatin1String("sqlite3") ? QString() : program;
+#else
+    return QStandardPaths::findExecutable(QStringLiteral("sqlite3"));
+#endif
+}
+
 Result sqlite(const QString &in, const QString &out)
 {
-    if (!host::programExists(QStringLiteral("sqlite3")))
+    const QString program = sqlite3();
+    if (program.isEmpty())
         return fail(tr("This needs the sqlite3 program, which isn't on this computer"));
     const QString sql = out + QStringLiteral(".sql");
     QFile::remove(out);
-    const int recovered = host::run({QStringLiteral("sqlite3"), in, QStringLiteral(".output ") + sql, QStringLiteral(".recover")});
-    const int read = recovered == 0 && QFileInfo(sql).size() > 0 ? host::run({QStringLiteral("sqlite3"), out, QStringLiteral(".read ") + sql}) : -1;
+    const int recovered = QProcess::execute(program, {in, QStringLiteral(".output ") + sql, QStringLiteral(".recover")});
+    const int read = recovered == 0 && QFileInfo(sql).size() > 0 ? QProcess::execute(program, {out, QStringLiteral(".read ") + sql}) : -1;
     QFile::remove(sql);
     if (read != 0 || !QFileInfo::exists(out))
         return fail(tr("sqlite3 couldn't find anything to recover in it"));
