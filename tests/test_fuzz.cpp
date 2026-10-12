@@ -13,6 +13,11 @@
 
 #include "testkit.h"
 
+#include "../src/backup/ewf.h"
+#include "../src/backup/zstdseek.h"
+#include "../src/backup/partclone.h"
+#include "../src/viruses/peinfo.h"
+#include "../src/drives/luksheader.h"
 #include "../src/addons/addons.h"
 #include "../src/backup/clone.h"
 #include "../src/common/format.h"
@@ -39,6 +44,9 @@
 #include <QRegularExpression>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QtEndian>
+
+#include <zstd.h>
 
 #include <algorithm>
 #include <cctype>
@@ -810,6 +818,75 @@ void driveNames()
 
 } // namespace
 
+// The readers added for 0.5.2's backups, evidence and Windows tools, fed damaged input: evidence
+// files, seekable backups' tables, partclone headers, programs' version resources, LUKS headers.
+void newReaders(const QString &tmp)
+{
+    // Evidence files: libewf's own, damaged, read here and there.
+    const QByteArray e01 = readFile(QStringLiteral(SOURCE_DIR "/tests/data/ewf/ref.E01"));
+    const QString e01Path = tmp + QStringLiteral("/fuzz.E01");
+    int opened = 0;
+    for (int i = 0; i < rounds() / 3; ++i) {
+        writeFile(e01Path, mutate(e01));
+        ewf::Info info;
+        if (const auto layer = ewf::open(e01Path, &info)) {
+            ++opened;
+            QByteArray buf(65536, '\0');
+            for (quint64 at : {quint64(0), info.size / 2, info.size > 4096 ? info.size - 4096 : 0})
+                layer->read(at, buf.data(), std::min<quint64>(quint64(buf.size()), info.size - std::min(at, info.size)));
+        }
+    }
+    report(true, QStringLiteral("%1 damaged evidence files: no crash (%2 still opened)").arg(rounds() / 3).arg(opened));
+
+    // Seekable backups' tables.
+    QByteArray backup(4096, 'z');
+    backup += zstdseek::table({{1000, 8388608}, {3096, 8388608}});
+    for (int i = 0; i < rounds(); ++i) {
+        const QByteArray d = mutate(backup);
+        zstdseek::readTable(quint64(d.size()), [&d](quint64 offset, char *buf, quint64 len) {
+            if (offset + len > quint64(d.size()))
+                return false;
+            memcpy(buf, d.constData() + offset, len);
+            return true;
+        });
+    }
+    report(true, QStringLiteral("%1 damaged backup tables: no crash").arg(rounds()));
+
+    // partclone's header (from the FAT32 image, unpacked).
+    const QByteArray packedPtcl = readFile(QStringLiteral(SOURCE_DIR "/tests/data/clonezilla/image/sda2.vfat-ptcl-img.zst"));
+    QByteArray ptcl(4096, '\0');
+    ZSTD_DCtx *dctx = ZSTD_createDCtx();
+    ZSTD_inBuffer in{packedPtcl.constData(), size_t(packedPtcl.size()), 0};
+    ZSTD_outBuffer outBuf{ptcl.data(), size_t(ptcl.size()), 0};
+    ZSTD_decompressStream(dctx, &outBuf, &in);
+    ZSTD_freeDCtx(dctx);
+    int valid = 0;
+    for (int i = 0; i < rounds(); ++i)
+        valid += partclone::parseHeader(mutate(ptcl.left(partclone::kHeaderSize))).valid() ? 1 : 0;
+    report(partclone::parseHeader(ptcl.left(partclone::kHeaderSize)).valid(),
+           QStringLiteral("%1 damaged partclone headers: no crash, and the CRC turns down almost all (%2 passed)").arg(rounds()).arg(valid));
+
+    // Programs' version resources.
+    const QByteArray exe = readFile(QStringLiteral(SOURCE_DIR "/tests/data/pe/versioned.exe"));
+    for (int i = 0; i < rounds(); ++i)
+        peinfo::versionStrings(mutate(exe));
+    report(!exe.isEmpty(), QStringLiteral("%1 damaged programs' version resources: no crash").arg(rounds()));
+
+    // LUKS2 headers: a made-up one, its JSON and all.
+    QByteArray luks(16384, '\0');
+    luks.replace(0, 6, QByteArray("LUKS\xba\xbe", 6));
+    luks[7] = 2;
+    qToBigEndian<quint64>(16384, luks.data() + 8);
+    luks.replace(168, 36, "0f5c3a1e-8b2d-4c6e-9a7f-1234567890ab");
+    const QByteArray json = R"({"keyslots":{},"tokens":{},"segments":{"0":{"type":"crypt","offset":"16777216","size":"dynamic"}},"digests":{},)"
+                            R"("config":{"json_size":"12288","keyslots_size":"16744448"}})";
+    luks.replace(4096, json.size(), json);
+    for (int i = 0; i < rounds(); ++i)
+        luksheader::inspect(mutate(luks));
+    report(luksheader::inspect(luks).valid() && luksheader::inspect(luks).size == 16777216,
+           QStringLiteral("%1 damaged LUKS headers: no crash").arg(rounds()));
+}
+
 void fuzzTests()
 {
     bool given = false;
@@ -839,5 +916,6 @@ void fuzzTests()
     tableInspector(tmp.path());
     savedLayouts(tmp.path());
     scanResults();
+    newReaders(tmp.path());
     out << "took " << timer.elapsed() / 1000.0 << " s" << Qt::endl;
 }
