@@ -56,8 +56,11 @@ case "$cmd" in
     ! on_github "$v" || die "v$v is already on GitHub, use a new version"
 
     # DiskAnvil never takes orders from other programs: no sockets, no D-Bus service of its
-    # own, nothing listening. Keep it that way.
-    if grep -rnE 'QLocalServer|QTcpServer|QUdpSocket|QWebSocketServer|QSctpServer|registerService|registerObject|QDBusAbstractAdaptor|\blisten\(' src; then
+    # own, nothing listening. Keep it that way. The one exception takes no orders either: Start
+    # Other PCs from This One (src/tools/netboot*, DiskAnvil Live) hands out DiskAnvil Live's own
+    # files, read-only, only while the person at the PC has it on.
+    if grep -rnE --exclude='netboot.cpp' --exclude='netboot.h' --exclude='netbootdialog.cpp' \
+        'QLocalServer|QTcpServer|QUdpSocket|QWebSocketServer|QSctpServer|registerService|registerObject|QDBusAbstractAdaptor|\blisten\(' src; then
         die "something in src/ listens for other programs (above); DiskAnvil mustn't"
     fi
     # Invisible characters (zero-width, text direction) can make code read differently than it runs.
