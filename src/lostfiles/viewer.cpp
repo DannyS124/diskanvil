@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "viewer.h"
 
+#include "enhance.h"
 #include "filetypes.h"
 #include "format.h"
 #include "gpt.h"
@@ -18,10 +19,13 @@
 #include <QAbstractScrollArea>
 #include <QApplication>
 #include <QBuffer>
+#include <QCheckBox>
+#include <QComboBox>
 #include <QDataStream>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QFormLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QPointer>
@@ -42,6 +46,7 @@
 #include <QStringDecoder>
 #include <QStyle>
 #include <QThread>
+#include <QThreadPool>
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
@@ -63,6 +68,7 @@
 
 #include <cmath>
 #include <cstdlib>
+#include <numbers>
 
 Q_DECLARE_METATYPE(viewer::Message)
 
@@ -71,6 +77,7 @@ namespace {
 
 constexpr quint32 kMagic = 0x44465657; // "DFVW"
 constexpr quint32 kMostMessage = 4 * 1024 * 1024;
+constexpr quint32 kMostPicture = 512u * 1024 * 1024;
 
 QString tr(const char *text)
 {
@@ -146,6 +153,9 @@ QByteArray encode(const Message &m)
         for (auto it = m.edits.cbegin(); it != m.edits.cend(); ++it)
             s << it.key() << it.value();
         break;
+    case Message::SavePicture:
+        s << m.pictureName << m.picture;
+        break;
     }
     QByteArray out;
     QDataStream header(&out, QIODevice::WriteOnly);
@@ -161,7 +171,9 @@ bool decode(QByteArray &buffer, Message &m, bool *bad)
     QDataStream header(buffer);
     quint32 magic = 0, type = 0, length = 0;
     header >> magic >> type >> length;
-    if (magic != kMagic || length > kMostMessage || type < Message::Look || type > Message::Edited) {
+    // A picture to save can be big (a photo made four times bigger); everything else is small.
+    const quint32 most = type == Message::SavePicture ? kMostPicture : kMostMessage;
+    if (magic != kMagic || length > most || type < Message::Look || type > Message::SavePicture) {
         *bad = true;
         return false;
     }
@@ -204,6 +216,9 @@ bool decode(QByteArray &buffer, Message &m, bool *bad)
         }
         break;
     }
+    case Message::SavePicture:
+        s >> m.pictureName >> m.picture;
+        break;
     }
     buffer.remove(0, 12 + length);
     if (s.status() != QDataStream::Ok) {
@@ -276,8 +291,34 @@ public:
             m_movie = nullptr;
         }
         m_image = QImage();
+        m_processed = QImage();
+        m_line = QLineF();
         viewport()->update();
     }
+
+    // Enhancing: the picture as it was found, and what's shown instead of it.
+    const QImage &original() const { return m_image; }
+    bool animated() const { return m_movie != nullptr; }
+    void showProcessed(const QImage &image)
+    {
+        m_processed = image;
+        viewport()->update();
+    }
+    // Holding Compare: the picture as it was found, for a moment.
+    void setComparing(bool on)
+    {
+        m_comparing = on;
+        viewport()->update();
+    }
+    // Measuring a blur streak: a line drawn along it says how far and which way it moved.
+    void setMeasuring(bool on)
+    {
+        m_measuring = on;
+        m_line = QLineF();
+        viewport()->setCursor(on ? Qt::CrossCursor : Qt::OpenHandCursor);
+        viewport()->update();
+    }
+    std::function<void(int length, int angle)> measured;
 
     QSize pictureSize() const { return m_image.size(); }
     double zoom() const { return m_zoom; }
@@ -302,7 +343,12 @@ protected:
         if (m_image.isNull())
             return;
         p.setRenderHint(QPainter::SmoothPixmapTransform, m_zoom < 4);
-        p.drawImage(target(), m_image);
+        p.drawImage(target(), !m_comparing && !m_processed.isNull() ? m_processed : m_image);
+        if (m_measuring && !m_line.isNull()) {
+            p.setRenderHint(QPainter::Antialiasing);
+            p.setPen(QPen(palette().color(QPalette::Highlight), 2));
+            p.drawLine(m_line);
+        }
     }
 
     void resizeEvent(QResizeEvent *event) override
@@ -326,6 +372,10 @@ protected:
 
     void mousePressEvent(QMouseEvent *event) override
     {
+        if (event->button() == Qt::LeftButton && m_measuring) {
+            m_line = QLineF(event->position(), event->position());
+            return;
+        }
         if (event->button() == Qt::LeftButton) {
             m_drag = event->position().toPoint();
             viewport()->setCursor(Qt::ClosedHandCursor);
@@ -336,13 +386,34 @@ protected:
     {
         if (!(event->buttons() & Qt::LeftButton))
             return;
+        if (m_measuring) {
+            m_line.setP2(event->position());
+            viewport()->update();
+            return;
+        }
         const QPoint by = event->position().toPoint() - m_drag;
         m_drag = event->position().toPoint();
         horizontalScrollBar()->setValue(horizontalScrollBar()->value() - by.x());
         verticalScrollBar()->setValue(verticalScrollBar()->value() - by.y());
     }
 
-    void mouseReleaseEvent(QMouseEvent *) override { viewport()->setCursor(Qt::OpenHandCursor); }
+    void mouseReleaseEvent(QMouseEvent *) override
+    {
+        if (m_measuring) {
+            // In the picture's own pixels: how long the streak is, and its direction (0° across,
+            // 90° up and down).
+            const double length = m_line.length() / m_zoom;
+            double angle = std::atan2(-(m_line.dy()), m_line.dx()) * 180 / std::numbers::pi;
+            if (angle < 0)
+                angle += 180;
+            if (angle >= 180)
+                angle -= 180;
+            if (length >= 2 && measured)
+                measured(int(std::lround(length)), int(std::lround(angle)) % 180);
+            return;
+        }
+        viewport()->setCursor(Qt::OpenHandCursor);
+    }
 
     void mouseDoubleClickEvent(QMouseEvent *event) override
     {
@@ -401,10 +472,163 @@ private:
     }
 
     QImage m_image;
+    QImage m_processed;
     QMovie *m_movie = nullptr;
     double m_zoom = 1;
     bool m_fit = true;
+    bool m_comparing = false;
+    bool m_measuring = false;
+    QLineF m_line;
     QPoint m_drag;
+};
+
+// --- Enhance: the image tools (enhance.h), for a picture or the frame of a film on the screen.
+
+class EnhancePanel : public QWidget
+{
+public:
+    explicit EnhancePanel(QWidget *parent = nullptr)
+        : QWidget(parent)
+    {
+        setObjectName(QStringLiteral("enhance"));
+        auto *layout = new QVBoxLayout(this);
+        auto *note = new QLabel(viewer::tr("These bring out what's in the picture. They can't add detail the camera never caught, and they "
+                                           "never make any up. The file found is never changed: what's saved is a new picture."));
+        note->setWordWrap(true);
+        layout->addWidget(note);
+        auto *form = new QFormLayout;
+        const auto slider = [this, form](const QString &label, int low, int high, const QString &name) {
+            auto *s = new QSlider(Qt::Horizontal);
+            s->setRange(low, high);
+            s->setObjectName(name);
+            auto *value = new QLabel(QStringLiteral("0"));
+            value->setMinimumWidth(32);
+            auto *row = new QHBoxLayout;
+            row->addWidget(s, 1);
+            row->addWidget(value);
+            form->addRow(label, row);
+            QObject::connect(s, &QSlider::valueChanged, this, [this, value](int v) {
+                value->setText(QString::number(v));
+                if (!m_quiet && changed)
+                    changed();
+            });
+            m_rows << s;
+            return s;
+        };
+        m_brightness = slider(viewer::tr("Lighter"), -100, 100, QStringLiteral("brightness"));
+        m_contrast = slider(viewer::tr("Contrast"), -100, 100, QStringLiteral("contrast"));
+        m_shadows = slider(viewer::tr("Dark parts"), 0, 100, QStringLiteral("shadows"));
+        m_sharpen = slider(viewer::tr("Sharpen"), 0, 100, QStringLiteral("sharpen"));
+        m_focus = slider(viewer::tr("Out of focus"), 0, 15, QStringLiteral("focus"));
+        m_motion = slider(viewer::tr("Moved"), 0, 60, QStringLiteral("motion"));
+        m_angle = slider(viewer::tr("Which way"), 0, 179, QStringLiteral("angle"));
+        m_focus->setToolTip(viewer::tr("How blurred it is, in pixels: the blur is taken back out (slow on a big picture)"));
+        m_motion->setToolTip(viewer::tr("How far it moved while it was taken, in pixels (or draw along a streak)"));
+        m_angle->setToolTip(viewer::tr("Which way it moved: 0 across, 90 up and down"));
+        layout->addLayout(form);
+        m_measure = new QPushButton(viewer::tr("Draw Along a Streak"));
+        m_measure->setCheckable(true);
+        m_measure->setToolTip(viewer::tr("Draw a line along a blur streak in the picture: how long it is and which way it goes set Moved and Which way"));
+        layout->addWidget(m_measure);
+        m_grain = new QComboBox;
+        m_grain->addItems({viewer::tr("Grain left as it is"), viewer::tr("A little grain smoothed"), viewer::tr("More grain smoothed")});
+        m_levels = new QCheckBox(viewer::tr("Stretch levels (darkest black, lightest white)"));
+        m_grey = new QCheckBox(viewer::tr("Black and white"));
+        m_invert = new QCheckBox(viewer::tr("Inverted (for a negative)"));
+        for (QWidget *w : {static_cast<QWidget *>(m_grain), static_cast<QWidget *>(m_levels), static_cast<QWidget *>(m_grey), static_cast<QWidget *>(m_invert)})
+            layout->addWidget(w);
+        QObject::connect(m_grain, &QComboBox::currentIndexChanged, this, [this] { if (!m_quiet && changed) changed(); });
+        for (QCheckBox *box : {m_levels, m_grey, m_invert})
+            QObject::connect(box, &QCheckBox::toggled, this, [this] { if (!m_quiet && changed) changed(); });
+        auto *buttons = new QHBoxLayout;
+        m_compare = new QPushButton(viewer::tr("Hold to Compare"));
+        m_compare->setToolTip(viewer::tr("Shows the picture as it was found while it's held down"));
+        auto *reset = new QPushButton(viewer::tr("Reset"));
+        buttons->addWidget(m_compare);
+        buttons->addWidget(reset);
+        layout->addLayout(buttons);
+        m_status = new QLabel;
+        m_status->setWordWrap(true);
+        layout->addWidget(m_status);
+        m_bigger = new QComboBox;
+        m_bigger->addItems({viewer::tr("Its own size"), viewer::tr("Twice as big"), viewer::tr("Three times as big"), viewer::tr("Four times as big")});
+        m_bigger->setToolTip(viewer::tr("Bigger, smoothly: the same picture larger, nothing made up"));
+        m_save = new QPushButton(viewer::tr("Save as a New Picture…"));
+        m_save->setObjectName(QStringLiteral("saveEnhanced"));
+        layout->addWidget(m_bigger);
+        layout->addWidget(m_save);
+        layout->addStretch();
+        QObject::connect(m_compare, &QPushButton::pressed, this, [this] { if (compare) compare(true); });
+        QObject::connect(m_compare, &QPushButton::released, this, [this] { if (compare) compare(false); });
+        QObject::connect(reset, &QPushButton::clicked, this, [this] { this->reset(); if (changed) changed(); });
+        QObject::connect(m_measure, &QPushButton::toggled, this, [this](bool on) { if (measure) measure(on); });
+        QObject::connect(m_save, &QPushButton::clicked, this, [this] { if (save) save(m_bigger->currentIndex() + 1); });
+    }
+
+    enhance::Settings settings() const
+    {
+        enhance::Settings s;
+        s.brightness = m_brightness->value();
+        s.contrast = m_contrast->value();
+        s.shadows = m_shadows->value();
+        s.sharpen = m_sharpen->value();
+        s.focus = m_focus->isEnabled() ? m_focus->value() : 0;
+        s.motion = m_motion->isEnabled() ? m_motion->value() : 0;
+        s.motionAngle = m_angle->value();
+        s.denoise = m_grain->isEnabled() ? m_grain->currentIndex() : 0;
+        s.autoLevels = m_levels->isChecked();
+        s.grey = m_grey->isChecked();
+        s.invert = m_invert->isChecked();
+        return s;
+    }
+
+    void reset()
+    {
+        m_quiet = true;
+        for (QSlider *s : std::as_const(m_rows))
+            s->setValue(0);
+        m_grain->setCurrentIndex(0);
+        for (QCheckBox *box : {m_levels, m_grey, m_invert})
+            box->setChecked(false);
+        m_bigger->setCurrentIndex(0);
+        m_measure->setChecked(false);
+        m_quiet = false;
+        setStatus(QString());
+    }
+
+    void setMotion(int length, int angle)
+    {
+        m_quiet = true;
+        m_motion->setValue(std::clamp(length, 2, 60));
+        m_quiet = false;
+        m_angle->setValue(angle); // the last one asks for the new picture
+        m_measure->setChecked(false);
+    }
+
+    // A film's frame: the slow ones (blur taken out, grain) and enlarging are for still pictures.
+    void setForFilm(bool film)
+    {
+        for (QWidget *w : {static_cast<QWidget *>(m_focus), static_cast<QWidget *>(m_motion), static_cast<QWidget *>(m_angle),
+                           static_cast<QWidget *>(m_grain), static_cast<QWidget *>(m_measure), static_cast<QWidget *>(m_bigger)})
+            w->setEnabled(!film);
+        m_save->setText(film ? viewer::tr("Save This Frame…") : viewer::tr("Save as a New Picture…"));
+    }
+
+    void setStatus(const QString &text) { m_status->setText(text); }
+
+    std::function<void()> changed;
+    std::function<void(int factor)> save;
+    std::function<void(bool on)> compare;
+    std::function<void(bool on)> measure;
+
+private:
+    QVector<QSlider *> m_rows;
+    QSlider *m_brightness, *m_contrast, *m_shadows, *m_sharpen, *m_focus, *m_motion, *m_angle;
+    QComboBox *m_grain, *m_bigger;
+    QCheckBox *m_levels, *m_grey, *m_invert;
+    QPushButton *m_measure, *m_compare, *m_save;
+    QLabel *m_status;
+    bool m_quiet = false;
 };
 
 // --- PDFs: every page under the one before, fitted to the window's width, drawn as they come
@@ -902,6 +1126,9 @@ Window::Window(QWidget *parent)
     , m_title(new QLabel)
     , m_facts(new QLabel)
     , m_side(new QScrollArea)
+    , m_enhance(new EnhancePanel)
+    , m_enhanceTimer(new QTimer(this))
+    , m_enhanceRound(std::make_shared<std::atomic<int>>(0))
 {
     setWindowTitle(tr("Find Lost Files: Viewer"));
     setObjectName(QStringLiteral("viewer"));
@@ -933,6 +1160,10 @@ Window::Window(QWidget *parent)
     m_insideAction->setCheckable(true);
     m_insideAction->setObjectName(QStringLiteral("insideAction"));
     m_insideAction->setToolTip(tr("What the file is made of, part by part, and its bytes (damage shows in red)"));
+    m_enhanceAction = bar->addAction(icon("color-management"), tr("Enhance"));
+    m_enhanceAction->setCheckable(true);
+    m_enhanceAction->setObjectName(QStringLiteral("enhanceAction"));
+    m_enhanceAction->setToolTip(tr("Lighter, sharper, blur taken out: a closer look, saved as a new picture"));
     m_repair = bar->addAction(icon("tools-wizard"), tr("Repair"));
     m_repair->setObjectName(QStringLiteral("repairAction"));
     m_open = bar->addAction(icon("document-open"), tr("Open in Its Own Program"));
@@ -970,11 +1201,18 @@ Window::Window(QWidget *parent)
     middleLayout->setContentsMargins(0, 0, 0, 0);
     middleLayout->addWidget(m_problem);
     middleLayout->addWidget(m_pages, 1);
+    auto *enhanceScroll = new QScrollArea;
+    enhanceScroll->setWidget(m_enhance);
+    enhanceScroll->setWidgetResizable(true);
+    enhanceScroll->setMinimumWidth(280);
+    enhanceScroll->hide();
     auto *split = new QSplitter;
     split->addWidget(middle);
+    split->addWidget(enhanceScroll);
     split->addWidget(m_side);
     split->setStretchFactor(0, 4);
     split->setStretchFactor(1, 1);
+    split->setStretchFactor(2, 1);
     split->setChildrenCollapsible(false);
     setCentralWidget(split);
 
@@ -999,9 +1237,116 @@ Window::Window(QWidget *parent)
     connect(m_zoomOut, &QAction::triggered, this, [this] { m_shown.kind == Kind::Pdf ? m_pdf->zoomBy(0.8) : m_picture->zoomBy(0.8); });
     connect(m_fit, &QAction::triggered, this, [this] { m_shown.kind == Kind::Pdf ? m_pdf->fit() : m_picture->fit(); });
     connect(m_actual, &QAction::triggered, this, [this] { m_shown.kind == Kind::Pdf ? m_pdf->actualSize() : m_picture->actualSize(); });
+
+    m_enhanceTimer->setSingleShot(true);
+    m_enhanceTimer->setInterval(180);
+    connect(m_enhanceTimer, &QTimer::timeout, this, &Window::enhanceNow);
+    connect(m_enhanceAction, &QAction::toggled, this, [this, enhanceScroll](bool on) {
+        enhanceScroll->setVisible(on);
+        if (!on) {
+            m_enhance->reset();
+            ++*m_enhanceRound;
+            m_picture->showProcessed(QImage());
+            m_picture->setMeasuring(false);
+        }
+    });
+    m_enhance->changed = [this] { enhanceSoon(); };
+    m_enhance->compare = [this](bool on) { m_picture->setComparing(on); };
+    m_enhance->measure = [this](bool on) { m_picture->setMeasuring(on); };
+    m_picture->measured = [this](int length, int angle) {
+        m_picture->setMeasuring(false);
+        m_enhance->setMotion(length, angle);
+    };
+    m_enhance->save = [this](int factor) { saveEnhanced(factor); };
 }
 
-Window::~Window() = default;
+void Window::enhanceSoon()
+{
+    m_enhanceTimer->start();
+}
+
+void Window::enhanceNow()
+{
+    const int round = ++*m_enhanceRound;
+    const enhance::Settings settings = m_enhance->settings();
+    const QImage original = m_picture->original();
+    if (original.isNull() || settings.isDefault()) {
+        m_picture->showProcessed(QImage());
+        m_enhance->setStatus(QString());
+        return;
+    }
+    // A quick look on a copy no bigger than the screen, then the whole picture.
+    const int longest = std::max(original.width(), original.height());
+    const QImage quick = longest > 1400 ? original.scaled(1400, 1400, Qt::KeepAspectRatio, Qt::SmoothTransformation) : original;
+    m_enhance->setStatus(tr("Working…"));
+    const std::shared_ptr<std::atomic<int>> current = m_enhanceRound;
+    QPointer<Window> self(this);
+    QThreadPool::globalInstance()->start([self, current, round, settings, quick, original, longest] {
+        const auto still = [current, round](int) { return current->load() == round; };
+        QImage shown = enhance::apply(quick, settings, still);
+        if (shown.isNull() || current->load() != round)
+            return;
+        QMetaObject::invokeMethod(qApp, [self, current, round, shown, more = longest > 1400] {
+            if (!self || current->load() != round)
+                return;
+            self->m_picture->showProcessed(shown);
+            self->m_enhance->setStatus(more ? Window::tr("Working on the whole picture…") : QString());
+        }, Qt::QueuedConnection);
+        if (longest <= 1400)
+            return;
+        const QImage whole = enhance::apply(original, settings, still);
+        if (whole.isNull() || current->load() != round)
+            return;
+        QMetaObject::invokeMethod(qApp, [self, current, round, whole] {
+            if (!self || current->load() != round)
+                return;
+            self->m_picture->showProcessed(whole);
+            self->m_enhance->setStatus(QString());
+        }, Qt::QueuedConnection);
+    });
+}
+
+void Window::saveEnhanced(int factor)
+{
+    const QImage original = m_picture->original();
+    if (original.isNull())
+        return;
+    const enhance::Settings settings = m_enhance->settings();
+    // Four times as big is 16 times the pixels: kept under 200 million of them.
+    while (factor > 1 && qint64(original.width()) * factor * original.height() * factor > 200000000LL)
+        --factor;
+    m_enhance->setStatus(tr("Making the picture to save…"));
+    const QString base = QFileInfo(m_shown.name).completeBaseName();
+    const QString name = base + (settings.isDefault() ? QString() : tr(" (enhanced)")) + (factor > 1 ? tr(" (x%1)").arg(factor) : QString())
+                       + QStringLiteral(".png");
+    QStringList done = settings.describe();
+    if (factor > 1)
+        done << tr("made %1 times as big (bicubic)").arg(factor);
+    const QString note = tr("Made by DiskAnvil's viewer from \"%1\": %2.").arg(m_shown.name, done.isEmpty() ? tr("nothing changed") : done.join(QStringLiteral(", ")));
+    QPointer<Window> self(this);
+    QThreadPool::globalInstance()->start([self, original, settings, factor, name, note] {
+        QImage picture = enhance::enlarge(enhance::apply(original, settings), factor);
+        // What was done goes in the picture itself, so a copy always says it isn't the original.
+        picture.setText(QStringLiteral("Description"), note);
+        picture.setText(QStringLiteral("Software"), QStringLiteral("DiskAnvil"));
+        QByteArray png;
+        QBuffer buffer(&png);
+        buffer.open(QIODevice::WriteOnly);
+        picture.save(&buffer, "PNG");
+        QMetaObject::invokeMethod(qApp, [self, name, png] {
+            if (!self)
+                return;
+            self->m_enhance->setStatus(QString());
+            Q_EMIT self->savePicture(name, png);
+        }, Qt::QueuedConnection);
+    });
+}
+
+Window::~Window()
+{
+    ++*m_enhanceRound; // whatever's being worked on stops
+    QThreadPool::globalInstance()->waitForDone();
+}
 
 QString Window::problem() const
 {
@@ -1014,6 +1359,8 @@ void Window::present(const Show &show)
 {
     m_shown = show;
     m_media->stop();
+    ++*m_enhanceRound;
+    m_enhance->reset();
     m_picture->clear();
     m_pdf->clear();
     m_problem->hide();
@@ -1108,6 +1455,12 @@ void Window::present(const Show &show)
     m_pages->setCurrentWidget(page);
     for (QAction *a : {m_zoomOut, m_fit, m_actual, m_zoomIn})
         a->setVisible(kind == Kind::Picture || kind == Kind::Pdf);
+    // Enhancing is for still pictures (an animated one shows its frames as they come).
+    const bool canEnhance = kind == Kind::Picture && !m_picture->animated();
+    m_enhanceAction->setVisible(canEnhance);
+    m_enhance->setForFilm(false);
+    if (!canEnhance)
+        m_enhanceAction->setChecked(false);
 }
 
 QWidget *Window::insideView() const
@@ -1322,6 +1675,14 @@ int run()
         Message m;
         m.type = Message::Edited;
         m.edits = edits;
+        out.write(encode(m));
+        out.flush();
+    });
+    QObject::connect(&window, &Window::savePicture, &window, [&out](const QString &name, const QByteArray &png) {
+        Message m;
+        m.type = Message::SavePicture;
+        m.pictureName = name;
+        m.picture = png;
         out.write(encode(m));
         out.flush();
     });

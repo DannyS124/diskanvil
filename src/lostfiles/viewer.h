@@ -13,6 +13,10 @@
 #include <QMap>
 #include <QPalette>
 #include <QStringList>
+#include <QTimer>
+
+#include <atomic>
+#include <memory>
 
 class QIODevice;
 class QLabel;
@@ -48,12 +52,16 @@ enum class Ask : qint32 { Ready = 0, Previous, Next, Save, Open, Shown, Repair, 
 // The messages between them, each a small header and then its body.
 struct Message {
     // Edited: the viewer's changes to the bytes of the one shown, to save as a copy.
-    enum Type : quint32 { Look = 1, ShowFile = 2, AskFor = 3, Facts = 4, Edited = 5 } type = ShowFile;
+    // SavePicture: a picture made in the viewer (one enhanced, a film's frame), to save where the
+    // person says. Find Lost Files only writes its bytes, it never reads them.
+    enum Type : quint32 { Look = 1, ShowFile = 2, AskFor = 3, Facts = 4, Edited = 5, SavePicture = 6 } type = ShowFile;
     QString style;    // Look: the widget style's name
     QPalette palette; // and the colours
     Show show;        // ShowFile; Facts: just show.facts, for the one shown
     Ask ask = Ask::Ready; // AskFor
     QMap<quint64, quint8> edits; // Edited: where, and what the byte there is now
+    QString pictureName;  // SavePicture: the name to suggest
+    QByteArray picture;   // and the picture, a PNG
 };
 QByteArray encode(const Message &message);
 // One message off the front of `buffer` when a whole one is there (removed from it). False
@@ -72,6 +80,7 @@ class PictureView;
 class PdfView;
 class MediaView;
 class InsideView;
+class EnhancePanel;
 
 class Window : public QMainWindow
 {
@@ -86,15 +95,23 @@ public:
     QString problem() const; // why it can't be shown, when it can't
     QWidget *insideView() const; // the parts and the bytes (the tests look)
 
+    EnhancePanel *enhancePanel() const { return m_enhance; } // the tests
+
 Q_SIGNALS:
     void asked(viewer::Ask ask);
     void saveEdited(const QMap<quint64, quint8> &edits);
+    void savePicture(const QString &name, const QByteArray &png);
 
 protected:
     void keyPressEvent(QKeyEvent *event) override;
 
 private:
     void showFacts();
+    // The Enhance panel's settings, on the picture shown: quickly on a smaller copy first, then the
+    // whole of it. Saving does the whole one, made bigger when asked.
+    void enhanceSoon();
+    void enhanceNow();
+    void saveEnhanced(int factor);
 
     Show m_shown;
     QStackedWidget *m_pages;
@@ -112,6 +129,10 @@ private:
     QAction *m_previous, *m_next, *m_zoomOut, *m_fit, *m_actual, *m_zoomIn, *m_details, *m_open, *m_save;
     QAction *m_insideAction;
     QAction *m_repair;
+    QAction *m_enhanceAction;
+    EnhancePanel *m_enhance;
+    QTimer *m_enhanceTimer;
+    std::shared_ptr<std::atomic<int>> m_enhanceRound; // a newer request stops the ones before it
 };
 
 } // namespace viewer

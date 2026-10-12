@@ -1000,7 +1000,7 @@
 <context>
     <name>viewer</name>
     <message numerus="yes">
-        <location filename="../src/lostfiles/viewer.cpp" line="798"/>
+        <location filename="../src/lostfiles/viewer.cpp" line="1022"/>
         <source>%n byte(s) changed</source>
         <translation>
             <numerusform>%n byte changed</numerusform>
@@ -1008,7 +1008,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/viewer.cpp" line="878"/>
+        <location filename="../src/lostfiles/viewer.cpp" line="1102"/>
         <source>%n part(s) damaged, in red: pick one to see where it is.</source>
         <translation>
             <numerusform>%n part damaged, in red: pick one to see where it is.</numerusform>

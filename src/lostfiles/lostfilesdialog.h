@@ -227,6 +227,8 @@ private:
     void saveReport();
     // The fingerprints of the files picked, to copy.
     void showFingerprints(const QVector<int> &indexes);
+    // A picture the viewer made (enhanced, a film's frame), saved where the person says.
+    void savePicture(const QString &name, const QByteArray &png);
     // The next or previous file in the list that has something to show, -1 when there's none.
     int neighbour(int index, int step) const;
     // The times the file system kept, as "label", "value" rows.

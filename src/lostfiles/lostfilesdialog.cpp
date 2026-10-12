@@ -2599,6 +2599,33 @@ void LostFilesDialog::saveChangedCopy(int index, const QMap<quint64, quint8> &ch
         QMessageBox::warning(this, windowTitle(), tr("The changed copy couldn't be saved: %1").arg(why));
 }
 
+void LostFilesDialog::savePicture(const QString &name, const QByteArray &png)
+{
+    // Made in the viewer (enhanced, or a film's frame): its bytes are written where the person
+    // says, never read here.
+    if (png.isEmpty() || !png.startsWith("\x89PNG"))
+        return;
+    raise();
+    activateWindow();
+    const QString folder = m_savedTo.isEmpty() ? QStandardPaths::writableLocation(QStandardPaths::PicturesLocation) : QFileInfo(m_savedTo).absolutePath();
+    const QString target = m_changedCopyTarget.isEmpty()
+                               ? QFileDialog::getSaveFileName(this, tr("Save the Picture"), folder + QLatin1Char('/') + lost::cleanName(name),
+                                                              tr("PNG picture (*.png)"))
+                               : m_changedCopyTarget;
+    if (target.isEmpty())
+        return;
+    if (!m_diskDevice.isEmpty() && blockio::pathIsOnDisk(QFileInfo(target).absolutePath(), m_diskDevice)) {
+        QMessageBox::warning(this, windowTitle(),
+                             tr("That's on the drive being searched: saving there could overwrite the lost files. Pick a folder on another drive."));
+        return;
+    }
+    QSaveFile out(target);
+    if (out.open(QIODevice::WriteOnly) && out.write(png) == png.size() && out.commit())
+        m_status->setText(tr("Saved the picture as %1.").arg(QDir::toNativeSeparators(target)));
+    else
+        QMessageBox::warning(this, windowTitle(), tr("The picture couldn't be saved: %1").arg(out.errorString()));
+}
+
 void LostFilesDialog::viewerSaid(const QByteArray &said)
 {
     m_viewerHeard += said;
@@ -2607,6 +2634,10 @@ void LostFilesDialog::viewerSaid(const QByteArray &said)
     while (viewer::decode(m_viewerHeard, m, &bad)) {
         if (m.type == viewer::Message::Edited) {
             saveChangedCopy(m_viewerIndex, m.edits);
+            continue;
+        }
+        if (m.type == viewer::Message::SavePicture) {
+            savePicture(m.pictureName, m.picture);
             continue;
         }
         if (m.type != viewer::Message::AskFor)

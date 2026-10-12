@@ -4753,6 +4753,50 @@ void placesWindow()
     }
 }
 
+// The viewer's Enhance panel: sharpened, saved as a new picture that says what was done to it.
+void enhanceWindow()
+{
+    QTemporaryDir dir;
+    QImage stripes(320, 240, QImage::Format_RGB32);
+    for (int y = 0; y < stripes.height(); ++y) {
+        for (int x = 0; x < stripes.width(); ++x)
+            stripes.setPixel(x, y, (x / 8) % 2 ? qRgb(200, 190, 180) : qRgb(40, 50, 60));
+    }
+    const QString path = dir.path() + QStringLiteral("/stripes.png");
+    stripes.save(path);
+    viewer::Window window;
+    viewer::Show show;
+    show.kind = viewer::Kind::Picture;
+    show.type = filetypes::typeForName(QStringLiteral("stripes.png"));
+    show.path = path;
+    show.name = QStringLiteral("stripes.png");
+    window.present(show);
+    window.show();
+    auto *action = window.findChild<QAction *>(QStringLiteral("enhanceAction"));
+    report(action && action->isVisible(), QStringLiteral("viewer: Enhance is there for a picture"));
+    if (!action)
+        return;
+    action->setChecked(true);
+    window.findChild<QSlider *>(QStringLiteral("sharpen"))->setValue(50);
+    window.findChild<QSlider *>(QStringLiteral("brightness"))->setValue(20);
+    QByteArray png;
+    QString name;
+    QObject::connect(&window, &viewer::Window::savePicture, [&](const QString &n, const QByteArray &p) {
+        name = n;
+        png = p;
+    });
+    window.findChild<QPushButton *>(QStringLiteral("saveEnhanced"))->click();
+    waitUntil([&] { return !png.isEmpty(); }, 20000);
+    QImage saved;
+    saved.loadFromData(png, "PNG");
+    report(name == QLatin1String("stripes (enhanced).png") && saved.size() == stripes.size() && saved.text(QStringLiteral("Description")).contains(QLatin1String("sharpened 50%"))
+               && saved.text(QStringLiteral("Description")).contains(QLatin1String("brightness +20")) && qGray(saved.pixel(4, 4)) > qGray(stripes.pixel(4, 4)),
+           QStringLiteral("viewer: an enhanced picture is saved new, saying what was done to it"), saved.text(QStringLiteral("Description")));
+    show.kind = viewer::Kind::Words;
+    window.present(show);
+    report(!action->isVisible() && !action->isChecked(), QStringLiteral("viewer: Enhance goes away for what isn't a picture"));
+}
+
 // What This PC Did on a Windows made of the test hives (tests/data/registry/activity.ps1).
 void activityWindow()
 {
@@ -6400,7 +6444,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"enhance", enhanceWindow}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},

@@ -2152,6 +2152,21 @@ void viewerMessages()
     QByteArray lying = viewer::encode(edited);
     lying.replace(12, 4, QByteArray("\xFF\xFF\xFF\xFF", 4)); // a made-up count
     report(!viewer::decode(lying, editedBack, &editedBad) || editedBack.edits.size() <= 3, QStringLiteral("viewer: a made-up count of changes asks for nothing"));
+    // A picture made in the viewer: its bytes come back whole; one claiming to be bigger than the
+    // most a picture may be is refused.
+    viewer::Message picture;
+    picture.type = viewer::Message::SavePicture;
+    picture.pictureName = QStringLiteral("beach (enhanced).png");
+    picture.picture = QByteArray("\x89PNG\r\n\x1a\n", 8) + QByteArray(100000, 'p');
+    QByteArray pictureBytes = viewer::encode(picture);
+    viewer::Message pictureBack;
+    bool pictureBad = false;
+    report(viewer::decode(pictureBytes, pictureBack, &pictureBad) && !pictureBad && pictureBack.pictureName == picture.pictureName
+               && pictureBack.picture == picture.picture,
+           QStringLiteral("viewer: a picture made in it comes back to be saved, whole"));
+    QByteArray huge = viewer::encode(picture);
+    huge.replace(8, 4, QByteArray("\x7F\xFF\xFF\xFF", 4)); // its length: 2 GB
+    report(!viewer::decode(huge, pictureBack, &pictureBad) && pictureBad, QStringLiteral("viewer: a picture message claiming 2 GB is refused"));
     const char junkBytes[] = "\x00\x00\x00\x01 not a message at all";
     QByteArray junk(junkBytes, sizeof(junkBytes) - 1);
     viewer::Message out;
