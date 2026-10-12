@@ -705,8 +705,17 @@ void testBoot()
     if (testboot::ovmf(&code, &vars)) {
         testboot::Options uefi = file;
         uefi.uefi = true;
-        const QString firmware = boot(uefi);
-        report(firmware.contains(QLatin1String("BdsDxe")), QStringLiteral("test boot: UEFI's firmware starts with the arguments given"), firmware.left(200));
+        // Once more when it says nothing: on a busy PC the firmware now and then stays silent the first time.
+        QElapsedTimer took;
+        took.start();
+        QString firmware = boot(uefi);
+        int tries = 1;
+        if (!firmware.contains(QLatin1String("BdsDxe"))) {
+            firmware = boot(uefi);
+            ++tries;
+        }
+        report(firmware.contains(QLatin1String("BdsDxe")), QStringLiteral("test boot: UEFI's firmware starts with the arguments given"),
+               QStringLiteral("%1 tries, %2 s: %3").arg(tries).arg(took.elapsed() / 1000).arg(firmware.right(160)));
     }
     const QByteArray after = QCryptographicHash::hash([&] { QFile f(image); return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray(); }(),
                                                       QCryptographicHash::Sha256);

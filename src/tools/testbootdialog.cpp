@@ -145,7 +145,9 @@ void TestBootDialog::start()
             delete clock;
             qemu->deleteLater();
         });
-        m_note->setText(tr("Started: it's in its own window. Close that window when you're done."));
+        m_note->setText(m_uefi->isChecked() ? tr("Started: it's in its own window. Close that window when you're done. If it stays on the "
+                                                  "TianoCore logo, close it and start it again: QEMU's UEFI firmware now and then sticks there.")
+                                            : tr("Started: it's in its own window. Close that window when you're done."));
     };
     if (!m_isDisk) {
         o.file = m_image;
