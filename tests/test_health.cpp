@@ -24,6 +24,7 @@
 #include "../src/tools/linuxboot.h"
 #include "../src/tools/winre.h"
 #include "../src/tools/testboot.h"
+#include "../src/drives/usbinfo.h"
 #include "../src/drives/blockio.h"
 #include "../src/health/surfacescan.h"
 #include "../src/tools/systemd.h"
@@ -700,6 +701,50 @@ void testBoot()
     report(before == after, QStringLiteral("test boot: the image is just as it was"));
 }
 
+// How a USB drive is connected, from a pretend sysfs: a USB 3 stick in a USB 2 port says so, with
+// its controller's name from pci.ids; and this PC's own USB drives, when there are any.
+void usbConnection()
+{
+    QTemporaryDir dir;
+    const QString sys = dir.filePath(QStringLiteral("sys"));
+    const QString pci = sys + QStringLiteral("/devices/pci0000:00/0000:00:14.0");
+    const QString hub = pci + QStringLiteral("/usb1"), stick = hub + QStringLiteral("/1-2");
+    const QString block = stick + QStringLiteral("/1-2:1.0/host6/target6:0:0/6:0:0:0/block/sdz");
+    QDir().mkpath(block);
+    QDir().mkpath(sys + QStringLiteral("/block"));
+    const auto put = [](const QString &path, const QByteArray &text) {
+        QFile f(path);
+        return f.open(QIODevice::WriteOnly) && f.write(text) > 0;
+    };
+    put(pci + QStringLiteral("/class"), "0x0c0330\n");
+    put(pci + QStringLiteral("/vendor"), "0x8086\n");
+    put(pci + QStringLiteral("/device"), "0xa36d\n");
+    put(hub + QStringLiteral("/speed"), "5000\n");
+    put(hub + QStringLiteral("/idVendor"), "1d6b\n");
+    put(stick + QStringLiteral("/speed"), "480\n");
+    put(stick + QStringLiteral("/version"), " 3.20\n");
+    put(stick + QStringLiteral("/idVendor"), "154b\n");
+    put(stick + QStringLiteral("/idProduct"), "1006\n");
+    put(stick + QStringLiteral("/manufacturer"), "PNY\n");
+    put(stick + QStringLiteral("/product"), "USB 3.2.1 FD\n");
+    QFile::link(block, sys + QStringLiteral("/block/sdz"));
+    const QString ids = dir.filePath(QStringLiteral("pci.ids"));
+    put(ids, "# test\n1022  Advanced Micro Devices, Inc. [AMD]\n\t43ee  500 Series Chipset USB 3.1 XHCI Controller\n"
+             "8086  Intel Corporation\n\ta36c  Something else\n\ta36d  Cannon Lake PCH USB 3.1 xHCI Host Controller\n");
+    const usbinfo::Info info = usbinfo::of(QStringLiteral("/dev/sdz"), sys, ids);
+    const QString text = usbinfo::describe(info);
+    report(info.known && info.speedMbps == 480 && info.portMbps == 5000 && info.port == QLatin1String("1-2") && info.maker == QLatin1String("PNY")
+               && info.controller == QLatin1String("Intel Corporation Cannon Lake PCH USB 3.1 xHCI Host Controller") && text.contains(QLatin1String("ten times")),
+           QStringLiteral("USB: a USB 3 stick at USB 2 speed is said, with its port and controller"), text);
+    report(!usbinfo::of(QStringLiteral("/dev/sdq"), sys, ids).known, QStringLiteral("USB: a drive that isn't on USB has nothing to say"));
+    // This PC's own.
+    for (const QString &name : QDir(QStringLiteral("/sys/block")).entryList({QStringLiteral("sd*")}, QDir::AllEntries | QDir::System)) {
+        const usbinfo::Info real = usbinfo::of(QStringLiteral("/dev/") + name);
+        if (real.known)
+            report(real.speedMbps > 0 && !real.port.isEmpty(), QStringLiteral("USB: this PC's %1").arg(name), usbinfo::describe(real));
+    }
+}
+
 void healthTests()
 {
     hiddenArea();
@@ -714,6 +759,7 @@ void healthTests()
     linuxBootRepair();
     windowsRecovery();
     testBoot();
+    usbConnection();
     rawPages();
     QTemporaryDir config;
     qputenv("XDG_CONFIG_HOME", QFile::encodeName(config.path()));

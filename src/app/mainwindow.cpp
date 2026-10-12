@@ -57,6 +57,7 @@
 #include "tryrepairdialog.h"
 #include "winredialog.h"
 #include "updates.h"
+#include "usbinfo.h"
 #include "udisks.h"
 
 #include <QAction>
@@ -1906,6 +1907,8 @@ void MainWindow::showProperties()
             add(tr("System disk"), tr("%1. This app won't modify it.").arg(d->systemReason));
         if (!d->nvmeNamespace && !d->isLoop)
             add(tr("Sector size"), tr("%1 bytes").arg(d->sectorSize));
+        if (d->bus == QLatin1String("usb"))
+            add(tr("USB connection"), usbinfo::describe(usbinfo::of(d->device)));
         if (d->nvmeNamespace) {
             if (d->nvmeSectorSize > 0) {
                 QStringList others;
