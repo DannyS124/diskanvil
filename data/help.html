@@ -253,8 +253,10 @@ password <code>xxxx</code>. Unlock it with
 <code>sudo hdparm --user-master u --security-unlock xxxx /dev/sdX</code>, then
 <code>sudo hdparm --user-master u --security-disable xxxx /dev/sdX</code> (use your drive's name), and run the
 erase again.</p>
-<p><b>Using the Flatpak?</b> Disk Usage only sees your home folder, /run/media and /mnt, and add-ons need one
-extra permission: <code>flatpak override --user --talk-name=org.freedesktop.Flatpak io.github.DannyS124.DiskAnvil</code>.
+<p><b>Using the Flatpak?</b> Disk Usage only sees your home folder, /run/media and /mnt. Add-ons, and the tools that run
+your system's own programs (Seagate FARM through smartctl, Open RAID, NAS and Dynamic Disks, Boot Menu Entries, Put
+DiskAnvil Live on This PC, the Windows Product Key from the firmware, Btrfs undelete), need one extra permission: <code>flatpak override --user --talk-name=org.freedesktop.Flatpak io.github.DannyS124.DiskAnvil</code>.
+Try Starting It can't work there: QEMU runs outside the Flatpak and a drive can't be handed to it.
 The Arch package doesn't have these limits.</p>
 <p>Still stuck? Open an issue at
 <a href="https://github.com/DannyS124/diskanvil/issues">github.com/DannyS124/diskanvil/issues</a>

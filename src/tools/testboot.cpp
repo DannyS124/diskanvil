@@ -3,6 +3,8 @@
 
 #include "testboot.h"
 
+#include "hostprocess.h"
+
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -120,6 +122,12 @@ QProcess *start(const Options &given, QObject *parent, QString *error)
         o.device = S_ISBLK(st.st_mode);
 #endif
     const QString program = qemu();
+    if (program.isEmpty() && host::inFlatpak()) {
+        *error = QCoreApplication::translate("testboot", "The Flatpak can't do this: QEMU runs outside it, and a drive can't be handed over to "
+                                                         "it from inside. DiskAnvil from your distribution's packages, the AppImage or "
+                                                         "DiskAnvil Live can.");
+        return nullptr;
+    }
     if (program.isEmpty()) {
         *error = QCoreApplication::translate("testboot", "It needs QEMU (qemu-system-x86_64), which isn't on this computer.");
         return nullptr;

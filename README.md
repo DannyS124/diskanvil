@@ -116,7 +116,9 @@ The PKGBUILD checks the release's sha256 and won't build if it doesn't match.
 Every release has an AppImage and a Flatpak on the [Releases page](https://github.com/DannyS124/diskanvil/releases).
 For Debian and Ubuntu, `packaging/deb/build.sh` builds a .deb (it needs podman and builds in a Debian container).
 They're not on Flathub, because a disk manager needs more access than Flathub allows. In the Flatpak, Disk Usage
-only sees your home folder and mounted drives, and add-ons need one extra permission (see Help → Problems).
+only sees your home folder and mounted drives; add-ons and the tools that run your system's own programs (smartctl,
+mdadm, efibootmgr...) need one extra permission (see Help → Problems); and Try Starting It can't work, because QEMU
+runs outside the Flatpak and a drive can't be handed to it.
 
 ### Extra packages for some features
 DiskAnvil never installs anything by itself. If a feature needs something, it tells you which package. These are
