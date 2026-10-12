@@ -17,6 +17,7 @@
 #include "../src/drives/blockio.h"
 #include "../src/usb/imagesource.h"
 #include "../src/lostfiles/viewer.h"
+#include "../src/lostfiles/hexview.h"
 #include "../src/lostfiles/lostfilesdialog.h"
 #include "../src/lostfiles/filetypes.h"
 #include "../src/common/jobui.h"
@@ -2389,11 +2390,53 @@ void viewerWindow()
     show("beep.wav");
     report(window.shownKind() == viewer::Kind::Song, QStringLiteral("viewer: a song gets the player"));
     show("broken.jpg");
-    report(window.shownKind() == viewer::Kind::Bytes && window.problem().contains(QLatin1String("can't be shown"))
-               && visibleText().startsWith(QLatin1String("00000000")),
-           QStringLiteral("viewer: a damaged picture shows its bytes, and says why"), window.problem().left(80));
+    auto *parts = window.findChild<QTreeWidget *>(QStringLiteral("parts"));
+    waitUntil([&] { return parts && parts->topLevelItemCount() > 0; }, 10000);
+    QStringList partNames;
+    bool damaged = false;
+    for (int i = 0; parts && i < parts->topLevelItemCount(); ++i) {
+        partNames << parts->topLevelItem(i)->text(0);
+        damaged = damaged || parts->topLevelItem(i)->toolTip(0).contains(QLatin1String("damaged from here on"));
+    }
+    report(window.shownKind() == viewer::Kind::Bytes && window.problem().contains(QLatin1String("can't be shown")) && window.insideView()->isVisible()
+               && partNames.value(0) == QStringLiteral("SOI · Start of the picture") && damaged,
+           QStringLiteral("viewer: a damaged picture shows what it's made of and where it's damaged, and says why"),
+           window.problem().left(60) + QStringLiteral(" | ") + partNames.join(QStringLiteral(", ")));
     auto *facts = window.findChild<QLabel *>(QStringLiteral("facts"));
     report(facts && facts->text().contains(QLatin1String("yesterday")), QStringLiteral("viewer: what's known about it is beside it"));
+
+    // Changing bytes: typed over in hex, undone, typed again, and handed out to be saved.
+    auto *hex = window.findChild<HexView *>(QStringLiteral("hex"));
+    auto *change = window.findChild<QPushButton *>(QStringLiteral("changeBytes"));
+    QMap<quint64, quint8> handed;
+    QObject::connect(&window, &viewer::Window::saveEdited, &window, [&handed](const QMap<quint64, quint8> &edits) { handed = edits; });
+    change->click();
+    hex->moveTo(4);
+    const auto type = [hex](const QString &keys) {
+        for (const QChar c : keys) {
+            QKeyEvent press(QEvent::KeyPress, 0, Qt::NoModifier, QString(c));
+            QCoreApplication::sendEvent(hex, &press);
+        }
+    };
+    type(QStringLiteral("4142"));
+    const bool typed = hex->edits().size() == 2 && hex->edits().value(4) == 0x41 && hex->edits().value(5) == 0x42;
+    hex->undo();
+    hex->undo();
+    const bool undone = hex->edits().size() == 1;
+    hex->moveTo(5);
+    type(QStringLiteral("7a"));
+    window.findChild<QPushButton *>(QStringLiteral("saveEdited"))->click();
+    report(typed && undone && handed.size() == 2 && handed.value(4) == 0x41 && handed.value(5) == 0x7A,
+           QStringLiteral("viewer: bytes are changed in a copy by typing over them, undone, and handed out to be saved"),
+           QStringLiteral("%1 changes").arg(handed.size()));
+    window.findChild<QAction *>(QStringLiteral("insideAction"))->setChecked(false);
+    report(!window.insideView()->isVisible(), QStringLiteral("viewer: Inside turns off again"));
+    show("photo.png");
+    window.findChild<QAction *>(QStringLiteral("insideAction"))->setChecked(true);
+    waitUntil([&] { return parts->topLevelItemCount() > 0; }, 10000);
+    report(window.insideView()->isVisible() && parts->topLevelItem(1) && parts->topLevelItem(1)->text(0).startsWith(QStringLiteral("IHDR · 600 × 400")),
+           QStringLiteral("viewer: Inside shows any file's parts, a photo's too"),
+           QStringLiteral("%1 %2 %3").arg(window.insideView()->isVisible()).arg(window.insideView()->isVisibleTo(&window)).arg(parts->topLevelItem(1) ? parts->topLevelItem(1)->text(0) : QString()));
 }
 
 // A compressed test file unpacked to `path`; empty when it couldn't be.
@@ -3624,6 +3667,22 @@ void lostFilesThroughWindow()
     waitUntil([&] { return dialog.viewerShown() == first; }, 20000);
     report(dialog.viewerReady() && dialog.viewerShown() == first, QStringLiteral("double-click opens the viewer, a program of its own, and it shows that file"),
            QStringLiteral("shown %1, wanted %2").arg(dialog.viewerShown()).arg(first));
+    // Its changed copy (from Inside, Change Bytes): saved with the changes, never onto the drive searched.
+    viewer::Message changed;
+    changed.type = viewer::Message::Edited;
+    changed.edits = {{2, 0x00}, {3, 0x7F}};
+    boxes.clear();
+    dialog.setChangedCopyTarget(onDisk.filePath(QStringLiteral("changed.bin")));
+    dialog.hearFromViewer(viewer::encode(changed));
+    const bool refused = boxes.size() == 1 && boxes[0].contains(QLatin1String("drive being searched")) && !QFileInfo::exists(onDisk.filePath(QStringLiteral("changed.bin")));
+    QTemporaryDir elsewhere;
+    dialog.setChangedCopyTarget(elsewhere.filePath(QStringLiteral("changed.bin")));
+    dialog.hearFromViewer(viewer::encode(changed));
+    QFile changedFile(elsewhere.filePath(QStringLiteral("changed.bin")));
+    const QByteArray changedBytes = changedFile.open(QIODevice::ReadOnly) ? changedFile.readAll() : QByteArray();
+    report(refused && changedBytes.size() > 4 && changedBytes[2] == '\0' && changedBytes[3] == '\x7F',
+           QStringLiteral("the viewer's changed copy is saved with its changes, and never onto the drive searched"),
+           boxes.join(QStringLiteral(" | ")).left(100));
     // Closing with files found asks first, and No keeps them.
     boxes.clear();
     answerer.answer = [&](QWidget *modal) {

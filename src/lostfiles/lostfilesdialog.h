@@ -201,6 +201,8 @@ private:
     void stopViewer();
     void sendToViewer(const QByteArray &message);
     void viewerSaid(const QByteArray &said);
+    // The viewer's changed copy of a file, saved where it's asked to be (never on the drive searched).
+    void saveChangedCopy(int index, const QMap<quint64, quint8> &changes);
     // The next or previous file in the list that has something to show, -1 when there's none.
     int neighbour(int index, int step) const;
     // The times the file system kept, as "label", "value" rows.
@@ -210,6 +212,10 @@ private:
 public:
     // For the tests: whether the viewer is running and has said it's ready, and what it shows.
     bool viewerReady() const { return m_viewerReady; }
+    // For the tests: where the changed copy goes, instead of asking; and a message as if the
+    // viewer had sent it.
+    void setChangedCopyTarget(const QString &path) { m_changedCopyTarget = path; }
+    void hearFromViewer(const QByteArray &said) { viewerSaid(said); }
     int viewerIndex() const { return m_viewerIndex; }
     int viewerShown() const { return m_viewerShown; } // the file it said it has on the screen, -1 for none
 
@@ -276,6 +282,7 @@ private:
     int m_viewerShown = -1;
     QHash<int, QStringList> m_facts; // what each file said about itself, once its preview did
     bool m_warnedDrop = false;
+    QString m_changedCopyTarget;
     QWidget *m_copiesBar = nullptr;
     QLabel *m_copiesText = nullptr;
     QPushButton *m_copiesLook = nullptr;

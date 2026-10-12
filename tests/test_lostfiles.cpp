@@ -19,6 +19,7 @@
 #include "../src/lostfiles/officetext.h"
 #include "../src/lostfiles/ole.h"
 #include "../src/lostfiles/pictures.h"
+#include "../src/lostfiles/structure.h"
 #include "../src/lostfiles/textkinds.h"
 #include "../src/lostfiles/preview.h"
 #include "../src/lostfiles/previewloader.h"
@@ -1912,6 +1913,18 @@ void lookCopies()
                QStringLiteral("look copies: the file's own bytes, under its own name"), path + why);
         report(again == path && !(QFileInfo(path).permissions() & QFileDevice::WriteOwner),
                QStringLiteral("look copies: made once, and read-only"));
+        // The viewer's changed copy: the copy with the changed bytes put in, the copy itself untouched.
+        QTemporaryDir out;
+        const QString changed = out.filePath(QStringLiteral("Beach day (changed).jpg"));
+        const QMap<quint64, quint8> changes = {{0, 0x00}, {200000, 'Q'}, {quint64(photo.size()) - 1, 'Z'}, {quint64(photo.size()) + 50, 'X'}};
+        QFile written(changed), original(path);
+        QByteArray expected = photo;
+        expected[0] = '\0';
+        expected[200000] = 'Q';
+        expected[expected.size() - 1] = 'Z';
+        report(lost::LookCopies::saveChanged(path, changes, changed, &why) && written.open(QIODevice::ReadOnly) && written.readAll() == expected
+                   && original.open(QIODevice::ReadOnly) && original.readAll() == photo,
+               QStringLiteral("look copies: a changed copy is saved with the changes in it, past its end left out"), why);
         lost::Found gone = f;
         gone.nameOnly = true;
         report(copies.make(source, gone, 8, &why).isEmpty() && why.contains(QLatin1String("Only its name")),
@@ -1962,6 +1975,17 @@ void viewerMessages()
                && got[0].show.next && !got[0].show.previous && got[0].show.openable && got[0].show.kind == viewer::Kind::Pdf
                && got[1].ask == viewer::Ask::Next,
            QStringLiteral("viewer: its messages come out as they went in, even a byte at a time"));
+    viewer::Message edited;
+    edited.type = viewer::Message::Edited;
+    edited.edits = {{4, 0x41}, {123456789012ull, 0x00}, {7, 0xFF}};
+    QByteArray editedBytes = viewer::encode(edited);
+    viewer::Message editedBack;
+    bool editedBad = false;
+    report(viewer::decode(editedBytes, editedBack, &editedBad) && !editedBad && editedBack.type == viewer::Message::Edited && editedBack.edits == edited.edits,
+           QStringLiteral("viewer: changed bytes go back as they were changed"));
+    QByteArray lying = viewer::encode(edited);
+    lying.replace(12, 4, QByteArray("\xFF\xFF\xFF\xFF", 4)); // a made-up count
+    report(!viewer::decode(lying, editedBack, &editedBad) || editedBack.edits.size() <= 3, QStringLiteral("viewer: a made-up count of changes asks for nothing"));
     const char junkBytes[] = "\x00\x00\x00\x01 not a message at all";
     QByteArray junk(junkBytes, sizeof(junkBytes) - 1);
     viewer::Message out;
@@ -2342,6 +2366,115 @@ void namesFromContents()
     report(true, QStringLiteral("names: %1 damaged files named without a crash").arg(runs));
 }
 
+// What a file is made of, part by part, and where it's damaged.
+void fileStructure()
+{
+    const auto type = [](const char *id) { return filetypes::typeForName(QStringLiteral("x.") + QString::fromLatin1(id)); };
+    const auto names = [](const QVector<structure::Part> &parts) {
+        QStringList out;
+        for (const structure::Part &p : parts)
+            out << QString(p.depth, QLatin1Char('>')) + p.name;
+        return out.join(QLatin1Char(' '));
+    };
+    const auto problems = [](const QVector<structure::Part> &parts) {
+        QStringList out;
+        for (const structure::Part &p : parts) {
+            if (!p.problem.isEmpty())
+                out << p.name;
+        }
+        return out;
+    };
+    const QByteArray jpg = picture("JPG");
+    const QVector<structure::Part> jpgParts = structure::parts(type("jpg"), jpg);
+    QString size;
+    for (const structure::Part &p : jpgParts)
+        size += p.name == QLatin1String("SOF0") ? p.detail : QString();
+    report(names(jpgParts).startsWith(QLatin1String("SOI ")) && names(jpgParts).contains(QLatin1String("SOS >Picture data EOI"))
+               && size.startsWith(QStringLiteral("320 × 200")) && problems(jpgParts).isEmpty(),
+           QStringLiteral("structure: a JPEG's markers, its size and its picture data"), names(jpgParts) + QStringLiteral(" | ") + size + QStringLiteral(" | ")
+               + problems(jpgParts).join(QLatin1Char(' ')));
+    report(problems(structure::parts(type("jpg"), jpg.left(jpg.size() - 300))) == QStringList{QStringLiteral("Picture data"), QStringLiteral("EOI")},
+           QStringLiteral("structure: a JPEG cut short says so"), problems(structure::parts(type("jpg"), jpg.left(jpg.size() - 300))).join(QLatin1Char(' ')));
+    QByteArray png = picture("PNG");
+    report(problems(structure::parts(type("png"), png)).isEmpty() && names(structure::parts(type("png"), png)).startsWith(QLatin1String("Signature IHDR")),
+           QStringLiteral("structure: a PNG's chunks, each checksum right"));
+    png[png.indexOf("IDAT") + 40] = char(png[png.indexOf("IDAT") + 40] ^ 0x55);
+    report(problems(structure::parts(type("png"), png)) == QStringList{QStringLiteral("IDAT")}, QStringLiteral("structure: a damaged PNG chunk is pointed at"));
+    report(names(structure::parts(type("gif"), gif())).endsWith(QLatin1String("Picture 1 End"))
+               && names(structure::parts(type("bmp"), picture("BMP"))).startsWith(QLatin1String("File header Picture header")),
+           QStringLiteral("structure: GIF and BMP"), names(structure::parts(type("gif"), gif())));
+    const QString mkv = names(structure::parts(type("mkv"), typesFile(QStringLiteral("trip.mkv"))));
+    report(mkv.startsWith(QLatin1String("EBML header Segment >SeekHead")) && mkv.contains(QLatin1String(">Info >Tracks >>TrackEntry"))
+               && mkv.contains(QLatin1String(">Cluster")),
+           QStringLiteral("structure: a Matroska film's elements"), mkv.left(120));
+    const QString flacParts = names(structure::parts(type("flac"), typesFile(QStringLiteral("song.flac"))));
+    report(flacParts.startsWith(QLatin1String("fLaC STREAMINFO")) && flacParts.contains(QLatin1String("PICTURE")) && flacParts.endsWith(QLatin1String("Sound")),
+           QStringLiteral("structure: a FLAC's blocks"), flacParts);
+    const QString wmvParts = names(structure::parts(type("wmv"), typesFile(QStringLiteral("trip.wmv"))));
+    report(wmvParts.startsWith(QLatin1String("Header >File properties")) && wmvParts.contains(QLatin1String(" Data")), QStringLiteral("structure: a WMV's objects"),
+           wmvParts);
+    QByteArray office = zip({{"[Content_Types].xml", "<Types/>"}, {"word/document.xml", QByteArray(3000, 'w')}});
+    report(names(structure::parts(type("docx"), office)) == QLatin1String("[Content_Types].xml word/document.xml Directory End of the directory")
+               && problems(structure::parts(type("docx"), office)).isEmpty(),
+           QStringLiteral("structure: a ZIP's entries, each checked against its checksum"), names(structure::parts(type("docx"), office)));
+    office[office.indexOf("wwww") + 100] = 'x';
+    report(problems(structure::parts(type("docx"), office)) == QStringList{QStringLiteral("word/document.xml")}, QStringLiteral("structure: a damaged entry is pointed at"));
+    const QByteArray zipped = zip({{"a.txt", QByteArray(5000, 'a')}}, true);
+    report(problems(structure::parts(type("zip"), zipped)).isEmpty(), QStringLiteral("structure: a packed entry unpacks and checks out"));
+    const QByteArray pdfFile = pdf();
+    const QString pdfParts = names(structure::parts(type("pdf"), pdfFile));
+    report(pdfParts.startsWith(QLatin1String("Header Object 1 0")) && pdfParts.contains(QLatin1String("Trailer startxref")) && problems(structure::parts(type("pdf"), pdfFile)).isEmpty(),
+           QStringLiteral("structure: a PDF's objects, its table and trailer"), pdfParts);
+    report(problems(structure::parts(type("pdf"), QByteArray("%PDF-1.4\n%moved\n") + pdfFile.mid(9))) == QStringList{QStringLiteral("startxref")},
+           QStringLiteral("structure: a PDF whose table points to the wrong place says so"));
+    const QString tif = names(structure::parts(type("tif"), typesFile(QStringLiteral("picture.tif"))));
+    report(tif.startsWith(QLatin1String("Header Folder 1 >Picture data")), QStringLiteral("structure: a TIFF's folders and picture data"), tif);
+    const QString docParts = names(structure::parts(type("doc"), typesFile(QStringLiteral("notes.doc"))));
+    report(docParts.startsWith(QLatin1String("Header")) && docParts.contains(QLatin1String("WordDocument")) && docParts.contains(QLatin1String("1Table")),
+           QStringLiteral("structure: a Word 97 file's streams"), docParts);
+    QByteArray gz = typesFile(QStringLiteral("pictures.tar.gz"));
+    report(problems(structure::parts(type("gz"), gz)).isEmpty(), QStringLiteral("structure: a gzip part checks out"));
+    gz[gz.size() - 6] = char(gz[gz.size() - 6] ^ 1);
+    report(problems(structure::parts(type("gz"), gz)).size() == 1, QStringLiteral("structure: a damaged gzip part is pointed at"));
+    report(problems(structure::parts(type("rar"), rar5())).isEmpty() && problems(structure::parts(type("rar"), rar4())).isEmpty()
+               && names(structure::parts(type("rar"), rar5())).endsWith(QLatin1String("End")),
+           QStringLiteral("structure: RAR blocks, their checksums right"), names(structure::parts(type("rar"), rar5())));
+    report(names(structure::parts(type("psd"), psd(true))).startsWith(QLatin1String("Header Colours Resources Layers Picture data")),
+           QStringLiteral("structure: a Photoshop file's sections"));
+    const QString mp4Parts = names(structure::parts(type("mp4"), mp4()));
+    report(mp4Parts.startsWith(QLatin1String("ftyp")) && mp4Parts.contains(QLatin1String("moov >mvhd")) && mp4Parts.contains(QLatin1String("mdat")),
+           QStringLiteral("structure: an MP4's boxes"), mp4Parts);
+    QByteArray noIndex = mp4();
+    const qsizetype moov = noIndex.indexOf("moov") - 4;
+    noIndex.remove(moov, qFromBigEndian<quint32>(noIndex.constData() + moov));
+    report(problems(structure::parts(type("mp4"), noIndex)) == QStringList{QStringLiteral("moov")}, QStringLiteral("structure: an MP4 without its index says so"));
+    report(problems(structure::parts(type("ogg"), ogg())).isEmpty() && problems(structure::parts(type("7z"), sevenZip())).isEmpty(),
+           QStringLiteral("structure: Ogg pages and 7z headers check out"));
+    // Damaged ones never crash it.
+    QRandomGenerator rng(4242);
+    const QVector<QPair<const char *, QByteArray>> kinds = {
+        {"jpg", picture("JPG")}, {"png", picture("PNG")}, {"gif", gif()}, {"bmp", picture("BMP")}, {"mkv", typesFile(QStringLiteral("trip.mkv"))},
+        {"flac", typesFile(QStringLiteral("song.flac"))}, {"wmv", typesFile(QStringLiteral("trip.wmv"))}, {"docx", zip({{"a.xml", QByteArray(3000, 'a')}}, true)},
+        {"pdf", pdf()}, {"tif", typesFile(QStringLiteral("picture.tif"))}, {"doc", typesFile(QStringLiteral("notes.doc"))}, {"gz", typesFile(QStringLiteral("pictures.tar.gz"))},
+        {"rar", rar5()}, {"rar", rar4()}, {"psd", psd(true)}, {"mp4", mp4()}, {"ogg", ogg()}, {"7z", sevenZip()}, {"sqlite", sqlite()}, {"mp3", mp3()}, {"wav", wav()}};
+    int runs = 0;
+    for (const auto &[id, good] : kinds) {
+        if (good.isEmpty()) {
+            report(false, QStringLiteral("structure: a %1 to damage").arg(QString::fromLatin1(id)));
+            continue;
+        }
+        for (int round = 0; round < 150; ++round, ++runs) {
+            QByteArray bad = good;
+            for (int k = 0, n = 1 + int(rng.bounded(16)); k < n; ++k)
+                bad[int(rng.bounded(quint32(bad.size())))] = char(rng.bounded(256));
+            if (round % 3 == 0)
+                bad.truncate(qsizetype(rng.bounded(quint32(bad.size()))) + 1);
+            structure::parts(type(id), bad);
+        }
+    }
+    report(true, QStringLiteral("structure: %1 damaged files taken apart without a crash").arg(runs));
+}
+
 void lostFilesTests()
 {
     previewQueue();
@@ -2363,4 +2496,5 @@ void lostFilesTests()
     mediaAndOffice();
     newKinds();
     namesFromContents();
+    fileStructure();
 }

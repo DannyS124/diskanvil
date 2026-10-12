@@ -11,6 +11,7 @@
 #include "lostscan.h"
 
 #include <QHash>
+#include <QMap>
 #include <QString>
 #include <QStringList>
 
@@ -53,6 +54,9 @@ public:
     // Whether a copy carries macros: an Office 97-2003 file (.doc, .xls, .ppt) with VBA in it or
     // Excel 4.0 macro sheets. Those aren't opened in their own program either.
     static bool hasMacros(const QString &copy);
+    // Writes `copy` to `to` with the bytes in `changes` (where → what) put in: the viewer's
+    // changed copy of a found file. False, with why, when it can't.
+    static bool saveChanged(const QString &copy, const QMap<quint64, quint8> &changes, const QString &to, QString *why);
 
 private:
     QString m_disk;

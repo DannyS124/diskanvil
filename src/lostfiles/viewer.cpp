@@ -12,6 +12,8 @@
 #include "pictures.h"
 #include "preview.h"
 #include "textkinds.h"
+#include "hexview.h"
+#include "structure.h"
 
 #include <QAbstractScrollArea>
 #include <QApplication>
@@ -21,6 +23,10 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QHBoxLayout>
+#include <QHeaderView>
+#include <QPointer>
+#include <QPushButton>
+#include <QTreeWidget>
 #include <QImageReader>
 #include <QKeyEvent>
 #include <QLabel>
@@ -135,6 +141,11 @@ QByteArray encode(const Message &m)
     case Message::Facts:
         preview::writeStrings(s, m.show.facts);
         break;
+    case Message::Edited:
+        s << quint32(m.edits.size());
+        for (auto it = m.edits.cbegin(); it != m.edits.cend(); ++it)
+            s << it.key() << it.value();
+        break;
     }
     QByteArray out;
     QDataStream header(&out, QIODevice::WriteOnly);
@@ -150,7 +161,7 @@ bool decode(QByteArray &buffer, Message &m, bool *bad)
     QDataStream header(buffer);
     quint32 magic = 0, type = 0, length = 0;
     header >> magic >> type >> length;
-    if (magic != kMagic || length > kMostMessage || type < Message::Look || type > Message::Facts) {
+    if (magic != kMagic || length > kMostMessage || type < Message::Look || type > Message::Edited) {
         *bad = true;
         return false;
     }
@@ -181,6 +192,18 @@ bool decode(QByteArray &buffer, Message &m, bool *bad)
     case Message::Facts:
         preview::readStrings(s, m.show.facts);
         break;
+    case Message::Edited: {
+        quint32 count = 0;
+        s >> count;
+        // Nine bytes each: a made-up count can't ask for more than the message holds.
+        for (quint32 i = 0; i < count && i < length / 9 && s.status() == QDataStream::Ok; ++i) {
+            quint64 at = 0;
+            quint8 value = 0;
+            s >> at >> value;
+            m.edits.insert(at, value);
+        }
+        break;
+    }
     }
     buffer.remove(0, 12 + length);
     if (s.status() != QDataStream::Ok) {
@@ -716,6 +739,154 @@ private:
     QLabel *m_message;
 };
 
+// --- Inside: what the file is made of, part by part, next to its bytes, which can be changed in
+// a copy (the file shown is never written; Find Lost Files saves the changed copy).
+
+class InsideView : public QWidget
+{
+    Q_OBJECT
+public:
+    explicit InsideView(QWidget *parent = nullptr)
+        : QWidget(parent)
+        , m_parts(new QTreeWidget)
+        , m_hex(new HexView)
+        , m_edit(new QPushButton(viewer::tr("Change Bytes")))
+        , m_undo(new QPushButton(viewer::tr("Undo")))
+        , m_saveEdited(new QPushButton(viewer::tr("Save the Changed Copy…")))
+        , m_changed(new QLabel)
+        , m_note(new QLabel)
+    {
+        setObjectName(QStringLiteral("inside"));
+        m_parts->setObjectName(QStringLiteral("parts"));
+        m_parts->setHeaderLabels({viewer::tr("Part"), viewer::tr("Where"), viewer::tr("Size")});
+        m_parts->setRootIsDecorated(true);
+        m_parts->setUniformRowHeights(true);
+        m_parts->header()->setStretchLastSection(false);
+        m_parts->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+        m_hex->setObjectName(QStringLiteral("hex"));
+        m_edit->setCheckable(true);
+        m_edit->setObjectName(QStringLiteral("changeBytes"));
+        m_edit->setToolTip(viewer::tr("Type over the bytes, in hex or as text (Tab goes between them). Only a copy is changed."));
+        m_saveEdited->setObjectName(QStringLiteral("saveEdited"));
+        m_undo->setEnabled(false);
+        m_saveEdited->setEnabled(false);
+        m_note->setWordWrap(true);
+        m_note->setObjectName(QStringLiteral("insideNote"));
+        auto *buttons = new QHBoxLayout;
+        buttons->addWidget(m_note, 1);
+        buttons->addWidget(m_changed);
+        buttons->addWidget(m_edit);
+        buttons->addWidget(m_undo);
+        buttons->addWidget(m_saveEdited);
+        auto *split = new QSplitter;
+        split->addWidget(m_parts);
+        split->addWidget(m_hex);
+        split->setStretchFactor(0, 2);
+        split->setStretchFactor(1, 3);
+        split->setChildrenCollapsible(false);
+        auto *layout = new QVBoxLayout(this);
+        layout->setContentsMargins(0, 0, 0, 0);
+        layout->addLayout(buttons);
+        layout->addWidget(split, 1);
+        connect(m_parts, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem *item) {
+            if (item)
+                m_hex->mark(item->data(0, Qt::UserRole).toULongLong(), item->data(0, Qt::UserRole + 1).toULongLong());
+        });
+        connect(m_edit, &QPushButton::toggled, m_hex, &HexView::setEditing);
+        connect(m_undo, &QPushButton::clicked, m_hex, &HexView::undo);
+        connect(m_hex, &HexView::editsChanged, this, [this](int count) {
+            m_changed->setText(count ? QCoreApplication::translate("viewer", "%n byte(s) changed", nullptr, count) : QString());
+            m_undo->setEnabled(count > 0);
+            m_saveEdited->setEnabled(count > 0);
+        });
+        connect(m_saveEdited, &QPushButton::clicked, this, [this] { Q_EMIT saveEdited(); });
+    }
+
+    void load(const QString &path, int type)
+    {
+        ++m_generation;
+        m_parts->clear();
+        m_edit->setChecked(false);
+        QString why;
+        if (!m_hex->open(path, &why)) {
+            m_note->setText(viewer::tr("Its bytes can't be read: %1").arg(why));
+            return;
+        }
+        m_note->setText(viewer::tr("Taking it apart…"));
+        // Taken apart on a thread of its own (a big file takes a moment), from a mapping of its own.
+        const int generation = m_generation;
+        QPointer<InsideView> self(this);
+        QThread *worker = QThread::create([self, path, type, generation] {
+            QFile file(path);
+            QVector<structure::Part> parts;
+            if (file.open(QIODevice::ReadOnly)) {
+                const uchar *data = file.size() ? file.map(0, file.size()) : nullptr;
+                QByteArray memory;
+                if (!data && file.size()) {
+                    memory = file.read(256 * 1024 * 1024);
+                    data = reinterpret_cast<const uchar *>(memory.constData());
+                }
+                parts = structure::parts(type, data, memory.isEmpty() ? quint64(file.size()) : quint64(memory.size()));
+            }
+            QMetaObject::invokeMethod(qApp, [self, parts, generation] {
+                if (self && self->m_generation == generation)
+                    self->showParts(parts);
+            }, Qt::QueuedConnection);
+        });
+        connect(worker, &QThread::finished, worker, &QObject::deleteLater);
+        worker->start();
+    }
+
+    QMap<quint64, quint8> edits() const { return m_hex->edits(); }
+    int partCount() const { return m_parts->topLevelItemCount(); }
+    HexView *hex() const { return m_hex; }
+
+Q_SIGNALS:
+    void saveEdited();
+
+private:
+    void showParts(const QVector<structure::Part> &parts)
+    {
+        m_parts->clear();
+        QVector<QTreeWidgetItem *> parents;
+        int damaged = 0;
+        const QColor bad(0xff, 0x33, 0x55);
+        for (const structure::Part &p : parts) {
+            const QStringList columns = {p.name, QString::number(p.at), formatSize(p.size)};
+            QTreeWidgetItem *item = p.depth > 0 && p.depth <= parents.size() ? new QTreeWidgetItem(parents[p.depth - 1], columns)
+                                                                                : new QTreeWidgetItem(m_parts, columns);
+            parents.resize(p.depth);
+            parents << item;
+            item->setData(0, Qt::UserRole, p.at);
+            item->setData(0, Qt::UserRole + 1, p.size);
+            QString tip = p.detail;
+            if (!p.problem.isEmpty()) {
+                ++damaged;
+                tip += (tip.isEmpty() ? QString() : QStringLiteral("\n")) + p.problem;
+                for (int c = 0; c < 3; ++c)
+                    item->setForeground(c, bad);
+                item->setIcon(0, QIcon::fromTheme(QStringLiteral("dialog-warning")));
+            }
+            item->setToolTip(0, tip);
+            if (!p.detail.isEmpty())
+                item->setText(0, p.name + QStringLiteral(" · ") + p.detail);
+        }
+        m_parts->expandToDepth(1);
+        m_parts->resizeColumnToContents(1);
+        m_parts->resizeColumnToContents(2);
+        m_note->setText(damaged == 0 ? viewer::tr("Every part of it checks out.")
+                                     : QCoreApplication::translate("viewer", "%n part(s) damaged, in red: pick one to see where it is.", nullptr, damaged));
+        if (parts.size() >= structure::kMostParts)
+            m_note->setText(m_note->text() + QLatin1Char(' ') + viewer::tr("(Only its first %1 parts are listed.)").arg(structure::kMostParts));
+    }
+
+    QTreeWidget *m_parts;
+    HexView *m_hex;
+    QPushButton *m_edit, *m_undo, *m_saveEdited;
+    QLabel *m_changed, *m_note;
+    int m_generation = 0;
+};
+
 // --- The window
 
 Window::Window(QWidget *parent)
@@ -726,6 +897,7 @@ Window::Window(QWidget *parent)
     , m_media(new MediaView)
     , m_words(new QPlainTextEdit)
     , m_bytes(new QPlainTextEdit)
+    , m_inside(new InsideView)
     , m_problem(new QLabel)
     , m_title(new QLabel)
     , m_facts(new QLabel)
@@ -757,6 +929,10 @@ Window::Window(QWidget *parent)
     m_details = bar->addAction(icon("documentinfo"), tr("Details"));
     m_details->setCheckable(true);
     m_details->setChecked(true);
+    m_insideAction = bar->addAction(icon("view-list-tree"), tr("Inside"));
+    m_insideAction->setCheckable(true);
+    m_insideAction->setObjectName(QStringLiteral("insideAction"));
+    m_insideAction->setToolTip(tr("What the file is made of, part by part, and its bytes (damage shows in red)"));
     m_open = bar->addAction(icon("document-open"), tr("Open in Its Own Program"));
     m_save = bar->addAction(icon("document-save"), tr("Save…"));
 
@@ -769,7 +945,7 @@ Window::Window(QWidget *parent)
     }
     m_bytes->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
     for (QWidget *page : {static_cast<QWidget *>(m_picture), static_cast<QWidget *>(m_pdf), static_cast<QWidget *>(m_media),
-                          static_cast<QWidget *>(m_words), static_cast<QWidget *>(m_bytes)})
+                          static_cast<QWidget *>(m_words), static_cast<QWidget *>(m_bytes), static_cast<QWidget *>(m_inside)})
         m_pages->addWidget(page);
 
     m_facts->setWordWrap(true);
@@ -799,6 +975,17 @@ Window::Window(QWidget *parent)
     connect(m_open, &QAction::triggered, this, [this] { Q_EMIT asked(Ask::Open); });
     connect(m_save, &QAction::triggered, this, [this] { Q_EMIT asked(Ask::Save); });
     connect(m_details, &QAction::toggled, m_side, &QWidget::setVisible);
+    connect(m_insideAction, &QAction::toggled, this, [this](bool on) {
+        if (on) {
+            m_inside->load(m_shown.path, m_shown.type);
+            m_pages->setCurrentWidget(m_inside);
+        } else {
+            m_pages->setCurrentWidget(m_normalPage ? m_normalPage : m_bytes);
+        }
+        for (QAction *a : {m_zoomOut, m_fit, m_actual, m_zoomIn})
+            a->setVisible(!on && (m_shown.kind == Kind::Picture || m_shown.kind == Kind::Pdf));
+    });
+    connect(m_inside, &InsideView::saveEdited, this, [this] { Q_EMIT saveEdited(m_inside->edits()); });
     connect(m_zoomIn, &QAction::triggered, this, [this] { m_shown.kind == Kind::Pdf ? m_pdf->zoomBy(1.25) : m_picture->zoomBy(1.25); });
     connect(m_zoomOut, &QAction::triggered, this, [this] { m_shown.kind == Kind::Pdf ? m_pdf->zoomBy(0.8) : m_picture->zoomBy(0.8); });
     connect(m_fit, &QAction::triggered, this, [this] { m_shown.kind == Kind::Pdf ? m_pdf->fit() : m_picture->fit(); });
@@ -898,9 +1085,23 @@ void Window::present(const Show &show)
                   : kind == Kind::Film || kind == Kind::Song ? static_cast<QWidget *>(m_media)
                   : kind == Kind::Words   ? static_cast<QWidget *>(m_words)
                                           : static_cast<QWidget *>(m_bytes);
+    m_normalPage = page;
+    {
+        const QSignalBlocker quiet(m_insideAction);
+        m_insideAction->setChecked(kind == Kind::Bytes);
+    }
+    if (kind == Kind::Bytes) { // nothing else to show: what's inside it
+        m_inside->load(show.path, show.type);
+        page = m_inside;
+    }
     m_pages->setCurrentWidget(page);
     for (QAction *a : {m_zoomOut, m_fit, m_actual, m_zoomIn})
         a->setVisible(kind == Kind::Picture || kind == Kind::Pdf);
+}
+
+QWidget *Window::insideView() const
+{
+    return m_inside;
 }
 
 void Window::setFacts(const QStringList &facts)
@@ -1100,6 +1301,13 @@ int run()
         Message m;
         m.type = Message::AskFor;
         m.ask = ask;
+        out.write(encode(m));
+        out.flush();
+    });
+    QObject::connect(&window, &Window::saveEdited, &window, [&out](const QMap<quint64, quint8> &edits) {
+        Message m;
+        m.type = Message::Edited;
+        m.edits = edits;
         out.write(encode(m));
         out.flush();
     });

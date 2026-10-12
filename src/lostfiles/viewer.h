@@ -10,6 +10,7 @@
 // or for this one to be saved or opened in its own program.
 
 #include <QMainWindow>
+#include <QMap>
 #include <QPalette>
 #include <QStringList>
 
@@ -43,11 +44,13 @@ enum class Ask : qint32 { Ready = 0, Previous, Next, Save, Open, Shown };
 
 // The messages between them, each a small header and then its body.
 struct Message {
-    enum Type : quint32 { Look = 1, ShowFile = 2, AskFor = 3, Facts = 4 } type = ShowFile;
+    // Edited: the viewer's changes to the bytes of the one shown, to save as a copy.
+    enum Type : quint32 { Look = 1, ShowFile = 2, AskFor = 3, Facts = 4, Edited = 5 } type = ShowFile;
     QString style;    // Look: the widget style's name
     QPalette palette; // and the colours
     Show show;        // ShowFile; Facts: just show.facts, for the one shown
     Ask ask = Ask::Ready; // AskFor
+    QMap<quint64, quint8> edits; // Edited: where, and what the byte there is now
 };
 QByteArray encode(const Message &message);
 // One message off the front of `buffer` when a whole one is there (removed from it). False
@@ -65,6 +68,7 @@ QStringList command(bool sandbox, const QStringList &readable);
 class PictureView;
 class PdfView;
 class MediaView;
+class InsideView;
 
 class Window : public QMainWindow
 {
@@ -77,9 +81,11 @@ public:
     // What's shown now (the tests look).
     Kind shownKind() const { return m_shown.kind; }
     QString problem() const; // why it can't be shown, when it can't
+    QWidget *insideView() const; // the parts and the bytes (the tests look)
 
 Q_SIGNALS:
     void asked(viewer::Ask ask);
+    void saveEdited(const QMap<quint64, quint8> &edits);
 
 protected:
     void keyPressEvent(QKeyEvent *event) override;
@@ -94,11 +100,14 @@ private:
     MediaView *m_media;
     QPlainTextEdit *m_words;
     QPlainTextEdit *m_bytes;
+    InsideView *m_inside;
+    QWidget *m_normalPage = nullptr; // what shows when Inside isn't on
     QLabel *m_problem;
     QLabel *m_title;
     QLabel *m_facts;
     QScrollArea *m_side;
     QAction *m_previous, *m_next, *m_zoomOut, *m_fit, *m_actual, *m_zoomIn, *m_details, *m_open, *m_save;
+    QAction *m_insideAction;
 };
 
 } // namespace viewer

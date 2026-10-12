@@ -75,7 +75,7 @@
 <context>
     <name>LostFilesDialog</name>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1069"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1275"/>
         <source>Windows kept %n earlier version(s) of this drive, the newest from %1. Files that have changed or gone since can come back from them.</source>
         <translation>
             <numerusform>Windows kept %n earlier version of this drive, the newest from %1. Files that have changed or gone since can come back from them.</numerusform>
@@ -83,7 +83,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1112"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1318"/>
         <source>%n file(s) from the earlier versions have changed or gone since: they&apos;re in the &quot;as it was on&quot; folders.</source>
         <translation>
             <numerusform>%n file from the earlier versions have changed or gone since: they're in the "as it was on" folders.</numerusform>
@@ -91,7 +91,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1167"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1373"/>
         <source>Done: nothing deleted was found on %1. %n file(s) that weren&apos;t deleted show when &quot;Only deleted files&quot; is unticked.</source>
         <translation>
             <numerusform>Done: nothing deleted was found on %1. %n file that weren't deleted show when "Only deleted files" is unticked.</numerusform>
@@ -624,11 +624,57 @@
 <context>
     <name>preview</name>
     <message numerus="yes">
-        <location filename="../src/lostfiles/preview.cpp" line="279"/>
+        <location filename="../src/lostfiles/preview.cpp" line="249"/>
         <source>%n page(s)</source>
         <translation>
             <numerusform>%n page</numerusform>
             <numerusform>%n pages</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
+    <name>structure</name>
+    <message numerus="yes">
+        <location filename="../src/lostfiles/structure.cpp" line="86"/>
+        <source>%n byte(s)</source>
+        <translation>
+            <numerusform>%n byte</numerusform>
+            <numerusform>%n bytes</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/lostfiles/structure.cpp" line="454"/>
+        <source>%n entries</source>
+        <translation>
+            <numerusform>%n entries</numerusform>
+            <numerusform>%n entries</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/lostfiles/structure.cpp" line="580"/>
+        <source>in %n piece(s)</source>
+        <translation>
+            <numerusform>in %n piece</numerusform>
+            <numerusform>in %n pieces</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
+    <name>viewer</name>
+    <message numerus="yes">
+        <location filename="../src/lostfiles/viewer.cpp" line="798"/>
+        <source>%n byte(s) changed</source>
+        <translation>
+            <numerusform>%n byte changed</numerusform>
+            <numerusform>%n bytes changed</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/lostfiles/viewer.cpp" line="878"/>
+        <source>%n part(s) damaged, in red: pick one to see where it is.</source>
+        <translation>
+            <numerusform>%n part damaged, in red: pick one to see where it is.</numerusform>
+            <numerusform>%n parts damaged, in red: pick one to see where it is.</numerusform>
         </translation>
     </message>
 </context>

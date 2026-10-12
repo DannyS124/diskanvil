@@ -9,6 +9,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QSaveFile>
 #include <QSet>
 #include <QStandardPaths>
 #include <QStorageInfo>
@@ -179,6 +180,36 @@ bool LookCopies::safeToOpen(const QString &name)
         QStringLiteral("bz2"), QStringLiteral("xz")};
     // The last extension is what decides: "invoice.pdf.exe" is a program.
     return name.contains(QLatin1Char('.')) && safe.contains(name.section(QLatin1Char('.'), -1).toLower());
+}
+
+bool LookCopies::saveChanged(const QString &copy, const QMap<quint64, quint8> &changes, const QString &to, QString *why)
+{
+    QFile in(copy);
+    QSaveFile out(to);
+    if (!in.open(QIODevice::ReadOnly) || !out.open(QIODevice::WriteOnly)) {
+        if (why)
+            *why = in.isOpen() ? out.errorString() : in.errorString();
+        return false;
+    }
+    QByteArray buffer;
+    for (quint64 at = 0;; at += quint64(buffer.size())) {
+        buffer = in.read(1 << 20);
+        if (buffer.isEmpty())
+            break;
+        for (auto it = changes.lowerBound(at); it != changes.cend() && it.key() < at + quint64(buffer.size()); ++it)
+            buffer[qsizetype(it.key() - at)] = char(it.value());
+        if (out.write(buffer) != buffer.size()) {
+            if (why)
+                *why = out.errorString();
+            return false;
+        }
+    }
+    if (in.error() != QFileDevice::NoError || !out.commit()) {
+        if (why)
+            *why = in.error() != QFileDevice::NoError ? in.errorString() : out.errorString();
+        return false;
+    }
+    return true;
 }
 
 bool LookCopies::hasMacros(const QString &copy)

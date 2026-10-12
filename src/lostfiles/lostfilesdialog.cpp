@@ -1891,12 +1891,45 @@ void LostFilesDialog::sendToViewer(const QByteArray &message)
         m_viewerWaiting << message;
 }
 
+void LostFilesDialog::saveChangedCopy(int index, const QMap<quint64, quint8> &changes)
+{
+    const QString copy = m_looks && index >= 0 ? m_looks->made(index) : QString();
+    if (copy.isEmpty() || changes.isEmpty())
+        return;
+    raise();
+    activateWindow();
+    const lost::Found &f = m_model->file(index);
+    const QFileInfo name(f.name);
+    const QString folder = m_savedTo.isEmpty() ? QStandardPaths::writableLocation(QStandardPaths::HomeLocation) : QFileInfo(m_savedTo).absolutePath();
+    const QString suggested = folder + QLatin1Char('/') + tr("%1 (changed)").arg(name.completeBaseName())
+                            + (name.suffix().isEmpty() ? QString() : QLatin1Char('.') + name.suffix());
+    const QString target = m_changedCopyTarget.isEmpty()
+                               ? QFileDialog::getSaveFileName(this, tr("Save the Changed Copy of \"%1\"").arg(f.name), suggested)
+                               : m_changedCopyTarget;
+    if (target.isEmpty())
+        return;
+    if (!m_diskDevice.isEmpty() && blockio::pathIsOnDisk(QFileInfo(target).absolutePath(), m_diskDevice)) {
+        QMessageBox::warning(this, windowTitle(),
+                             tr("That's on the drive being searched: saving there could overwrite the lost files. Pick a folder on another drive."));
+        return;
+    }
+    QString why;
+    if (lost::LookCopies::saveChanged(copy, changes, target, &why))
+        m_status->setText(tr("Saved the changed copy of \"%1\" as %2.").arg(f.name, target));
+    else
+        QMessageBox::warning(this, windowTitle(), tr("The changed copy couldn't be saved: %1").arg(why));
+}
+
 void LostFilesDialog::viewerSaid(const QByteArray &said)
 {
     m_viewerHeard += said;
     viewer::Message m;
     bool bad = false;
     while (viewer::decode(m_viewerHeard, m, &bad)) {
+        if (m.type == viewer::Message::Edited) {
+            saveChangedCopy(m_viewerIndex, m.edits);
+            continue;
+        }
         if (m.type != viewer::Message::AskFor)
             continue;
         switch (m.ask) {
