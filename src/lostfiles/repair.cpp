@@ -684,6 +684,8 @@ Result riff(const Bytes &b, QFileDevice &out)
 
 // --- SQLite: sqlite3's own .recover, into a new database
 
+} // namespace
+
 // sqlite3 runs where DiskAnvil does, not on the host: the Flatpak's runtime has its own, and the
 // files it works on are where this process sees them. Windows' comes with DiskAnvil.
 QString sqlite3()
@@ -695,6 +697,8 @@ QString sqlite3()
     return QStandardPaths::findExecutable(QStringLiteral("sqlite3"));
 #endif
 }
+
+namespace {
 
 Result sqlite(const QString &in, const QString &out)
 {

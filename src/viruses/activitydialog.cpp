@@ -46,7 +46,8 @@ ActivityDialog::ActivityDialog(const QString &root, QWidget *parent)
     m_kind->setObjectName(QStringLiteral("kind"));
     m_kind->addItem(tr("Everything"), -1);
     for (const activity::Kind k : {activity::Kind::UsbDevice, activity::Kind::ProgramRun, activity::Kind::FileOpened, activity::Kind::FolderOpened,
-                                   activity::Kind::Search, activity::Kind::Typed, activity::Kind::Network, activity::Kind::Account})
+                                   activity::Kind::Search, activity::Kind::Typed, activity::Kind::Website, activity::Kind::Download,
+                                   activity::Kind::Network, activity::Kind::Account})
         m_kind->addItem(activity::kindName(k), int(k));
     m_words->setObjectName(QStringLiteral("words"));
     m_words->setPlaceholderText(tr("Words to look for"));

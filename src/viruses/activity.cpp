@@ -4,6 +4,7 @@
 #include "activity.h"
 
 #include "reghive.h"
+#include "repair.h"
 #include "shelllink.h"
 #include "winstartup.h"
 
@@ -11,10 +12,16 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLocale>
 #include <QRegularExpression>
+#include <QProcess>
 #include <QSet>
+#include <QTemporaryDir>
 #include <QTimeZone>
+#include <QUrl>
 #include <QtEndian>
 
 #include <algorithm>
@@ -270,6 +277,126 @@ void readRecentLinks(const startup::Machine &m, const startup::Machine::User &us
     }
 }
 
+// --- Browsers: what was visited and downloaded. Their history is in SQLite files, read by the
+// sqlite3 program from a copy (the drive isn't touched, and a browser's -wal file is read too).
+
+QJsonArray sqlite(const QString &file, const QString &query)
+{
+    const QString program = repair::sqlite3();
+    QTemporaryDir dir;
+    if (program.isEmpty() || !dir.isValid())
+        return {};
+    const QString copy = dir.filePath(QStringLiteral("history.db"));
+    for (const char *suffix : {"", "-wal", "-journal"}) {
+        if (QFileInfo::exists(file + QLatin1String(suffix)))
+            QFile::copy(file + QLatin1String(suffix), copy + QLatin1String(suffix));
+    }
+    QProcess p;
+    p.setProcessChannelMode(QProcess::SeparateChannels);
+    p.start(program, {QStringLiteral("-json"), copy, query});
+    if (!p.waitForFinished(120000)) {
+        p.kill();
+        p.waitForFinished(5000);
+        return {};
+    }
+    return QJsonDocument::fromJson(p.readAllStandardOutput()).array();
+}
+
+// A Chromium browser's times: microseconds since 1601. Firefox's: since 1970.
+QDateTime chromiumTime(const QJsonValue &v)
+{
+    return fromFileTime(v.toString().toULongLong() * 10);
+}
+
+QDateTime firefoxTime(const QJsonValue &v)
+{
+    const qint64 us = v.toString().toLongLong();
+    return us > 0 ? QDateTime::fromMSecsSinceEpoch(us / 1000, QTimeZone::UTC) : QDateTime();
+}
+
+Event visit(const QJsonObject &o, QDateTime when, const QString &user, const QString &browser)
+{
+    Event e;
+    e.kind = Kind::Website;
+    e.when = when;
+    const QString title = o.value(QStringLiteral("title")).toString().simplified().left(200);
+    const QString url = o.value(QStringLiteral("url")).toString().left(2000);
+    e.what = tr("Visited %1").arg(title.isEmpty() ? QUrl(url).host() : title);
+    e.detail = url;
+    e.user = user;
+    e.source = tr("%1's history").arg(browser);
+    return e;
+}
+
+Event download(const QString &path, const QJsonObject &o, QDateTime when, const QString &user, const QString &browser)
+{
+    Event e;
+    e.kind = Kind::Download;
+    e.when = when;
+    e.what = tr("Downloaded %1").arg(path.section(QLatin1Char('\\'), -1).section(QLatin1Char('/'), -1));
+    e.detail = QStringList{path, o.value(QStringLiteral("url")).toString().left(2000)}.join(QStringLiteral(" · "));
+    e.user = user;
+    e.source = tr("%1's downloads").arg(browser);
+    return e;
+}
+
+void readBrowsers(const startup::Machine &m, const startup::Machine::User &user, Report &report, const std::atomic<bool> *cancel)
+{
+    constexpr int kMostVisits = 5000;
+    const QVector<std::pair<const char *, const char *>> chromium = {
+        {"Chrome", "\\AppData\\Local\\Google\\Chrome\\User Data"},
+        {"Edge", "\\AppData\\Local\\Microsoft\\Edge\\User Data"},
+        {"Brave", "\\AppData\\Local\\BraveSoftware\\Brave-Browser\\User Data"},
+        {"Vivaldi", "\\AppData\\Local\\Vivaldi\\User Data"},
+        {"Opera", "\\AppData\\Roaming\\Opera Software"},
+    };
+    for (const auto &[browser, place] : chromium) {
+        const QString data = m.local(user.profile + QLatin1String(place));
+        if (data.isEmpty())
+            continue;
+        for (const QFileInfo &profile : QDir(data).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+            const QString history = profile.filePath() + QStringLiteral("/History");
+            if (stopped(cancel) || !QFileInfo(history).isFile())
+                continue;
+            const QString name = QLatin1String(browser) + (profile.fileName() == QLatin1String("Default") ? QString() : QStringLiteral(" (%1)").arg(profile.fileName()));
+            const QString visits = QStringLiteral("SELECT u.url AS url, u.title AS title, CAST(v.visit_time AS TEXT) AS t FROM visits v "
+                                                  "JOIN urls u ON u.id = v.url ORDER BY v.visit_time DESC LIMIT %1;")
+                                       .arg(kMostVisits);
+            for (const QJsonValue &row : sqlite(history, visits))
+                report.events << visit(row.toObject(), chromiumTime(row.toObject().value(QStringLiteral("t"))), user.name, name);
+            const QString downloads = QStringLiteral("SELECT target_path AS path, tab_url AS url, CAST(start_time AS TEXT) AS t FROM downloads "
+                                                     "ORDER BY start_time DESC LIMIT 2000;");
+            for (const QJsonValue &row : sqlite(history, downloads)) {
+                const QJsonObject o = row.toObject();
+                report.events << download(o.value(QStringLiteral("path")).toString(), o, chromiumTime(o.value(QStringLiteral("t"))), user.name, name);
+            }
+        }
+    }
+    const QString firefox = m.local(user.profile + QStringLiteral("\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles"));
+    if (firefox.isEmpty())
+        return;
+    for (const QFileInfo &profile : QDir(firefox).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+        const QString places = profile.filePath() + QStringLiteral("/places.sqlite");
+        if (stopped(cancel) || !QFileInfo(places).isFile())
+            continue;
+        const QString name = QStringLiteral("Firefox (%1)").arg(profile.fileName().section(QLatin1Char('.'), 1));
+        const QString visits = QStringLiteral("SELECT p.url AS url, p.title AS title, CAST(v.visit_date AS TEXT) AS t FROM moz_historyvisits v "
+                                              "JOIN moz_places p ON p.id = v.place_id ORDER BY v.visit_date DESC LIMIT %1;")
+                                   .arg(kMostVisits);
+        for (const QJsonValue &row : sqlite(places, visits))
+            report.events << visit(row.toObject(), firefoxTime(row.toObject().value(QStringLiteral("t"))), user.name, name);
+        // Downloads are notes on the page they came from, saying where the file went.
+        const QString downloads = QStringLiteral("SELECT a.content AS path, p.url AS url, CAST(a.dateAdded AS TEXT) AS t FROM moz_annos a "
+                                                 "JOIN moz_anno_attributes n ON n.id = a.anno_attribute_id JOIN moz_places p ON p.id = a.place_id "
+                                                 "WHERE n.name = 'downloads/destinationFileURI' ORDER BY a.dateAdded DESC LIMIT 2000;");
+        for (const QJsonValue &row : sqlite(places, downloads)) {
+            const QJsonObject o = row.toObject();
+            const QUrl file(o.value(QStringLiteral("path")).toString());
+            report.events << download(file.isLocalFile() ? file.toLocalFile() : file.toString(), o, firefoxTime(o.value(QStringLiteral("t"))), user.name, name);
+        }
+    }
+}
+
 // --- Networks joined (SOFTWARE\...\NetworkList\Profiles).
 
 void readNetworks(const startup::Machine &m, Report &report)
@@ -401,6 +528,7 @@ Report read(const QString &root, const std::atomic<bool> *cancel)
         readPrograms(u, report, cancel);
         readUserTrail(u, report, cancel);
         readRecentLinks(m, u, report, cancel);
+        readBrowsers(m, u, report, cancel);
     }
 
     // Newest first; the ones with no time after, in the order they were read.

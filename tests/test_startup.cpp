@@ -17,6 +17,9 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QRandomGenerator>
+#include <QTimeZone>
+#include <QStandardPaths>
+#include <QProcess>
 #include <QStringDecoder>
 #include <QTemporaryDir>
 
@@ -291,6 +294,52 @@ void activityRecords(const QString &dir)
                && !activity::fromSystemTime(QByteArray(16, '\xff')).isValid() && !activity::fromSystemTime(QByteArray(3, '\0')).isValid()
                && !activity::fromFileTime(1).isValid(),
            QStringLiteral("activity: ROT13, USB names, and times that are nonsense left out"));
+    // Browsers: a Chrome and a Firefox history, made here with sqlite3.
+    const QString sqlite = QStandardPaths::findExecutable(QStringLiteral("sqlite3"));
+    if (sqlite.isEmpty()) {
+        out << "SKIP  activity: sqlite3 isn't installed, so no browser history" << Qt::endl;
+    } else {
+        const QString chrome = root + QStringLiteral("/Users/tester/AppData/Local/Google/Chrome/User Data/Default");
+        const QString fox = root + QStringLiteral("/Users/tester/AppData/Roaming/Mozilla/Firefox/Profiles/k3x9.default-release");
+        QDir().mkpath(chrome);
+        QDir().mkpath(fox);
+        // 13360000000000000 microseconds after 1601 is 2024-05-12 15:06:40 UTC; Firefox counts from 1970.
+        QProcess::execute(sqlite, {chrome + QStringLiteral("/History"),
+                                   QStringLiteral("CREATE TABLE urls(id INTEGER PRIMARY KEY, url TEXT, title TEXT);"
+                                                  "CREATE TABLE visits(id INTEGER PRIMARY KEY, url INTEGER, visit_time INTEGER);"
+                                                  "CREATE TABLE downloads(id INTEGER PRIMARY KEY, target_path TEXT, tab_url TEXT, start_time INTEGER, total_bytes INTEGER);"
+                                                  "INSERT INTO urls VALUES(1, 'https://example.org/rent', 'Rent calculator');"
+                                                  "INSERT INTO visits VALUES(1, 1, 13360000000000000);"
+                                                  "INSERT INTO downloads VALUES(1, 'C:\\Users\\tester\\Downloads\\setup.exe', 'https://example.org/get', 13360000060000000, 1234);")});
+        QProcess::execute(sqlite, {fox + QStringLiteral("/places.sqlite"),
+                                   QStringLiteral("CREATE TABLE moz_places(id INTEGER PRIMARY KEY, url TEXT, title TEXT);"
+                                                  "CREATE TABLE moz_historyvisits(id INTEGER PRIMARY KEY, place_id INTEGER, visit_date INTEGER);"
+                                                  "CREATE TABLE moz_anno_attributes(id INTEGER PRIMARY KEY, name TEXT);"
+                                                  "CREATE TABLE moz_annos(id INTEGER PRIMARY KEY, place_id INTEGER, anno_attribute_id INTEGER, content TEXT, dateAdded INTEGER);"
+                                                  "INSERT INTO moz_places VALUES(1, 'https://news.example.net/', NULL);"
+                                                  "INSERT INTO moz_historyvisits VALUES(1, 1, 1717000000000000);"
+                                                  "INSERT INTO moz_anno_attributes VALUES(1, 'downloads/destinationFileURI');"
+                                                  "INSERT INTO moz_annos VALUES(1, 1, 1, 'file:///C:/Users/tester/Downloads/map.pdf', 1717000100000000);")});
+        const activity::Report b = activity::read(root);
+        const auto in = [&b](const QString &what) -> const activity::Event * {
+            for (const activity::Event &e : b.events) {
+                if (e.what == what)
+                    return &e;
+            }
+            return nullptr;
+        };
+        const activity::Event *rent = in(QStringLiteral("Visited Rent calculator"));
+        const activity::Event *setup = in(QStringLiteral("Downloaded setup.exe"));
+        const activity::Event *news = in(QStringLiteral("Visited news.example.net"));
+        const activity::Event *map = in(QStringLiteral("Downloaded map.pdf"));
+        report(rent && rent->when == QDateTime(QDate(2024, 5, 12), QTime(15, 6, 40), QTimeZone::UTC) && rent->source.startsWith(QLatin1String("Chrome"))
+                   && setup && setup->detail.contains(QLatin1String("https://example.org/get")) && news
+                   && news->when == QDateTime::fromSecsSinceEpoch(1717000000, QTimeZone::UTC) && news->source.startsWith(QLatin1String("Firefox"))
+                   && map && map->when == QDateTime::fromSecsSinceEpoch(1717000100, QTimeZone::UTC),
+               QStringLiteral("activity: websites visited and files downloaded, from Chrome's and Firefox's history"),
+               rent ? rent->when.toString(Qt::ISODate) + QLatin1Char(' ') + rent->source : QStringLiteral("no visit"));
+    }
+
     QRandomGenerator rng(99);
     const QByteArray user = readAll(kData + QStringLiteral("activity-ntuser.hiv"));
     for (int round = 0; round < 60; ++round) {

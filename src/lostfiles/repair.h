@@ -46,6 +46,10 @@ QString referenceWanted(int type);
 Result run(int type, const QString &in, const QString &out, const QString &reference = {},
            const std::function<bool(int percent)> &progress = {});
 
+// The sqlite3 program (it reads SQLite files: browsers' history, Firefox's bookmarks), or empty
+// when it isn't there. The one where DiskAnvil runs: in the Flatpak, the runtime's.
+QString sqlite3();
+
 // A PDF saved again after it was made keeps each earlier version whole inside it: a save adds
 // only the changes, at the end. Where each version ends, oldest first (the last is the PDF as it
 // is); one for a PDF saved once, none for what isn't a PDF.
