@@ -32,6 +32,7 @@
 #include "../src/app/whathappened.h"
 #include "../src/lostfiles/lostfilesdialog.h"
 #include "../src/lostfiles/timelinedialog.h"
+#include "../src/lostfiles/placesdialog.h"
 #include "../src/lostfiles/filetypes.h"
 #include "../src/common/jobui.h"
 #include "../src/lostfiles/preview.h"
@@ -4671,6 +4672,86 @@ void timelineWindow()
            QStringLiteral("%1 events, %2 deletions, %3 of deleted files, %4 for beach").arg(all).arg(deletions).arg(deletedFiles).arg(dialog.shown()));
 }
 
+// A JPEG that says only where it was taken (EXIF's GPS folder), the way a phone writes it.
+QByteArray gpsJpeg(double latitude, double longitude)
+{
+    QByteArray t("II*\0", 4);
+    auto u16 = [](QByteArray &b, quint16 v) { b.append(char(v)).append(char(v >> 8)); };
+    auto u32 = [](QByteArray &b, quint32 v) { b.append(char(v)).append(char(v >> 8)).append(char(v >> 16)).append(char(v >> 24)); };
+    u32(t, 8);
+    // IFD0: just the GPS folder's place (26 bytes on), then the GPS folder with four tags.
+    u16(t, 1);
+    u16(t, 0x8825), u16(t, 4), u32(t, 1), u32(t, 26);
+    u32(t, 0);
+    const quint32 values = 26 + 2 + 4 * 12 + 4;
+    u16(t, 4);
+    auto entry = [&](quint16 tag, quint16 type, quint32 count, quint32 value) { u16(t, tag), u16(t, type), u32(t, count), u32(t, value); };
+    entry(1, 2, 2, latitude < 0 ? 'S' : 'N');
+    entry(2, 5, 3, values);
+    entry(3, 2, 2, longitude < 0 ? 'W' : 'E');
+    entry(4, 5, 3, values + 24);
+    u32(t, 0);
+    for (const double v : {std::abs(latitude), std::abs(longitude)}) {
+        const double minutes = (v - std::floor(v)) * 60;
+        u32(t, quint32(v)), u32(t, 1), u32(t, quint32(minutes)), u32(t, 1), u32(t, quint32((minutes - std::floor(minutes)) * 60 * 1000)), u32(t, 1000);
+    }
+    const QByteArray app1 = QByteArray("Exif\0\0", 6) + t;
+    const int length = int(app1.size()) + 2;
+    return QByteArray("\xFF\xD8\xFF\xE1", 4) + char(length >> 8) + char(length & 0xFF) + app1 + QByteArray("\xFF\xDA\x00\x02\xFF\xD9", 6);
+}
+
+void placesWindow()
+{
+    // Three photos round Leeds, one in Paris, one in New York; one that doesn't say, and a document.
+    const QVector<std::tuple<const char *, double, double>> spots = {{"leeds1.jpg", 53.7997, -1.5492}, {"leeds2.jpg", 53.8008, -1.5410},
+                                                                     {"leeds3.jpg", 53.7950, -1.5600}, {"paris.jpg", 48.8584, 2.2945},
+                                                                     {"newyork.jpg", 40.7484, -73.9857}};
+    QVector<lost::Found> files;
+    for (const auto &[name, lat, lon] : spots) {
+        lost::Found f;
+        f.name = QString::fromLatin1(name);
+        f.type = filetypes::typeForName(f.name);
+        f.data = gpsJpeg(lat, lon);
+        f.size = quint64(f.data.size());
+        files << f;
+    }
+    lost::Found plain;
+    plain.name = QStringLiteral("nowhere.jpg");
+    plain.type = filetypes::typeForName(plain.name);
+    plain.data = QByteArray("\xFF\xD8\xFF\xD9", 4);
+    plain.size = 4;
+    lost::Found note;
+    note.name = QStringLiteral("note.txt");
+    note.type = filetypes::typeForName(note.name);
+    note.data = "a note";
+    note.size = 6;
+    files << plain << note;
+    PlacesDialog dialog(lost::Source::fromMemory(QByteArray(512, '\0')), files, QStringLiteral("test drive"));
+    dialog.show();
+    dialog.waitUntilDone();
+    auto *places = dialog.findChild<QTreeWidget *>(QStringLiteral("places"));
+    auto *list = dialog.findChild<QListWidget *>(QStringLiteral("files"));
+    QTreeWidgetItem *top = places ? places->topLevelItem(0) : nullptr;
+    report(dialog.located() == 5 && places && places->topLevelItemCount() == 3 && top && top->text(0).contains(QLatin1String("Leeds")) && top->text(1) == QLatin1String("3"),
+           QStringLiteral("places: five photos say where, by place, the most first"), top ? top->text(0) + QLatin1Char(' ') + top->text(1) : QStringLiteral("none"));
+    if (!top || !list)
+        return;
+    Q_EMIT places->itemClicked(top, 0);
+    int viewed = -1;
+    QObject::connect(&dialog, &PlacesDialog::view, [&viewed](int index) { viewed = index; });
+    list->setCurrentRow(0);
+    Q_EMIT list->itemActivated(list->currentItem());
+    report(list->count() == 3 && viewed >= 0 && viewed <= 2, QStringLiteral("places: a place lists its photos, and one opens from there"),
+           QStringLiteral("%1 listed, opened %2").arg(list->count()).arg(viewed));
+    if (qEnvironmentVariableIsSet("DISKANVIL_UITEST_SHOTS")) {
+        dialog.grab().save(qEnvironmentVariable("DISKANVIL_UITEST_SHOTS") + QStringLiteral("/places.png"));
+        if (auto *map = dialog.findChild<PlacesMap *>(QStringLiteral("map"))) {
+            map->showAll();
+            dialog.grab().save(qEnvironmentVariable("DISKANVIL_UITEST_SHOTS") + QStringLiteral("/places-all.png"));
+        }
+    }
+}
+
 void lostFilesDeletedRecently()
 {
     QTemporaryDir dir;
@@ -6279,7 +6360,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},

@@ -16,6 +16,8 @@
 #include "previewloader.h"
 #include "repair.h"
 #include "thumbcache.h"
+#include "placesdialog.h"
+#include "placesmap.h"
 #include "timelinedialog.h"
 #include "ransomware.h"
 #include "readthrough.h"
@@ -866,6 +868,20 @@ LostFilesDialog::LostFilesDialog(UDisks *udisks, const QString &preferredPath, Q
     timelineAction->setObjectName(QStringLiteral("timeline"));
     timelineAction->setToolTip(tr("Every time the drive kept of the files found, in order: what was made, opened and deleted when"));
     connect(timelineAction, &QAction::triggered, this, [this] { TimelineDialog(m_model->files(), m_title, this).exec(); });
+    QAction *placesAction = organise->addAction(tr("Where They Were Taken…"));
+    placesAction->setObjectName(QStringLiteral("places"));
+    placesAction->setToolTip(tr("The photos and films that say where they were taken, on a map and by place, worked out without the internet"));
+    connect(placesAction, &QAction::triggered, this, [this] {
+        PlacesDialog dialog(m_source, m_model->files(), m_title, this);
+        connect(&dialog, &PlacesDialog::view, this, [this](int index) {
+            if (const int row = m_model->rowOf(index); row >= 0) {
+                m_view->setCurrentIndex(m_model->index(row));
+                m_view->scrollTo(m_model->index(row));
+            }
+            viewerShow(index);
+        });
+        dialog.exec();
+    });
     m_organise->setMenu(organise);
     filters->addWidget(m_organise);
     middleLayout->addWidget(filterBox);
@@ -908,6 +924,14 @@ LostFilesDialog::LostFilesDialog(UDisks *udisks, const QString &preferredPath, Q
     m_details->setWordWrap(true);
     m_details->setTextFormat(Qt::RichText);
     m_details->setObjectName(QStringLiteral("details"));
+    // Where a photo was taken: its spot opens on a map, after asking.
+    m_details->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::LinksAccessibleByMouse | Qt::LinksAccessibleByKeyboard);
+    m_details->setOpenExternalLinks(false);
+    connect(m_details, &QLabel::linkActivated, this, [this](const QString &link) {
+        double latitude = 0, longitude = 0;
+        if (parseGeo(link, &latitude, &longitude))
+            openOnOpenStreetMap(this, latitude, longitude);
+    });
     previewLayout->addWidget(m_details);
     m_hex->setReadOnly(true);
     m_hex->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
@@ -2433,6 +2457,17 @@ void LostFilesDialog::viewerSaid(const QByteArray &said)
         case viewer::Ask::Shown:
             m_viewerShown = m_viewerIndex;
             break;
+        case viewer::Ask::Map:
+            for (const QString &fact : m_facts.value(m_viewerIndex)) {
+                double latitude = 0, longitude = 0;
+                if (parseGeo(fact.section(QLatin1Char('\t'), 1), &latitude, &longitude)) {
+                    raise();
+                    activateWindow();
+                    openOnOpenStreetMap(this, latitude, longitude);
+                    break;
+                }
+            }
+            break;
         }
     }
     if (bad)
@@ -2584,9 +2619,13 @@ QString LostFilesDialog::detailsTable(const QVector<QPair<QString, QString>> &ro
 {
     const QString quiet = palette().color(QPalette::PlaceholderText).name();
     QString html = QStringLiteral("<table cellspacing=\"0\" cellpadding=\"1\">");
-    for (const auto &[label, value] : rows)
-        html += QStringLiteral("<tr><td style=\"color:%1; padding-right:12px\">%2</td><td>%3</td></tr>")
-                    .arg(quiet, label.toHtmlEscaped(), value.toHtmlEscaped());
+    for (const auto &[label, value] : rows) {
+        double latitude = 0, longitude = 0;
+        const QString shown = parseGeo(value, &latitude, &longitude)
+                                  ? QStringLiteral("<a href=\"%1\">%2</a>").arg(value.toHtmlEscaped(), tr("Open on OpenStreetMap…").toHtmlEscaped())
+                                  : value.toHtmlEscaped();
+        html += QStringLiteral("<tr><td style=\"color:%1; padding-right:12px\">%2</td><td>%3</td></tr>").arg(quiet, label.toHtmlEscaped(), shown);
+    }
     return html + QStringLiteral("</table>");
 }
 

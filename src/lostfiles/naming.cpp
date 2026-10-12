@@ -13,6 +13,8 @@
 #include <QRegularExpression>
 #include <QTimeZone>
 #include <QXmlStreamReader>
+
+#include <cstring>
 #include <QtEndian>
 
 #include <zlib.h>
@@ -248,6 +250,33 @@ Inside fromContents(int type, quint64 size, const Read &read)
         || id == QLatin1String("ods") || id == QLatin1String("odp"))
         return officeZip(id, size, read);
     return out;
+}
+
+Spot where(int type, quint64 size, const Read &read)
+{
+    Spot spot;
+    if (type < 0 || type >= filetypes::types().size() || size == 0)
+        return spot;
+    const filetypes::Type &t = filetypes::types()[type];
+    if (t.category == filetypes::Category::Picture) {
+        // EXIF is near the start: a JPEG's first segments, a HEIC's or a raw file's first megabytes.
+        const exif::Info info = exif::read(read(0, qint64(std::min<quint64>(size, 2 * kMiB))));
+        if (info.hasLocation) {
+            spot = {true, info.latitude, info.longitude, info.taken.isValid() ? info.taken.toMSecsSinceEpoch() : 0};
+        }
+    } else if (t.category == filetypes::Category::Video && (t.id == QLatin1String("mp4") || t.id == QLatin1String("mov") || t.id == QLatin1String("3gp"))) {
+        const QByteArray moov = mediainfo::mp4Moov([&read](quint64 at, char *buf, qint64 len) {
+            const QByteArray part = read(at, len);
+            memcpy(buf, part.constData(), size_t(part.size()));
+            return qint64(part.size());
+        }, size);
+        const mediainfo::Info info = mediainfo::read(type, moov, size);
+        if (info.hasLocation) {
+            const QDateTime when = info.made.isValid() ? info.made : info.recorded;
+            spot = {true, info.latitude, info.longitude, when.isValid() ? when.toMSecsSinceEpoch() : 0};
+        }
+    }
+    return spot;
 }
 
 } // namespace naming

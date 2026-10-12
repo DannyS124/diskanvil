@@ -42,7 +42,8 @@ struct Show {
 // What the viewer asks Find Lost Files for.
 // Shown: it has the file sent last on the screen (so Find Lost Files, and the tests, know it got it).
 // Repair: a repaired copy of it, shown next when it's made.
-enum class Ask : qint32 { Ready = 0, Previous, Next, Save, Open, Shown, Repair };
+// Map: show where the one shown was taken on a map (the viewer can't go online; the window asks).
+enum class Ask : qint32 { Ready = 0, Previous, Next, Save, Open, Shown, Repair, Map };
 
 // The messages between them, each a small header and then its body.
 struct Message {

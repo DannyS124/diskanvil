@@ -186,7 +186,7 @@ bool decode(QByteArray &buffer, Message &m, bool *bad)
     case Message::AskFor: {
         qint32 ask = 0;
         s >> ask;
-        m.ask = ask >= 0 && ask <= qint32(Ask::Repair) ? Ask(ask) : Ask::Ready;
+        m.ask = ask >= 0 && ask <= qint32(Ask::Map) ? Ask(ask) : Ask::Ready;
         break;
     }
     case Message::Facts:
@@ -955,6 +955,12 @@ Window::Window(QWidget *parent)
     m_facts->setAlignment(Qt::AlignTop | Qt::AlignLeft);
     m_facts->setContentsMargins(10, 10, 10, 10);
     m_facts->setObjectName(QStringLiteral("facts"));
+    m_facts->setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::LinksAccessibleByMouse | Qt::LinksAccessibleByKeyboard);
+    m_facts->setOpenExternalLinks(false);
+    connect(m_facts, &QLabel::linkActivated, this, [this](const QString &link) {
+        if (link.startsWith(QLatin1String("geo:")))
+            Q_EMIT asked(Ask::Map);
+    });
     m_side->setWidget(m_facts);
     m_side->setWidgetResizable(true);
     m_side->setMinimumWidth(220);
@@ -1125,8 +1131,11 @@ void Window::showFacts()
             const QString label = fact.section(QLatin1Char('\t'), 0, 0), value = fact.section(QLatin1Char('\t'), 1);
             if (label.isEmpty() && value.isEmpty())
                 continue;
-            html += QStringLiteral("<tr><td style=\"color:%1; padding-right:10px\">%2</td><td>%3</td></tr>")
-                        .arg(quiet, label.toHtmlEscaped(), value.toHtmlEscaped());
+            // Where it was taken opens on a map, from Find Lost Files' window (which asks first).
+            const QString shown = value.startsWith(QLatin1String("geo:"))
+                                      ? QStringLiteral("<a href=\"%1\">%2</a>").arg(value.toHtmlEscaped(), tr("Open on OpenStreetMap…").toHtmlEscaped())
+                                      : value.toHtmlEscaped();
+            html += QStringLiteral("<tr><td style=\"color:%1; padding-right:10px\">%2</td><td>%3</td></tr>").arg(quiet, label.toHtmlEscaped(), shown);
         }
         html += QStringLiteral("</table>");
     }

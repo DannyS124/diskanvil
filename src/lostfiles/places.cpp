@@ -141,6 +141,7 @@ QStringList facts(double latitude, double longitude, bool hasAltitude, double al
     if (hasAltitude)
         numbers += QLatin1String(", ") + (altitude < 0 ? tr("%1 m below the sea").arg(qRound64(-altitude)) : tr("%1 m up").arg(qRound64(altitude)));
     out << tr("Coordinates") + QLatin1Char('\t') + numbers;
+    out << tr("Map") + QStringLiteral("\tgeo:%1,%2").arg(QString::number(latitude, 'f', 6), QString::number(longitude, 'f', 6));
     return out;
 }
 

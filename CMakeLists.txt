@@ -174,6 +174,8 @@ add_library(diskanvil-ui STATIC
     src/app/whathappened.cpp src/app/whathappened.h
     src/lostfiles/lostfilesdialog.cpp src/lostfiles/lostfilesdialog.h
     src/lostfiles/timelinedialog.cpp src/lostfiles/timelinedialog.h
+    src/lostfiles/placesmap.cpp src/lostfiles/placesmap.h
+    src/lostfiles/placesdialog.cpp src/lostfiles/placesdialog.h
     src/lostfiles/preview.cpp src/lostfiles/preview.h
     src/lostfiles/pictures.cpp src/lostfiles/pictures.h
     src/lostfiles/previewloader.cpp src/lostfiles/previewloader.h

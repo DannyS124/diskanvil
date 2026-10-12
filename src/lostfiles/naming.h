@@ -28,4 +28,12 @@ struct Inside {
 using Read = std::function<QByteArray(quint64 at, qint64 len)>;
 Inside fromContents(int type, quint64 size, const Read &read);
 
+// Where a photo or a film says it was taken (EXIF's GPS, or a phone film's own), and when.
+struct Spot {
+    bool known = false;
+    double latitude = 0, longitude = 0;
+    qint64 when = 0; // ms since 1970, 0 when not known
+};
+Spot where(int type, quint64 size, const Read &read);
+
 } // namespace naming

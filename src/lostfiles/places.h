@@ -32,8 +32,9 @@ QString coordinates(double latitude, double longitude);
 // The spot on OpenStreetMap's website, for the user to open if they want (nothing goes online
 // by itself).
 QString mapLink(double latitude, double longitude);
-// The lines to show for a spot: "Where" (the place's name, when there's one near) and
-// "Coordinates" (with its height, when it's known), as "label\tvalue".
+// The lines to show for a spot: "Where" (the place's name, when there's one near),
+// "Coordinates" (with its height, when it's known) and "Map" (a geo: link to it, which windows
+// show as a way to open it on a map), as "label\tvalue".
 QStringList facts(double latitude, double longitude, bool hasAltitude = false, double altitude = 0);
 // How far apart two spots are, over the Earth's surface.
 double kilometres(double latitude1, double longitude1, double latitude2, double longitude2);
