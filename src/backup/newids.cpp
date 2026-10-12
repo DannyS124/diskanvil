@@ -54,7 +54,9 @@ QVector<Clash> clashes(const QVector<Disk> &disks)
     for (qsizetype i = 0; i < disks.size(); ++i) {
         for (qsizetype j = i + 1; j < disks.size(); ++j) {
             const Disk &a = disks[i], &b = disks[j];
-            if (writtenFromAnImage(a) || writtenFromAnImage(b) || a.isRaid || b.isRaid)
+            // An array or a Windows dynamic volume is put together from drives here: its file
+            // system shows on them too (Linux reads MBR dynamic disks' volumes itself).
+            if (writtenFromAnImage(a) || writtenFromAnImage(b) || a.isRaid || b.isRaid || a.isDynamicVolume || b.isDynamicVolume)
                 continue;
             Clash c;
             c.first = a.blockPath;

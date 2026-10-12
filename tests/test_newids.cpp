@@ -85,8 +85,14 @@ void clashes()
                      {volume(QStringLiteral("/dev/sdh1"), QStringLiteral("iso9660"), QStringLiteral("2026-09-01-12-00-00-00"), QStringLiteral("5f8e2a10-01"))});
     Disk isoB = isoA;
     isoB.device = isoB.blockPath = QStringLiteral("/dev/sdi");
-    found = newids::clashes({raidA, raidB, btrfsA, btrfsB, isoA, isoB});
-    report(found.isEmpty(), QStringLiteral("new IDs: RAID, multi-drive Btrfs and sticks written from one ISO aren't called copies"),
+    // A Windows dynamic volume ldmtool opened, and the same volume as Linux shows it on the disk.
+    Disk dynamic = disk(QStringLiteral("/dev/mapper/ldm_vol_PC-Dg0_Volume1"), QString(),
+                        {volume(QStringLiteral("/dev/mapper/ldm_vol_PC-Dg0_Volume1"), QStringLiteral("ntfs"), QStringLiteral("AEEA5DF0EA5DB575"), QString())});
+    dynamic.isDynamicVolume = true;
+    Disk dynamicDisk = disk(QStringLiteral("/dev/sdj"), QStringLiteral("9f82e904"),
+                            {volume(QStringLiteral("/dev/sdj1"), QStringLiteral("ntfs"), QStringLiteral("AEEA5DF0EA5DB575"), QString())});
+    found = newids::clashes({raidA, raidB, btrfsA, btrfsB, isoA, isoB, dynamic, dynamicDisk});
+    report(found.isEmpty(), QStringLiteral("new IDs: RAID, multi-drive Btrfs, Windows dynamic volumes and sticks written from one ISO aren't called copies"),
            found.isEmpty() ? QString() : found[0].ids.join(QStringLiteral(", ")));
 
     const QString key = newids::clashKey(newids::clashes({original, copy}).value(0), {original, copy});

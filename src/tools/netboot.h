@@ -28,7 +28,7 @@ QString medium();      // the stick (or CD) DiskAnvil Live started from, when it
 QStringList command(const QString &card, quint16 port);
 
 // From a line of dnsmasq's messages: a PC asking to start ("PXE(eth0) 52:54:00:12:34:56 proxy"),
-// or a file it was sent ("sent /…/core.0 to 192.168.1.50"). Empty when it's neither.
+// or a file it was sent ("sent /…/pxelinux.0 to 192.168.1.50"). Empty when it's neither.
 QString askedBy(const QString &line);
 QString sentTo(const QString &line, QString *file = nullptr);
 

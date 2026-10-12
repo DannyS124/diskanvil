@@ -3029,7 +3029,8 @@ void netBootWindow()
     put(medium + QStringLiteral("/live/initrd.img"), "initrd");
     put(medium + QStringLiteral("/EFI/BOOT/BOOTX64.EFI"), "shim");
     put(medium + QStringLiteral("/boot/grub/netboot/grubx64.efi"), "grubnet");
-    put(medium + QStringLiteral("/boot/grub/netboot/core.0"), "pxe");
+    for (const char *bios : {"pxelinux.0", "ldlinux.c32", "menu.c32", "libutil.c32"})
+        put(medium + QStringLiteral("/boot/pxelinux/") + QLatin1String(bios), "pxelinux");
     put(medium + QStringLiteral("/.disk/diskanvil-live"), "DiskAnvil Live\nversion=0.0.5\n");
     put(dir.filePath(QStringLiteral("secret.txt")), "secret");
     // A request, and what came back.
@@ -3089,14 +3090,20 @@ void netBootWindow()
     const QStringList args = QString::fromUtf8(dry.readAllStandardOutput()).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
     QFile menu(state + QStringLiteral("/grub/grub.cfg"));
     const QString cfg = menu.open(QIODevice::ReadOnly) ? QString::fromUtf8(menu.readAll()) : QString();
+    QFile biosMenu(state + QStringLiteral("/pxelinux.cfg/default"));
+    const QString biosCfg = biosMenu.open(QIODevice::ReadOnly) ? QString::fromUtf8(biosMenu.readAll()) : QString();
     report(dry.exitCode() == 0 && args.contains(QStringLiteral("--dhcp-range=192.168.36.0,proxy")) && args.contains(QStringLiteral("--interface=eth9"))
-               && args.contains(QStringLiteral("--tftp-root=") + state) && args.contains(QStringLiteral("--pxe-service=X86-64_EFI,DiskAnvil Live,bootx64.efi")),
+               && args.contains(QStringLiteral("--tftp-root=") + state) && args.contains(QStringLiteral("--pxe-service=X86-64_EFI,DiskAnvil Live,bootx64.efi"))
+               && args.contains(QStringLiteral("--pxe-service=x86PC,DiskAnvil Live,pxelinux")),
            QStringLiteral("netboot: dnsmasq answers as a proxy for the card's own network"), args.join(QLatin1Char(' ')) + QString::fromUtf8(dry.readAllStandardError()));
     report(cfg.contains(QLatin1String("fetch=http://192.168.37.42:8123/live/filesystem.squashfs")) && cfg.contains(QLatin1String("DiskAnvil Live 0.0.5"))
                && QFileInfo(state + QStringLiteral("/bootx64.efi")).canonicalFilePath() == QFileInfo(medium + QStringLiteral("/EFI/BOOT/BOOTX64.EFI")).canonicalFilePath()
                && QFileInfo(state + QStringLiteral("/grubx64.efi")).canonicalFilePath() == QFileInfo(medium + QStringLiteral("/boot/grub/netboot/grubx64.efi")).canonicalFilePath()
-               && QFile::exists(state + QStringLiteral("/live/initrd.img")) && QFile::exists(state + QStringLiteral("/core.0")),
-           QStringLiteral("netboot: the menu says where the system is, and the boot files are linked from the stick"), cfg.left(400));
+               && QFile::exists(state + QStringLiteral("/live/initrd.img")) && QFile::exists(state + QStringLiteral("/pxelinux.0"))
+               && QFile::exists(state + QStringLiteral("/menu.c32")) && QFile::exists(state + QStringLiteral("/ldlinux.c32"))
+               && biosCfg.contains(QLatin1String("APPEND boot=live ip=dhcp fetch=http://192.168.37.42:8123/live/filesystem.squashfs"))
+               && biosCfg.contains(QLatin1String("DiskAnvil Live 0.0.5")) && biosCfg.contains(QLatin1String("LOCALBOOT 0")),
+           QStringLiteral("netboot: the menus (UEFI and BIOS) say where the system is, and the boot files are linked from the stick"), cfg.left(400) + biosCfg.left(400));
     QProcess bad;
     bad.setProcessEnvironment(env);
     bad.start(QStringLiteral("bash"), {helper, QStringLiteral("start"), QStringLiteral("eth0;reboot"), QStringLiteral("8123")});

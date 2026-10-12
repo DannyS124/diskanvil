@@ -52,7 +52,7 @@ QVector<Card> cards()
 QString medium()
 {
     const QString m = mediumForTest.isEmpty() ? QStringLiteral("/run/live/medium") : mediumForTest;
-    return QFileInfo(m + QStringLiteral("/live/filesystem.squashfs")).isFile() && QFileInfo(m + QStringLiteral("/boot/grub/netboot/core.0")).isFile() ? m : QString();
+    return QFileInfo(m + QStringLiteral("/live/filesystem.squashfs")).isFile() && QFileInfo(m + QStringLiteral("/boot/pxelinux/pxelinux.0")).isFile() ? m : QString();
 }
 
 bool available()

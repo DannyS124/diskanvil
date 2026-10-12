@@ -8,7 +8,7 @@
 #   diskanvil-live-netboot start <network card> <http port>
 #
 # The boot files are DiskAnvil Live's own, from the stick (or CD) it started from: shim and
-# Debian's signed network GRUB for UEFI, so Secure Boot can stay on; GRUB's PXE image for BIOS.
+# Debian's signed network GRUB for UEFI, so Secure Boot can stay on; PXELINUX for BIOS.
 # For the tests: DISKANVIL_NETBOOT_MEDIUM, _STATE and _ADDRESS (address/prefix) stand in, and
 # DISKANVIL_NETBOOT_DRY=1 prints dnsmasq's command instead of running it.
 set -eu
@@ -20,7 +20,8 @@ card=$2
 port=$3
 case $card in *[!A-Za-z0-9._-]*|'') echo "not a network card: $card" >&2; exit 2 ;; esac
 case $port in *[!0-9]*|'') echo "not a port: $port" >&2; exit 2 ;; esac
-for f in live/vmlinuz live/initrd.img live/filesystem.squashfs EFI/BOOT/BOOTX64.EFI boot/grub/netboot/grubx64.efi boot/grub/netboot/core.0; do
+bios="pxelinux.0 ldlinux.c32 menu.c32 libutil.c32"
+for f in live/vmlinuz live/initrd.img live/filesystem.squashfs EFI/BOOT/BOOTX64.EFI boot/grub/netboot/grubx64.efi $(printf 'boot/pxelinux/%s ' $bios); do
     [ -e "$medium/$f" ] || { echo "DiskAnvil Live's own files aren't here ($medium/$f): it has to have started from a stick or a CD (not over the network, and not copied to memory)." >&2; exit 3; }
 done
 
@@ -35,13 +36,15 @@ mask=$(( prefix == 0 ? 0 : (0xFFFFFFFF << (32 - prefix)) & 0xFFFFFFFF ))
 n=$(( n & mask ))
 network="$(( (n >> 24) & 255 )).$(( (n >> 16) & 255 )).$(( (n >> 8) & 255 )).$(( n & 255 ))"
 
-# The TFTP folder: links to the stick's files, and the menu, which says where the rest is.
+# The TFTP folder: links to the stick's files, and the menus, which say where the rest is.
 rm -rf "$state"
-mkdir -p "$state/grub"
+mkdir -p "$state/grub" "$state/pxelinux.cfg"
 ln -s "$medium/EFI/BOOT/BOOTX64.EFI" "$state/bootx64.efi"
 [ -e "$medium/EFI/BOOT/mmx64.efi" ] && ln -s "$medium/EFI/BOOT/mmx64.efi" "$state/mmx64.efi"
 ln -s "$medium/boot/grub/netboot/grubx64.efi" "$state/grubx64.efi"
-ln -s "$medium/boot/grub/netboot/core.0" "$state/core.0"
+for f in $bios; do
+    ln -s "$medium/boot/pxelinux/$f" "$state/$f"
+done
 ln -s "$medium/live" "$state/live"
 version=$(sed -n 's/^version=//p' "$medium/.disk/diskanvil-live" 2>/dev/null || true)
 cat > "$state/grub/grub.cfg" <<CFG
@@ -61,11 +64,31 @@ menuentry "Start this PC the usual way" {
     exit
 }
 CFG
+cat > "$state/pxelinux.cfg/default" <<CFG
+# Written by diskanvil-live-netboot on $(hostname) ($ip): the same, for old BIOS PCs.
+UI menu.c32
+MENU TITLE DiskAnvil Live over the network, from $ip
+TIMEOUT 50
+DEFAULT live
+LABEL live
+  MENU LABEL Start DiskAnvil Live ${version} over the network
+  KERNEL /live/vmlinuz
+  INITRD /live/initrd.img
+  APPEND boot=live ip=dhcp fetch=http://$ip:$port/live/filesystem.squashfs quiet splash
+LABEL safe
+  MENU LABEL Start DiskAnvil Live over the network, safe graphics
+  KERNEL /live/vmlinuz
+  INITRD /live/initrd.img
+  APPEND boot=live ip=dhcp fetch=http://$ip:$port/live/filesystem.squashfs nomodeset
+LABEL local
+  MENU LABEL Start this PC the usual way
+  LOCALBOOT 0
+CFG
 
 set -- dnsmasq --keep-in-foreground --conf-file=/dev/null --port=0 --interface="$card" --bind-interfaces \
     --dhcp-range="$network,proxy" \
     --pxe-prompt="DiskAnvil Live",1 \
-    --pxe-service=x86PC,"DiskAnvil Live",core \
+    --pxe-service=x86PC,"DiskAnvil Live",pxelinux \
     --pxe-service=X86-64_EFI,"DiskAnvil Live",bootx64.efi \
     --enable-tftp --tftp-root="$state" --log-dhcp --log-facility=-
 if [ "${DISKANVIL_NETBOOT_DRY:-}" = 1 ]; then

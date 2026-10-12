@@ -132,17 +132,17 @@ printf '\x90\x90' | dd of="$work/stick-boot.img" bs=1 seek=$((0x66)) conv=notrun
 cp "$work/stick-boot.img" "$iso/boot/grub/i386-pc/stick-boot.img"
 
 # Start Other PCs from This One (network start, diskanvil-live-netboot): Debian's signed GRUB
-# for network starts after shim on UEFI, and GRUB's own PXE image for old BIOS PCs. Both read
-# grub/grub.cfg from the TFTP server, which the helper writes. The live system's initrd already
-# has the network cards' drivers.
-mkdir -p "$iso/boot/grub/netboot"
+# for network starts after shim on UEFI, reading grub/grub.cfg; PXELINUX for old BIOS PCs,
+# reading pxelinux.cfg/default. The helper writes both. (GRUB's own BIOS PXE image takes the
+# router's DHCP answer for where its files are and ignores ours, so it waits on the router
+# forever; PXELINUX asks the PC's network card, which listened to both.) The live system's
+# initrd already has the network cards' drivers.
+mkdir -p "$iso/boot/grub/netboot" "$iso/boot/pxelinux"
 cp /usr/lib/grub/x86_64-efi-signed/grubnetx64.efi.signed "$iso/boot/grub/netboot/grubx64.efi"
-# (-O i386-pc-pxe puts GRUB's PXE boot sector in front by itself: one more in front of that and
-# old PCs hang on a black screen.)
-grub-mkimage -O i386-pc-pxe -p '(tftp)/grub' -o "$iso/boot/grub/netboot/core.0" \
-    pxe tftp net normal linux echo test configfile sleep reboot halt
-cmp -s -n 1024 /usr/lib/grub/i386-pc/pxeboot.img "$iso/boot/grub/netboot/core.0" ||
-    { echo "core.0 doesn't start with GRUB's PXE boot sector"; exit 1; }
+cp /usr/lib/PXELINUX/pxelinux.0 "$iso/boot/pxelinux/"
+for module in ldlinux.c32 menu.c32 libutil.c32; do
+    cp "/usr/lib/syslinux/modules/bios/$module" "$iso/boot/pxelinux/"
+done
 
 cp /usr/share/grub/unicode.pf2 "$iso/boot/grub/fonts/"
 # The boot menu's own fonts (theme.txt names them) and its selection bar.
