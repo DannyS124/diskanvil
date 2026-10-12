@@ -6337,7 +6337,11 @@ int main(int argc, char *argv[])
             askedToRepair = true;
             for (int i = 0; i < 3; ++i)
                 udisks.refresh(); // replaces the disk list while the question is open
-            box->button(QMessageBox::Yes)->click();
+            // Repair, Try the Repair First… or Not Now: Repair.
+            if (QPushButton *repair = findButton(box, QStringLiteral("Repair")))
+                repair->click();
+            else
+                box->close();
         } else {
             messages << QStringLiteral("dialog: ") + box->text();
             box->close();
