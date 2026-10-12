@@ -74,10 +74,14 @@ AboutDialog::AboutDialog(const QString &udisksVersion, QWidget *parent)
     tabs->addTab(richLabel(tr("<p>Drive failure rates in Disk Health come from %1: Backblaze's published records of the drives in "
                               "its data centres, free to use when they're named as the source.</p>"
                               "<p>DiskAnvil runs these as separate programs when they're there: ClamAV, smartmontools, "
-                              "efibootmgr, QEMU, dnsmasq, x11vnc, OpenSSH, sqlite3, wimlib, cryptsetup, btrfs-progs, mdadm, "
-                              "LVM and ldmtool. DiskAnvil Live is built from Debian.</p>")
+                              "efibootmgr, QEMU, dnsmasq, x11vnc, OpenSSH, sqlite3, FFmpeg, wimlib, cryptsetup, btrfs-progs, mdadm, "
+                              "LVM and ldmtool. DiskAnvil Live is built from Debian.</p>"
+                              "<p>Where photos and films were taken is named from %2's list of towns and cities (CC BY 4.0), and "
+                              "drawn on a map of %3's outlines (public domain).</p>")
                                .arg(link(QStringLiteral("https://www.backblaze.com/cloud-storage/resources/hard-drive-test-data"),
-                                         tr("Backblaze Drive Stats")))),
+                                         tr("Backblaze Drive Stats")),
+                                    link(QStringLiteral("https://www.geonames.org"), QStringLiteral("GeoNames")),
+                                    link(QStringLiteral("https://www.naturalearthdata.com"), QStringLiteral("Natural Earth")))),
                  tr("&Thanks"));
 
     auto *license = new QTextBrowser;

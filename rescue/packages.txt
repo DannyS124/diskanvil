@@ -157,3 +157,5 @@ ovmf
 seabios
 # more picture kinds in those previews (WebP, TIFF...)
 qt6-image-formats-plugins
+# Find Lost Files' viewer: a film saved at another speed, and a film's frame in the previews
+ffmpeg

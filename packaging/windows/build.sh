@@ -31,6 +31,9 @@ cp "$root/LICENSE" "$work/DiskAnvil/LICENSE.txt"
 # sqlite3.exe (public domain), with what it needs: repairing SQLite files, and Firefox bookmarks in
 # Save My Files.
 "$root/packaging/windows/deploy.sh" "$work/sysroot/ucrt64/bin/sqlite3.exe" "$work/DiskAnvil" "$work/sysroot"
+# ffmpeg.exe (GPL, from MSYS2, run as its own program): a film saved at another speed in Find Lost
+# Files' viewer, and a film's frame in its previews.
+"$root/packaging/windows/deploy.sh" "$work/sysroot/ucrt64/bin/ffmpeg.exe" "$work/DiskAnvil" "$work/sysroot"
 python3 -I "$root/packaging/windows/icons.py" "$root/rescue/icons/DiskAnvil-Live" "$work/DiskAnvil/icons"
 (cd "$work" && rm -f "DiskAnvil-$version-windows.zip" && python3 -m zipfile -c "DiskAnvil-$version-windows.zip" DiskAnvil)
 echo "==> $work/DiskAnvil-$version-windows.zip"
