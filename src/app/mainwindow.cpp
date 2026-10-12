@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "mainwindow.h"
+
 #include "homewindow.h"
 #include "lostfilesdialog.h"
 
@@ -17,7 +18,9 @@
 #include "systemtools.h"
 #include "usagedialog.h"
 #include "applog.h"
+#include "blockio.h"
 #include "drivepower.h"
+#include "luksheader.h"
 #include "newids.h"
 #include "newidsdialog.h"
 #include "virusdialog.h"
@@ -74,6 +77,7 @@
 #include <QSet>
 #include <QDateTime>
 #include <QTimer>
+#include <QSaveFile>
 #include <QSettings>
 #include <QVBoxLayout>
 
@@ -436,6 +440,19 @@ void MainWindow::createActions()
             gone();
     });
 
+    m_luksBackup = new QAction(themeIcon("document-save", "document-save"), tr("Back Up Encryption &Header…"), this);
+    m_luksBackup->setObjectName(QStringLiteral("luksBackup"));
+    m_luksBackup->setToolTip(tr("A copy of the LUKS header, which holds the drive's keys: if the header is ever damaged, the copy "
+                                "is the only way back in"));
+    connect(m_luksBackup, &QAction::triggered, this, &MainWindow::backupLuksHeader);
+    m_luksRestore = new QAction(themeIcon("document-revert", "edit-undo"), tr("Put Back Encryption Header…"), this);
+    m_luksRestore->setObjectName(QStringLiteral("luksRestore"));
+    connect(m_luksRestore, &QAction::triggered, this, &MainWindow::restoreLuksHeader);
+#ifdef Q_OS_WIN
+    m_luksBackup->setVisible(false); // LUKS is Linux's: DiskForge Live does it
+    m_luksRestore->setVisible(false);
+#endif
+
     m_openImage = new QAction(themeIcon("document-open", "document-open"), tr("&Open Disk Image…"), this);
     m_openImage->setShortcut(QKeySequence::Open);
     connect(m_openImage, &QAction::triggered, this, [this] {
@@ -712,7 +729,7 @@ void MainWindow::createActions()
     action->addSeparator();
     action->addActions({m_open, m_mount, m_unmount, m_safelyRemove});
     action->addSeparator();
-    action->addActions({m_unlock, m_lock, m_changePass});
+    action->addActions({m_unlock, m_lock, m_changePass, m_luksBackup, m_luksRestore});
     action->addSeparator();
     action->addActions({m_newPartition, m_format, m_resize, m_rename, m_typeFlags, m_check, m_startup, m_delete});
     action->addSeparator();
@@ -1301,6 +1318,12 @@ void MainWindow::updateActions()
     const bool bitLocker = v && v->fsType == QLatin1String("BitLocker");
     m_changePass->setEnabled(changeable && v && v->encrypted && !bitLocker);
 #endif
+    const bool luks = v && v->fsType == QLatin1String("crypto_LUKS");
+    // A LUKS partition whose header is wrecked doesn't show as LUKS any more: that's when the
+    // copy is needed, so it can go back on a partition nothing is recognized on too.
+    const bool unknown = v && v->fsType.isEmpty() && !v->isContainer && v->number > 0;
+    m_luksBackup->setEnabled(luks && !busy);
+    m_luksRestore->setEnabled((luks || unknown) && changeable && !v->isSystem);
     m_newPartition->setEnabled(tableChangeable && kind == DiskMap::Selection::Kind::Free && !d->tableType.isEmpty());
     m_format->setEnabled(tableChangeable && v && !v->isContainer);
     m_rename->setEnabled(changeable && v && v->canMount());
@@ -1474,6 +1497,10 @@ void MainWindow::buildContextMenu(QMenu *menu)
         add({m_open, m_usage, m_mount, m_unmount, m_unlock, m_lock});
         menu->addSeparator();
         add({m_format, m_resize, m_rename, m_typeFlags, m_check, m_startup, m_changePass, m_delete});
+        if (v->fsType == QLatin1String("crypto_LUKS"))
+            add({m_luksBackup, m_luksRestore});
+        else if (m_luksRestore->isEnabled())
+            add({m_luksRestore});
         menu->addSeparator();
         add({m_backup, m_restore});
         if (v->effectiveFsType() == QLatin1String("btrfs"))
@@ -1865,6 +1892,134 @@ void MainWindow::newPartitionTable()
     statusBar()->showMessage(tr("Writing a new partition table to %1…").arg(shortDevice(fresh->device)));
     m_udisks->createPartitionTable(*fresh, dialog.tableType());
     updateActions();
+}
+
+void MainWindow::backupLuksHeader()
+{
+    const Volume *v = selectedVolume();
+    const Disk *d = selectedDisk();
+    if (!v || !d || !m_luksBackup->isEnabled())
+        return;
+    const QString suggested = QDir::home().filePath(QStringLiteral("%1-luks-header.img").arg(v->label.isEmpty() ? v->uuid.left(8) : v->label));
+    const QString file = QFileDialog::getSaveFileName(this, tr("Back Up Encryption Header"), suggested, tr("Header backups (*.img);;All files (*)"));
+    if (file.isEmpty())
+        return;
+    if (blockio::pathIsOnDisk(QFileInfo(file).absolutePath(), d->device)) {
+        QMessageBox::warning(this, tr("Back Up Encryption Header"),
+                             tr("The copy has to go on another drive: if this one is damaged, a copy on it is lost with it."));
+        return;
+    }
+    const QString path = v->objectPath, name = shortDevice(v->device);
+    auto opened = std::make_shared<QMetaObject::Connection>();
+    *opened = connect(m_udisks, &UDisks::deviceOpened, this, [this, opened, path, name, file](const QString &which, int fd) {
+        if (which != path)
+            return;
+        disconnect(*opened);
+        if (fd < 0)
+            return; // UDisks said why
+        luksheader::Info info;
+        const QByteArray header = luksheader::read(fd, &info);
+        blockio::close(fd);
+        QSaveFile out(file);
+        if (header.isEmpty() || !out.open(QIODevice::WriteOnly) || out.write(header) != header.size() || !out.commit()) {
+            QMessageBox::warning(this, tr("Back Up Encryption Header"),
+                                 tr("The header of %1 couldn't be copied: %2").arg(name, header.isEmpty() ? info.problem : out.errorString()));
+            return;
+        }
+        QFile::setPermissions(file, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+        qCInfo(lcOps).noquote() << "LUKS header of" << name << "copied to" << file << header.size() << "bytes";
+        QMessageBox::information(this, tr("Back Up Encryption Header"),
+                                 tr("The header of %1 (LUKS%2, %3) is copied to %4.\n\nKeep it safe and private: with it and any "
+                                    "passphrase the drive had when it was copied, the drive can be opened, even after that passphrase "
+                                    "is changed or removed. Make a new copy after changing passphrases.")
+                                     .arg(name)
+                                     .arg(info.version)
+                                     .arg(formatSize(quint64(header.size())), QDir::toNativeSeparators(file)));
+    });
+    // Read-only and for a moment: it works while the drive is unlocked and in use.
+    m_udisks->openBlock(path, UDisks::OpenMode::Benchmark);
+}
+
+void MainWindow::restoreLuksHeader()
+{
+    const Volume *v = selectedVolume();
+    if (!v || !m_luksRestore->isEnabled())
+        return;
+    const QString file = QFileDialog::getOpenFileName(this, tr("Put Back Encryption Header"), QDir::homePath(),
+                                                      tr("Header backups (*.img);;All files (*)"));
+    if (file.isEmpty())
+        return;
+    QFile in(file);
+    QByteArray backup;
+    if (in.open(QIODevice::ReadOnly) && in.size() <= 64 * 1024 * 1024)
+        backup = in.readAll();
+    const luksheader::Info info = luksheader::inspect(backup.left(4 * 1024 * 1024 + 4096));
+    if (!info.valid() || quint64(backup.size()) != info.size) {
+        QMessageBox::warning(this, tr("Put Back Encryption Header"),
+                             tr("%1 isn't a whole LUKS header copy: %2").arg(QFileInfo(file).fileName(), info.problem.isEmpty() ? tr("its size is wrong") : info.problem));
+        return;
+    }
+    // What's on the drive now, to say whether the copy is its own.
+    const QString path = v->objectPath, name = shortDevice(v->device);
+    auto opened = std::make_shared<QMetaObject::Connection>();
+    *opened = connect(m_udisks, &UDisks::deviceOpened, this, [this, opened, path, name, backup, info](const QString &which, int fd) {
+        if (which != path)
+            return;
+        disconnect(*opened);
+        if (fd < 0)
+            return;
+        luksheader::Info now;
+        luksheader::read(fd, &now);
+        blockio::close(fd);
+        QString text = tr("<p>Put the copy of the header (LUKS%1, ID %2) back on <b>%3</b>?</p>").arg(info.version).arg(info.uuid, name.toHtmlEscaped());
+        if (!now.valid()) {
+            text += tr("<p>Its header is damaged or gone now (%1): putting a copy back is what it's for.</p>").arg(now.problem.toHtmlEscaped());
+        } else if (now.uuid != info.uuid) {
+            text += redText(tr("This copy is from another drive: its ID is %1, and this drive's is %2. Putting it back makes this drive "
+                               "unreadable, unless the drive's data really belongs with that header.")
+                                .arg(info.uuid, now.uuid));
+        } else if (now.dataOffset != info.dataOffset && now.dataOffset > 0 && info.dataOffset > 0) {
+            QMessageBox::warning(this, tr("Put Back Encryption Header"), tr("This copy doesn't fit %1: its data starts somewhere else.").arg(name));
+            return;
+        } else {
+            text += tr("<p>It's this drive's own header. Its passphrases go back to the ones it had when the copy was made.</p>");
+        }
+        text += tr("<p>The drive is locked first.</p>");
+        QDialog confirm(this);
+        confirm.setWindowTitle(tr("Put Back Encryption Header"));
+        auto *layout = new QVBoxLayout(&confirm);
+        layout->addWidget(wrappingLabel(text));
+        layout->addWidget(new QLabel(tr("Type <b>%1</b> to confirm:").arg(name)));
+        auto *typed = new QLineEdit;
+        typed->setObjectName(QStringLiteral("confirm"));
+        layout->addWidget(typed);
+        QPushButton *ok;
+        layout->addWidget(dialogButtons(&confirm, tr("Put It Back"), &ok));
+        ok->setEnabled(false);
+        connect(typed, &QLineEdit::textChanged, &confirm, [ok, name](const QString &t) { ok->setEnabled(t.trimmed() == name); });
+        if (confirm.exec() != QDialog::Accepted)
+            return;
+        auto writing = std::make_shared<QMetaObject::Connection>();
+        *writing = connect(m_udisks, &UDisks::deviceOpened, this, [this, writing, path, name, backup](const QString &which, int fd) {
+            if (which != path)
+                return;
+            disconnect(*writing);
+            if (fd < 0)
+                return;
+            QString error;
+            const bool ok = luksheader::write(fd, backup, &error);
+            blockio::close(fd);
+            qCInfo(lcOps).noquote() << "LUKS header of" << name << (ok ? "put back" : "not put back: " + error);
+            m_udisks->rescan(path);
+            if (ok)
+                QMessageBox::information(this, tr("Put Back Encryption Header"),
+                                         tr("The header is back on %1. Unlock it with a passphrase it had when the copy was made.").arg(name));
+            else
+                QMessageBox::warning(this, tr("Put Back Encryption Header"), tr("It couldn't be put back on %1: %2").arg(name, error));
+        });
+        m_udisks->openBlock(path, UDisks::OpenMode::ReadWrite); // locks it first
+    });
+    m_udisks->openBlock(path, UDisks::OpenMode::Benchmark);
 }
 
 void MainWindow::resizeVolume()

@@ -66,6 +66,7 @@ add_library(diskforge-core STATIC
     src/drives/fat32format.cpp src/drives/fat32format.h
     src/drives/exfatformat.cpp src/drives/exfatformat.h
     src/drives/sdcard.cpp src/drives/sdcard.h
+    src/drives/luksheader.cpp src/drives/luksheader.h
     src/lostfiles/mediainfo.cpp src/lostfiles/mediainfo.h
     src/lostfiles/exif.cpp src/lostfiles/exif.h
     src/lostfiles/lookcopies.cpp src/lostfiles/lookcopies.h
@@ -251,7 +252,7 @@ else()
     option(DISKFORGE_SELFTEST "Build the loop-device self-test" ON)
 endif()
 if(DISKFORGE_SELFTEST)
-    qt_add_executable(diskforge-selftest tests/selftest.cpp tests/testkit.cpp tests/testkit.h tests/test_fat32.cpp
+    qt_add_executable(diskforge-selftest tests/selftest.cpp tests/testkit.cpp tests/testkit.h tests/test_fat32.cpp tests/test_luks.cpp
         tests/test_gpt.cpp tests/test_copy.cpp tests/test_blockmap.cpp
         tests/test_usage.cpp tests/test_backup.cpp
         tests/test_rescue.cpp tests/test_clone.cpp tests/test_system.cpp

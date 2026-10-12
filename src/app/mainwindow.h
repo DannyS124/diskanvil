@@ -74,6 +74,9 @@ private:
     void resizeVolume();
     void changeLabel();
     void newPartitionTable();
+    // LUKS: a copy of the header (its keys), and putting one back.
+    void backupLuksHeader();
+    void restoreLuksHeader();
     void checkForUpdates();
     bool addAddonActions(QMenu *menu); // false if none apply
     void runAddon(const QString &addonId, const QString &label);
@@ -120,6 +123,8 @@ private:
     QAction *m_unlock = nullptr;
     QAction *m_lock = nullptr;
     QAction *m_changePass = nullptr;
+    QAction *m_luksBackup = nullptr;
+    QAction *m_luksRestore = nullptr;
     QAction *m_openImage = nullptr;
     QAction *m_detachImage = nullptr;
     QAction *m_writeImage = nullptr;

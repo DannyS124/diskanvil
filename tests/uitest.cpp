@@ -1056,6 +1056,128 @@ void lockInMap()
     sh(QStringLiteral("losetup"), {QStringLiteral("-d"), loop});
 }
 
+// Back Up Encryption Header and Put Back Encryption Header, through the main window, on a LUKS
+// partition of a loop device: the copy is cryptsetup's own bytes, and after the header is
+// wrecked (the partition no longer shows as LUKS) it's put back and opens with its passphrase.
+void luksHeaderThroughWindow()
+{
+    QTemporaryDir dir;
+    const QString image = dir.filePath(QStringLiteral("luks.img"));
+    sh(QStringLiteral("truncate"), {QStringLiteral("-s"), QStringLiteral("64M"), image});
+    QProcess sfdisk;
+    sfdisk.start(QStringLiteral("sfdisk"), {QStringLiteral("-q"), image});
+    sfdisk.waitForStarted();
+    sfdisk.write("label: gpt\n,,L\n");
+    sfdisk.closeWriteChannel();
+    sfdisk.waitForFinished();
+    QString loop;
+    sh(QStringLiteral("losetup"), {QStringLiteral("-fP"), QStringLiteral("--show"), image}, &loop);
+    loop = loop.trimmed();
+    const QString part = loop + QStringLiteral("p1");
+    QThread::msleep(500);
+    const auto cryptsetup = [](const QStringList &args, const QByteArray &input = {}) {
+        QProcess p;
+        p.start(QStringLiteral("cryptsetup"), args);
+        p.waitForStarted();
+        p.write(input);
+        p.closeWriteChannel();
+        p.waitForFinished(60000);
+        return p.exitStatus() == QProcess::NormalExit ? p.exitCode() : -1;
+    };
+    report(cryptsetup({QStringLiteral("luksFormat"), QStringLiteral("--batch-mode"), QStringLiteral("--type"), QStringLiteral("luks2"), QStringLiteral("--pbkdf"),
+                       QStringLiteral("pbkdf2"), QStringLiteral("--pbkdf-force-iterations"), QStringLiteral("1000"), QStringLiteral("--key-file=-"), part},
+                      "header test")
+               == 0,
+           QStringLiteral("LUKS header: a LUKS test partition"));
+    const QString theirs = dir.filePath(QStringLiteral("theirs.img"));
+    cryptsetup({QStringLiteral("luksHeaderBackup"), part, QStringLiteral("--header-backup-file"), theirs});
+    const QString ours = dir.filePath(QStringLiteral("ours.img"));
+
+    UDisks udisks;
+    udisks.setInteractive(false);
+    MainWindow window(&udisks);
+    window.resize(1200, 800);
+    window.show();
+    const auto volume = [&]() -> const Volume * {
+        for (const Disk &d : udisks.disks()) {
+            for (const Volume &v : d.volumes) {
+                if (v.device == part)
+                    return &v;
+            }
+        }
+        return nullptr;
+    };
+    waitUntil([&] {
+        udisks.refresh();
+        return volume() && volume()->fsType == QLatin1String("crypto_LUKS");
+    }, 15000);
+    QString pickFile;
+    QStringList boxes;
+    Answerer answerer;
+    answerer.answer = [&](QWidget *modal) {
+        if (auto *picker = qobject_cast<QFileDialog *>(modal)) {
+            picker->selectFile(pickFile);
+            if (auto *name = picker->findChild<QLineEdit *>(QStringLiteral("fileNameEdit")))
+                name->setText(pickFile);
+            static_cast<QDialog *>(picker)->accept();
+            return true;
+        }
+        if (auto *box = qobject_cast<QMessageBox *>(modal)) {
+            boxes << box->text();
+            box->accept();
+            return true;
+        }
+        if (auto *confirm = modal->findChild<QLineEdit *>(QStringLiteral("confirm")); confirm && qobject_cast<QDialog *>(modal)) {
+            boxes << modal->findChild<QLabel *>()->text();
+            confirm->setText(shortDevice(part));
+            static_cast<QDialog *>(modal)->accept();
+            return true;
+        }
+        return false;
+    };
+    const auto file = [](const QString &path) {
+        QFile f(path);
+        return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
+    };
+    window.selectDevice(part);
+    auto *backup = window.findChild<QAction *>(QStringLiteral("luksBackup"));
+    report(backup && backup->isEnabled(), QStringLiteral("LUKS header: Back Up Encryption Header is offered on the LUKS partition"));
+    pickFile = ours;
+    if (backup)
+        backup->trigger();
+    waitUntil([&] { return !boxes.isEmpty(); }, 30000);
+    report(!file(ours).isEmpty() && file(ours) == file(theirs) && boxes.join(QLatin1Char(' ')).contains(QLatin1String("Keep it safe")),
+           QStringLiteral("LUKS header: the copy is the same bytes as cryptsetup's, and it says to keep it safe"), boxes.join(QStringLiteral(" | ")).left(200));
+
+    // Wrecked: the partition's first MiB zeroed; it no longer shows as LUKS.
+    {
+        QFile device(part);
+        if (device.open(QIODevice::ReadWrite)) {
+            device.write(QByteArray(1024 * 1024, '\0'));
+            device.close();
+        }
+    }
+    sh(QStringLiteral("udevadm"), {QStringLiteral("settle")});
+    waitUntil([&] {
+        udisks.refresh();
+        return volume() && volume()->fsType.isEmpty();
+    }, 15000);
+    window.selectDevice(part);
+    auto *restore = window.findChild<QAction *>(QStringLiteral("luksRestore"));
+    report(volume() && volume()->fsType.isEmpty() && restore && restore->isEnabled(),
+           QStringLiteral("LUKS header: wrecked, it shows as unknown, and Put Back is still offered"));
+    boxes.clear();
+    pickFile = ours;
+    if (restore)
+        restore->trigger();
+    waitUntil([&] { return boxes.size() >= 2; }, 30000);
+    report(boxes.value(0).contains(QLatin1String("damaged or gone")) && boxes.value(1).contains(QLatin1String("is back on")),
+           QStringLiteral("LUKS header: it says the header is gone, then puts the copy back"), boxes.join(QStringLiteral(" | ")).left(300));
+    report(cryptsetup({QStringLiteral("open"), QStringLiteral("--test-passphrase"), part, QStringLiteral("--key-file"), QStringLiteral("-")}, "header test") == 0,
+           QStringLiteral("LUKS header: and the partition opens with its passphrase again"));
+    sh(QStringLiteral("losetup"), {QStringLiteral("-d"), loop});
+}
+
 // Inspect Partition Table on the system disk: read-only, so it opens without unmounting
 // anything, and the table it shows is intact.
 void inspector()
@@ -4524,7 +4646,7 @@ int main(int argc, char *argv[])
     }
     // As root, the ones that make their own loop device can run by themselves.
     if (!only.isEmpty()) {
-        const QVector<QPair<const char *, void (*)()>> alone = {{"stickcheck", stickCheck}, {"sdcard", sdCardFormat}, {"refresh", slowAreaRefresh}, {"stopwipe", stopWipe}};
+        const QVector<QPair<const char *, void (*)()>> alone = {{"stickcheck", stickCheck}, {"sdcard", sdCardFormat}, {"refresh", slowAreaRefresh}, {"stopwipe", stopWipe}, {"luksheader", luksHeaderThroughWindow}};
         for (const auto &[name, run] : alone) {
             if (only.contains(QLatin1String(name)))
                 run();
@@ -4612,6 +4734,7 @@ int main(int argc, char *argv[])
     stopWipe();
     typeAndFlags();
     lockInMap();
+    luksHeaderThroughWindow();
     inspector();
     recoverThroughWindow();
     scanThroughWindow();
