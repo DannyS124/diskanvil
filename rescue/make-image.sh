@@ -137,9 +137,12 @@ cp "$work/stick-boot.img" "$iso/boot/grub/i386-pc/stick-boot.img"
 # has the network cards' drivers.
 mkdir -p "$iso/boot/grub/netboot"
 cp /usr/lib/grub/x86_64-efi-signed/grubnetx64.efi.signed "$iso/boot/grub/netboot/grubx64.efi"
-grub-mkimage -O i386-pc-pxe -p '(tftp)/grub' -o "$work/pxecore.img" \
+# (-O i386-pc-pxe puts GRUB's PXE boot sector in front by itself: one more in front of that and
+# old PCs hang on a black screen.)
+grub-mkimage -O i386-pc-pxe -p '(tftp)/grub' -o "$iso/boot/grub/netboot/core.0" \
     pxe tftp net normal linux echo test configfile sleep reboot halt
-cat /usr/lib/grub/i386-pc/pxeboot.img "$work/pxecore.img" > "$iso/boot/grub/netboot/core.0"
+cmp -s -n 1024 /usr/lib/grub/i386-pc/pxeboot.img "$iso/boot/grub/netboot/core.0" ||
+    { echo "core.0 doesn't start with GRUB's PXE boot sector"; exit 1; }
 
 cp /usr/share/grub/unicode.pf2 "$iso/boot/grub/fonts/"
 # The boot menu's own fonts (theme.txt names them) and its selection bar.
