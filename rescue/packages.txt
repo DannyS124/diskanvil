@@ -110,6 +110,7 @@ thin-provisioning-tools
 mdadm
 ldmtool
 cryptsetup
+sqlite3
 parted
 gdisk
 fdisk
