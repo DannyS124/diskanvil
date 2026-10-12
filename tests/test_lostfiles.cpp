@@ -8,6 +8,7 @@
 
 #include "testkit.h"
 
+#include "../src/lostfiles/enhance.h"
 #include "../src/lostfiles/exif.h"
 #include "../src/lostfiles/filetypes.h"
 #include "../src/usb/imagesource.h"
@@ -3441,6 +3442,105 @@ void foundReport()
     report(stopsAt == 1, QStringLiteral("report: making one can be stopped"));
 }
 
+// The viewer's tools: blur taken back out gets closer to the sharp picture; the rest do what
+// they say.
+void enhanceTools()
+{
+    // A sharp picture with fine detail (stripes and squares), then blurred the two ways.
+    QImage sharp(160, 120, QImage::Format_ARGB32);
+    for (int y = 0; y < sharp.height(); ++y) {
+        for (int x = 0; x < sharp.width(); ++x) {
+            const bool on = ((x / 6) + (y / 6)) % 2 == 0 || (x % 17 == 3);
+            sharp.setPixel(x, y, on ? qRgb(230, 220, 210) : qRgb(30, 40, 50));
+        }
+    }
+    const auto difference = [](const QImage &a, const QImage &b) {
+        double sum = 0;
+        for (int y = 8; y < a.height() - 8; ++y) {
+            for (int x = 8; x < a.width() - 8; ++x)
+                sum += std::abs(qGray(a.pixel(x, y)) - qGray(b.pixel(x, y)));
+        }
+        return sum / ((a.width() - 16) * (a.height() - 16));
+    };
+    // Out of focus: a Gaussian blur (sigma 2), the kind the tool takes out.
+    QImage soft(sharp.size(), QImage::Format_ARGB32);
+    {
+        double k[13], sum = 0;
+        for (int i = -6; i <= 6; ++i)
+            sum += k[i + 6] = std::exp(-(i * i) / 8.0);
+        const auto at = [&sharp](int x, int y) { return qGray(sharp.pixel(std::clamp(x, 0, sharp.width() - 1), std::clamp(y, 0, sharp.height() - 1))); };
+        for (int y = 0; y < sharp.height(); ++y) {
+            for (int x = 0; x < sharp.width(); ++x) {
+                double v = 0;
+                for (int j = -6; j <= 6; ++j) {
+                    for (int i = -6; i <= 6; ++i)
+                        v += k[i + 6] * k[j + 6] * at(x + i, y + j);
+                }
+                const int g = qRound(v / (sum * sum));
+                soft.setPixel(x, y, qRgb(g, g, g));
+            }
+        }
+    }
+    enhance::Settings focus;
+    focus.focus = 4;
+    focus.rounds = 20;
+    const QImage refocused = enhance::apply(soft, focus);
+    QImage greyStill = sharp;
+    for (int y = 0; y < greyStill.height(); ++y) {
+        for (int x = 0; x < greyStill.width(); ++x) {
+            const int g = qGray(sharp.pixel(x, y));
+            greyStill.setPixel(x, y, qRgb(g, g, g));
+        }
+    }
+    const double before = difference(soft, greyStill), after = difference(refocused, greyStill);
+    report(!refocused.isNull() && after < before * 0.85, QStringLiteral("enhance: out-of-focus blur taken out, closer to the sharp picture"),
+           QStringLiteral("off by %1 before, %2 after").arg(before, 0, 'f', 1).arg(after, 0, 'f', 1));
+    // Moved sideways while it was taken: each pixel the average of 9 in a row.
+    QImage moved(sharp.size(), QImage::Format_ARGB32);
+    for (int y = 0; y < sharp.height(); ++y) {
+        for (int x = 0; x < sharp.width(); ++x) {
+            int sum = 0;
+            for (int i = -4; i <= 4; ++i)
+                sum += qGray(sharp.pixel(std::clamp(x + i, 0, sharp.width() - 1), y));
+            moved.setPixel(x, y, qRgb(sum / 9, sum / 9, sum / 9));
+        }
+    }
+    enhance::Settings motion;
+    motion.motion = 9;
+    motion.motionAngle = 0;
+    motion.rounds = 25;
+    const QImage steadied = enhance::apply(moved, motion);
+    QImage greySharp = sharp;
+    for (int y = 0; y < greySharp.height(); ++y) {
+        for (int x = 0; x < greySharp.width(); ++x) {
+            const int g = qGray(sharp.pixel(x, y));
+            greySharp.setPixel(x, y, qRgb(g, g, g));
+        }
+    }
+    const double movedOff = difference(moved, greySharp), steadiedOff = difference(steadied, greySharp);
+    report(!steadied.isNull() && steadiedOff < movedOff * 0.8, QStringLiteral("enhance: movement blur taken out, closer to the still picture"),
+           QStringLiteral("off by %1 before, %2 after").arg(movedOff, 0, 'f', 1).arg(steadiedOff, 0, 'f', 1));
+    // The simple ones.
+    enhance::Settings light;
+    light.brightness = 50;
+    enhance::Settings flip;
+    flip.invert = true;
+    flip.grey = true;
+    QImage dark(4, 4, QImage::Format_ARGB32);
+    dark.fill(qRgb(40, 40, 40));
+    const QImage brighter = enhance::apply(dark, light), flipped = enhance::apply(dark, flip);
+    report(qGray(brighter.pixel(1, 1)) > 80 && qGray(flipped.pixel(1, 1)) == 215 && enhance::apply(dark, enhance::Settings()) == dark,
+           QStringLiteral("enhance: brighter, inverted, and nothing done when nothing's asked"));
+    const QImage big = enhance::enlarge(sharp, 3);
+    report(big.size() == sharp.size() * 3 && qGray(big.pixel(1, 1)) == qGray(sharp.pixel(0, 0)) && enhance::enlarge(sharp, 1) == sharp,
+           QStringLiteral("enhance: enlarged three times over, the same picture bigger"));
+    int stops = 0;
+    const QImage stopped = enhance::apply(soft, focus, [&stops](int) { return ++stops < 3; });
+    report(stopped.isNull(), QStringLiteral("enhance: it can be stopped part way"));
+    report(focus.describe().join(QStringLiteral("; ")).contains(QLatin1String("4 px")), QStringLiteral("enhance: what was done, in words"),
+           focus.describe().join(QStringLiteral("; ")));
+}
+
 // Where a photo was taken, in words and on a map, from what DiskAnvil carries (no internet).
 void placeNames()
 {
@@ -3501,4 +3601,5 @@ void lostFilesTests()
     windowsCompressed();
     placeNames();
     foundReport();
+    enhanceTools();
 }

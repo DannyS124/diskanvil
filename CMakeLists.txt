@@ -177,6 +177,7 @@ add_library(diskanvil-ui STATIC
     src/lostfiles/lostfilesdialog.cpp src/lostfiles/lostfilesdialog.h
     src/lostfiles/timelinedialog.cpp src/lostfiles/timelinedialog.h
     src/lostfiles/placesmap.cpp src/lostfiles/placesmap.h
+    src/lostfiles/enhance.cpp src/lostfiles/enhance.h
     src/viruses/activitydialog.cpp src/viruses/activitydialog.h
     src/lostfiles/placesdialog.cpp src/lostfiles/placesdialog.h
     src/lostfiles/preview.cpp src/lostfiles/preview.h
