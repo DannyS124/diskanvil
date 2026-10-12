@@ -15,6 +15,8 @@
 #include "../src/health/triage.h"
 #include "../src/health/drivefacts.h"
 #include "../src/health/farm.h"
+#include "../src/drives/blockio.h"
+#include "../src/health/surfacescan.h"
 #include "../src/tools/systemd.h"
 
 #include <QDir>
@@ -279,12 +281,54 @@ void farmHistory()
            QStringLiteral("FARM: asked of Seagate's drives only"));
 }
 
+// SSD refresh: which reads were slow for the drive, and writing them back unchanged.
+void slowRefresh()
+{
+    BlockMapData map(64 * 1024 * 1024, false);
+    QVector<ReadSample> samples;
+    for (quint64 off = 0; off < 64ull * 1024 * 1024; off += 1024 * 1024)
+        samples.append({off, 1024 * 1024, quint32(off == 5 * 1024 * 1024 || off == 6 * 1024 * 1024 || off == 40 * 1024 * 1024 ? 300 : 2), true});
+    samples.append({50ull * 1024 * 1024, 1024 * 1024, 400, false}); // unreadable: Repair's, not this
+    map.add(samples);
+    const auto ranges = slowRanges(samples, map);
+    report(ranges.size() == 2 && ranges[0] == qMakePair(quint64(5 * 1024 * 1024), quint64(2 * 1024 * 1024)) && ranges[1].first == 40 * 1024 * 1024,
+           QStringLiteral("SSD refresh: slow reads are found, neighbours joined, unreadable ones left out"), QString::number(ranges.size()));
+
+    QTemporaryDir dir;
+    const QString path = dir.filePath(QStringLiteral("ssd.img"));
+    QByteArray data(8 * 1024 * 1024, '\0');
+    for (qsizetype i = 0; i < data.size(); ++i)
+        data[i] = char((i * 131 + i / 4096) & 0xFF);
+    QFile f(path);
+    if (f.open(QIODevice::WriteOnly)) {
+        f.write(data);
+        f.close();
+    }
+    const int fd = blockio::openFile(path, blockio::FileMode::Update);
+    RefreshResult result;
+    {
+        // A range past the end can't be read: it's counted and left alone.
+        SlowRefresh refresh(fd, {{1024 * 1024, 3 * 1024 * 1024}, {7 * 1024 * 1024, 1024 * 1024}, {20 * 1024 * 1024, 1024 * 1024}});
+        QObject::connect(&refresh, &SlowRefresh::finished, [&result](const RefreshResult &r) { result = r; });
+        refresh.run();
+    }
+    QByteArray after;
+    if (f.open(QIODevice::ReadOnly)) {
+        after = f.readAll();
+        f.close();
+    }
+    report(result.error.isEmpty() && result.bytes == 4 * 1024 * 1024 && result.unreadable == 1 && after == data,
+           QStringLiteral("SSD refresh: each slow piece is written back unchanged, and what can't be read is left alone"),
+           QStringLiteral("%1 bytes, %2 unreadable, same: %3 %4").arg(result.bytes).arg(result.unreadable).arg(after == data).arg(result.error));
+}
+
 void healthTests()
 {
     hiddenArea();
     triageAdvice();
     driveFacts();
     farmHistory();
+    slowRefresh();
     rawPages();
     QTemporaryDir config;
     qputenv("XDG_CONFIG_HOME", QFile::encodeName(config.path()));

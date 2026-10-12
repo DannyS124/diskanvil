@@ -1555,8 +1555,13 @@ BadSectorsDialog::BadSectorsDialog(UDisks *udisks, const Disk &disk, QWidget *pa
     , m_repairNote(new QLabel)
     , m_scan(new QPushButton(tr("Start Scan")))
     , m_repair(new QPushButton(tr("Repair…")))
+    , m_refresh(new QPushButton(tr("Refresh Slow Areas…")))
 {
     setWindowTitle(tr("Bad Sectors on %1").arg(disk.model));
+    m_refresh->setObjectName(QStringLiteral("refresh"));
+    m_refresh->setToolTip(tr("Experimental: an SSD's old data can get slow to read as it fades. Writing the same data back makes it fresh."));
+    m_refresh->setVisible(false);
+    connect(m_refresh, &QPushButton::clicked, this, &BadSectorsDialog::startRefresh);
     const bool slow = disk.rotationRate > 0 || disk.bus == QLatin1String("usb") || disk.removable;
     QString intro = tr("<p><b>%1</b></p><p>Reads every sector of the drive to find ones that can't be read. "
                        "Scanning doesn't change anything and takes %2. You can keep using the PC meanwhile.</p>")
@@ -1601,6 +1606,7 @@ BadSectorsDialog::BadSectorsDialog(UDisks *udisks, const Disk &disk, QWidget *pa
     connect(m_repair, &QPushButton::clicked, this, &BadSectorsDialog::startRepair);
     auto *buttons = new QHBoxLayout;
     buttons->addWidget(m_repair);
+    buttons->addWidget(m_refresh);
     buttons->addStretch();
     buttons->addWidget(m_scan);
     buttons->addWidget(close);
@@ -1626,6 +1632,8 @@ void BadSectorsDialog::stop()
     disconnect(m_openConn);
     if (auto *s = qobject_cast<SurfaceScan *>(m_worker))
         s->cancel(); // finished() then reports how far it got
+    if (auto *r = qobject_cast<SlowRefresh *>(m_worker))
+        r->cancel(); // after the piece it's on: it's never left half written
 }
 
 void BadSectorsDialog::reject()
@@ -1645,6 +1653,25 @@ void BadSectorsDialog::setRunning(bool running)
     m_running = running;
     m_scan->setText(running ? tr("Stop") : tr("Scan Again"));
     m_repair->setEnabled(!running && !m_bad.isEmpty() && !m_disk.isSystem);
+    m_refresh->setEnabled(!running && !m_disk.isSystem);
+    m_refresh->setVisible(isSsd() && !m_slow.isEmpty());
+}
+
+bool BadSectorsDialog::isSsd() const
+{
+    return (m_disk.rotationRate == 0 && !m_disk.isLoop) || (m_disk.isLoop && loopIsSsdForTest);
+}
+
+void BadSectorsDialog::showScanForTest(const QVector<ReadSample> &samples)
+{
+    m_map->reset(m_disk.size, m_disk.rotationRate > 0);
+    m_map->addSamples(samples);
+    m_slowReads.clear();
+    for (const ReadSample &s : samples) {
+        if (s.ms >= 50)
+            m_slowReads << s;
+    }
+    scanFinished(true, {}, 512);
 }
 
 void BadSectorsDialog::showFound()
@@ -1694,6 +1721,16 @@ void BadSectorsDialog::startScan()
         clock->start();
         m_map->reset(m_disk.size, m_disk.rotationRate > 0);
         connect(scan, &SurfaceScan::samples, m_map, &BlockMapWidget::addSamples);
+        // Kept: the reads slow enough that they might be slow for this drive (50 ms, an SSD's
+        // floor); which really are is known once the whole drive's been read.
+        m_slowReads.clear();
+        m_slow.clear();
+        connect(scan, &SurfaceScan::samples, this, [this](const QVector<ReadSample> &batch) {
+            for (const ReadSample &s : batch) {
+                if (s.ms >= 50 && s.readable && m_slowReads.size() < 100000)
+                    m_slowReads << s;
+            }
+        });
         connect(scan, &SurfaceScan::progress, this, [this, clock](quint64 done, quint64 total, int bad) {
             m_progress->setValue(int(done * 1000 / std::max<quint64>(total, 1)));
             const double rate = done / std::max(clock->nsecsElapsed() / 1e9, 0.001);
@@ -1709,28 +1746,111 @@ void BadSectorsDialog::startScan()
             m_thread->wait();
             m_thread = nullptr;
             m_worker = nullptr;
-            m_bad = bad;
-            m_logical = logical;
-            m_progress->setVisible(false);
-            const int slow = m_map->data().slowAreas();
-            const QString slowNote = slow == 0 ? QString()
-                : QStringLiteral(" ") + tr("%n area(s) read slowly. Slow spots often turn into bad sectors later, so keep a backup.", nullptr, slow);
-            if (!completed)
-                m_status->setText(tr("Stopped. Bad sectors found so far: %1").arg(bad.size()) + slowNote);
-            else if (bad.isEmpty() && slow == 0)
-                m_status->setText(tr("Done. Every sector reads fine."));
-            else if (bad.isEmpty())
-                m_status->setText(tr("Done. Every sector can be read.") + slowNote);
-            else
-                m_status->setText(tr("Done. %1 can't be read.").arg(sectors(bad.size())) + slowNote);
-            showFound();
-            setRunning(false);
+            scanFinished(completed, bad, logical);
         });
         m_progress->setValue(0);
         m_progress->setVisible(true);
         m_thread->start();
     });
     m_udisks->openDevice(m_disk, false, true);
+}
+
+void BadSectorsDialog::scanFinished(bool completed, const QVector<quint64> &bad, int logical)
+{
+    m_bad = bad;
+    m_logical = logical;
+    m_progress->setVisible(false);
+    // Only a whole drive's reads say what's slow for it.
+    m_slow = completed ? slowRanges(m_slowReads, m_map->data()) : QVector<QPair<quint64, quint64>>();
+    const int slow = m_map->data().slowAreas();
+    QString slowNote = slow == 0 ? QString()
+        : QStringLiteral(" ") + tr("%n area(s) read slowly. Slow spots often turn into bad sectors later, so keep a backup.", nullptr, slow);
+    if (isSsd() && !m_slow.isEmpty())
+        slowNote += QStringLiteral(" ") + tr("On an SSD, old data that has faded reads slowly too: Refresh Slow Areas writes it back fresh.");
+    if (!completed)
+        m_status->setText(tr("Stopped. Bad sectors found so far: %1").arg(bad.size()) + slowNote);
+    else if (bad.isEmpty() && slow == 0)
+        m_status->setText(tr("Done. Every sector reads fine."));
+    else if (bad.isEmpty())
+        m_status->setText(tr("Done. Every sector can be read.") + slowNote);
+    else
+        m_status->setText(tr("Done. %1 can't be read.").arg(sectors(bad.size())) + slowNote);
+    showFound();
+    setRunning(false);
+}
+
+void BadSectorsDialog::startRefresh()
+{
+    if (m_slow.isEmpty() || m_disk.isSystem || m_running)
+        return;
+    quint64 bytes = 0;
+    for (const auto &range : std::as_const(m_slow))
+        bytes += range.second;
+    QStringList mounted;
+    for (const Volume &v : m_disk.volumes) {
+        if (!v.mounts().isEmpty())
+            mounted << volumeTitle(v);
+    }
+    QString question = tr("Refresh %1 that read slowly on %2?").arg(formatSize(bytes), diskTitle(m_disk));
+    if (!mounted.isEmpty())
+        question += QStringLiteral("\n\n") + tr("These get unmounted first: %1").arg(mounted.join(QStringLiteral(", ")));
+    QMessageBox confirm(QMessageBox::Warning, tr("Refresh Slow Areas"), question, QMessageBox::Cancel, this);
+    confirm.setInformativeText(tr("This is experimental. Each slow piece is read and written back unchanged, which makes faded data on an "
+                                  "SSD fresh again, and it uses a little of the drive's writing life. If the power goes in the middle of "
+                                  "a piece, that piece can be damaged: keep a backup, and on a laptop, plug it in. Pieces that can't be "
+                                  "read are left alone (that's what Repair is for)."));
+    QAbstractButton *go = confirm.addButton(tr("Refresh"), QMessageBox::AcceptRole);
+    confirm.setDefaultButton(QMessageBox::Cancel);
+    confirm.exec();
+    if (confirm.clickedButton() != go)
+        return;
+
+    setRunning(true);
+    m_status->setText(tr("Waiting for permission…"));
+    const QVector<QPair<quint64, quint64>> ranges = m_slow;
+    m_openConn = connect(m_udisks, &UDisks::deviceOpened, this, [this, ranges](const QString &path, int fd) {
+        if (path != m_disk.blockPath)
+            return;
+        disconnect(m_openConn);
+        if (fd < 0) {
+            m_status->setText(tr("Couldn't open the drive for writing."));
+            setRunning(false);
+            return;
+        }
+        auto *refresh = new SlowRefresh(fd, ranges);
+        m_worker = refresh;
+        m_thread = new QThread(this);
+        refresh->moveToThread(m_thread);
+        connect(m_thread, &QThread::started, refresh, &SlowRefresh::run);
+        connect(m_thread, &QThread::finished, refresh, &QObject::deleteLater);
+        connect(refresh, &SlowRefresh::progress, this, [this](quint64 done, quint64 total) {
+            m_progress->setValue(int(done * 1000 / std::max<quint64>(total, 1)));
+            m_status->setText(tr("Refreshed %1 of %2…").arg(formatSize(done), formatSize(total)));
+        });
+        connect(refresh, &SlowRefresh::finished, this, [this](const RefreshResult &r) {
+            qCInfo(lcOps).noquote() << "Slow area refresh:" << r.bytes << "bytes," << r.unreadable << "unreadable, before" << r.beforeMs << "ms after"
+                                    << r.afterMs << "ms" << r.error;
+            m_thread->quit();
+            m_thread->wait();
+            m_thread = nullptr;
+            m_worker = nullptr;
+            m_progress->setVisible(false);
+            QString text = r.error.isEmpty() ? tr("Refreshed %1.").arg(formatSize(r.bytes)) : tr("%1, after %2.").arg(r.error, formatSize(r.bytes));
+            if (r.beforeMs > 0)
+                text += QLatin1Char(' ') + tr("A MiB took %1 ms to read before, and %2 ms after.")
+                                               .arg(QLocale().toString(r.beforeMs, 'f', 1), QLocale().toString(r.afterMs, 'f', 1));
+            if (r.unreadable > 0)
+                text += QLatin1Char(' ') + tr("%n piece(s) couldn't be read and were left alone: scan again, then Repair.", nullptr, r.unreadable);
+            m_status->setText(text);
+            m_slow.clear();
+            setRunning(false);
+            QMessageBox::information(this, tr("Refresh Slow Areas"), text);
+        });
+        m_progress->setValue(0);
+        m_progress->setVisible(true);
+        m_thread->start();
+    });
+    m_udisks->openDevice(m_disk, true, false, true);
 }
 
 void BadSectorsDialog::startRepair()

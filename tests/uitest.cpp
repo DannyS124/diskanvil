@@ -1773,6 +1773,102 @@ void stickCheck()
     cleanUpLoop(udisks, loopPath);
 }
 
+// Refresh Slow Areas on a loop device standing in for an SSD, after a scan whose reads are
+// given: two slow pieces. As root they're written back and the image is byte for byte the same;
+// as the user, opening the drive for writing is refused and the window says so.
+void slowAreaRefresh()
+{
+    const bool asRoot = geteuid() == 0;
+    QTemporaryDir dir;
+    const QString image = dir.filePath(QStringLiteral("ssd.img"));
+    {
+        QFile f(image);
+        if (f.open(QIODevice::WriteOnly)) {
+            QByteArray block(1024 * 1024, '\0');
+            for (int m = 0; m < 32; ++m) {
+                for (qsizetype i = 0; i < block.size(); ++i)
+                    block[i] = char((i * 7 + m * 13) & 0xFF);
+                f.write(block);
+            }
+        }
+    }
+    const auto digest = [&image] {
+        QFile f(image);
+        return f.open(QIODevice::ReadOnly) ? QCryptographicHash::hash(f.readAll(), QCryptographicHash::Sha256) : QByteArray();
+    };
+    const QByteArray before = digest();
+    QFile backing(image);
+    QString loopPath;
+    if (backing.open(QIODevice::ReadWrite)) {
+        QDBusMessage call = QDBusMessage::createMethodCall(QStringLiteral("org.freedesktop.UDisks2"), QStringLiteral("/org/freedesktop/UDisks2/Manager"),
+                                                           QStringLiteral("org.freedesktop.UDisks2.Manager"), QStringLiteral("LoopSetup"));
+        call << QVariant::fromValue(QDBusUnixFileDescriptor(backing.handle())) << QVariantMap{{QStringLiteral("auth.no_user_interaction"), true}};
+        loopPath = QDBusConnection::systemBus().call(call, QDBus::Block, 30000).arguments().value(0).value<QDBusObjectPath>().path();
+        backing.close();
+    }
+    report(!loopPath.isEmpty(), QStringLiteral("SSD refresh: a loop device stands in for the SSD"));
+    if (loopPath.isEmpty())
+        return;
+    UDisks udisks;
+    udisks.setInteractive(false);
+    const Disk *ssd = nullptr;
+    waitUntil([&] {
+        udisks.refresh();
+        ssd = udisks.diskByPath(loopPath);
+        return ssd != nullptr;
+    }, 15000);
+    if (!ssd)
+        return;
+    QStringList boxes;
+    Answerer answerer;
+    answerer.answer = [&](QWidget *modal) {
+        if (auto *box = qobject_cast<QMessageBox *>(modal)) {
+            boxes << box->text();
+            for (QAbstractButton *b : box->buttons()) {
+                if (b->text() == QLatin1String("Refresh")) {
+                    b->click();
+                    return true;
+                }
+            }
+            box->accept();
+            return true;
+        }
+        return false;
+    };
+    BadSectorsDialog::loopIsSsdForTest = true;
+    {
+        BadSectorsDialog dialog(&udisks, *ssd);
+        dialog.show();
+        QVector<ReadSample> samples;
+        for (quint64 off = 0; off < 32ull * 1024 * 1024; off += 1024 * 1024)
+            samples.append({off, 1024 * 1024, quint32(off == 3 * 1024 * 1024 || off == 20 * 1024 * 1024 ? 250 : 2), true});
+        dialog.showScanForTest(samples);
+        QPushButton *refresh = dialog.findChild<QPushButton *>(QStringLiteral("refresh"));
+        report(refresh && refresh->isVisibleTo(&dialog) && refresh->isEnabled(), QStringLiteral("SSD refresh: after a scan with slow pieces, it's offered"));
+        if (refresh)
+            refresh->click();
+        if (asRoot) {
+            waitUntil([&] { return std::any_of(boxes.cbegin(), boxes.cend(), [](const QString &b) { return b.startsWith(QLatin1String("Refreshed")); }); }, 60000);
+            report(std::any_of(boxes.cbegin(), boxes.cend(), [](const QString &b) { return b.startsWith(QLatin1String("Refreshed 2")); }),
+                   QStringLiteral("SSD refresh: the two slow MiB are refreshed, and it says how fast they read before and after"),
+                   boxes.join(QStringLiteral(" | ")).left(300));
+        } else {
+            QLabel *status = nullptr;
+            waitUntil([&] {
+                for (QLabel *l : dialog.findChildren<QLabel *>()) {
+                    if (l->text().contains(QLatin1String("Couldn't open the drive for writing")))
+                        status = l;
+                }
+                return status != nullptr;
+            }, 60000);
+            report(status != nullptr, QStringLiteral("SSD refresh: as the user without a password prompt, it can't open the drive and says so"));
+        }
+    }
+    BadSectorsDialog::loopIsSsdForTest = false;
+    cleanUpLoop(udisks, loopPath);
+    report(digest() == before, QStringLiteral("SSD refresh: the drive holds exactly what it did"));
+}
+
 // Format as an SD Card on a 3 GB loop device standing in for a card. As root: the card gets one
 // FAT32 partition 4 MiB in, with its name. As the user: writing to a drive directly needs the
 // admin password, so without a prompt it's refused, and the window says so.
@@ -4328,7 +4424,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},
@@ -4373,7 +4469,7 @@ int main(int argc, char *argv[])
     }
     // As root, the ones that make their own loop device can run by themselves.
     if (!only.isEmpty()) {
-        const QVector<QPair<const char *, void (*)()>> alone = {{"stickcheck", stickCheck}, {"sdcard", sdCardFormat}, {"stopwipe", stopWipe}};
+        const QVector<QPair<const char *, void (*)()>> alone = {{"stickcheck", stickCheck}, {"sdcard", sdCardFormat}, {"refresh", slowAreaRefresh}, {"stopwipe", stopWipe}};
         for (const auto &[name, run] : alone) {
             if (only.contains(QLatin1String(name)))
                 run();
@@ -4467,6 +4563,7 @@ int main(int argc, char *argv[])
     raidBanner();
     stickCheck();
     sdCardFormat();
+    slowAreaRefresh();
 
     out << (failures ? QStringLiteral("%1 step(s) failed").arg(failures) : QStringLiteral("All steps passed")) << Qt::endl;
     return failures ? 1 : 0;

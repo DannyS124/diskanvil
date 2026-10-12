@@ -70,3 +70,42 @@ private:
 };
 
 Q_DECLARE_METATYPE(RepairResult)
+
+// The pieces a scan read slowly, slow for this drive (BlockMapData::isSlow), neighbours joined:
+// (offset, length) each.
+QVector<QPair<quint64, quint64>> slowRanges(const QVector<ReadSample> &samples, const BlockMapData &map);
+
+struct RefreshResult {
+    quint64 bytes = 0;        // read and written back
+    int unreadable = 0;       // pieces that couldn't be read: left alone, for Repair
+    double beforeMs = 0;      // the average read of a MiB before, and after
+    double afterMs = 0;
+    QString error;
+};
+
+// Experimental: an SSD's old data can get slow to read as its cells' charge fades (some
+// drives, like Samsung's 840 EVO, were known for it); writing the same data back makes it
+// fresh. Each slow piece is read and written back unchanged, then timed again. Pieces that
+// can't be read are left as they are. Needs an O_DIRECT, read-write fd on an unmounted device.
+class SlowRefresh : public QObject
+{
+    Q_OBJECT
+public:
+    SlowRefresh(int fd, const QVector<QPair<quint64, quint64>> &ranges);
+    ~SlowRefresh() override;
+    void cancel() { m_cancel = true; }
+
+public slots:
+    void run();
+
+signals:
+    void progress(quint64 done, quint64 total);
+    void finished(const RefreshResult &result);
+
+private:
+    int m_fd;
+    QVector<QPair<quint64, quint64>> m_ranges;
+    std::atomic<bool> m_cancel{false};
+};
+
+Q_DECLARE_METATYPE(RefreshResult)

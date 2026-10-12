@@ -5,6 +5,7 @@
 
 #include "blockio.h"
 
+#include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QSet>
 
@@ -170,5 +171,87 @@ void SectorRepair::run()
         }
         emit progress(i + 1, int(blocks.size()));
     }
+    emit finished(r);
+}
+
+QVector<QPair<quint64, quint64>> slowRanges(const QVector<ReadSample> &samples, const BlockMapData &map)
+{
+    QVector<ReadSample> slow;
+    for (const ReadSample &s : samples) {
+        if (s.readable && map.isSlow(s.ms))
+            slow << s;
+    }
+    std::sort(slow.begin(), slow.end(), [](const ReadSample &a, const ReadSample &b) { return a.offset < b.offset; });
+    QVector<QPair<quint64, quint64>> out;
+    for (const ReadSample &s : slow) {
+        if (!out.isEmpty() && out.last().first + out.last().second >= s.offset)
+            out.last().second = std::max(out.last().second, s.offset + s.length - out.last().first);
+        else
+            out.append({s.offset, s.length});
+    }
+    return out;
+}
+
+SlowRefresh::SlowRefresh(int fd, const QVector<QPair<quint64, quint64>> &ranges)
+    : m_fd(fd)
+    , m_ranges(ranges)
+{
+    qRegisterMetaType<RefreshResult>();
+}
+
+SlowRefresh::~SlowRefresh()
+{
+    if (m_fd >= 0)
+        blockio::close(m_fd);
+}
+
+void SlowRefresh::run()
+{
+    RefreshResult r;
+    quint64 total = 0;
+    for (const auto &range : std::as_const(m_ranges))
+        total += range.second;
+    blockio::Buffer buf = alignedBuffer(kChunk);
+    if (!buf) {
+        r.error = tr("Out of memory");
+        emit finished(r);
+        return;
+    }
+    QElapsedTimer clock;
+    double before = 0, after = 0;
+    int timed = 0;
+    quint64 done = 0;
+    for (const auto &[start, length] : std::as_const(m_ranges)) {
+        for (quint64 off = start; off < start + length && !m_cancel; off += kChunk) {
+            const quint64 len = std::min(kChunk, start + length - off);
+            clock.start();
+            if (!readAt(m_fd, buf.get(), len, off)) {
+                ++r.unreadable; // not this one's job: Repair handles what can't be read
+                done += len;
+                continue;
+            }
+            const double readMs = double(clock.nsecsElapsed()) / 1e6;
+            if (!blockio::writeAt(m_fd, buf.get(), len, off) || !blockio::flush(m_fd)) {
+                r.error = tr("Writing at %1 failed: %2").arg(off).arg(QString::fromLocal8Bit(strerror(errno)));
+                emit finished(r);
+                return;
+            }
+            clock.start();
+            if (readAt(m_fd, buf.get(), len, off)) {
+                after += double(clock.nsecsElapsed()) / 1e6 * double(kChunk) / double(len);
+                before += readMs * double(kChunk) / double(len);
+                ++timed;
+            }
+            r.bytes += len;
+            done += len;
+            emit progress(done, total);
+        }
+    }
+    if (timed > 0) {
+        r.beforeMs = before / timed;
+        r.afterMs = after / timed;
+    }
+    if (m_cancel)
+        r.error = tr("Stopped");
     emit finished(r);
 }

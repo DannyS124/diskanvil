@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "blockmapdata.h"
 #include "firmware.h"
 #include "isomode.h"
 #include "udisks.h"
@@ -175,13 +176,19 @@ class BadSectorsDialog : public QDialog
 public:
     BadSectorsDialog(UDisks *udisks, const Disk &disk, QWidget *parent = nullptr);
     ~BadSectorsDialog() override;
+    // For the tests: a scan's reads, as if it had just finished; and loop devices count as SSDs.
+    void showScanForTest(const QVector<ReadSample> &samples);
+    static inline bool loopIsSsdForTest = false;
 
 protected:
     void reject() override;
 
 private:
     void startScan();
+    void scanFinished(bool completed, const QVector<quint64> &bad, int logical);
     void startRepair();
+    void startRefresh();
+    bool isSsd() const;
     void stop();
     void setRunning(bool running);
     void showFound();
@@ -195,6 +202,9 @@ private:
     QLabel *m_repairNote;
     QPushButton *m_scan;
     QPushButton *m_repair;
+    QPushButton *m_refresh; // SSDs: write slow pieces back (experimental)
+    QVector<ReadSample> m_slowReads; // reads that took long enough to maybe be slow for this drive
+    QVector<QPair<quint64, quint64>> m_slow; // after the scan: the pieces that were
     QVector<quint64> m_bad;
     int m_logical = 512;
     QThread *m_thread = nullptr;
