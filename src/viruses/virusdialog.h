@@ -138,4 +138,5 @@ private:
     QThread *m_thread = nullptr;
     bool m_busy = false;
     int m_found = 0;
+    int m_compressed = 0; // files Windows keeps compressed, which couldn't be read
 };

@@ -101,6 +101,7 @@ add_library(diskanvil-core STATIC
     src/tools/winre.cpp src/tools/winre.h
     src/tools/testboot.cpp src/tools/testboot.h
     src/viruses/peinfo.cpp src/viruses/peinfo.h
+    src/viruses/wof.cpp src/viruses/wof.h
     src/backup/newids.cpp src/backup/newids.h
     src/lostfiles/filetypes.cpp src/lostfiles/filetypes.h
     src/usb/checksums.cpp src/usb/checksums.h

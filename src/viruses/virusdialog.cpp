@@ -712,6 +712,8 @@ void VirusDialog::runScan(const QStringList &alsoScan)
         m_phase->setText(tr("Scanning: %L1 of %L2 files").arg(done).arg(total));
     });
     connect(m_job, &virus::Scan::found, this, &VirusDialog::addHit);
+    m_compressed = 0;
+    connect(m_job, &virus::Scan::compressedByWindows, this, [this](int count) { m_compressed = count; });
     connect(m_job, &virus::Scan::finished, this, &VirusDialog::scanFinished);
     m_thread = startOnThread(this, m_job);
 }
@@ -864,6 +866,9 @@ void VirusDialog::scanFinished(bool completed, int scanned, int unreadable, cons
         text = scanned > 0 ? tr("Done: found %n thing(s) in %L1 files.", nullptr, m_found).arg(scanned) : tr("Done: found %n thing(s).", nullptr, m_found);
     if (unreadable > 0)
         text += QLatin1Char(' ') + tr("%n file(s) couldn't be read: another user's or the system's, or in use.", nullptr, unreadable);
+    if (m_compressed > 0)
+        text += QLatin1Char(' ') + tr("%n of Windows' own file(s) are kept compressed by Windows (CompactOS), which Linux can't read: "
+                                      "Microsoft Defender, in Windows, checks those.", nullptr, m_compressed);
     int odd = 0;
     for (const startup::Entry &e : std::as_const(m_startup.entries))
         odd += e.severity > 0;

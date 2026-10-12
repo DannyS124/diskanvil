@@ -3,6 +3,8 @@
 
 #include "virusscan.h"
 
+#include "wof.h"
+
 #include "applog.h"
 
 #include <QCoreApplication>
@@ -386,7 +388,7 @@ void Scan::runClamAv(const QString &list, qint64 total)
     }
     Q_EMIT phase(tr("Loading the virus list (this takes a while)"));
     quint64 done = 0;
-    int hits = 0, unreadable = 0;
+    int hits = 0, unreadable = 0, compressed = 0;
     QElapsedTimer sinceReport;
     sinceReport.start();
     QByteArray pending;
@@ -412,7 +414,10 @@ void Scan::runClamAv(const QString &list, qint64 total)
                 Q_EMIT phase(tr("Scanning"));
             ++done;
             if (kind == ClamLine::Unreadable) {
-                ++unreadable;
+                if (wof::compressed(QDir::fromNativeSeparators(d.path)))
+                    ++compressed;
+                else
+                    ++unreadable;
                 qCDebug(lcOps).noquote() << "Scan for Viruses: couldn't read" << line;
             } else if (kind == ClamLine::Found) {
                 d.path = QDir::fromNativeSeparators(d.path);
@@ -434,7 +439,9 @@ void Scan::runClamAv(const QString &list, qint64 total)
                         tr("ClamAV stopped with an error: %1").arg(errors.section(QLatin1Char('\n'), -3).simplified()));
         return;
     }
-    qCInfo(lcOps).noquote() << "Scan for Viruses: done," << done << "files," << hits << "found," << unreadable << "unreadable";
+    qCInfo(lcOps).noquote() << "Scan for Viruses: done," << done << "files," << hits << "found," << unreadable << "unreadable," << compressed
+                            << "kept compressed by Windows";
+    Q_EMIT compressedByWindows(compressed);
     Q_EMIT finished(true, int(done), unreadable, QString());
 }
 

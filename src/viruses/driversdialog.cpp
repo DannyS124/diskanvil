@@ -7,6 +7,7 @@
 #include "authenticode.h"
 #include "dialogs.h"
 #include "peinfo.h"
+#include "wof.h"
 
 #include <QCheckBox>
 #include <QDir>
@@ -100,6 +101,12 @@ void DriversDialog::load()
                 // maker had Microsoft test are signed by its "Hardware Compatibility Publisher").
                 r.windowsOwn = r.maker.startsWith(QLatin1String("Microsoft"))
                             || (r.signer.startsWith(QLatin1String("Microsoft Windows")) && !r.signer.contains(QLatin1String("Hardware Compatibility")));
+                // Kept compressed by Windows (CompactOS), which only does that to its own files:
+                // Linux can't read them, but whose they are is known.
+                if (data.isEmpty() && file.size() > 0 && wof::compressed(e.file)) {
+                    r.maker = tr("Windows (kept compressed)");
+                    r.windowsOwn = true;
+                }
                 if (r.maker.isEmpty())
                     r.maker = r.signer;
             }

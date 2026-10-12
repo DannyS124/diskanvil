@@ -87,6 +87,9 @@ Q_SIGNALS:
     void progress(quint64 done, quint64 total);
     void found(const virus::Detection &detection);
     // unreadable: files the scanner couldn't open (another user's, the system's, in use)
+    // Of the files that couldn't be read, the ones Windows keeps compressed (wof.h): its own
+    // files, which Linux can't read. Before finished().
+    void compressedByWindows(int count);
     void finished(bool completed, int scanned, int unreadable, const QString &problem);
 
 private:
