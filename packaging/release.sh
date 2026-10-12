@@ -111,7 +111,7 @@ case "$cmd" in
     # The file-based suites again with AddressSanitizer and UBSan, which catch memory errors
     # that don't crash. Last, because building it takes a while and sudo's login runs out.
     cmake -S . -B build-asan -DDISKANVIL_SANITIZE=ON -DCMAKE_BUILD_TYPE=Debug >/dev/null
-    cmake --build build-asan -j"$(awk '/MemTotal/ {j = int($2 / 2097152); print j < 1 ? 1 : j}' /proc/meminfo)" --target diskanvil-selftest >/dev/null
+    cmake --build build-asan -j"$(awk '/MemAvailable/ {j = int($2 / 1048576); print j < 1 ? 1 : j}' /proc/meminfo)" --target diskanvil-selftest >/dev/null
     for suite in addons gpt copy usage backup rescuemap catalog fuzz health jobs recover rescueusb stickcheck images isomode windows lostfiles viruses registry startup boot newids fat32 luks savefiles clonezilla; do
         run_tests asan-$suite env ASAN_OPTIONS=detect_leaks=0 ./build-asan/diskanvil-selftest --$suite
     done

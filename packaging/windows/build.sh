@@ -21,8 +21,8 @@ fi
 cmake -S "$root" -B "$work/build" -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE="$root/packaging/windows/mingw.cmake" \
     -DDISKANVIL_SYSROOT="$work/sysroot" -DQT_HOST_PATH="$hostqt" >/dev/null
-# At most one compile per 2 GB of memory, so a big build can't run the PC out of it.
-jobs=$(awk '/MemTotal/ {print int($2 / 2097152)}' /proc/meminfo); [ "$jobs" -ge 1 ] || jobs=1
+# One compile per GB of memory that's free right now (each takes up to about 600 MB).
+jobs=$(awk '/MemAvailable/ {print int($2 / 1048576)}' /proc/meminfo); [ "$jobs" -ge 1 ] || jobs=1
 [ "$jobs" -le "$(nproc)" ] || jobs=$(nproc)
 cmake --build "$work/build" -j "$jobs"
 x86_64-w64-mingw32-strip "$work/build/diskanvil.exe"

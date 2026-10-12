@@ -27,8 +27,8 @@ echo "Debian $(cat /etc/debian_version), Qt $(dpkg-query -W -f='${Version}' qt6-
 mkdir -p /src && tar -xf /work/src.tar -C /src
 cmake -S /src -B /build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=/usr >/build.log 2>&1 \
     || { tail -30 /build.log; exit 1; }
-# At most one compile per 2 GB of memory: all 16 at once ran a 16 GB PC out of memory.
-jobs=$(awk '/MemTotal/ {print int($2 / 2097152)}' /proc/meminfo); [ "$jobs" -ge 1 ] || jobs=1
+# One compile per GB of memory that's free right now (each takes up to about 600 MB).
+jobs=$(awk '/MemAvailable/ {print int($2 / 1048576)}' /proc/meminfo); [ "$jobs" -ge 1 ] || jobs=1
 [ "$jobs" -le "$(nproc)" ] || jobs=$(nproc)
 cmake --build /build -j "$jobs" >>/build.log 2>&1 || { grep -E "error" /build.log | head -30; exit 1; }
 echo "build OK, $(grep -c 'warning:' /build.log) warnings"
