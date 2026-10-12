@@ -42,6 +42,7 @@
 #include "jobui.h"
 #include "noticebar.h"
 #include "powerbox.h"
+#include "productkeydialog.h"
 #include "theme.h"
 #include "thememaker.h"
 #include "updates.h"
@@ -642,6 +643,11 @@ void MainWindow::createActions()
             RescueDialog(m_udisks, d->blockPath, this).exec();
     });
 
+    m_productKey = new QAction(themeIcon("dialog-password", "document-encrypt"), tr("Windows Product &Key…"), this);
+    m_productKey->setObjectName(QStringLiteral("productKey"));
+    m_productKey->setToolTip(tr("The key in this PC's firmware, and the ones Windows installs here use: to have before reinstalling"));
+    connect(m_productKey, &QAction::triggered, this, [this] { ProductKeyDialog(m_udisks, this).exec(); });
+
     m_openSets = new QAction(themeIcon("drive-multidisk", "drive-harddisk"), tr("Open RAID, NAS and Dynamic Disks…"), this);
     m_openSets->setObjectName(QStringLiteral("openSets"));
     m_openSets->setToolTip(tr("Drives that belong together (a NAS's, a RAID array's, Windows' dynamic disks), opened read-only"));
@@ -797,10 +803,11 @@ void MainWindow::createActions()
         tools->clear();
         tools->addAction(m_whatHappened);
         tools->addAction(m_openSets);
+        tools->addAction(m_productKey);
         tools->addSeparator();
 #ifdef Q_OS_WIN
         // Quick Fixes' tools, and add-ons (Linux commands), aren't in the Windows version yet.
-        tools->addActions({m_virusScan, m_usage, m_cleanup, m_optimize, m_snapshots});
+        tools->addActions({m_virusScan, m_productKey, m_usage, m_cleanup, m_optimize, m_snapshots});
         return;
 #endif
         tools->addAction(themeIcon("tools-wizard", "system-run"), tr("&Quick Fixes…"), this, [this] {

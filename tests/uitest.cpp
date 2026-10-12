@@ -37,6 +37,8 @@
 #include "../src/app/noticebar.h"
 #include "../src/drives/typedialog.h"
 #include "../src/viruses/virusdialog.h"
+#include "../src/viruses/windowspicker.h"
+#include "../src/viruses/productkeydialog.h"
 #include "../src/backup/newids.h"
 #include "../src/backup/newidsdialog.h"
 #include "../src/viruses/hashlookup.h"
@@ -1993,6 +1995,37 @@ void stickCheck()
            QStringLiteral("an MBR with one FAT32 partition"));
 
     cleanUpLoop(udisks, loopPath);
+}
+
+// Windows Product Key on this PC (no MSDM table, no Windows mounted): it says so in plain words,
+// and Look in Another Windows asks which.
+void productKeyWindow()
+{
+    UDisks udisks;
+    udisks.setInteractive(false);
+    QStringList asked;
+    Answerer answerer;
+    answerer.answer = [&](QWidget *modal) {
+        if (auto *picker = qobject_cast<WindowsPicker *>(modal)) {
+            asked << picker->windowTitle();
+            picker->reject();
+            return true;
+        }
+        return false;
+    };
+    ProductKeyDialog dialog(&udisks);
+    dialog.show();
+    QApplication::processEvents();
+    auto *firmware = dialog.findChild<QLabel *>(QStringLiteral("firmwareKey"));
+    const bool msdm = QFile::exists(QStringLiteral("/sys/firmware/acpi/tables/MSDM"));
+    report(firmware && (msdm ? !firmware->text().isEmpty() : firmware->text().startsWith(QLatin1String("None"))),
+           QStringLiteral("product key: the firmware's key, or why there's none"), firmware ? firmware->text() : QString());
+    if (QPushButton *look = findButton(&dialog, QStringLiteral("Look in Another Windows…")))
+        look->click();
+    waitUntil([&] { return !asked.isEmpty(); }, 5000);
+    report(asked.value(0) == QLatin1String("Which Windows?"), QStringLiteral("product key: Look in Another Windows asks which"));
+    if (qEnvironmentVariableIsSet("DISKFORGE_UITEST_SHOTS"))
+        dialog.grab().save(qEnvironmentVariable("DISKFORGE_UITEST_SHOTS") + QStringLiteral("/productkey.png"));
 }
 
 // Unlocking as VeraCrypt: the window's answers become UDisks' unlock options, with the types its
@@ -4729,7 +4762,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},

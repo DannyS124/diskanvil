@@ -16,6 +16,7 @@
 #include "../src/health/drivefacts.h"
 #include "../src/health/farm.h"
 #include "../src/drives/closedsets.h"
+#include "../src/viruses/productkey.h"
 #include "../src/drives/blockio.h"
 #include "../src/health/surfacescan.h"
 #include "../src/tools/systemd.h"
@@ -376,6 +377,57 @@ void closedSets()
            QStringLiteral("closed sets: a program that isn't here is named"));
 }
 
+// Windows product keys: the firmware's MSDM table, and the registry's encoded one.
+void productKeys()
+{
+    QByteArray msdm(56, '\0');
+    msdm.replace(0, 4, "MSDM");
+    msdm += "ABCDE-FGH2J-KLMN3-PQRS4-TUVW5";
+    report(productkey::fromMsdm(msdm) == QLatin1String("ABCDE-FGH2J-KLMN3-PQRS4-TUVW5") && productkey::fromMsdm(QByteArray("MSDM")).isEmpty()
+               && productkey::fromMsdm(QByteArray(90, 'x')).isEmpty(),
+           QStringLiteral("product key: the firmware's (MSDM) is read where the table keeps it"));
+    // Encoded the way Windows 8 and later keep it: base 24, the "N" taken out and its place in
+    // the first character, bit 3 of the last byte set.
+    const auto encode = [](const QString &key) {
+        static const QString chars = QStringLiteral("BCDFGHJKMPQRTVWXY2346789");
+        QString plain = key;
+        plain.remove(QLatin1Char('-'));
+        const int n = int(plain.indexOf(QLatin1Char('N')));
+        plain.remove(n, 1);
+        plain.prepend(chars.at(n));
+        QByteArray bytes(15, '\0');
+        for (const QChar c : plain) { // the number times 24, plus the digit
+            int carry = int(chars.indexOf(c));
+            for (int i = 0; i < 15; ++i) {
+                const int v = quint8(bytes[i]) * 24 + carry;
+                bytes[i] = char(v & 0xFF);
+                carry = v >> 8;
+            }
+        }
+        bytes[14] = char(quint8(bytes[14]) | 0x08);
+        QByteArray value(164, '\0');
+        value.replace(52, 15, bytes);
+        return value;
+    };
+    bool all = true;
+    QString wrong;
+    for (const QString &key : {QStringLiteral("VK7JG-NPHTM-C97JM-9MPGT-3V66T"), QStringLiteral("TX9XD-98N7V-6WMQ6-BX7FG-H8Q99"),
+                               QStringLiteral("NBCDF-GHJKM-PQRTV-WXY23-46789"), QStringLiteral("99999-99999-99999-9999N-99999")}) { // the N can be 0 to 23 in
+        const QString back = productkey::decode(encode(key));
+        if (back != key) {
+            all = false;
+            wrong += key + QStringLiteral(" -> ") + back + QLatin1Char(' ');
+        }
+    }
+    report(all && productkey::isGeneric(QStringLiteral("vk7jg-nphtm-c97jm-9mpgt-3v66t")) && !productkey::isGeneric(QStringLiteral("ABCDE-FGH2J-KLMN3-PQRS4-TUVW5"))
+               && productkey::decode(QByteArray(20, '\0')).isEmpty(),
+           QStringLiteral("product key: the registry's key is decoded, the N wherever it is, and generic ones are told apart"), wrong);
+    // The test SOFTWARE hive (made in Windows with our own keys) has no key: it says so.
+    const productkey::Installed none = productkey::fromHive(QStringLiteral(SOURCE_DIR "/tests/data/registry/software.hiv"));
+    report(none.key.isEmpty() && none.problem.contains(QLatin1String("no key")), QStringLiteral("product key: a registry without one says so"),
+           none.problem);
+}
+
 void healthTests()
 {
     hiddenArea();
@@ -384,6 +436,7 @@ void healthTests()
     farmHistory();
     slowRefresh();
     closedSets();
+    productKeys();
     rawPages();
     QTemporaryDir config;
     qputenv("XDG_CONFIG_HOME", QFile::encodeName(config.path()));
