@@ -17,6 +17,7 @@
 #include "../src/health/farm.h"
 #include "../src/drives/closedsets.h"
 #include "../src/viruses/productkey.h"
+#include "../src/viruses/peinfo.h"
 #include "../src/drives/blockio.h"
 #include "../src/health/surfacescan.h"
 #include "../src/tools/systemd.h"
@@ -428,6 +429,27 @@ void productKeys()
            none.problem);
 }
 
+// A Windows program's version strings, from our own tiny EXE (tests/data/pe/make.sh).
+void peVersions()
+{
+    QFile exe(QStringLiteral(SOURCE_DIR "/tests/data/pe/versioned.exe"));
+    const QByteArray data = exe.open(QIODevice::ReadOnly) ? exe.readAll() : QByteArray();
+    const QHash<QString, QString> v = peinfo::versionStrings(data);
+    report(v.value(QStringLiteral("CompanyName")) == QLatin1String("DiskForge Test Company")
+               && v.value(QStringLiteral("FileDescription")) == QStringLiteral("Grüße driver for tests") && v.value(QStringLiteral("FileVersion")) == QLatin1String("3.1.4.1"),
+           QStringLiteral("PE: the company and description in a program's version resource"),
+           QStringList(v.keys()).join(QLatin1Char(',')) + QStringLiteral(" ") + v.value(QStringLiteral("FileDescription")));
+    // Cut short or scribbled on, it's read without going out of bounds (ASan watches this);
+    // something that isn't a program gives nothing.
+    peinfo::versionStrings(data.left(data.size() / 2));
+    QByteArray broken = data;
+    for (qsizetype i = 0x200; i < broken.size(); i += 37)
+        broken[i] = char(0xFF);
+    peinfo::versionStrings(broken);
+    report(peinfo::versionStrings(QByteArray("MZ")).isEmpty() && peinfo::versionStrings(QByteArray(4096, '\0')).isEmpty(),
+           QStringLiteral("PE: damaged files are read within bounds, and what isn't a program gives nothing"));
+}
+
 void healthTests()
 {
     hiddenArea();
@@ -437,6 +459,7 @@ void healthTests()
     slowRefresh();
     closedSets();
     productKeys();
+    peVersions();
     rawPages();
     QTemporaryDir config;
     qputenv("XDG_CONFIG_HOME", QFile::encodeName(config.path()));

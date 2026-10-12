@@ -116,6 +116,33 @@
     </message>
 </context>
 <context>
+    <name>DriversDialog</name>
+    <message numerus="yes">
+        <location filename="../src/viruses/driversdialog.cpp" line="154"/>
+        <source>%n driver(s) and service(s)</source>
+        <translation>
+            <numerusform>%n driver and service</numerusform>
+            <numerusform>%n drivers and services</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/viruses/driversdialog.cpp" line="154"/>
+        <source>%n of Windows&apos; own hidden</source>
+        <translation>
+            <numerusform>%n of Windows' own hidden</numerusform>
+            <numerusform>%n of Windows' own hidden</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/viruses/driversdialog.cpp" line="208"/>
+        <source>Switched off %n. The backup, and how to undo it, is in %1.</source>
+        <translation>
+            <numerusform>Switched off %n. The backup, and how to undo it, is in %1.</numerusform>
+            <numerusform>Switched off %n. The backup, and how to undo it, is in %1.</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
     <name>LostFilesDialog</name>
     <message numerus="yes">
         <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1394"/>
@@ -200,7 +227,7 @@
 <context>
     <name>MainWindow</name>
     <message numerus="yes">
-        <location filename="../src/app/mainwindow.cpp" line="1160"/>
+        <location filename="../src/app/mainwindow.cpp" line="1174"/>
         <source>%n more drive(s) need a look; their health is in the Status column.</source>
         <translation>
             <numerusform>%n more drive need a look; their health is in the Status column.</numerusform>
@@ -208,7 +235,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/app/mainwindow.cpp" line="2439"/>
+        <location filename="../src/app/mainwindow.cpp" line="2453"/>
         <source>%n add-on command(s) still running. Stop them and quit?</source>
         <translation>
             <numerusform>%n add-on command still running. Stop them and quit?</numerusform>

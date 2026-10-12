@@ -90,6 +90,7 @@ add_library(diskforge-core STATIC
     src/viruses/efivars.cpp src/viruses/efivars.h
     src/viruses/bootcheck.cpp src/viruses/bootcheck.h
     src/viruses/productkey.cpp src/viruses/productkey.h
+    src/viruses/peinfo.cpp src/viruses/peinfo.h
     src/backup/newids.cpp src/backup/newids.h
     src/lostfiles/filetypes.cpp src/lostfiles/filetypes.h
     src/usb/checksums.cpp src/usb/checksums.h
@@ -181,6 +182,7 @@ add_library(diskforge-ui STATIC
     src/viruses/hashlookup.cpp src/viruses/hashlookup.h
     src/viruses/windowspicker.cpp src/viruses/windowspicker.h
     src/viruses/productkeydialog.cpp src/viruses/productkeydialog.h
+    src/viruses/driversdialog.cpp src/viruses/driversdialog.h
     src/backup/newidsdialog.cpp src/backup/newidsdialog.h
     src/tools/systemtools.cpp src/tools/systemtools.h
     src/drives/erasedialog.cpp src/drives/erasedialog.h

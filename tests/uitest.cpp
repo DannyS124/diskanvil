@@ -39,6 +39,7 @@
 #include "../src/viruses/virusdialog.h"
 #include "../src/viruses/windowspicker.h"
 #include "../src/viruses/productkeydialog.h"
+#include "../src/viruses/driversdialog.h"
 #include "../src/backup/newids.h"
 #include "../src/backup/newidsdialog.h"
 #include "../src/viruses/hashlookup.h"
@@ -1995,6 +1996,70 @@ void stickCheck()
            QStringLiteral("an MBR with one FAT32 partition"));
 
     cleanUpLoop(udisks, loopPath);
+}
+
+// Windows Drivers and Services on a pretend Windows (the test hives, and our own tiny program as
+// its driver): the driver shows its maker from its version resource, newest first, and
+// switching it off sets it to Disabled in the SYSTEM hive, with a backup.
+void driversWindow()
+{
+    QTemporaryDir dir;
+    const QString data = QStringLiteral(SOURCE_DIR "/tests/data/");
+    const QString root = dir.filePath(QStringLiteral("drive"));
+    const auto put = [](const QString &path, const QByteArray &bytes) {
+        QDir().mkpath(QFileInfo(path).absolutePath());
+        QFile f(path);
+        return f.open(QIODevice::WriteOnly) && f.write(bytes) == bytes.size();
+    };
+    const auto read = [](const QString &path) {
+        QFile f(path);
+        return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
+    };
+    put(root + QStringLiteral("/Windows/System32/config/SOFTWARE"), read(data + QStringLiteral("registry/software.hiv")));
+    put(root + QStringLiteral("/Windows/System32/config/SYSTEM"), read(data + QStringLiteral("registry/system.hiv")));
+    put(root + QStringLiteral("/Windows/System32/drivers/drv.sys"), read(data + QStringLiteral("pe/versioned.exe")));
+    put(root + QStringLiteral("/Users/Public/svc.exe"), "MZ");
+    put(root + QStringLiteral("/Windows/System32/goodsvc.dll"), "MZ");
+    QStringList boxes;
+    Answerer answerer;
+    answerer.answer = [&](QWidget *modal) {
+        if (auto *box = qobject_cast<QMessageBox *>(modal)) {
+            boxes << box->text();
+            if (QAbstractButton *yes = box->button(QMessageBox::Yes))
+                yes->click();
+            else
+                box->accept();
+            return true;
+        }
+        return false;
+    };
+    DriversDialog dialog(root);
+    dialog.show();
+    auto *list = dialog.findChild<QTreeWidget *>(QStringLiteral("drivers"));
+    waitUntil([&] { return list && list->topLevelItemCount() > 0; }, 30000);
+    QTreeWidgetItem *drv = nullptr;
+    QStringList names;
+    for (int i = 0; list && i < list->topLevelItemCount(); ++i) {
+        names << list->topLevelItem(i)->text(0) + QLatin1Char('/') + list->topLevelItem(i)->text(1);
+        if (list->topLevelItem(i)->text(0) == QLatin1String("Drv"))
+            drv = list->topLevelItem(i);
+    }
+    report(drv && drv->text(1) == QLatin1String("DiskForge Test Company") && drv->text(3) == QLatin1String("Driver") && names.size() >= 3,
+           QStringLiteral("drivers: listed with who made each, from its version resource"), names.join(QStringLiteral(", ")));
+    if (drv) {
+        list->clearSelection();
+        drv->setSelected(true);
+        if (auto *off = dialog.findChild<QPushButton *>(QStringLiteral("switchOff")))
+            off->click();
+    }
+    waitUntil([&] { return boxes.size() >= 2; }, 10000);
+    reg::Hive system;
+    QString error;
+    system.open(root + QStringLiteral("/Windows/System32/config/SYSTEM"), &error);
+    const auto start = system.value(system.key(QStringLiteral("ControlSet001\\Services\\Drv")), QStringLiteral("Start"));
+    const QStringList backups = QDir(root + QStringLiteral("/DiskForge backups")).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    report(start && start->number() == 4 && backups.size() == 1 && boxes.value(1).startsWith(QLatin1String("Switched off 1")),
+           QStringLiteral("drivers: switched off, Disabled in the SYSTEM hive, with a backup"), boxes.join(QStringLiteral(" | ")).left(300));
 }
 
 // Windows Product Key on this PC (no MSDM table, no Windows mounted): it says so in plain words,
@@ -4762,7 +4827,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},

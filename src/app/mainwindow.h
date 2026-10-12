@@ -64,6 +64,7 @@ private:
     QStringList m_closedNoticeKey;
     QAction *m_openSets = nullptr;
     QAction *m_productKey = nullptr;
+    QAction *m_drivers = nullptr;
     void updateJobBars();
     void showNoticesIfAny();
     void stopJob(const QString &jobPath);

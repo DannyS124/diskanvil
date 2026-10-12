@@ -43,6 +43,8 @@
 #include "noticebar.h"
 #include "powerbox.h"
 #include "productkeydialog.h"
+#include "windowspicker.h"
+#include "driversdialog.h"
 #include "theme.h"
 #include "thememaker.h"
 #include "updates.h"
@@ -643,6 +645,16 @@ void MainWindow::createActions()
             RescueDialog(m_udisks, d->blockPath, this).exec();
     });
 
+    m_drivers = new QAction(themeIcon("preferences-system", "system-run"), tr("Windows &Drivers and Services…"), this);
+    m_drivers->setObjectName(QStringLiteral("drivers"));
+    m_drivers->setToolTip(tr("What starts with a Windows, newest first: when it stops starting after an install, switch the newest "
+                             "driver off"));
+    connect(m_drivers, &QAction::triggered, this, [this] {
+        WindowsPicker picker(m_udisks, true, tr("Which Windows? One on a drive is mounted so its drivers can be switched off."), this);
+        if (picker.exec() == QDialog::Accepted)
+            DriversDialog(picker.root(), this).exec();
+    });
+
     m_productKey = new QAction(themeIcon("dialog-password", "document-encrypt"), tr("Windows Product &Key…"), this);
     m_productKey->setObjectName(QStringLiteral("productKey"));
     m_productKey->setToolTip(tr("The key in this PC's firmware, and the ones Windows installs here use: to have before reinstalling"));
@@ -666,7 +678,8 @@ void MainWindow::createActions()
             }
             const QHash<QString, QAction *> actions = {{QStringLiteral("lost-files"), m_findFiles},  {QStringLiteral("rescue-copy"), m_rescue},
                                                        {QStringLiteral("health"), m_health},         {QStringLiteral("recover-partitions"), m_recover},
-                                                       {QStringLiteral("rescue-usb"), m_rescueUsb},  {QStringLiteral("virus-scan"), m_virusScan}};
+                                                       {QStringLiteral("rescue-usb"), m_rescueUsb},  {QStringLiteral("virus-scan"), m_virusScan},
+                                                       {QStringLiteral("drivers"), m_drivers}};
             if (QAction *action = actions.value(tool)) {
                 updateActions();
                 dialog.accept();
@@ -803,11 +816,12 @@ void MainWindow::createActions()
         tools->clear();
         tools->addAction(m_whatHappened);
         tools->addAction(m_openSets);
+        tools->addAction(m_drivers);
         tools->addAction(m_productKey);
         tools->addSeparator();
 #ifdef Q_OS_WIN
         // Quick Fixes' tools, and add-ons (Linux commands), aren't in the Windows version yet.
-        tools->addActions({m_virusScan, m_productKey, m_usage, m_cleanup, m_optimize, m_snapshots});
+        tools->addActions({m_virusScan, m_drivers, m_productKey, m_usage, m_cleanup, m_optimize, m_snapshots});
         return;
 #endif
         tools->addAction(themeIcon("tools-wizard", "system-run"), tr("&Quick Fixes…"), this, [this] {

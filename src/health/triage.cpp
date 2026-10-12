@@ -182,8 +182,9 @@ Advice advise(Symptom symptom, const Drive &d)
         a.dont << tr("Don't reinstall Windows or \"reset this PC\" before your files are safe.");
         a.steps << tr("Make a DiskForge Live stick (on another computer, if this one won't start).")
                 << tr("Start this computer from it, and copy your files to another drive (Find Lost Files lists them all).")
-                << tr("Then see to Windows.");
-        a.tools << QStringLiteral("rescue-usb") << QStringLiteral("lost-files");
+                << tr("Then see to Windows: if it stopped starting just after something was installed, Windows Drivers and Services "
+                      "shows the newest drivers, and switches the suspect off.");
+        a.tools << QStringLiteral("rescue-usb") << QStringLiteral("lost-files") << QStringLiteral("drivers");
         break;
     }
     return a;
