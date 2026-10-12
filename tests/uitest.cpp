@@ -6087,7 +6087,8 @@ void lostFilesThroughWindow()
     dialog.setChangedCopyTarget(onDisk.filePath(QStringLiteral("changed.bin")));
     dialog.hearFromViewer(viewer::encode(changed));
     const bool refused = boxes.size() == 1 && boxes[0].contains(QLatin1String("drive being searched")) && !QFileInfo::exists(onDisk.filePath(QStringLiteral("changed.bin")));
-    QTemporaryDir elsewhere;
+    // Somewhere surely not on that drive: memory (TMPDIR can be on it, as when staging a release).
+    QTemporaryDir elsewhere(QFileInfo(QStringLiteral("/dev/shm")).isWritable() ? QStringLiteral("/dev/shm/diskanvil-uitest-XXXXXX") : QDir::tempPath() + QStringLiteral("/diskanvil-uitest-XXXXXX"));
     dialog.setChangedCopyTarget(elsewhere.filePath(QStringLiteral("changed.bin")));
     dialog.hearFromViewer(viewer::encode(changed));
     QFile changedFile(elsewhere.filePath(QStringLiteral("changed.bin")));
