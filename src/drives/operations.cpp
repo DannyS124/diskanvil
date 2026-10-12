@@ -670,7 +670,7 @@ void UDisks::openBlock(const QString &objectPath, OpenMode mode)
     bool unmounts = false;
     for (const Volume &v : affected)
         unmounts = unmounts || (v.canMount() && !v.mounts().isEmpty()) || (v.encrypted && !v.cleartextPath.isEmpty());
-    if ((writes || (unmounts && mode != OpenMode::Benchmark)) && refuseSystem(disk, failure)) {
+    if ((writes || (unmounts && mode != OpenMode::Benchmark && mode != OpenMode::Peek)) && refuseSystem(disk, failure)) {
         emit deviceOpened(objectPath, -1);
         return;
     }
@@ -681,13 +681,14 @@ void UDisks::openBlock(const QString &objectPath, OpenMode mode)
             message = QDBusMessage::createMethodCall(kService, objectPath, kBlock, QStringLiteral("OpenForBenchmark"));
             message << options({{QStringLiteral("writable"), mode == OpenMode::BenchmarkWritable}});
         } else {
+            const bool readOnly = mode == OpenMode::Read || mode == OpenMode::Peek;
             int flags = O_CLOEXEC;
-            if (mode != OpenMode::Read)
+            if (!readOnly)
                 flags |= O_EXCL;
             if (mode == OpenMode::ReadWriteDirect)
                 flags |= O_DIRECT;
             message = QDBusMessage::createMethodCall(kService, objectPath, kBlock, QStringLiteral("OpenDevice"));
-            message << (mode == OpenMode::Read ? QStringLiteral("r") : QStringLiteral("rw")) << options({{QStringLiteral("flags"), flags}});
+            message << (readOnly ? QStringLiteral("r") : QStringLiteral("rw")) << options({{QStringLiteral("flags"), flags}});
         }
         message.setInteractiveAuthorizationAllowed(m_interactive);
         qCInfo(lcOps).noquote() << message.member() << objectPath << "mode" << int(mode);
@@ -710,7 +711,7 @@ void UDisks::openBlock(const QString &objectPath, OpenMode mode)
     // Reading for a benchmark or a rescue works while mounted; everything else gets
     // unmounted (and locked) first so the data doesn't change underneath.
     // A failed unmount was reported already; whoever asked still hears it didn't open.
-    if (mode == OpenMode::Benchmark)
+    if (mode == OpenMode::Benchmark || mode == OpenMode::Peek)
         open();
     else
         unmountThen(affected, failure, open, true, [this, objectPath] { emit deviceOpened(objectPath, -1); });

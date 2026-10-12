@@ -50,6 +50,7 @@
 #include "windowspicker.h"
 #include "driversdialog.h"
 #include "theme.h"
+#include "testbootdialog.h"
 #include "thememaker.h"
 #include "tryrepairdialog.h"
 #include "winredialog.h"
@@ -664,6 +665,21 @@ void MainWindow::createActions()
             RescueDialog(m_udisks, d->blockPath, this).exec();
     });
 
+    m_testBoot = new QAction(themeIcon("computer", "system-run"), tr("&Try Starting It…"), this);
+    m_testBoot->setObjectName(QStringLiteral("testBoot"));
+    m_testBoot->setToolTip(tr("Starts the drive in a virtual machine, to see that it starts (a clone, say): nothing on it changes"));
+    connect(m_testBoot, &QAction::triggered, this, [this] {
+        if (const Disk *d = selectedDisk())
+            TestBootDialog(m_udisks, d, QString(), this).exec();
+    });
+    m_testBootImage = new QAction(themeIcon("computer", "system-run"), tr("Try &Starting a Disk Image…"), this);
+    connect(m_testBootImage, &QAction::triggered, this, [this] {
+        const QString image = QFileDialog::getOpenFileName(this, tr("Try Starting a Disk Image"), QDir::homePath(),
+                                                           tr("Disk images (*.img *.raw *.vhd *.vhdx *.vmdk *.qcow2 *.vdi);;All files (*)"));
+        if (!image.isEmpty())
+            TestBootDialog(m_udisks, nullptr, image, this).exec();
+    });
+
     m_clonezilla = new QAction(themeIcon("document-revert", "edit-undo"), tr("Restore from &Clonezilla…"), this);
     m_clonezilla->setObjectName(QStringLiteral("clonezilla"));
     m_clonezilla->setToolTip(tr("Puts one of a Clonezilla backup's partition images back on this partition"));
@@ -810,7 +826,7 @@ void MainWindow::createActions()
     });
 
     QMenu *file = menuBar()->addMenu(tr("&File"));
-    file->addActions({m_openImage, m_findFilesImage, m_writeImage, m_windowsUsb, m_rescueUsb});
+    file->addActions({m_openImage, m_findFilesImage, m_testBootImage, m_writeImage, m_windowsUsb, m_rescueUsb});
     file->addSeparator();
     file->addAction(m_refresh);
     file->addSeparator();
@@ -1579,6 +1595,7 @@ void MainWindow::updateActions()
     m_snapshots->setEnabled(!snapper::mountedSubvolumes().isEmpty());
     m_restore->setText(partition ? tr("R&estore Partition Backup…") : tr("R&estore Drive Backup…"));
     m_clonezilla->setEnabled(tableChangeable && partition && !v->isSystem);
+    m_testBoot->setEnabled(d && !d->isRaid && !busy);
     m_properties->setEnabled(d != nullptr);
 
     const QString why = d && d->isSystem ? tr("Disk holds the running system (%1)").arg(d->systemReason)
@@ -1711,7 +1728,7 @@ void MainWindow::buildContextMenu(QMenu *menu)
     }
 
     menu->addSection(tr("Drive: %1").arg(d->model.isEmpty() ? shortDevice(d->device) : d->model));
-    add({m_safelyRemove, m_detachImage, m_health, m_badSectors, m_benchmark});
+    add({m_safelyRemove, m_detachImage, m_health, m_badSectors, m_benchmark, m_testBoot});
     if (!v)
         add({m_backup, m_restore});
     add({m_clone, m_newIds, m_rescue, m_findFiles});

@@ -70,6 +70,8 @@ private:
     QAction *m_linuxBoot = nullptr;
     QAction *m_winRe = nullptr;
     QAction *m_clonezilla = nullptr;
+    QAction *m_testBoot = nullptr;      // a drive
+    QAction *m_testBootImage = nullptr; // a disk image file
     void updateJobBars();
     void showNoticesIfAny();
     void stopJob(const QString &jobPath);

@@ -46,6 +46,8 @@
 #include "../src/backup/savefilesdialog.h"
 #include "../src/tools/linuxbootdialog.h"
 #include "../src/tools/tryrepairdialog.h"
+#include "../src/tools/testboot.h"
+#include "../src/tools/testbootdialog.h"
 #include "../src/backup/newids.h"
 #include "../src/backup/newidsdialog.h"
 #include "../src/viruses/hashlookup.h"
@@ -2707,6 +2709,80 @@ void clonezillaRestore()
     cleanUpLoop(udisks, loopPath);
 }
 
+// Try Starting It on a loop device holding a boot sector of our own (it writes DFBOOT to the
+// serial port): opened read-only, handed to QEMU, and it starts (BIOS, since it's MBR).
+void testBootWindow()
+{
+    if (testboot::qemu().isEmpty()) {
+        report(true, QStringLiteral("test boot: skipped, no QEMU here"));
+        return;
+    }
+    QTemporaryDir dir;
+    QByteArray sector = QByteArray::fromHex("fa31c08ed8be167cbaf803ac84c07403eeebf8f4ebfd") + QByteArray("DFBOOT\r\n", 9);
+    sector = sector.leftJustified(510, '\0') + QByteArray("\x55\xaa", 2);
+    const QString image = dir.filePath(QStringLiteral("boot.img"));
+    {
+        QFile f(image);
+        if (f.open(QIODevice::WriteOnly)) {
+            f.write(sector);
+            f.resize(8 * 1024 * 1024);
+        }
+    }
+    QFile backing(image);
+    QString loopPath;
+    if (backing.open(QIODevice::ReadWrite)) {
+        QDBusMessage call = QDBusMessage::createMethodCall(QStringLiteral("org.freedesktop.UDisks2"), QStringLiteral("/org/freedesktop/UDisks2/Manager"),
+                                                           QStringLiteral("org.freedesktop.UDisks2.Manager"), QStringLiteral("LoopSetup"));
+        call << QVariant::fromValue(QDBusUnixFileDescriptor(backing.handle())) << QVariantMap{{QStringLiteral("auth.no_user_interaction"), true}};
+        loopPath = QDBusConnection::systemBus().call(call, QDBus::Block, 30000).arguments().value(0).value<QDBusObjectPath>().path();
+        backing.close();
+    }
+    UDisks udisks;
+    udisks.setInteractive(false);
+    const Disk *disk = nullptr;
+    waitUntil([&] {
+        udisks.refresh();
+        disk = udisks.diskByPath(loopPath);
+        return disk != nullptr;
+    }, 15000);
+    report(disk != nullptr, QStringLiteral("test boot: a loop device holds a drive that starts"));
+    if (!disk)
+        return;
+    const QString serial = dir.filePath(QStringLiteral("serial.txt"));
+    TestBootDialog::serialForTest = serial;
+    {
+        TestBootDialog dialog(&udisks, disk, QString());
+        dialog.show();
+        auto *bios = dialog.findChildren<QRadioButton *>().value(1);
+        report(bios && bios->isChecked(), QStringLiteral("test boot: an MBR drive is started the BIOS way"));
+        dialog.findChild<QPushButton *>(QStringLiteral("start"))->click();
+        auto *note = dialog.findChild<QLabel *>(QStringLiteral("note"));
+        QByteArray said;
+        waitUntil([&] {
+            QFile log(serial);
+            if (log.open(QIODevice::ReadOnly))
+                said = log.readAll();
+            return said.contains("DFBOOT") || note->text().contains(QLatin1String("isn't")) || note->text().contains(QLatin1String("didn't"))
+                || note->text().contains(QLatin1String("couldn't"));
+        }, 30000);
+        if (geteuid() == 0)
+            report(said.contains("DFBOOT"), QStringLiteral("test boot: the drive starts in QEMU, read through its handle"),
+                   note->text() + QStringLiteral(" | ") + QString::fromLatin1(said.left(80)));
+        else
+            report(note->text().contains(QLatin1String("couldn't be opened")) || said.contains("DFBOOT"),
+                   QStringLiteral("test boot: as the user without a password prompt, reading the drive is refused and said"), note->text());
+    }
+    // QEMU goes when it's done: it's stopped here (it'd otherwise sit halted).
+    for (QProcess *qemu : udisks.findChildren<QProcess *>()) {
+        qemu->kill();
+        qemu->waitForFinished(5000);
+        if (const QByteArray said = qemu->readAllStandardError(); !said.isEmpty())
+            out << "QEMU said: " << said.left(400) << Qt::endl;
+    }
+    TestBootDialog::serialForTest.clear();
+    cleanUpLoop(udisks, loopPath);
+}
+
 // Write Image to USB's "copy the files" way, with persistence, on a loop device of the user's
 // own (no raw access needed, so no password): a Debian-live-like ISO with a long label.
 // DISKFORGE_TEST_COPY_ISO uses a real ISO instead (one with live-boot persistence, like
@@ -5196,7 +5272,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},
@@ -5241,7 +5317,7 @@ int main(int argc, char *argv[])
     }
     // As root, the ones that make their own loop device can run by themselves.
     if (!only.isEmpty()) {
-        const QVector<QPair<const char *, void (*)()>> alone = {{"stickcheck", stickCheck}, {"sdcard", sdCardFormat}, {"refresh", slowAreaRefresh}, {"stopwipe", stopWipe}, {"luksheader", luksHeaderThroughWindow}, {"nas", nasDrives}, {"tryrepair", tryRepairFirst}, {"clonezilla", clonezillaRestore}};
+        const QVector<QPair<const char *, void (*)()>> alone = {{"stickcheck", stickCheck}, {"sdcard", sdCardFormat}, {"refresh", slowAreaRefresh}, {"stopwipe", stopWipe}, {"luksheader", luksHeaderThroughWindow}, {"nas", nasDrives}, {"tryrepair", tryRepairFirst}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}};
         for (const auto &[name, run] : alone) {
             if (only.contains(QLatin1String(name)))
                 run();
@@ -5332,6 +5408,7 @@ int main(int argc, char *argv[])
     luksHeaderThroughWindow();
     tryRepairFirst();
     clonezillaRestore();
+    testBootWindow();
     inspector();
     recoverThroughWindow();
     scanThroughWindow();

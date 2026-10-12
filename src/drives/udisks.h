@@ -351,7 +351,9 @@ public:
     // Raw access to a whole disk or one partition. Everything except the read-only
     // benchmark mode unmounts first; writable modes refuse system disks. polkit asks
     // for a password. The fd arrives through deviceOpened; the caller closes it.
-    enum class OpenMode { Read, ReadWrite, ReadWriteDirect, Benchmark, BenchmarkWritable };
+    // Peek: read-only, as it is (nothing unmounted), and plain: no direct or synchronous reads,
+    // so another program can be handed it (Try Starting It's QEMU).
+    enum class OpenMode { Read, ReadWrite, ReadWriteDirect, Benchmark, BenchmarkWritable, Peek };
     void openBlock(const QString &objectPath, OpenMode mode);
     void openDevice(const Disk &disk, bool writable, bool forBenchmark = false, bool direct = false);
     // Asks the kernel to re-read the partition table (after writing one directly).

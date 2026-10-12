@@ -6,6 +6,8 @@
 
 #include "testkit.h"
 
+#include <unistd.h>
+
 #include "../src/health/btrfscheck.h"
 #include "../src/drives/drivepower.h"
 #include "../src/health/firmware.h"
@@ -21,12 +23,17 @@
 #include "../src/viruses/efiboot.h"
 #include "../src/tools/linuxboot.h"
 #include "../src/tools/winre.h"
+#include "../src/tools/testboot.h"
 #include "../src/drives/blockio.h"
 #include "../src/health/surfacescan.h"
 #include "../src/tools/systemd.h"
 
 #include <QDir>
 #include <QFile>
+#include <QThread>
+#include <QRandomGenerator>
+#include <QElapsedTimer>
+#include <QCryptographicHash>
 #include <QFileInfo>
 #include <QProcess>
 #include <QStandardPaths>
@@ -617,6 +624,82 @@ void windowsRecovery()
            QStringLiteral("windows recovery: Microsoft's diskpart steps, for GPT and MBR"));
 }
 
+// Try Starting It: a boot sector of our own (it writes DFBOOT to the serial port and halts) is
+// started in QEMU from a file and through a drive's handle, the BIOS way; and UEFI's firmware
+// starts with the arguments given. Writes never reach the image.
+void testBoot()
+{
+    if (testboot::qemu().isEmpty()) {
+        out << "SKIP  test boot: needs qemu-system-x86_64" << Qt::endl;
+        return;
+    }
+    QTemporaryDir dir;
+    // cli; xor ax,ax; mov ds,ax; mov si,msg; mov dx,0x3f8; next: lodsb; test al,al; jz done;
+    // out dx,al; jmp next; done: hlt; jmp done; msg: "DFBOOT\r\n"
+    QByteArray sector = QByteArray::fromHex("fa31c08ed8be167cbaf803ac84c07403eeebf8f4ebfd") + QByteArray("DFBOOT\r\n", 9);
+    sector = sector.leftJustified(510, '\0') + QByteArray("\x55\xaa", 2);
+    const QString image = dir.filePath(QStringLiteral("boot.img"));
+    {
+        QFile f(image);
+        if (f.open(QIODevice::WriteOnly)) {
+            f.write(sector);
+            f.resize(4 * 1024 * 1024);
+        }
+    }
+    const QByteArray before = QCryptographicHash::hash([&] { QFile f(image); return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray(); }(),
+                                                       QCryptographicHash::Sha256);
+    const auto boot = [&](testboot::Options o) {
+        o.window = false;
+        o.serialLog = dir.filePath(QStringLiteral("serial-%1.txt").arg(QRandomGenerator::global()->generate()));
+        QString error;
+        QObject owner;
+        QProcess *qemu = testboot::start(o, &owner, &error);
+        QByteArray said;
+        QElapsedTimer clock;
+        clock.start();
+        while (qemu && clock.elapsed() < 20000) {
+            QFile log(o.serialLog);
+            if (log.open(QIODevice::ReadOnly))
+                said = log.readAll();
+            if (said.contains("DFBOOT") || said.contains("BdsDxe"))
+                break;
+            QThread::msleep(200);
+        }
+        if (qemu) {
+            qemu->kill();
+            qemu->waitForFinished(5000);
+        }
+        return qemu ? QString::fromLatin1(said) : error;
+    };
+    testboot::Options file;
+    file.file = image;
+    file.format = testboot::formatOf(image);
+    file.uefi = false;
+    const QString fromFile = boot(file);
+    report(file.format == QLatin1String("raw") && fromFile.contains(QLatin1String("DFBOOT")), QStringLiteral("test boot: an image starts in QEMU (BIOS)"), fromFile.left(200));
+    // Like a drive: open only through its handle (its file can't be opened by name any more).
+    const int fd = blockio::openFile(image, blockio::FileMode::Read);
+    QFile::setPermissions(image, QFileDevice::Permissions());
+    testboot::Options drive;
+    drive.fd = fd;
+    drive.format = QStringLiteral("raw");
+    drive.uefi = false;
+    const QString fromFd = boot(drive);
+    ::close(fd);
+    QFile::setPermissions(image, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+    report(fromFd.contains(QLatin1String("DFBOOT")), QStringLiteral("test boot: a drive's read-only handle starts the same way"), fromFd.left(200));
+    QString code, vars;
+    if (testboot::ovmf(&code, &vars)) {
+        testboot::Options uefi = file;
+        uefi.uefi = true;
+        const QString firmware = boot(uefi);
+        report(firmware.contains(QLatin1String("BdsDxe")), QStringLiteral("test boot: UEFI's firmware starts with the arguments given"), firmware.left(200));
+    }
+    const QByteArray after = QCryptographicHash::hash([&] { QFile f(image); return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray(); }(),
+                                                      QCryptographicHash::Sha256);
+    report(before == after, QStringLiteral("test boot: the image is just as it was"));
+}
+
 void healthTests()
 {
     hiddenArea();
@@ -630,6 +713,7 @@ void healthTests()
     bootMenu();
     linuxBootRepair();
     windowsRecovery();
+    testBoot();
     rawPages();
     QTemporaryDir config;
     qputenv("XDG_CONFIG_HOME", QFile::encodeName(config.path()));

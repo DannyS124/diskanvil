@@ -95,6 +95,7 @@ add_library(diskforge-core STATIC
     src/tools/linuxboot.cpp src/tools/linuxboot.h
     src/tools/tryrepair.cpp src/tools/tryrepair.h
     src/tools/winre.cpp src/tools/winre.h
+    src/tools/testboot.cpp src/tools/testboot.h
     src/viruses/peinfo.cpp src/viruses/peinfo.h
     src/backup/newids.cpp src/backup/newids.h
     src/lostfiles/filetypes.cpp src/lostfiles/filetypes.h
@@ -196,6 +197,7 @@ add_library(diskforge-ui STATIC
     src/tools/linuxbootdialog.cpp src/tools/linuxbootdialog.h
     src/tools/tryrepairdialog.cpp src/tools/tryrepairdialog.h
     src/tools/winredialog.cpp src/tools/winredialog.h
+    src/tools/testbootdialog.cpp src/tools/testbootdialog.h
     src/backup/newidsdialog.cpp src/backup/newidsdialog.h
     src/tools/systemtools.cpp src/tools/systemtools.h
     src/drives/erasedialog.cpp src/drives/erasedialog.h
