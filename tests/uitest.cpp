@@ -6319,10 +6319,14 @@ void lostFilesThroughWindow()
         waitUntil([&] { return saveStatus->text().startsWith(QLatin1String("Saved")) && saveStatus->text().contains(saveAgain); }, 30000);
     }
     int savedAgain = 0;
+    bool sums = false;
     QDirIterator it2(saveAgain, QDir::Files, QDirIterator::Subdirectories);
-    while (it2.hasNext())
-        savedAgain += !it2.next().endsWith(QLatin1String(".txt"));
-    report(savedAgain == 3 && view->model()->rowCount() == 3, QStringLiteral("a second save works, from the same results"),
+    while (it2.hasNext()) {
+        const QString file = it2.next();
+        sums = sums || file.endsWith(QLatin1String("/SHA256SUMS"));
+        savedAgain += !file.endsWith(QLatin1String(".txt")) && !file.endsWith(QLatin1String("/SHA256SUMS"));
+    }
+    report(savedAgain == 3 && sums && view->model()->rowCount() == 3, QStringLiteral("a second save works, from the same results, with SHA256SUMS"),
            saveStatus->text().left(80));
     auto *panes = dialog.findChild<QSplitter *>(QStringLiteral("panes"));
     report(panes && panes->widget(0)->maximumWidth() > 4000 && panes->widget(0)->width() > 0,
