@@ -321,6 +321,32 @@ QImage apply(const QImage &in, const Settings &s, const std::function<bool(int p
     return out;
 }
 
+QStringList ffmpegArguments(const QString &in, const QString &out, double speed, const Settings &s)
+{
+    speed = std::clamp(speed, 0.1, 2.0);
+    QStringList video{QStringLiteral("setpts=PTS/%1").arg(speed, 0, 'f', 3)};
+    if (s.brightness != 0 || s.contrast != 0 || s.shadows != 0) {
+        const double contrast = s.contrast >= 0 ? 1 + s.contrast / 50.0 : 1 + s.contrast / 100.0;
+        video << QStringLiteral("eq=brightness=%1:contrast=%2:gamma=%3").arg(s.brightness / 250.0, 0, 'f', 3).arg(contrast, 0, 'f', 3).arg(1 + s.shadows / 66.0, 0, 'f', 3);
+    }
+    if (s.sharpen > 0)
+        video << QStringLiteral("unsharp=5:5:%1").arg(s.sharpen / 50.0, 0, 'f', 2);
+    if (s.grey)
+        video << QStringLiteral("hue=s=0");
+    if (s.invert)
+        video << QStringLiteral("negate");
+    QStringList args{QStringLiteral("-hide_banner"), QStringLiteral("-nostats"), QStringLiteral("-progress"), QStringLiteral("pipe:1"), QStringLiteral("-y"),
+                     QStringLiteral("-i"), in, QStringLiteral("-vf"), video.join(QLatin1Char(','))};
+    // The sound slowed with it, down to half speed; slower than that it isn't worth hearing.
+    if (speed >= 0.5)
+        args << QStringLiteral("-af") << QStringLiteral("atempo=%1").arg(speed, 0, 'f', 3) << QStringLiteral("-c:a") << QStringLiteral("aac");
+    else
+        args << QStringLiteral("-an");
+    args << QStringLiteral("-c:v") << QStringLiteral("libx264") << QStringLiteral("-crf") << QStringLiteral("18") << QStringLiteral("-pix_fmt")
+         << QStringLiteral("yuv420p") << out;
+    return args;
+}
+
 QImage enlarge(const QImage &in, int factor)
 {
     factor = std::clamp(factor, 1, 4);

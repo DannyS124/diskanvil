@@ -25,6 +25,7 @@
 #include "../src/app/homewindow.h"
 #include "../src/drives/blockio.h"
 #include "../src/usb/imagesource.h"
+#include "../src/lostfiles/enhance.h"
 #include "../src/lostfiles/viewer.h"
 #include "../src/lostfiles/hexview.h"
 #include "../src/lostfiles/structure.h"
@@ -139,6 +140,7 @@
 #include <QRandomGenerator>
 #include <QTableWidget>
 #include <QTemporaryDir>
+#include <QEventLoop>
 #include <QTextStream>
 #include <QThread>
 #include <QTimer>
@@ -4797,6 +4799,92 @@ void enhanceWindow()
     report(!action->isVisible() && !action->isChecked(), QStringLiteral("viewer: Enhance goes away for what isn't a picture"));
 }
 
+// The viewer with a film: frames shown and one saved; and a slowed-down copy made by ffmpeg.
+void filmTools()
+{
+    const QString ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
+    const QString ffprobe = QStandardPaths::findExecutable(QStringLiteral("ffprobe"));
+    if (ffmpeg.isEmpty() || ffprobe.isEmpty()) {
+        out << "SKIP  film tools: ffmpeg isn't installed (it makes the test film)" << Qt::endl;
+        return;
+    }
+    QTemporaryDir dir;
+    const QString film = dir.path() + QStringLiteral("/pattern.mp4");
+    QProcess::execute(ffmpeg, {QStringLiteral("-hide_banner"), QStringLiteral("-loglevel"), QStringLiteral("error"), QStringLiteral("-f"), QStringLiteral("lavfi"),
+                               QStringLiteral("-i"), QStringLiteral("testsrc=duration=2:size=320x240:rate=25"), QStringLiteral("-f"), QStringLiteral("lavfi"),
+                               QStringLiteral("-i"), QStringLiteral("sine=frequency=440:duration=2"), QStringLiteral("-pix_fmt"), QStringLiteral("yuv420p"),
+                               QStringLiteral("-shortest"), film});
+    const auto length = [&ffprobe](const QString &file) {
+        QProcess probe;
+        probe.start(ffprobe, {QStringLiteral("-v"), QStringLiteral("error"), QStringLiteral("-show_entries"), QStringLiteral("format=duration"),
+                              QStringLiteral("-of"), QStringLiteral("csv=p=0"), file});
+        probe.waitForFinished(30000);
+        return probe.readAllStandardOutput().trimmed().toDouble();
+    };
+    report(QFileInfo(film).size() > 1000 && length(film) > 1.9, QStringLiteral("film tools: a 2-second test film to work on"));
+
+    // A quarter of the speed, sharpened, in black and white: four times as long, no sound.
+    enhance::Settings s;
+    s.sharpen = 30;
+    s.grey = true;
+    const QString slow = dir.path() + QStringLiteral("/slow.mp4");
+    QProcess run;
+    run.start(ffmpeg, enhance::ffmpegArguments(film, slow, 0.25, s));
+    run.waitForFinished(120000);
+    QProcess streams;
+    streams.start(ffprobe, {QStringLiteral("-v"), QStringLiteral("error"), QStringLiteral("-show_entries"), QStringLiteral("stream=codec_type"),
+                            QStringLiteral("-of"), QStringLiteral("csv=p=0"), slow});
+    streams.waitForFinished(30000);
+    const QByteArray kinds = streams.readAllStandardOutput();
+    const double slowLength = length(slow);
+    report(run.exitCode() == 0 && slowLength > 7.5 && slowLength < 8.5 && kinds.contains("video") && !kinds.contains("audio"),
+           QStringLiteral("film tools: a copy at a quarter of the speed lasts four times as long (the sound left out that slow)"),
+           QStringLiteral("%1 s, streams: %2").arg(slowLength).arg(QString::fromLatin1(kinds.simplified())));
+    const QString half = dir.path() + QStringLiteral("/half.mp4");
+    QProcess::execute(ffmpeg, enhance::ffmpegArguments(film, half, 0.5, enhance::Settings()));
+    report(length(half) > 3.8 && length(half) < 4.2, QStringLiteral("film tools: at half speed, with its sound slowed too"), QString::number(length(half)));
+
+#ifdef DISKANVIL_MEDIA
+    viewer::Window window;
+    viewer::Show show;
+    show.kind = viewer::Kind::Film;
+    show.type = filetypes::typeForName(QStringLiteral("pattern.mp4"));
+    show.path = film;
+    show.name = QStringLiteral("pattern.mp4");
+    window.present(show);
+    window.show();
+    auto *action = window.findChild<QAction *>(QStringLiteral("enhanceAction"));
+    auto *speed = window.findChild<QComboBox *>(QStringLiteral("speed"));
+    report(action && action->isVisible() && speed && speed->count() == 6, QStringLiteral("film tools: Enhance and the speeds are there for a film"));
+    if (!action || !speed)
+        return;
+    speed->setCurrentIndex(speed->findData(0.25));
+    {
+        QEventLoop playing;
+        QTimer::singleShot(1500, &playing, &QEventLoop::quit);
+        playing.exec();
+    }
+    action->setChecked(true);
+    window.findChild<QSlider *>(QStringLiteral("brightness"))->setValue(30);
+    QByteArray png;
+    QString name;
+    QObject::connect(&window, &viewer::Window::savePicture, [&](const QString &n, const QByteArray &p) {
+        name = n;
+        png = p;
+    });
+    window.findChild<QPushButton *>(QStringLiteral("saveEnhanced"))->click();
+    waitUntil([&] { return !png.isEmpty(); }, 10000);
+    QImage frame;
+    frame.loadFromData(png, "PNG");
+    report(frame.size() == QSize(320, 240) && name.startsWith(QLatin1String("pattern frame ")) && frame.text(QStringLiteral("Description")).contains(QLatin1String("brightness +30")),
+           QStringLiteral("film tools: the frame on the screen saved whole, saying where in the film it's from"), name);
+    double exportSpeed = 0;
+    QObject::connect(&window, &viewer::Window::exportFilm, [&exportSpeed](double rate, const enhance::Settings &, qint64) { exportSpeed = rate; });
+    window.findChild<QPushButton *>(QStringLiteral("exportFilm"))->click();
+    report(exportSpeed == 0.25, QStringLiteral("film tools: a slowed-down copy is asked for at the speed chosen"));
+#endif
+}
+
 // What This PC Did on a Windows made of the test hives (tests/data/registry/activity.ps1).
 void activityWindow()
 {
@@ -6444,7 +6532,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"enhance", enhanceWindow}, {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"enhance", enhanceWindow}, {"film", filmTools}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "enhance.h"
 #include "jobui.h"
 #include "lostscan.h"
 
@@ -229,6 +230,8 @@ private:
     void showFingerprints(const QVector<int> &indexes);
     // A picture the viewer made (enhanced, a film's frame), saved where the person says.
     void savePicture(const QString &name, const QByteArray &png);
+    // The film shown in the viewer at another speed, with its light tools, made by ffmpeg.
+    void exportFilm(int index, double speed, const enhance::Settings &settings, qint64 durationMs);
     // The next or previous file in the list that has something to show, -1 when there's none.
     int neighbour(int index, int step) const;
     // The times the file system kept, as "label", "value" rows.

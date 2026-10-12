@@ -9,6 +9,8 @@
 // on its standard input, and it asks back on its standard output for the one before or after,
 // or for this one to be saved or opened in its own program.
 
+#include "enhance.h"
+
 #include <QMainWindow>
 #include <QMap>
 #include <QPalette>
@@ -54,7 +56,8 @@ struct Message {
     // Edited: the viewer's changes to the bytes of the one shown, to save as a copy.
     // SavePicture: a picture made in the viewer (one enhanced, a film's frame), to save where the
     // person says. Find Lost Files only writes its bytes, it never reads them.
-    enum Type : quint32 { Look = 1, ShowFile = 2, AskFor = 3, Facts = 4, Edited = 5, SavePicture = 6 } type = ShowFile;
+    // ExportFilm: a copy of the film shown at another speed, with the light tools, made by ffmpeg.
+    enum Type : quint32 { Look = 1, ShowFile = 2, AskFor = 3, Facts = 4, Edited = 5, SavePicture = 6, ExportFilm = 7 } type = ShowFile;
     QString style;    // Look: the widget style's name
     QPalette palette; // and the colours
     Show show;        // ShowFile; Facts: just show.facts, for the one shown
@@ -62,6 +65,9 @@ struct Message {
     QMap<quint64, quint8> edits; // Edited: where, and what the byte there is now
     QString pictureName;  // SavePicture: the name to suggest
     QByteArray picture;   // and the picture, a PNG
+    double speed = 1;     // ExportFilm: how fast, 0.1 to 2
+    enhance::Settings settings;
+    qint64 durationMs = 0;
 };
 QByteArray encode(const Message &message);
 // One message off the front of `buffer` when a whole one is there (removed from it). False
@@ -101,6 +107,8 @@ Q_SIGNALS:
     void asked(viewer::Ask ask);
     void saveEdited(const QMap<quint64, quint8> &edits);
     void savePicture(const QString &name, const QByteArray &png);
+    // A copy of the film shown at another speed, with the Enhance panel's light tools.
+    void exportFilm(double speed, const enhance::Settings &settings, qint64 durationMs);
 
 protected:
     void keyPressEvent(QKeyEvent *event) override;

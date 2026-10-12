@@ -58,8 +58,10 @@
 #endif
 #ifdef DISKANVIL_MEDIA
 #include <QAudioOutput>
+#include <QMediaMetaData>
 #include <QMediaPlayer>
-#include <QVideoWidget>
+#include <QVideoFrame>
+#include <QVideoSink>
 #endif
 #ifdef Q_OS_WIN
 #include <fcntl.h>
@@ -156,6 +158,10 @@ QByteArray encode(const Message &m)
     case Message::SavePicture:
         s << m.pictureName << m.picture;
         break;
+    case Message::ExportFilm:
+        s << m.speed << m.durationMs << qint32(m.settings.brightness) << qint32(m.settings.contrast) << qint32(m.settings.shadows)
+          << qint32(m.settings.sharpen) << m.settings.grey << m.settings.invert;
+        break;
     }
     QByteArray out;
     QDataStream header(&out, QIODevice::WriteOnly);
@@ -173,7 +179,7 @@ bool decode(QByteArray &buffer, Message &m, bool *bad)
     header >> magic >> type >> length;
     // A picture to save can be big (a photo made four times bigger); everything else is small.
     const quint32 most = type == Message::SavePicture ? kMostPicture : kMostMessage;
-    if (magic != kMagic || length > most || type < Message::Look || type > Message::SavePicture) {
+    if (magic != kMagic || length > most || type < Message::Look || type > Message::ExportFilm) {
         *bad = true;
         return false;
     }
@@ -219,6 +225,17 @@ bool decode(QByteArray &buffer, Message &m, bool *bad)
     case Message::SavePicture:
         s >> m.pictureName >> m.picture;
         break;
+    case Message::ExportFilm: {
+        qint32 brightness = 0, contrast = 0, shadows = 0, sharpen = 0;
+        s >> m.speed >> m.durationMs >> brightness >> contrast >> shadows >> sharpen >> m.settings.grey >> m.settings.invert;
+        // From another process: kept to what the panel can set.
+        m.speed = std::isfinite(m.speed) ? std::clamp(m.speed, 0.1, 2.0) : 1.0;
+        m.settings.brightness = std::clamp(brightness, -100, 100);
+        m.settings.contrast = std::clamp(contrast, -100, 100);
+        m.settings.shadows = std::clamp(shadows, 0, 100);
+        m.settings.sharpen = std::clamp(sharpen, 0, 100);
+        break;
+    }
     }
     buffer.remove(0, 12 + length);
     if (s.status() != QDataStream::Ok) {
@@ -555,14 +572,20 @@ public:
         m_bigger->setToolTip(viewer::tr("Bigger, smoothly: the same picture larger, nothing made up"));
         m_save = new QPushButton(viewer::tr("Save as a New Picture…"));
         m_save->setObjectName(QStringLiteral("saveEnhanced"));
+        m_export = new QPushButton(viewer::tr("Save a Slowed-Down Copy…"));
+        m_export->setObjectName(QStringLiteral("exportFilm"));
+        m_export->setToolTip(viewer::tr("The film at the speed chosen below it, with what's set here, saved as a new MP4 (needs ffmpeg)"));
+        m_export->hide();
         layout->addWidget(m_bigger);
         layout->addWidget(m_save);
+        layout->addWidget(m_export);
         layout->addStretch();
         QObject::connect(m_compare, &QPushButton::pressed, this, [this] { if (compare) compare(true); });
         QObject::connect(m_compare, &QPushButton::released, this, [this] { if (compare) compare(false); });
         QObject::connect(reset, &QPushButton::clicked, this, [this] { this->reset(); if (changed) changed(); });
         QObject::connect(m_measure, &QPushButton::toggled, this, [this](bool on) { if (measure) measure(on); });
         QObject::connect(m_save, &QPushButton::clicked, this, [this] { if (save) save(m_bigger->currentIndex() + 1); });
+        QObject::connect(m_export, &QPushButton::clicked, this, [this] { if (exportFilm) exportFilm(); });
     }
 
     enhance::Settings settings() const
@@ -612,6 +635,7 @@ public:
                            static_cast<QWidget *>(m_grain), static_cast<QWidget *>(m_measure), static_cast<QWidget *>(m_bigger)})
             w->setEnabled(!film);
         m_save->setText(film ? viewer::tr("Save This Frame…") : viewer::tr("Save as a New Picture…"));
+        m_export->setVisible(film);
     }
 
     void setStatus(const QString &text) { m_status->setText(text); }
@@ -620,13 +644,14 @@ public:
     std::function<void(int factor)> save;
     std::function<void(bool on)> compare;
     std::function<void(bool on)> measure;
+    std::function<void()> exportFilm;
 
 private:
     QVector<QSlider *> m_rows;
     QSlider *m_brightness, *m_contrast, *m_shadows, *m_sharpen, *m_focus, *m_motion, *m_angle;
     QComboBox *m_grain, *m_bigger;
     QCheckBox *m_levels, *m_grey, *m_invert;
-    QPushButton *m_measure, *m_compare, *m_save;
+    QPushButton *m_measure, *m_compare, *m_save, *m_export;
     QLabel *m_status;
     bool m_quiet = false;
 };
@@ -796,6 +821,101 @@ private:
 
 // --- Films and songs: played, with the usual buttons. A song shows its cover.
 
+// A film's frames, drawn here so they can be looked into while it plays: the wheel zooms in on a
+// part, dragging moves it, a double-click shows all of it again.
+class FrameView : public QWidget
+{
+public:
+    explicit FrameView(QWidget *parent = nullptr)
+        : QWidget(parent)
+    {
+        setObjectName(QStringLiteral("frames"));
+        setCursor(Qt::OpenHandCursor);
+        setMinimumSize(160, 120);
+    }
+
+    void setFrame(const QImage &frame)
+    {
+        m_frame = frame;
+        update();
+    }
+    void clear()
+    {
+        m_frame = QImage();
+        m_zoom = 1;
+        m_centre = QPointF(0.5, 0.5);
+        update();
+    }
+    double zoom() const { return m_zoom; }
+    // The size frames are worth working on at: what's on the screen, zoom included.
+    QSize workingSize() const { return size() * std::max(1.0, m_zoom) * devicePixelRatioF(); }
+
+protected:
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter p(this);
+        p.fillRect(rect(), Qt::black);
+        if (m_frame.isNull())
+            return;
+        p.setRenderHint(QPainter::SmoothPixmapTransform);
+        p.drawImage(target(), m_frame);
+    }
+    void wheelEvent(QWheelEvent *event) override
+    {
+        const QRectF before = target();
+        const QPointF spot((event->position().x() - before.left()) / before.width(), (event->position().y() - before.top()) / before.height());
+        m_zoom = std::clamp(m_zoom * std::pow(1.25, event->angleDelta().y() / 120.0), 1.0, 16.0);
+        // The point under the pointer stays under it.
+        const QRectF after = target();
+        m_centre += QPointF(spot.x() - (event->position().x() - after.left()) / after.width(), spot.y() - (event->position().y() - after.top()) / after.height());
+        clampCentre();
+        update();
+        event->accept();
+    }
+    void mousePressEvent(QMouseEvent *event) override
+    {
+        m_drag = event->position();
+        setCursor(Qt::ClosedHandCursor);
+    }
+    void mouseMoveEvent(QMouseEvent *event) override
+    {
+        if (!(event->buttons() & Qt::LeftButton))
+            return;
+        const QRectF t = target();
+        m_centre -= QPointF((event->position().x() - m_drag.x()) / t.width(), (event->position().y() - m_drag.y()) / t.height());
+        m_drag = event->position();
+        clampCentre();
+        update();
+    }
+    void mouseReleaseEvent(QMouseEvent *) override { setCursor(Qt::OpenHandCursor); }
+    void mouseDoubleClickEvent(QMouseEvent *) override
+    {
+        m_zoom = 1;
+        m_centre = QPointF(0.5, 0.5);
+        update();
+    }
+
+private:
+    QRectF target() const
+    {
+        if (m_frame.isNull())
+            return {};
+        const QSizeF fitted = QSizeF(m_frame.size()).scaled(QSizeF(size()), Qt::KeepAspectRatio) * m_zoom;
+        return QRectF(width() / 2.0 - m_centre.x() * fitted.width(), height() / 2.0 - m_centre.y() * fitted.height(), fitted.width(), fitted.height());
+    }
+    void clampCentre()
+    {
+        const double half = 0.5 / m_zoom;
+        m_centre.setX(std::clamp(m_centre.x(), half, 1 - half));
+        m_centre.setY(std::clamp(m_centre.y(), half, 1 - half));
+    }
+
+    QImage m_frame;
+    double m_zoom = 1;
+    QPointF m_centre{0.5, 0.5}; // the point of the frame in the middle, 0 to 1 across and down
+    QPointF m_drag;
+};
+
 class MediaView : public QWidget
 {
 public:
@@ -808,6 +928,9 @@ public:
         , m_time(new QLabel)
         , m_volume(new QSlider(Qt::Horizontal))
         , m_message(new QLabel)
+        , m_back(new QToolButton)
+        , m_forward(new QToolButton)
+        , m_speed(new QComboBox)
     {
         auto *layout = new QVBoxLayout(this);
         m_cover->setAlignment(Qt::AlignCenter);
@@ -817,10 +940,16 @@ public:
 #ifdef DISKANVIL_MEDIA
         m_player = new QMediaPlayer(this);
         m_audio = new QAudioOutput(this);
-        m_video = new QVideoWidget;
+        m_video = new FrameView;
+        m_sink = new QVideoSink(this);
         m_player->setAudioOutput(m_audio);
-        m_player->setVideoOutput(m_video);
+        m_player->setVideoSink(m_sink);
         m_screen->addWidget(m_video);
+        // Each frame as it comes, worked on at the size it's shown when it's being enhanced.
+        QObject::connect(m_sink, &QVideoSink::videoFrameChanged, this, [this](const QVideoFrame &frame) {
+            m_last = frame;
+            showFrame();
+        });
         QObject::connect(m_player, &QMediaPlayer::playbackStateChanged, this, [this] { showState(); });
         // At the end it goes back to the start, paused, showing the first picture (not an empty screen).
         QObject::connect(m_player, &QMediaPlayer::mediaStatusChanged, this, [this](QMediaPlayer::MediaStatus status) {
@@ -845,12 +974,18 @@ public:
         QObject::connect(m_position, &QSlider::sliderMoved, this, [this](int tenths) { m_player->setPosition(qint64(tenths) * 100); });
         QObject::connect(m_play, &QToolButton::clicked, this, [this] { playPause(); });
         QObject::connect(m_volume, &QSlider::valueChanged, this, [this](int v) { m_audio->setVolume(v / 100.0f); });
+        QObject::connect(m_back, &QToolButton::clicked, this, [this] { step(-1); });
+        QObject::connect(m_forward, &QToolButton::clicked, this, [this] { step(1); });
+        QObject::connect(m_speed, &QComboBox::currentIndexChanged, this, [this] { m_player->setPlaybackRate(speed()); });
 #else
         m_message->setText(viewer::tr("Films and songs can't be played here: this DiskAnvil was built without Qt Multimedia. What's known about it is "
                               "on the right."));
         m_message->show();
         m_play->setEnabled(false);
         m_position->setEnabled(false);
+        m_back->setEnabled(false);
+        m_forward->setEnabled(false);
+        m_speed->setEnabled(false);
 #endif
         m_screen->addWidget(m_cover);
         layout->addWidget(m_screen, 1);
@@ -859,6 +994,14 @@ public:
         m_play->setIcon(icon("media-playback-start"));
         m_play->setToolTip(viewer::tr("Play (Space)"));
         controls->addWidget(m_play);
+        m_back->setIcon(icon("media-skip-backward"));
+        m_back->setToolTip(viewer::tr("The frame before (,)"));
+        m_back->setObjectName(QStringLiteral("frameBack"));
+        m_forward->setIcon(icon("media-skip-forward"));
+        m_forward->setToolTip(viewer::tr("The next frame (.)"));
+        m_forward->setObjectName(QStringLiteral("frameForward"));
+        controls->addWidget(m_back);
+        controls->addWidget(m_forward);
         controls->addWidget(m_position, 1);
         m_time->setObjectName(QStringLiteral("time"));
         controls->addWidget(m_time);
@@ -869,7 +1012,71 @@ public:
         m_volume->setValue(80);
         m_volume->setMaximumWidth(120);
         controls->addWidget(m_volume);
+        m_speed->setObjectName(QStringLiteral("speed"));
+        m_speed->setToolTip(viewer::tr("How fast it plays: slower to see what happens in a moment"));
+        for (const double rate : {0.1, 0.25, 0.5, 1.0, 1.5, 2.0})
+            m_speed->addItem(rate == 1 ? viewer::tr("Normal speed") : viewer::tr("%1× speed").arg(QLocale().toString(rate)), rate);
+        m_speed->setCurrentIndex(3);
+        controls->addWidget(m_speed);
         layout->addLayout(controls);
+    }
+
+    double speed() const { return m_speed->currentData().toDouble(); }
+    void setSpeed(double rate)
+    {
+        const int i = m_speed->findData(rate);
+        if (i >= 0)
+            m_speed->setCurrentIndex(i);
+    }
+    qint64 position() const
+    {
+#ifdef DISKANVIL_MEDIA
+        return m_player->position();
+#else
+        return 0;
+#endif
+    }
+    qint64 duration() const
+    {
+#ifdef DISKANVIL_MEDIA
+        return m_player->duration();
+#else
+        return 0;
+#endif
+    }
+
+    // A frame forward or back: paused, by one frame's time.
+    void step(int frames)
+    {
+#ifdef DISKANVIL_MEDIA
+        if (m_player->playbackState() == QMediaPlayer::PlayingState)
+            m_player->pause();
+        double rate = m_player->metaData().value(QMediaMetaData::VideoFrameRate).toDouble();
+        if (rate < 1 || rate > 1000)
+            rate = 30;
+        m_player->setPosition(std::clamp<qint64>(m_player->position() + qint64(std::lround(frames * 1000.0 / rate)), 0, m_player->duration()));
+#else
+        Q_UNUSED(frames)
+#endif
+    }
+
+    // The Enhance panel's light tools, on each frame as it plays.
+    void setEnhance(const enhance::Settings &settings)
+    {
+        m_settings = settings;
+#ifdef DISKANVIL_MEDIA
+        showFrame();
+#endif
+    }
+
+    // The frame on the screen now, whole and with what's set applied.
+    QImage frame() const
+    {
+#ifdef DISKANVIL_MEDIA
+        return enhance::apply(QVideoFrame(m_last).toImage(), m_settings);
+#else
+        return {};
+#endif
     }
 
     void load(const QString &path, bool film)
@@ -892,6 +1099,12 @@ public:
 #ifdef DISKANVIL_MEDIA
         if (film)
             m_screen->setCurrentWidget(m_video);
+        m_video->clear();
+        m_last = QVideoFrame();
+        m_settings = enhance::Settings();
+        setSpeed(1.0);
+        m_back->setEnabled(film);
+        m_forward->setEnabled(film);
         m_player->setSource(QUrl::fromLocalFile(path));
         m_player->play();
 #else
@@ -950,10 +1163,28 @@ private:
         m_time->setText(clock(m_player->position()) + QStringLiteral(" / ") + clock(m_player->duration()));
     }
 
+    void showFrame()
+    {
+        if (!m_last.isValid())
+            return;
+        QImage image = QVideoFrame(m_last).toImage();
+        if (!m_settings.isDefault()) {
+            // Worked on at the size it's shown, so it keeps up while it plays.
+            const QSize room = m_video->workingSize();
+            if (image.width() > room.width() || image.height() > room.height())
+                image = image.scaled(room, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+            image = enhance::apply(image, m_settings);
+        }
+        m_video->setFrame(image);
+    }
+
     QMediaPlayer *m_player = nullptr;
     QAudioOutput *m_audio = nullptr;
-    QVideoWidget *m_video = nullptr;
+    QVideoSink *m_sink = nullptr;
+    FrameView *m_video = nullptr;
+    QVideoFrame m_last;
 #endif
+    enhance::Settings m_settings;
     QStackedWidget *m_screen;
     QLabel *m_cover;
     QToolButton *m_play;
@@ -961,6 +1192,8 @@ private:
     QLabel *m_time;
     QSlider *m_volume;
     QLabel *m_message;
+    QToolButton *m_back, *m_forward;
+    QComboBox *m_speed;
 };
 
 // --- Inside: what the file is made of, part by part, next to its bytes, which can be changed in
@@ -1250,8 +1483,22 @@ Window::Window(QWidget *parent)
             m_picture->setMeasuring(false);
         }
     });
-    m_enhance->changed = [this] { enhanceSoon(); };
-    m_enhance->compare = [this](bool on) { m_picture->setComparing(on); };
+    // A film's frames are enhanced as they're shown (the light tools only); a picture a moment later.
+    m_enhance->changed = [this] {
+        if (m_shown.kind == Kind::Film)
+            m_media->setEnhance(m_enhance->settings());
+        else
+            enhanceSoon();
+    };
+    m_enhance->compare = [this](bool on) {
+        if (m_shown.kind == Kind::Film)
+            m_media->setEnhance(on ? enhance::Settings() : m_enhance->settings());
+        else
+            m_picture->setComparing(on);
+    };
+    m_enhance->exportFilm = [this] {
+        Q_EMIT exportFilm(m_media->speed(), m_enhance->settings(), m_media->duration());
+    };
     m_enhance->measure = [this](bool on) { m_picture->setMeasuring(on); };
     m_picture->measured = [this](int length, int angle) {
         m_picture->setMeasuring(false);
@@ -1308,6 +1555,25 @@ void Window::enhanceNow()
 
 void Window::saveEnhanced(int factor)
 {
+    if (m_shown.kind == Kind::Film) {
+        // The frame on the screen, whole, with the tools applied: named after where in the film it is.
+        const QImage frame = m_media->frame();
+        if (frame.isNull())
+            return;
+        const qint64 at = m_media->position();
+        QImage picture = frame;
+        const QString when = QStringLiteral("%1m%2s%3").arg(at / 60000).arg(at / 1000 % 60, 2, 10, QLatin1Char('0')).arg(at % 1000, 3, 10, QLatin1Char('0'));
+        const QStringList done = m_enhance->settings().describe();
+        picture.setText(QStringLiteral("Description"), tr("A frame of \"%1\", %2 in, saved by DiskAnvil's viewer%3.")
+                                                           .arg(m_shown.name, when, done.isEmpty() ? QString() : QStringLiteral(": ") + done.join(QStringLiteral(", "))));
+        picture.setText(QStringLiteral("Software"), QStringLiteral("DiskAnvil"));
+        QByteArray png;
+        QBuffer buffer(&png);
+        buffer.open(QIODevice::WriteOnly);
+        picture.save(&buffer, "PNG");
+        Q_EMIT savePicture(tr("%1 frame %2.png").arg(QFileInfo(m_shown.name).completeBaseName(), when), png);
+        return;
+    }
     const QImage original = m_picture->original();
     if (original.isNull())
         return;
@@ -1455,10 +1721,10 @@ void Window::present(const Show &show)
     m_pages->setCurrentWidget(page);
     for (QAction *a : {m_zoomOut, m_fit, m_actual, m_zoomIn})
         a->setVisible(kind == Kind::Picture || kind == Kind::Pdf);
-    // Enhancing is for still pictures (an animated one shows its frames as they come).
-    const bool canEnhance = kind == Kind::Picture && !m_picture->animated();
+    // Enhancing is for still pictures (an animated one shows its frames as they come) and films.
+    const bool canEnhance = (kind == Kind::Picture && !m_picture->animated()) || kind == Kind::Film;
     m_enhanceAction->setVisible(canEnhance);
-    m_enhance->setForFilm(false);
+    m_enhance->setForFilm(kind == Kind::Film);
     if (!canEnhance)
         m_enhanceAction->setChecked(false);
 }
@@ -1509,6 +1775,13 @@ void Window::keyPressEvent(QKeyEvent *event)
     case Qt::Key_Space:
         if (m_shown.kind == Kind::Film || m_shown.kind == Kind::Song) {
             m_media->playPause();
+            return;
+        }
+        break;
+    case Qt::Key_Comma:
+    case Qt::Key_Period:
+        if (m_shown.kind == Kind::Film) {
+            m_media->step(event->key() == Qt::Key_Period ? 1 : -1);
             return;
         }
         break;
@@ -1675,6 +1948,15 @@ int run()
         Message m;
         m.type = Message::Edited;
         m.edits = edits;
+        out.write(encode(m));
+        out.flush();
+    });
+    QObject::connect(&window, &Window::exportFilm, &window, [&out](double speed, const enhance::Settings &settings, qint64 durationMs) {
+        Message m;
+        m.type = Message::ExportFilm;
+        m.speed = speed;
+        m.settings = settings;
+        m.durationMs = durationMs;
         out.write(encode(m));
         out.flush();
     });

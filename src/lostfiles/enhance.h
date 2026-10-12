@@ -40,4 +40,9 @@ QImage apply(const QImage &in, const Settings &settings, const std::function<boo
 // Bigger by a whole factor (2, 3 or 4), smoothly (bicubic): what's there, larger, nothing made up.
 QImage enlarge(const QImage &in, int factor);
 
+// ffmpeg's arguments for a film at another speed (0.1 to 2) with the light tools (lighter,
+// contrast, dark parts, sharpen, black and white, inverted) the same as the viewer shows them,
+// to an MP4. Progress goes to its output, as out_time_us= lines.
+QStringList ffmpegArguments(const QString &in, const QString &out, double speed, const Settings &settings);
+
 } // namespace enhance
