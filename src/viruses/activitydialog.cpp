@@ -41,7 +41,7 @@ ActivityDialog::ActivityDialog(const QString &root, QWidget *parent)
     const QString where = root.isEmpty() ? tr("this PC") : QDir::toNativeSeparators(root);
     setWindowTitle(tr("What This PC Did — %1").arg(where));
     m_overview->setTextFormat(Qt::RichText);
-    m_overview->setWordWrap(true);
+    m_overview->setWordWrap(false); // a table: wrapping makes Qt measure it a line tall
     m_overview->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_kind->setObjectName(QStringLiteral("kind"));
     m_kind->addItem(tr("Everything"), -1);

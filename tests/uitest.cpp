@@ -33,6 +33,7 @@
 #include "../src/lostfiles/lostfilesdialog.h"
 #include "../src/lostfiles/timelinedialog.h"
 #include "../src/lostfiles/placesdialog.h"
+#include "../src/viruses/activitydialog.h"
 #include "../src/lostfiles/filetypes.h"
 #include "../src/common/jobui.h"
 #include "../src/lostfiles/preview.h"
@@ -4752,6 +4753,45 @@ void placesWindow()
     }
 }
 
+// What This PC Did on a Windows made of the test hives (tests/data/registry/activity.ps1).
+void activityWindow()
+{
+    QTemporaryDir dir;
+    const QString data = QStringLiteral(SOURCE_DIR "/tests/data/registry/");
+    const auto put = [](const QString &path, const QString &from) {
+        QDir().mkpath(QFileInfo(path).absolutePath());
+        QFile::copy(from, path);
+    };
+    put(dir.path() + QStringLiteral("/Windows/System32/config/SOFTWARE"), data + QStringLiteral("activity-software.hiv"));
+    put(dir.path() + QStringLiteral("/Windows/System32/config/SYSTEM"), data + QStringLiteral("activity-system.hiv"));
+    put(dir.path() + QStringLiteral("/Users/tester/NTUSER.DAT"), data + QStringLiteral("activity-ntuser.hiv"));
+    ActivityDialog dialog(dir.path());
+    dialog.show();
+    dialog.waitUntilRead();
+    const int all = dialog.shown();
+    auto *kind = dialog.findChild<QComboBox *>(QStringLiteral("kind"));
+    auto *words = dialog.findChild<QLineEdit *>(QStringLiteral("words"));
+    kind->setCurrentIndex(kind->findData(int(activity::Kind::UsbDevice)));
+    const int usb = dialog.shown();
+    kind->setCurrentIndex(0);
+    words->setText(QStringLiteral("tax"));
+    const int tax = dialog.shown();
+    words->clear();
+    report(all >= 10 && usb == 2 && tax == 1, QStringLiteral("activity window: every event, then just USB drives, then words"),
+           QStringLiteral("%1 in all, %2 USB, %3 for tax").arg(all).arg(usb).arg(tax));
+    QLabel *overview = nullptr;
+    for (QLabel *l : dialog.findChildren<QLabel *>()) {
+        if (l->text().startsWith(QLatin1String("<table>")))
+            overview = l;
+    }
+    report(overview && overview->text().contains(QLatin1String("ANVIL-PC")) && overview->text().contains(QLatin1String("GMT Standard Time"))
+               && overview->text().contains(QLatin1String("Sam Tester")),
+           QStringLiteral("activity window: what the PC is, at the top"), overview ? overview->text().left(300) : QStringLiteral("no overview"));
+    QCoreApplication::processEvents();
+    if (qEnvironmentVariableIsSet("DISKANVIL_UITEST_SHOTS"))
+        dialog.grab().save(qEnvironmentVariable("DISKANVIL_UITEST_SHOTS") + QStringLiteral("/activity.png"));
+}
+
 void lostFilesDeletedRecently()
 {
     QTemporaryDir dir;
@@ -6360,7 +6400,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},
