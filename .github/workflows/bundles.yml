@@ -55,7 +55,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libzstd-dev libssl-dev libblkid-dev libarchive-dev zlib1g-dev pkg-config ninja-build desktop-file-utils \
-            libfreetype-dev libfontconfig1-dev libjpeg-dev libpng-dev libopenjp2-7-dev liblcms2-dev
+            libfreetype-dev libfontconfig1-dev libjpeg-dev libpng-dev libopenjp2-7-dev liblcms2-dev \
+            libxrandr2 libpulse0 # what Qt Multimedia needs, for the viewer's films and songs
           # Ubuntu 22.04 has no poppler for Qt 6, so it's built here, for the PDF pages in Find Lost
           # Files' previews: the version DiskAnvil Live has. The hash is of the release tarball, whose
           # signature (Albert Astals Cid, CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7) was checked.
