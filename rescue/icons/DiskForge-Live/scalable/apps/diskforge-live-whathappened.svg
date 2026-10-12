@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9ad8ff" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+  <!-- What happened: a speech bubble with a question mark. -->
+  <path d="M4.5 4h15a1.75 1.75 0 0 1 1.75 1.75v9a1.75 1.75 0 0 1-1.75 1.75H11l-4.25 3.5V16.5H4.5a1.75 1.75 0 0 1-1.75-1.75v-9A1.75 1.75 0 0 1 4.5 4z"/>
+  <path d="M10 8.5a2 2 0 1 1 2.75 1.85c-.5.2-.75.6-.75 1.15v.5" stroke="#00e5ff"/>
+  <path d="M12 14.25v.01" stroke="#00e5ff" stroke-width="2.25"/>
+</svg>

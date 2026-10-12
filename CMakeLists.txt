@@ -103,6 +103,7 @@ add_library(diskforge-core STATIC
     src/addons/signature.cpp src/addons/signature.h
     src/addons/outputfilter.cpp src/addons/outputfilter.h
     src/health/health.cpp src/health/health.h
+    src/health/triage.cpp src/health/triage.h
     src/health/smartdata.cpp src/health/smartdata.h
     src/health/firmware.h
     src/health/btrfscheck.cpp src/health/btrfscheck.h
@@ -145,6 +146,7 @@ target_compile_options(diskforge-core PRIVATE -Wall -Wextra)
 add_library(diskforge-ui STATIC
     src/app/diskmap.cpp src/app/diskmap.h
     src/app/homewindow.cpp src/app/homewindow.h
+    src/app/whathappened.cpp src/app/whathappened.h
     src/lostfiles/lostfilesdialog.cpp src/lostfiles/lostfilesdialog.h
     src/lostfiles/preview.cpp src/lostfiles/preview.h
     src/lostfiles/pictures.cpp src/lostfiles/pictures.h

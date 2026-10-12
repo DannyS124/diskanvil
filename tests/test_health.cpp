@@ -12,6 +12,7 @@
 #include "../src/health/health.h"
 #include "../src/drives/powerbox.h"
 #include "../src/health/smartdata.h"
+#include "../src/health/triage.h"
 #include "../src/tools/systemd.h"
 
 #include <QDir>
@@ -153,9 +154,61 @@ void rawPages()
            QStringLiteral("SMART pages too short to be real are left alone"));
 }
 
+// "What happened?": honest odds and the right first step for each kind of drive.
+void triageAdvice()
+{
+    using triage::Symptom;
+    using Odds = triage::Advice::Odds;
+    triage::Drive ssd;
+    ssd.known = true;
+    ssd.name = QStringLiteral("Fast SSD");
+    ssd.ssd = true;
+    ssd.trim = triage::Trim::Continuous;
+    triage::Drive weekly = ssd, off = ssd;
+    weekly.trim = triage::Trim::Weekly;
+    off.trim = triage::Trim::Off;
+    triage::Drive hdd;
+    hdd.known = true;
+    hdd.name = QStringLiteral("Big HDD");
+    triage::Drive card = hdd;
+    card.removable = true;
+    triage::Drive failing = hdd;
+    failing.failing = true;
+    triage::Drive system = hdd;
+    system.system = true;
+    report(triage::advise(Symptom::Deleted, ssd).odds == Odds::Poor && triage::advise(Symptom::Deleted, weekly).odds == Odds::Fair
+               && triage::advise(Symptom::Deleted, off).odds == Odds::Good && triage::advise(Symptom::Deleted, hdd).odds == Odds::Good
+               && triage::advise(Symptom::Deleted, card).odds == Odds::Good,
+           QStringLiteral("what happened: deleted files' odds, by how the drive erases them (TRIM)"));
+    const triage::Advice rescue = triage::advise(Symptom::Deleted, failing);
+    report(rescue.tools.value(0) == QLatin1String("rescue-copy") && rescue.odds == Odds::Fair && rescue.dont.join(' ').contains(QLatin1String("Don't check, repair")),
+           QStringLiteral("what happened: on a failing drive, a Rescue Copy comes first"), rescue.tools.join(','));
+    report(triage::advise(Symptom::Deleted, system).odds_why.contains(QLatin1String("DiskForge Live")),
+           QStringLiteral("what happened: the system's own drive is best looked at from DiskForge Live"));
+    report(triage::advise(Symptom::Formatted, ssd).odds == Odds::Poor && triage::advise(Symptom::Formatted, card).odds == Odds::Good,
+           QStringLiteral("what happened: a formatted SSD is mostly erased, a formatted card isn't"));
+    const triage::Advice raw = triage::advise(Symptom::WontOpen, hdd);
+    report(raw.dont.join(' ').contains(QLatin1String("Don't format it")) && raw.dont.join(' ').contains(QLatin1String("chkdsk"))
+               && raw.tools == QStringList{QStringLiteral("health"), QStringLiteral("lost-files")},
+           QStringLiteral("what happened: a drive that won't open isn't formatted or repaired"));
+    report(triage::advise(Symptom::PartitionGone, hdd).tools.value(0) == QLatin1String("recover-partitions")
+               && triage::advise(Symptom::WindowsWontStart, triage::Drive()).tools.value(0) == QLatin1String("rescue-usb")
+               && triage::advise(Symptom::Ransomware, hdd).dont.value(0).contains(QLatin1String("pay"))
+               && triage::advise(Symptom::Deleted, triage::Drive()).odds == Odds::Unknown,
+           QStringLiteral("what happened: each one's first tool, and no odds without a drive"));
+    Disk spinning;
+    spinning.rotationRate = 7200;
+    Disk noTrim;
+    noTrim.rotationRate = 0;
+    noTrim.discard = false;
+    report(triage::trimOf(spinning) == triage::Trim::NotSsd && triage::trimOf(noTrim) == triage::Trim::Unsupported,
+           QStringLiteral("what happened: TRIM only matters on an SSD that does it"));
+}
+
 void healthTests()
 {
     hiddenArea();
+    triageAdvice();
     rawPages();
     QTemporaryDir config;
     qputenv("XDG_CONFIG_HOME", QFile::encodeName(config.path()));

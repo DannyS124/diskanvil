@@ -30,6 +30,7 @@
 #include "inspectdialog.h"
 #include "recoverdialog.h"
 #include "rescuestick.h"
+#include "whathappened.h"
 #include "rescueusbdialog.h"
 #include "stickcheckdialog.h"
 #include "windowsusbdialog.h"
@@ -196,6 +197,8 @@ MainWindow::MainWindow(UDisks *udisks, QWidget *parent)
             return;
         if (!askPlain(this, tr("Errors Found"), tr("%1 has file system errors. Repair them now?").arg(volumeTitle(*v))))
             return;
+        if (const Volume *again = volumeByPath(objectPath); !again || !failingDriveOk(*again, true))
+            return;
         if (const Volume *fresh = volumeByPath(objectPath))
             m_udisks->repair(*fresh);
         else
@@ -351,6 +354,8 @@ void MainWindow::createActions()
         if (!v)
             return;
         const QString path = v->objectPath;
+        if (!failingDriveOk(*v, false))
+            return;
 #ifndef Q_OS_WIN // Windows' chkdsk checks it where it is
         if (!v->mounts().isEmpty()
             && !askPlain(this, tr("Check for Errors"), tr("%1 has to be unmounted while it's checked. Continue?").arg(volumeTitle(*v))))
@@ -594,6 +599,29 @@ void MainWindow::createActions()
             RescueDialog(m_udisks, d->blockPath, this).exec();
     });
 
+    m_whatHappened = new QAction(themeIcon("help-hint", "help-contents"), tr("&What Happened?…"), this);
+    m_whatHappened->setToolTip(tr("Lost files? Start here: what happened, the odds, what not to do, and which tool to use"));
+    connect(m_whatHappened, &QAction::triggered, this, [this] {
+        WhatHappenedDialog dialog(m_udisks->disks(), rescue::runningInRescue(), this);
+        connect(&dialog, &WhatHappenedDialog::openTool, this, [this, &dialog](const QString &tool, const QString &blockPath) {
+            // The drive picked there is the one picked here, then the tool is opened as from the menu.
+            const QVector<Disk> &disks = m_udisks->disks();
+            for (int i = 0; i < disks.size(); ++i) {
+                if (disks[i].blockPath == blockPath)
+                    m_map->selectDisk(i);
+            }
+            const QHash<QString, QAction *> actions = {{QStringLiteral("lost-files"), m_findFiles},  {QStringLiteral("rescue-copy"), m_rescue},
+                                                       {QStringLiteral("health"), m_health},         {QStringLiteral("recover-partitions"), m_recover},
+                                                       {QStringLiteral("rescue-usb"), m_rescueUsb},  {QStringLiteral("virus-scan"), m_virusScan}};
+            if (QAction *action = actions.value(tool)) {
+                updateActions();
+                dialog.accept();
+                action->trigger();
+            }
+        });
+        dialog.exec();
+    });
+
     m_usage = new QAction(themeIcon("view-statistics", "drive-harddisk"), tr("Disk &Usage…"), this);
     connect(m_usage, &QAction::triggered, this, [this] {
         const Volume *v = selectedVolume();
@@ -719,6 +747,8 @@ void MainWindow::createActions()
     tools->setToolTipsVisible(true);
     connect(tools, &QMenu::aboutToShow, this, [this, tools] {
         tools->clear();
+        tools->addAction(m_whatHappened);
+        tools->addSeparator();
 #ifdef Q_OS_WIN
         // Quick Fixes' tools, and add-ons (Linux commands), aren't in the Windows version yet.
         tools->addActions({m_virusScan, m_usage, m_cleanup, m_optimize, m_snapshots});
@@ -1352,9 +1382,37 @@ QWidget *MainWindow::toolParent()
     return m_toolOnly ? nullptr : this;
 }
 
+bool MainWindow::failingDriveOk(const Volume &volume, bool repairing)
+{
+    const Disk *disk = m_udisks->diskOf(volume);
+    if (!disk || !health::hasUnreadableSpots(disk->health))
+        return true;
+    // Checking reads all of it; repairing writes to it, and can drop what it can't read.
+    QMessageBox box(QMessageBox::Warning, repairing ? tr("Repair a Failing Drive?") : tr("Check a Failing Drive?"),
+                    repairing ? tr("%1 is on a drive with spots it can't read. Repairing writes to it, and can throw away files it can't "
+                                   "read: on a failing drive that can lose them for good. Make a Rescue Copy first, and repair the copy.")
+                                    .arg(volumeTitle(volume))
+                              : tr("%1 is on a drive with spots it can't read. Checking reads all of it, which can make a failing drive worse. "
+                                   "Make a Rescue Copy first, and check the copy.")
+                                    .arg(volumeTitle(volume)),
+                    QMessageBox::NoButton, this);
+    QPushButton *rescue = box.addButton(tr("Make a Rescue Copy…"), QMessageBox::AcceptRole);
+    QPushButton *anyway = box.addButton(repairing ? tr("Repair Anyway") : tr("Check Anyway"), QMessageBox::DestructiveRole);
+    box.addButton(QMessageBox::Cancel);
+    box.setDefaultButton(rescue);
+    box.setObjectName(QStringLiteral("failingDrive"));
+    box.exec();
+    if (box.clickedButton() == rescue) {
+        RescueDialog(m_udisks, disk->blockPath, this).exec();
+        return false;
+    }
+    return box.clickedButton() == anyway;
+}
+
 bool MainWindow::openTool(const QString &name)
 {
-    const QHash<QString, QAction *> tools = {{QStringLiteral("write-image"), m_writeImage},
+    const QHash<QString, QAction *> tools = {{QStringLiteral("what-happened"), m_whatHappened},
+                                             {QStringLiteral("write-image"), m_writeImage},
                                              {QStringLiteral("windows-usb"), m_windowsUsb},
                                              {QStringLiteral("rescue-usb"), m_rescueUsb},
                                              {QStringLiteral("check-stick"), m_checkStick},

@@ -36,6 +36,9 @@ public:
     // Opens one of the tools by name, for --open: write-image, windows-usb, rescue-usb,
     // check-stick, lost-files. False for a name it doesn't know.
     bool openTool(const QString &name);
+    // On a drive with spots it can't read: a Rescue Copy offered first, before checking or
+    // repairing what's on it. True when it's to go ahead.
+    bool failingDriveOk(const Volume &volume, bool repairing);
     QWidget *toolParent(); // the parent for the USB tools' dialogs
     void buildContextMenu(QMenu *menu); // the right-click menu for the current selection
     // Sets up add-on toolbar pins and shortcuts again, after add-ons or their settings changed.
@@ -132,6 +135,7 @@ private:
     QAction *m_backup = nullptr;
     QAction *m_restore = nullptr;
     QAction *m_rescue = nullptr;
+    QAction *m_whatHappened = nullptr;
     QAction *m_usage = nullptr;
     QAction *m_optimize = nullptr;
     QAction *m_cleanup = nullptr;

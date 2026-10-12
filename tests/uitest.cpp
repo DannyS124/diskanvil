@@ -20,6 +20,7 @@
 #include "../src/lostfiles/hexview.h"
 #include "../src/lostfiles/structure.h"
 #include "../src/lostfiles/btrfsdialog.h"
+#include "../src/app/whathappened.h"
 #include "../src/lostfiles/lostfilesdialog.h"
 #include "../src/lostfiles/filetypes.h"
 #include "../src/common/jobui.h"
@@ -62,6 +63,7 @@
 #include <QCheckBox>
 #include <QStorageInfo>
 #include <QBuffer>
+#include <QCommandLinkButton>
 #include <QSettings>
 #include <QPainter>
 #include <QPdfWriter>
@@ -3624,6 +3626,55 @@ void lostFilesBtrfs()
            QStringLiteral("btrfs: the DiskForge Live way, read as root through a loop device that's taken away after"), live.join(QLatin1Char(',')));
 }
 
+// "What Happened?": from what happened and which drive, to the odds and the right tool.
+void whatHappened()
+{
+    Disk ssd;
+    ssd.blockPath = QStringLiteral("/org/freedesktop/UDisks2/block_devices/nvme0n1");
+    ssd.device = QStringLiteral("/dev/nvme0n1");
+    ssd.model = QStringLiteral("Fast SSD");
+    ssd.size = 512ull * 1000 * 1000 * 1000;
+    ssd.rotationRate = 0;
+    ssd.discard = true;
+    Disk hdd;
+    hdd.blockPath = QStringLiteral("/org/freedesktop/UDisks2/block_devices/sdb");
+    hdd.device = QStringLiteral("/dev/sdb");
+    hdd.model = QStringLiteral("Old HDD");
+    hdd.size = 500ull * 1000 * 1000 * 1000;
+    hdd.rotationRate = 5400;
+    hdd.health.state = Health::State::Failing;
+    hdd.health.pendingSectors = 8;
+    WhatHappenedDialog dialog({ssd, hdd}, false);
+    dialog.setTrimForTests(triage::Trim::Continuous);
+    dialog.show();
+    QStringList opened;
+    QObject::connect(&dialog, &WhatHappenedDialog::openTool, &dialog,
+                     [&opened](const QString &tool, const QString &path) { opened << tool + QLatin1Char('@') + path.section(QLatin1Char('/'), -1); });
+    auto *drives = dialog.findChild<QListWidget *>(QStringLiteral("drives"));
+    auto *odds = dialog.findChild<QLabel *>(QStringLiteral("odds"));
+    dialog.findChild<QCommandLinkButton *>(QStringLiteral("deleted"))->click();
+    drives->setCurrentRow(0);
+    dialog.findChild<QPushButton *>(QStringLiteral("next"))->click();
+    const QString ssdOdds = odds->text();
+    dialog.findChild<QPushButton *>(QStringLiteral("tool-lost-files"))->click();
+    report(ssdOdds.contains(QLatin1String("Poor")) && ssdOdds.contains(QLatin1String("TRIM is on")) && opened == QStringList{QStringLiteral("lost-files@nvme0n1")},
+           QStringLiteral("what happened: deleted files on an SSD that trims: poor odds, said why, and Find Lost Files opens on it"),
+           opened.join(',') + QStringLiteral(" | ") + ssdOdds.left(80));
+    // A failing drive: a Rescue Copy first.
+    drives->setCurrentRow(1);
+    dialog.findChild<QPushButton *>(QStringLiteral("next"))->click();
+    QCoreApplication::processEvents(); // new buttons are shown on the next turn of the event loop
+    QStringList buttons;
+    for (QPushButton *b : dialog.findChildren<QPushButton *>()) {
+        if (b->objectName().startsWith(QLatin1String("tool-")) && b->isVisible())
+            buttons << b->objectName().mid(5);
+    }
+    if (qEnvironmentVariableIsSet("DISKFORGE_UITEST_SHOTS"))
+        dialog.grab().save(qEnvironmentVariable("DISKFORGE_UITEST_SHOTS") + QStringLiteral("/what-happened.png"));
+    report(drives->item(1)->text().contains(QLatin1String("failing")) && buttons.value(0) == QLatin1String("rescue-copy"),
+           QStringLiteral("what happened: on a failing drive, Make a Rescue Copy is the first button"), buttons.join(','));
+}
+
 // Repairing through the window: a copy is repaired, and joins the list to be looked at and saved.
 void lostFilesRepaired()
 {
@@ -4187,7 +4238,7 @@ int userScenarios(const QStringList &only)
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
         {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
-        {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
+        {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},
         {"previews", previewsThroughHelper}, {"viruses", virusScanThroughWindow}, {"virusdrive", virusScanOnDrive}, {"viruswindows", virusScanWindowsDrive}, {"virusboot", virusScanBoot}, {"viruslookup", virusLookUpOnline}, {"newids", newIdsThroughWindow},
     };

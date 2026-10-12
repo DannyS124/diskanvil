@@ -274,6 +274,9 @@ QVector<HomeWindow::Tile> HomeWindow::allTiles() const
         add(QStringLiteral("drives"), QStringLiteral("diskforge-live-drives"), QStringLiteral("drive-harddisk"), tr("Drives and Partitions"),
             tr("Every drive in the PC: health, partitions, backups and more"))
             .mainWindow = true;
+    add(QStringLiteral("whathappened"), QStringLiteral("diskforge-live-whathappened"), QStringLiteral("help-hint"), tr("What Happened?"),
+        tr("Lost files? Start here: the odds, what not to do, and what to do"))
+        .tool = QStringLiteral("what-happened");
     add(QStringLiteral("recover"), QStringLiteral("diskforge-live-recover"), QStringLiteral("edit-find"), tr("Get Files Back"),
         tr("Deleted files, or files from a formatted or damaged drive"))
         .tool = QStringLiteral("lost-files");
