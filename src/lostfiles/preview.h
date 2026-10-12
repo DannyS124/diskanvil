@@ -29,6 +29,7 @@ struct Request {
     quint64 size = 0;  // the whole file's; `data` can be just its start
     int pixels = 0;    // the picture's longest side
     QByteArray data;
+    QByteArray moov;   // an MP4 or MOV's moov box, when it's past `data` (phones write it at the end)
 };
 
 struct Result {

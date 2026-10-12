@@ -6,6 +6,7 @@
 #include "applog.h"
 #include "filetypes.h"
 #include "hostprocess.h"
+#include "mediainfo.h"
 
 #include <QCoreApplication>
 #include <QDeadlineTimer>
@@ -98,7 +99,16 @@ void PreviewLoader::run()
         request.name = f.name;
         request.size = f.size;
         request.pixels = wish.pixels;
-        request.data = lost::FileReader(m_source, f).head(most);
+        lost::FileReader reader(m_source, f);
+        request.data = reader.head(most);
+        // An MP4 or MOV with its moov box past what's read (phones write it last): that too.
+        const QString id = f.type >= 0 ? filetypes::types()[f.type].id : QString();
+        if (quint64(request.data.size()) < f.size && (id == QLatin1String("mp4") || id == QLatin1String("mov") || id == QLatin1String("3gp"))) {
+            quint64 where = 0;
+            request.moov = mediainfo::mp4Moov([&reader](quint64 at, char *buf, qint64 len) { return reader.read(at, buf, len); }, f.size, &where);
+            if (where + quint64(request.moov.size()) <= quint64(request.data.size()))
+                request.moov.clear(); // it was in there after all
+        }
         bool failed = false;
         const preview::Result result = ask(request, &failed);
         Q_EMIT ready(wish.index, wish.pixels, result.image, result.text, result.facts, failed);

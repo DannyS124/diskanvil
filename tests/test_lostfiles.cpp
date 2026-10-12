@@ -18,6 +18,7 @@
 #include "../src/lostfiles/mediainfo.h"
 #include "../src/lostfiles/officetext.h"
 #include "../src/lostfiles/ole.h"
+#include "../src/lostfiles/places.h"
 #include "../src/lostfiles/pictures.h"
 #include "../src/lostfiles/structure.h"
 #include "../src/lostfiles/repair.h"
@@ -1727,6 +1728,68 @@ void mediaAndOffice()
         }
     }
     report(runs == 1200, QStringLiteral("previews: 1200 damaged files read without a crash"));
+
+    // Where a phone film was made. An Android phone's: ©xyz in udta, its moov box written last.
+    QByteArray xyz;
+    be32(xyz, 0);
+    xyz.replace(0, 4, QByteArray("\0\x12\x15\xc7", 4)); // its length (18) and language
+    xyz.append("+53.8008-001.5491/");
+    const QByteArray android = box("ftyp", QByteArray("isom\0\0\x02\0isomavc1", 16)) + box("mdat", QByteArray(300000, '\x22'))
+                             + box("moov", box("udta", box("\xa9xyz", xyz)));
+    quint64 where = 0;
+    const QByteArray moov = mediainfo::mp4Moov([&android](quint64 at, char *buf, qint64 len) {
+        const qint64 n = std::max<qint64>(0, std::min<qint64>(len, android.size() - qint64(at)));
+        memcpy(buf, android.constData() + at, size_t(n));
+        return n;
+    }, quint64(android.size()), &where);
+    const mediainfo::Info a = mediainfo::read(mp4Type, moov, quint64(android.size()));
+    const QStringList aFacts = mediainfo::facts(a);
+    report(where > 300000 && a.hasLocation && std::abs(a.latitude - 53.8008) < 1e-6 && std::abs(a.longitude + 1.5491) < 1e-6
+               && aFacts.contains(QStringLiteral("Where\tLeeds, England, United Kingdom")),
+           QStringLiteral("films: where an Android phone's was made, from the moov box at its end"), aFacts.join(QLatin1Char('|')));
+    // An iPhone's: QuickTime keys in moov's meta.
+    const QVector<std::pair<QByteArray, QByteArray>> apple = {
+        {"com.apple.quicktime.location.ISO6709", "+37.3349-122.0090+010.000/"}, {"com.apple.quicktime.make", "Apple"},
+        {"com.apple.quicktime.model", "iPhone 15 Pro"}, {"com.apple.quicktime.software", "17.5.1"},
+        {"com.apple.quicktime.creationdate", "2024-07-14T13:22:05-0700"}};
+    QByteArray keys(4, '\0'), items;
+    be32(keys, quint32(apple.size()));
+    for (int k = 0; k < apple.size(); ++k) {
+        be32(keys, quint32(8 + apple[k].first.size()));
+        keys.append("mdta").append(apple[k].first);
+        QByteArray data;
+        be32(data, 1);
+        be32(data, 0);
+        QByteArray item = box("data", data + apple[k].second);
+        QByteArray numbered;
+        be32(numbered, quint32(8 + item.size()));
+        be32(numbered, quint32(k + 1));
+        items.append(numbered + item);
+    }
+    QByteArray hdlr(8, '\0');
+    hdlr.append("mdta").append(QByteArray(12, '\0'));
+    const QByteArray iphone = box("ftyp", QByteArray("qt  \0\0\0\0qt  ", 12)) + box("moov", box("meta", fullBox("hdlr", 0, hdlr).mid(0) + box("keys", keys) + box("ilst", items)));
+    const mediainfo::Info i = mediainfo::read(filetypes::typeNumber(QStringLiteral("mov")), iphone, quint64(iphone.size()));
+    const QStringList iFacts = mediainfo::facts(i);
+    report(i.hasLocation && std::abs(i.latitude - 37.3349) < 1e-6 && i.hasAltitude && i.altitude == 10 && i.make == QLatin1String("Apple")
+               && i.model == QLatin1String("iPhone 15 Pro") && i.software == QLatin1String("17.5.1")
+               && i.made.toUTC() == QDateTime(QDate(2024, 7, 14), QTime(20, 22, 5), QTimeZone::UTC)
+               && iFacts.filter(QStringLiteral("Where\t")).join(QString()).contains(QLatin1String("United States")),
+           QStringLiteral("films: an iPhone's place, model and time, from its QuickTime keys"), iFacts.join(QLatin1Char('|')));
+    double lat = 0, lon = 0, alt = 0;
+    bool hasAlt = false;
+    report(mediainfo::parseIso6709(QStringLiteral("+27.5916+086.5640+8850CRSWGS_84/"), &lat, &lon, &alt, &hasAlt) && hasAlt && alt == 8850
+               && !mediainfo::parseIso6709(QStringLiteral("+00.0000+000.0000/"), &lat, &lon, &alt, &hasAlt)
+               && !mediainfo::parseIso6709(QStringLiteral("+95.0000+010.0000/"), &lat, &lon, &alt, &hasAlt)
+               && !mediainfo::parseIso6709(QStringLiteral("nowhere"), &lat, &lon, &alt, &hasAlt),
+           QStringLiteral("films: ISO 6709 places read, nonsense and 0,0 refused"));
+    for (int round = 0; round < 2000; ++round) {
+        QByteArray broken = (round % 2 ? iphone : android.right(200));
+        for (int k = 0; k < 6; ++k)
+            broken[rnd.bounded(int(broken.size()))] = char(rnd.bounded(256));
+        mediainfo::facts(mediainfo::read(filetypes::typeNumber(QStringLiteral("mov")), broken, quint64(broken.size())));
+    }
+    report(true, QStringLiteral("films: 2000 damaged phone films read without a crash"));
 }
 
 // One record of NTFS's change journal, the way Windows writes it (USN_RECORD_V2 or V3).
@@ -1841,9 +1904,12 @@ QByteArray exifTiff(bool little, bool loop = false)
     };
     const quint32 exif = folder({tagged(0x829A, rational({{1, 250}})), tagged(0x829D, rational({{28, 10}})), ExifTag{0x8827, 3, 1, n16(100)},
                                  tagged(0x9003, text("2024:07:14 13:22:05")), tagged(0x9011, text("+02:00")), tagged(0x920A, rational({{42, 10}})),
-                                 ExifTag{0xA002, 4, 1, n32(4032)}, ExifTag{0xA003, 4, 1, n32(3024)}, tagged(0xA434, text("EF-S 18-55mm"))});
+                                 ExifTag{0xA002, 4, 1, n32(4032)}, ExifTag{0xA003, 4, 1, n32(3024)}, tagged(0xA431, text("093021001234")),
+                                 tagged(0xA434, text("EF-S 18-55mm"))});
     const quint32 gps = folder({tagged(1, text("N")), tagged(2, rational({{51, 1}, {30, 1}, {2604, 100}})), tagged(3, text("W")),
-                                tagged(4, rational({{0, 1}, {7, 1}, {3900, 100}})), ExifTag{5, 1, 1, QByteArray(1, '\0')}, tagged(6, rational({{35, 1}}))});
+                                tagged(4, rational({{0, 1}, {7, 1}, {3900, 100}})), ExifTag{5, 1, 1, QByteArray(1, '\0')}, tagged(6, rational({{35, 1}})),
+                                tagged(7, rational({{11, 1}, {22, 1}, {4, 1}})), tagged(0x10, text("T")), tagged(0x11, rational({{4700, 100}})),
+                                tagged(0x1D, text("2024:07:14"))});
     const quint32 first = quint32(t.size());
     const quint32 first0 = folder({tagged(0x010F, text("Canon")), tagged(0x0110, text("Canon EOS 80D")), tagged(0x0132, text("2024:07:14 13:20:00")),
                                    ExifTag{0x8769, 4, 1, n32(loop ? first : exif)}, ExifTag{0x8825, 4, 1, n32(loop ? exif : gps)}});
@@ -1898,6 +1964,39 @@ void photoFacts()
     }
     report(true, QStringLiteral("EXIF: cut short at every byte and damaged 3000 ways, read without a crash"));
     report(exif::read(QByteArray("\xFF\xD8\xFF\xE0\x00\x10JFIF", 10)).empty(), QStringLiteral("EXIF: a photo without any says nothing"));
+
+    // Where, which way, the satellites' time and the serial number, and nothing said about editing
+    // for a photo straight from the camera.
+    const exif::Info camera = exif::read(jpegWith(exifTiff(false)));
+    report(camera.serial == QLatin1String("093021001234") && camera.hasDirection && qFuzzyCompare(camera.direction, 47.0) && !camera.directionMagnetic
+               && camera.satelliteTime == QDateTime(QDate(2024, 7, 14), QTime(11, 22, 4), QTimeZone::UTC),
+           QStringLiteral("EXIF: the camera's serial number, which way it faced, the satellites' time"));
+    report(said.contains(QStringLiteral("Where\tLondon, England, United Kingdom")) && said.contains(QStringLiteral("Facing\tnorth-east (47°)"))
+               && said.contains(QStringLiteral("Camera serial\t093021001234")) && exif::editSigns(camera).isEmpty() && !all.contains(QLatin1String("Changed since")),
+           QStringLiteral("EXIF: where it was taken, by name, without going online; nothing said about editing"), all);
+    // The camera's clock without a time zone: the satellites' time says which it was on.
+    QByteArray noZone = exifTiff(true);
+    noZone.replace("+02:00", "      ");
+    const QString clock = exif::describe(exif::read(jpegWith(noZone))).filter(QStringLiteral("Satellite time")).join(QString());
+    report(clock.contains(QLatin1String("on UTC+02:00")), QStringLiteral("EXIF: the satellites' time gives the time zone the camera's clock was on"), clock);
+
+    // Edited: Photoshop's XMP, with its history, and the "changed" time after the "taken" one.
+    QByteArray edited = exifTiff(true);
+    edited.replace("2024:07:14 13:20:00", "2024:07:16 09:30:00");
+    const QByteArray xmp = R"x(<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF><rdf:Description xmp:CreatorTool="Adobe Photoshop 25.0 (Windows)">)x"
+                           R"x(<xmpMM:History><rdf:Seq><rdf:li stEvt:action="created" stEvt:when="2024-07-14T13:22:05+02:00"/>)x"
+                           R"x(<rdf:li stEvt:action="saved" stEvt:when="2024-07-16T09:30:00+02:00" stEvt:softwareAgent="Adobe Photoshop 25.0 (Windows)"/>)x"
+                           R"x(<rdf:li><stEvt:action>converted</stEvt:action><stEvt:softwareAgent>Adobe Photoshop 25.0 (Windows)</stEvt:softwareAgent></rdf:li>)x"
+                           R"x(</rdf:Seq></xmpMM:History></rdf:Description></rdf:RDF></x:xmpmeta>)x";
+    const QByteArray xmpSegment = QByteArray("http://ns.adobe.com/xap/1.0/\0", 29) + xmp;
+    QByteArray withXmp = jpegWith(edited);
+    const int xmpLength = int(xmpSegment.size()) + 2;
+    withXmp.insert(withXmp.indexOf("\xFF\xDA"), QByteArray("\xFF\xE1", 2) + char(xmpLength >> 8) + char(xmpLength & 0xFF) + xmpSegment);
+    const exif::Info touched = exif::read(withXmp);
+    const QStringList signs = exif::editSigns(touched);
+    report(touched.xmpTool.startsWith(QLatin1String("Adobe Photoshop")) && touched.history.size() == 3 && signs.size() == 3
+               && signs.last().contains(QLatin1String("lists 2 change")),
+           QStringLiteral("EXIF: an edited photo says so (changed after, an editing program, its history)"), signs.join(QStringLiteral(" | ")));
 }
 
 // Copies made just to look at a found file: the same bytes, under its own name, read-only, made
@@ -3244,6 +3343,35 @@ void windowsCompressed()
     report(rounds == 6000, QStringLiteral("compressed by Windows: damaged packed data unpacks to no more than it should"), QString::number(rounds));
 }
 
+// Where a photo was taken, in words and on a map, from what DiskAnvil carries (no internet).
+void placeNames()
+{
+    const places::Place leeds = places::nearest(53.79648, -1.54785);
+    report(leeds.name == QLatin1String("Leeds") && leeds.country == QLatin1String("United Kingdom") && leeds.region == QLatin1String("England")
+               && leeds.kilometres < 2 && places::describe(leeds) == QLatin1String("Leeds, England, United Kingdom"),
+           QStringLiteral("places: a spot in a city is named after it"), places::describe(leeds));
+    const places::Place outside = places::nearest(-33.95, 151.35); // off Sydney's coast
+    report(outside.valid() && places::describe(outside).startsWith(QLatin1String("near ")) && outside.country == QLatin1String("Australia"),
+           QStringLiteral("places: a spot out of town is \"near\" the nearest one, with how far"), places::describe(outside));
+    report(!places::nearest(-48.88, -123.39).valid() && !places::nearest(91, 0).valid() && !places::nearest(qQNaN(), 0).valid(),
+           QStringLiteral("places: the middle of the ocean, or no place at all, isn't named"));
+    report(places::nearest(64.84, -147.72).name == QLatin1String("Fairbanks") && places::nearest(-0.18, -78.47).countryCode == QLatin1String("EC")
+               && places::nearest(35.68, 139.69).countryCode == QLatin1String("JP"),
+           QStringLiteral("places: north, south, east and west of here"));
+    const double london = places::kilometres(51.5074, -0.1278, 48.8566, 2.3522);
+    report(london > 340 && london < 345, QStringLiteral("places: London to Paris is about 343 km"), QString::number(london));
+    report(places::mapLink(53.8, -1.5).startsWith(QLatin1String("https://www.openstreetmap.org/?mlat=53.800000&mlon=-1.500000")),
+           QStringLiteral("places: a link to the spot on OpenStreetMap"), places::mapLink(53.8, -1.5));
+    qsizetype points = 0;
+    for (const places::Ring &r : places::land())
+        points += r.size();
+    report(places::land().size() > 1000 && points > 30000 && places::borders().size() > 200, QStringLiteral("places: the world map's outlines load"),
+           QStringLiteral("%1 rings, %2 points").arg(places::land().size()).arg(points));
+    QByteArray bad("DAMAP1\0\0", 8);
+    bad += QByteArray::fromHex("ffffff7f0100020003000400");
+    report(places::readRings(bad).isEmpty() && places::readRings("nonsense").isEmpty(), QStringLiteral("places: a damaged map file reads as nothing"));
+}
+
 void lostFilesTests()
 {
     previewQueue();
@@ -3273,4 +3401,5 @@ void lostFilesTests()
     readThrough();
     btrfsRestore();
     windowsCompressed();
+    placeNames();
 }

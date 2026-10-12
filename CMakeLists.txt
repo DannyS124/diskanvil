@@ -63,6 +63,7 @@ add_library(diskanvil-core STATIC
     src/lostfiles/timeline.cpp src/lostfiles/timeline.h
     src/lostfiles/lostfs.cpp src/lostfiles/lostfs.h src/lostfiles/lostntfs.cpp src/lostfiles/lostraw.h
     src/lostfiles/unpack.cpp src/lostfiles/unpack.h
+    src/lostfiles/places.cpp src/lostfiles/places.h
     src/lostfiles/vshadow.cpp src/lostfiles/vshadow.h
     src/lostfiles/vdisk.cpp src/lostfiles/vdisk.h
     src/drives/fat32format.cpp src/drives/fat32format.h
@@ -270,6 +271,9 @@ function(diskanvil_add_data target)
     qt_add_resources(${target} "${target}_data" PREFIX "/" FILES data/help.html data/${APP_ID}.svg LICENSE)
     qt_add_resources(${target} "${target}_themes" PREFIX "/themes" BASE data/themes
         FILES data/themes/classic.json data/themes/deadshadow.json data/themes/diskanvil-live.json data/themes/high-contrast.json)
+    # Place names and a world map, for where photos were taken (data/places/ATTRIBUTION.txt).
+    qt_add_resources(${target} "${target}_places" PREFIX "/places" BASE data/places
+        FILES data/places/cities.tsv data/places/countries.tsv data/places/land.bin data/places/borders.bin)
 endfunction()
 
 qt_add_executable(diskanvil src/main.cpp)
@@ -296,6 +300,7 @@ if(DISKANVIL_SELFTEST)
         tests/test_usage.cpp tests/test_backup.cpp
         tests/test_rescue.cpp tests/test_clone.cpp tests/test_system.cpp
         tests/test_catalog.cpp tests/test_fuzz.cpp tests/test_health.cpp tests/test_jobs.cpp tests/test_recover.cpp tests/test_rescueusb.cpp tests/test_stickcheck.cpp tests/test_images.cpp tests/test_isomode.cpp tests/test_windows.cpp tests/test_lostfiles.cpp tests/test_viruses.cpp tests/test_registry.cpp tests/test_startup.cpp tests/test_boot.cpp tests/test_newids.cpp tests/testsign.cpp tests/testsign.h tests/test_raid.cpp tests/test_lvm.cpp)
+    diskanvil_add_data(diskanvil-selftest)
     target_link_libraries(diskanvil-selftest PRIVATE diskanvil-ui OpenSSL::Crypto)
     target_compile_definitions(diskanvil-selftest PRIVATE SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 

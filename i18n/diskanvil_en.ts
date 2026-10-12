@@ -816,6 +816,17 @@
     </message>
 </context>
 <context>
+    <name>exif</name>
+    <message numerus="yes">
+        <location filename="../src/lostfiles/exif.cpp" line="459"/>
+        <source>its own record lists %n change(s) made to it</source>
+        <translation>
+            <numerusform>its own record lists %n change made to it</numerusform>
+            <numerusform>its own record lists %n changes made to it</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
     <name>format</name>
     <message numerus="yes">
         <location filename="../src/common/format.cpp" line="128"/>

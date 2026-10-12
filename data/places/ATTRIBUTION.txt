@@ -1,0 +1,14 @@
+Where these files come from
+
+cities.tsv, countries.tsv: GeoNames (https://www.geonames.org), licensed under Creative Commons
+Attribution 4.0 (https://creativecommons.org/licenses/by/4.0/). Made from cities15000.zip,
+countryInfo.txt and admin1CodesASCII.txt of https://download.geonames.org/export/dump/: the towns
+and cities with over 15,000 people, with their country and region, sorted by place. Each line:
+name, country code, region, latitude, longitude, people.
+
+land.bin, borders.bin: Natural Earth (https://www.naturalearthdata.com), in the public domain.
+Made from ne_50m_land and ne_110m_admin_0_countries, simplified, as rings of points: "DAMAP1",
+two zero bytes, then for each ring a little-endian 32-bit count and that many pairs of 16-bit
+longitude and latitude in hundredths of a degree.
+
+make.py makes all four from those downloads.

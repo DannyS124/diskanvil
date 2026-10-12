@@ -29,6 +29,14 @@ struct Info {
     double latitude = 0, longitude = 0; // degrees, north and east positive
     bool hasAltitude = false;
     double altitude = 0; // metres above the sea
+    bool hasDirection = false;
+    double direction = 0;   // which way the camera faced, degrees from north
+    bool directionMagnetic = false; // from magnetic north, not true north
+    QDateTime satelliteTime; // the GPS's own time (UTC), set by the satellites, not the camera's clock
+    QString serial, lensSerial, owner; // the camera body's and the lens's serial numbers, its owner's name
+    QDateTime changed;       // when it was last changed (EXIF's DateTime: editing programs set it)
+    QString xmpTool;         // the program XMP says made it
+    QStringList history;     // XMP's edit history: "saved with Adobe Photoshop 25.0, 2024-07-15 09:12"
     bool empty() const;
 };
 
@@ -37,9 +45,15 @@ Info read(const QByteArray &file);
 // From the TIFF structure EXIF is made of, starting at "II*\0" or "MM\0*".
 Info fromTiff(QByteArrayView tiff);
 
-// In plain words, a "label\tvalue" per line: Taken, Camera, Lens, Settings, Location, Edited
-// with, By. Only what's known.
+// In plain words, a "label\tvalue" per line: Taken, Camera, Lens, Settings, Where, Coordinates,
+// Facing, Edited with, By, and the signs it was changed after it was taken. Only what's known.
 QStringList describe(const Info &info);
+// The signs it was changed after the camera took it, in plain words (part of describe()): only
+// what it says about itself, so a careful editor leaves none.
+QStringList editSigns(const Info &info);
+// From XMP, the description Adobe's and most other editing programs add: the program, and its
+// list of what was done when. Exposed for the tests.
+void readXmp(QByteArrayView xmp, Info &info);
 // The label describe() gives a picture's size ("Size"), for others to add one the same way.
 QString sizeLabel();
 

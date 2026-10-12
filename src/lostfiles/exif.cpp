@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "exif.h"
 
+#include "places.h"
+
 #include <QCoreApplication>
 #include <QLocale>
 #include <QRegularExpression>
@@ -47,6 +49,12 @@ public:
     }
 
     qint64 first() const { return m_first; }
+    // The folder after the one at `at` (0 when there's none).
+    qint64 next(qint64 at) const
+    {
+        const int n = u16(at);
+        return n > 0 && has(at + 2, qint64(n) * 12 + 4) ? qint64(u32(at + 2 + qint64(n) * 12)) : 0;
+    }
 
     struct Entry {
         quint16 tag = 0;
@@ -206,7 +214,7 @@ Info fromTiff(QByteArrayView tiff)
     Tiff t(tiff);
     if (!t.open())
         return info;
-    QString dateTime, original, offset;
+    QString dateTime, original, offset, changedOffset;
     qint64 exifAt = -1, gpsAt = -1;
     for (const Tiff::Entry &e : t.folder(t.first())) {
         switch (e.tag) {
@@ -229,7 +237,11 @@ Info fromTiff(QByteArrayView tiff)
             case 0x829D: info.aperture = t.fraction(e); break;
             case 0x8827: info.iso = int(t.number(e)); break;
             case 0x9003: original = t.text(e); break;
+            case 0x9010: changedOffset = t.text(e); break;
             case 0x9011: offset = t.text(e); break;
+            case 0xA430: info.owner = t.text(e); break;
+            case 0xA431: info.serial = t.text(e); break;
+            case 0xA435: info.lensSerial = t.text(e); break;
             case 0x920A: info.focalLength = t.fraction(e); break;
             case 0xA002: info.width = int(t.number(e)); break;
             case 0xA003: info.height = int(t.number(e)); break;
@@ -239,9 +251,10 @@ Info fromTiff(QByteArrayView tiff)
         }
     }
     if (gpsAt > 0 && gpsAt != t.first() && gpsAt != exifAt) {
-        QString latRef, lonRef;
-        double lat = -1, lon = -1, alt = 0;
+        QString latRef, lonRef, directionRef, gpsDate;
+        double lat = -1, lon = -1, alt = 0, direction = -1;
         bool hasAlt = false, below = false;
+        double hms[3] = {-1, -1, -1};
         for (const Tiff::Entry &e : t.folder(gpsAt)) {
             const auto degrees = [&t, &e] { return e.count >= 3 ? t.fraction(e, 0) + t.fraction(e, 1) / 60 + t.fraction(e, 2) / 3600 : -1.0; };
             switch (e.tag) {
@@ -251,9 +264,24 @@ Info fromTiff(QByteArrayView tiff)
             case 4: lon = degrees(); break;
             case 5: below = t.number(e) == 1; break;
             case 6: alt = t.fraction(e); hasAlt = e.count >= 1; break;
+            case 7:
+                for (int i = 0; i < 3 && quint32(i) < e.count; ++i)
+                    hms[i] = t.fraction(e, i);
+                break;
+            case 0x10: directionRef = t.text(e); break;
+            case 0x11: direction = e.count >= 1 ? t.fraction(e) : -1; break;
+            case 0x1D: gpsDate = t.text(e); break;
             default: break;
             }
         }
+        if (direction >= 0 && direction <= 360) {
+            info.hasDirection = true;
+            info.direction = direction;
+            info.directionMagnetic = directionRef.startsWith(QLatin1Char('M'));
+        }
+        const QDate day = QDate::fromString(gpsDate.left(10), QStringLiteral("yyyy:MM:dd"));
+        if (day.isValid() && day.year() >= 1990 && hms[0] >= 0 && hms[0] < 24 && hms[1] >= 0 && hms[1] < 60 && hms[2] >= 0 && hms[2] < 61)
+            info.satelliteTime = QDateTime(day, QTime(int(hms[0]), int(hms[1]), int(std::min(59.0, hms[2]))), QTimeZone::UTC);
         // 0, 0 is what cameras without a fix write: not a place.
         if (lat >= 0 && lat <= 90 && lon >= 0 && lon <= 180 && (lat > 0 || lon > 0)) {
             info.hasLocation = true;
@@ -266,6 +294,9 @@ Info fromTiff(QByteArrayView tiff)
         }
     }
     info.taken = parseTime(original.isEmpty() ? dateTime : original, offset, &info.takenHasZone);
+    bool changedHasZone = false;
+    if (!original.isEmpty())
+        info.changed = parseTime(dateTime, changedOffset.isEmpty() ? offset : changedOffset, &changedHasZone);
     if (info.exposure < 0 || info.exposure > 100000)
         info.exposure = 0;
     if (info.aperture < 0 || info.aperture > 1000)
@@ -277,9 +308,34 @@ Info fromTiff(QByteArrayView tiff)
     return info;
 }
 
+namespace {
+
+Info readExif(QByteArrayView d, QByteArrayView *xmp);
+
+} // namespace
+
 Info read(const QByteArray &file)
 {
     const QByteArrayView d(file);
+    QByteArrayView xmp;
+    Info info = readExif(d, &xmp);
+    // XMP: a JPEG's own APP1 segment for it, or anywhere in the start of the others.
+    if (xmp.isEmpty()) {
+        const QByteArrayView head = d.first(std::min<qsizetype>(d.size(), 8 * 1024 * 1024));
+        const qsizetype start = head.indexOf(QByteArrayView("<x:xmpmeta"));
+        const qsizetype end = start >= 0 ? head.indexOf(QByteArrayView("</x:xmpmeta>"), start) : -1;
+        if (end > start)
+            xmp = head.sliced(start, end - start);
+    }
+    if (!xmp.isEmpty())
+        readXmp(xmp.first(std::min<qsizetype>(xmp.size(), 512 * 1024)), info);
+    return info;
+}
+
+namespace {
+
+Info readExif(QByteArrayView d, QByteArrayView *xmp)
+{
     // TIFF, and most cameras' raw files (CR2, NEF, ARW, DNG, ORF, RW2...), are TIFF themselves.
     if (d.size() >= 8 && ((d[0] == 'I' && d[1] == 'I') || (d[0] == 'M' && d[1] == 'M'))) {
         const Info info = fromTiff(d);
@@ -288,7 +344,7 @@ Info read(const QByteArray &file)
     }
     // A JPEG: the APP1 segment that starts with "Exif\0\0", before the picture itself.
     if (d.size() > 4 && quint8(d[0]) == 0xFF && quint8(d[1]) == 0xD8) {
-        qsizetype at = 2;
+        qsizetype at = 2, exifAt = -1;
         while (at + 4 <= d.size() && quint8(d[at]) == 0xFF) {
             const quint8 marker = quint8(d[at + 1]);
             if (marker == 0xD9 || marker == 0xDA)
@@ -304,11 +360,16 @@ Info read(const QByteArray &file)
             const int length = quint8(d[at + 2]) << 8 | quint8(d[at + 3]);
             if (length < 2 || at + 2 + length > d.size())
                 break;
-            if (marker == 0xE1 && length >= 14 && d.sliced(at + 4, 6) == QByteArrayView("Exif\0\0", 6))
-                return fromTiff(d.sliced(at + 10, length - 8));
+            static const QByteArrayView xmpMark("http://ns.adobe.com/xap/1.0/\0", 29);
+            if (marker == 0xE1 && length >= 14 && d.sliced(at + 4, 6) == QByteArrayView("Exif\0\0", 6) && exifAt < 0)
+                exifAt = at;
+            else if (marker == 0xE1 && length > 2 + xmpMark.size() && d.sliced(at + 4, xmpMark.size()) == xmpMark)
+                *xmp = d.sliced(at + 4 + xmpMark.size(), length - 2 - xmpMark.size());
             at += 2 + length;
         }
-        return {};
+        if (exifAt < 0)
+            return {};
+        return fromTiff(d.sliced(exifAt + 10, (quint8(d[exifAt + 2]) << 8 | quint8(d[exifAt + 3])) - 8));
     }
     // HEIC and AVIF keep it as an item, PNG in an eXIf chunk, WebP in an EXIF one, CR3 in a CMT1 box: found by what
     // it starts with, in the first few megabytes.
@@ -331,6 +392,72 @@ Info read(const QByteArray &file)
         }
     }
     return {};
+}
+
+// An XMP field, written either way XMP allows: as an attribute, or as an element of its own.
+QString xmpField(QByteArrayView xml, const char *name)
+{
+    const QString text = QString::fromUtf8(xml);
+    const QRegularExpression field(QStringLiteral("%1\\s*(?:=\\s*\"([^\"]*)\"|>([^<]*)<)").arg(QRegularExpression::escape(QLatin1String(name))));
+    const QRegularExpressionMatch m = field.match(text);
+    if (!m.hasMatch())
+        return {};
+    QString value = m.captured(1).isNull() ? m.captured(2) : m.captured(1);
+    value.replace(QLatin1String("&amp;"), QLatin1String("&")).replace(QLatin1String("&quot;"), QLatin1String("\"")).replace(QLatin1String("&lt;"), QLatin1String("<"));
+    return value.simplified().left(200);
+}
+
+} // namespace
+
+void readXmp(QByteArrayView xmp, Info &info)
+{
+    if (info.xmpTool.isEmpty())
+        info.xmpTool = xmpField(xmp, "xmp:CreatorTool");
+    // xmpMM:History: what each program did, and when.
+    const qsizetype start = xmp.indexOf(QByteArrayView("xmpMM:History"));
+    const qsizetype end = start >= 0 ? xmp.indexOf(QByteArrayView("</xmpMM:History>"), start) : -1;
+    if (end <= start)
+        return;
+    const QByteArrayView history = xmp.sliced(start, end - start);
+    for (qsizetype at = history.indexOf(QByteArrayView("<rdf:li")); at >= 0 && info.history.size() < 30;) {
+        const qsizetype next = history.indexOf(QByteArrayView("<rdf:li"), at + 7);
+        const QByteArrayView item = history.sliced(at, (next < 0 ? history.size() : next) - at);
+        const QString action = xmpField(item, "stEvt:action"), agent = xmpField(item, "stEvt:softwareAgent");
+        const QDateTime when = QDateTime::fromString(xmpField(item, "stEvt:when").left(19), Qt::ISODate);
+        if (!action.isEmpty()) {
+            QString line = action;
+            if (!agent.isEmpty())
+                line = tr("%1 with %2").arg(action, agent);
+            if (when.isValid())
+                line += QStringLiteral(", ") + QLocale().toString(when, QLocale::ShortFormat);
+            info.history << line;
+        }
+        at = next;
+    }
+}
+
+QStringList editSigns(const Info &i)
+{
+    QStringList signs;
+    // Editing programs set the "changed" time; cameras set it to when the photo was taken.
+    if (i.changed.isValid() && i.taken.isValid() && i.changed.toSecsSinceEpoch() > i.taken.toSecsSinceEpoch() + 60)
+        signs << tr("it was changed on %1, after it was taken").arg(QLocale().toString(i.changed, QLocale::ShortFormat));
+    static const QRegularExpression editors(
+        QStringLiteral("photoshop|lightroom|gimp|paint\\.net|affinity|pixelmator|snapseed|picasa|canva|luminar|capture one|darktable|"
+                       "rawtherapee|acdsee|photoscape|fotor|polarr|vsco|facetune|meitu|photo editor|faceapp"),
+        QRegularExpression::CaseInsensitiveOption);
+    for (const QString &tool : {i.software, i.xmpTool}) {
+        if (!tool.isEmpty() && editors.match(tool).hasMatch()) {
+            signs << tr("it was saved by %1, an editing program").arg(tool);
+            break;
+        }
+    }
+    int edits = 0;
+    for (const QString &h : i.history)
+        edits += !h.startsWith(QLatin1String("created"));
+    if (edits > 0)
+        signs << QCoreApplication::translate("exif", "its own record lists %n change(s) made to it", nullptr, edits);
+    return signs;
 }
 
 QString sizeLabel()
@@ -369,16 +496,46 @@ QStringList describe(const Info &i)
     if (i.width > 0 && i.height > 0)
         add(sizeLabel(), tr("%1 × %2 pixels").arg(i.width).arg(i.height));
     if (i.hasLocation) {
-        QString where = QStringLiteral("%1° %2, %3° %4")
-                            .arg(QLocale().toString(std::abs(i.latitude), 'f', 5), i.latitude < 0 ? tr("S") : tr("N"),
-                                 QLocale().toString(std::abs(i.longitude), 'f', 5), i.longitude < 0 ? tr("W") : tr("E"));
-        if (i.hasAltitude)
-            where += QLatin1String(", ") + (i.altitude < 0 ? tr("%1 m below the sea").arg(qRound64(-i.altitude))
-                                                           : tr("%1 m up").arg(qRound64(i.altitude)));
-        add(tr("Location"), where);
+        for (const QString &line : places::facts(i.latitude, i.longitude, i.hasAltitude, i.altitude))
+            out << line;
     }
+    if (i.hasDirection) {
+        static const char *const points[] = {QT_TRANSLATE_NOOP("exif", "north"), QT_TRANSLATE_NOOP("exif", "north-east"),
+                                             QT_TRANSLATE_NOOP("exif", "east"), QT_TRANSLATE_NOOP("exif", "south-east"),
+                                             QT_TRANSLATE_NOOP("exif", "south"), QT_TRANSLATE_NOOP("exif", "south-west"),
+                                             QT_TRANSLATE_NOOP("exif", "west"), QT_TRANSLATE_NOOP("exif", "north-west")};
+        const QString point = tr(points[int(std::fmod(i.direction + 22.5, 360.0) / 45) % 8]);
+        add(tr("Facing"), i.directionMagnetic ? tr("%1 (%2° from magnetic north)").arg(point).arg(qRound(i.direction))
+                                              : tr("%1 (%2°)").arg(point).arg(qRound(i.direction)));
+    }
+    if (i.satelliteTime.isValid()) {
+        QString when = QLocale().toString(i.satelliteTime, QLocale::ShortFormat) + QStringLiteral(" UTC");
+        // The camera's clock against the satellites': its time zone, or how far out it was.
+        if (i.taken.isValid()) {
+            const qint64 apart = QDateTime(i.taken.date(), i.taken.time(), QTimeZone::UTC).toSecsSinceEpoch() - i.satelliteTime.toSecsSinceEpoch();
+            const qint64 quarters = qRound64(apart / 900.0);
+            if (!i.takenHasZone && std::abs(apart - quarters * 900) <= 120 && std::abs(quarters) <= 56)
+                when += QStringLiteral(" · ") + tr("the camera's clock was on UTC%1%2:%3")
+                                                    .arg(quarters < 0 ? QLatin1Char('-') : QLatin1Char('+'))
+                                                    .arg(std::abs(quarters) / 4, 2, 10, QLatin1Char('0'))
+                                                    .arg(std::abs(quarters) % 4 * 15, 2, 10, QLatin1Char('0'));
+            else if (i.takenHasZone && std::abs(i.taken.toSecsSinceEpoch() - i.satelliteTime.toSecsSinceEpoch()) > 120)
+                when += QStringLiteral(" · ") + tr("the camera's clock was %1 min out").arg(qRound64((i.taken.toSecsSinceEpoch() - i.satelliteTime.toSecsSinceEpoch()) / 60.0));
+        }
+        add(tr("Satellite time"), when);
+    }
+    add(tr("Camera serial"), i.serial);
+    add(tr("Lens serial"), i.lensSerial);
+    add(tr("Owner"), i.owner);
     add(tr("Edited with"), i.software);
+    if (!i.xmpTool.isEmpty() && i.xmpTool != i.software)
+        add(tr("Made with"), i.xmpTool);
     add(tr("By"), i.artist);
+    if (!i.history.isEmpty())
+        add(tr("Its history"), i.history.join(QStringLiteral("; ")));
+    const QStringList signs = editSigns(i);
+    if (!signs.isEmpty())
+        add(tr("Changed since"), signs.join(QStringLiteral("; ")));
     return out;
 }
 

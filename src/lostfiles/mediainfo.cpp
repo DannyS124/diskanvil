@@ -4,15 +4,19 @@
 #include "mediainfo.h"
 
 #include "filetypes.h"
+#include "places.h"
 
 #include <QCoreApplication>
 #include <QHash>
+#include <QLocale>
+#include <QRegularExpression>
 #include <QTimeZone>
 #include <QStringDecoder>
 #include <QStringList>
 #include <QtEndian>
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 namespace mediainfo {
@@ -140,6 +144,44 @@ struct Mp4Walk {
         trackCodec.clear();
     }
 
+    QVector<QByteArray> keys; // QuickTime's metadata keys: ilst's items are numbered after them
+    bool inIlst = false;
+
+    void place(const QString &iso6709)
+    {
+        double lat = 0, lon = 0, alt = 0;
+        bool hasAlt = false;
+        if (!info.hasLocation && parseIso6709(iso6709, &lat, &lon, &alt, &hasAlt)) {
+            info.hasLocation = true;
+            info.latitude = lat;
+            info.longitude = lon;
+            info.hasAltitude = hasAlt;
+            info.altitude = alt;
+        }
+    }
+
+    // One of Apple's QuickTime keys and its value.
+    void keyed(const QByteArray &key, const QString &value)
+    {
+        if (key == "com.apple.quicktime.location.ISO6709")
+            place(value);
+        else if (key == "com.apple.quicktime.make")
+            info.make = value;
+        else if (key == "com.apple.quicktime.model")
+            info.model = value;
+        else if (key == "com.apple.quicktime.software")
+            info.software = value;
+        else if (key == "com.apple.quicktime.creationdate" && !info.made.isValid()) {
+            // "2024-07-14T13:22:05+0200"
+            QString t = value.left(24);
+            if (t.size() == 24 && (t[19] == QLatin1Char('+') || t[19] == QLatin1Char('-')))
+                t.insert(22, QLatin1Char(':'));
+            const QDateTime when = QDateTime::fromString(t, Qt::ISODate);
+            if (when.isValid() && when.date().year() >= 1990)
+                info.made = when;
+        }
+    }
+
     // The value in an iTunes-style tag: a 'data' box with a type, a locale, then the value.
     QByteArray tagValue(quint64 at, quint64 end) const
     {
@@ -164,14 +206,59 @@ struct Mp4Walk {
             if (size < header || size > end - at)
                 return;
             const quint64 body = at + header, next = at + size;
-            if (type == "moov" || type == "mdia" || type == "minf" || type == "stbl" || type == "udta" || type == "ilst"
+            const quint32 item = b.be32(at + 4);
+            if (inIlst && item >= 1 && item <= quint32(keys.size())) {
+                // QuickTime metadata: the item is the key's number, its value in a 'data' box.
+                keyed(keys[item - 1], clean(QString::fromUtf8(tagValue(body, next))));
+            } else if (type == "ilst") {
+                const bool was = inIlst;
+                inIlst = true;
+                walk(body, next, depth + 1);
+                inIlst = was;
+            } else if (type == "keys") {
+                // A full box: version and flags, how many, then each: its size, "mdta", the key.
+                keys.clear();
+                const quint32 count = b.be32(body + 4);
+                quint64 k = body + 8;
+                for (quint32 i = 0; i < count && i < 500 && k + 8 <= next; ++i) {
+                    const quint32 keySize = b.be32(k);
+                    if (keySize < 8 || keySize > next - k)
+                        break;
+                    keys << b.mid(k + 8, keySize - 8);
+                    k += keySize;
+                }
+            } else if (type == "\xa9xyz") {
+                // Where: a 16-bit length, a language, then ISO 6709 text.
+                const quint32 length = b.be16(body);
+                if (length > 0 && body + 4 + length <= next)
+                    place(QString::fromLatin1(b.mid(body + 4, length)));
+            } else if (type == "loci") {
+                // 3GPP's: version and flags, a language, a name, a role, then 16.16 fixed longitude,
+                // latitude and altitude.
+                quint64 p = body + 6;
+                while (p < next && b.u8(p) != 0)
+                    ++p;
+                p += 2;
+                if (p + 12 <= next && !info.hasLocation) {
+                    const double lon = qint32(b.be32(p)) / 65536.0, lat = qint32(b.be32(p + 4)) / 65536.0;
+                    if (std::abs(lat) <= 90 && std::abs(lon) <= 180 && (lat != 0 || lon != 0)) {
+                        info.hasLocation = true;
+                        info.latitude = lat;
+                        info.longitude = lon;
+                        info.hasAltitude = true;
+                        info.altitude = qint32(b.be32(p + 8)) / 65536.0;
+                    }
+                }
+            } else if (type == "moov" || type == "mdia" || type == "minf" || type == "stbl" || type == "udta"
                 || type == "edts" || type == "dinf") {
                 walk(body, next, depth + 1);
             } else if (type == "trak") {
                 walk(body, next, depth + 1);
                 endTrack();
             } else if (type == "meta") {
-                walk(body + 4, next, depth + 1); // a full box: version and flags first
+                // ISO's is a full box (version and flags first); QuickTime's isn't.
+                const bool quickTime = b.is(body + 4, "hdlr") || b.is(body + 4, "keys");
+                walk(quickTime ? body : body + 4, next, depth + 1);
             } else if (type == "mvhd") {
                 const bool v1 = b.u8(body) == 1;
                 // Seconds since 1904, in UTC. Cameras without a clock write 0, or 1904 itself.
@@ -867,6 +954,71 @@ Info read(int type, const QByteArray &data, quint64 fileSize)
         readAsf(b, info);
     }
     return info;
+}
+
+bool parseIso6709(const QString &text, double *latitude, double *longitude, double *altitude, bool *hasAltitude)
+{
+    static const QRegularExpression form(QStringLiteral("^\\s*([+-]\\d{1,2}(?:\\.\\d+)?)([+-]\\d{1,3}(?:\\.\\d+)?)([+-]\\d+(?:\\.\\d+)?)?"));
+    const QRegularExpressionMatch m = form.match(text);
+    if (!m.hasMatch())
+        return false;
+    const double lat = m.captured(1).toDouble(), lon = m.captured(2).toDouble();
+    if (std::abs(lat) > 90 || std::abs(lon) > 180 || (lat == 0 && lon == 0))
+        return false;
+    *latitude = lat;
+    *longitude = lon;
+    *hasAltitude = m.hasCaptured(3);
+    *altitude = *hasAltitude ? m.captured(3).toDouble() : 0;
+    return true;
+}
+
+QStringList facts(const Info &info)
+{
+    QStringList out;
+    const auto add = [&out](const QString &label, const QString &value) {
+        if (!value.trimmed().isEmpty())
+            out << label + QLatin1Char('\t') + value.trimmed();
+    };
+    if (info.made.isValid())
+        add(tr("Recorded"), QLocale().toString(info.made, QLocale::LongFormat));
+    else if (info.recorded.isValid())
+        add(tr("Recorded"), QLocale().toString(info.recorded.toLocalTime(), QLocale::LongFormat));
+    const QString device = info.model.startsWith(info.make, Qt::CaseInsensitive) || info.make.isEmpty() ? info.model
+                         : info.model.isEmpty() ? info.make : info.make + QLatin1Char(' ') + info.model;
+    add(tr("Phone or camera"), device);
+    add(tr("Made with"), info.software);
+    if (info.hasLocation)
+        out += places::facts(info.latitude, info.longitude, info.hasAltitude, info.altitude);
+    return out;
+}
+
+QByteArray mp4Moov(const Reader &read, quint64 size, quint64 *where)
+{
+    // The top-level boxes, one after another: just their headers are read.
+    quint64 at = 0;
+    for (int n = 0; n < 1000 && at + 8 <= size; ++n) {
+        char header[16];
+        if (read(at, header, 16) < 8)
+            return {};
+        const auto be32 = [&header](int i) { return quint32(quint8(header[i])) << 24 | quint32(quint8(header[i + 1])) << 16 | quint32(quint8(header[i + 2])) << 8 | quint8(header[i + 3]); };
+        quint64 boxSize = be32(0);
+        if (boxSize == 1)
+            boxSize = quint64(be32(8)) << 32 | be32(12);
+        else if (boxSize == 0)
+            boxSize = size - at;
+        if (boxSize < 8 || boxSize > size - at)
+            return {};
+        if (QByteArrayView(header + 4, 4) == QByteArrayView("moov")) {
+            if (boxSize > 64ull * 1024 * 1024)
+                return {};
+            QByteArray moov(qsizetype(boxSize), Qt::Uninitialized);
+            if (where)
+                *where = at;
+            return read(at, moov.data(), moov.size()) == moov.size() ? moov : QByteArray();
+        }
+        at += boxSize;
+    }
+    return {};
 }
 
 QString describe(const Info &info)

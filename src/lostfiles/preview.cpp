@@ -163,7 +163,7 @@ void write(QIODevice &to, const Request &r)
 {
     QByteArray body;
     QDataStream s(&body, QIODevice::WriteOnly);
-    s << qint32(r.type) << r.name << r.size << qint32(r.pixels) << r.data;
+    s << qint32(r.type) << r.name << r.size << qint32(r.pixels) << r.data << r.moov;
     writeMessage(to, body);
 }
 
@@ -174,7 +174,7 @@ bool read(QIODevice &from, Request &r, int msecs)
         return false;
     QDataStream s(body);
     qint32 type = -1, pixels = 0;
-    s >> type >> r.name >> r.size >> pixels >> r.data;
+    s >> type >> r.name >> r.size >> pixels >> r.data >> r.moov;
     r.type = type;
     r.pixels = std::clamp(pixels, 16, 2048);
     return s.status() == QDataStream::Ok;
@@ -307,11 +307,16 @@ Result make(const Request &r)
         return out;
     }
     if (type && (type->category == filetypes::Category::Music || type->category == filetypes::Category::Video)) {
-        const mediainfo::Info info = mediainfo::read(r.type, r.data, r.size);
+        mediainfo::Info info = mediainfo::read(r.type, r.data, r.size);
+        if (!r.moov.isEmpty()) {
+            // Its moov box was further on: everything but the cover is in there.
+            const QByteArray cover = info.cover;
+            info = mediainfo::read(r.type, r.moov, r.size);
+            if (info.cover.isEmpty())
+                info.cover = cover;
+        }
         out.text = mediainfo::describe(info);
-        if (info.recorded.isValid())
-            out.facts << tr("Recorded") + QLatin1Char('\t') + QLocale().toString(info.recorded.toLocalTime().date(), QLocale::LongFormat)
-                             + QStringLiteral(", ") + QLocale().toString(info.recorded.toLocalTime().time(), QLocale::ShortFormat);
+        out.facts += mediainfo::facts(info);
         if (!info.cover.isEmpty())
             out.image = pictures::decode(info.cover, -1, r.pixels);
         if (out.image.isNull() && type->category == filetypes::Category::Video)
