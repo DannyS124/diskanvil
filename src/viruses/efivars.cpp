@@ -3,6 +3,7 @@
 
 #include "efivars.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -62,6 +63,38 @@ QString guidText(const char *raw)
         .arg(u16(raw + 6), 4, 16, QLatin1Char('0'))
         .arg(QString::fromLatin1(QByteArray(raw + 8, 2).toHex()), QString::fromLatin1(QByteArray(raw + 10, 6).toHex()));
 }
+
+QByteArray guidBytes(const QString &text)
+{
+    static const QRegularExpression shape(QStringLiteral("^\\{?([0-9a-fA-F]{8})-([0-9a-fA-F]{4})-([0-9a-fA-F]{4})-([0-9a-fA-F]{4})-([0-9a-fA-F]{12})\\}?$"));
+    const QRegularExpressionMatch m = shape.match(text.trimmed());
+    if (!m.hasMatch())
+        return {};
+    QByteArray out(16, '\0');
+    qToLittleEndian<quint32>(m.captured(1).toUInt(nullptr, 16), out.data());
+    qToLittleEndian<quint16>(quint16(m.captured(2).toUInt(nullptr, 16)), out.data() + 4);
+    qToLittleEndian<quint16>(quint16(m.captured(3).toUInt(nullptr, 16)), out.data() + 6);
+    out.replace(8, 8, QByteArray::fromHex((m.captured(4) + m.captured(5)).toLatin1()));
+    return out;
+}
+
+#ifdef Q_OS_WIN
+bool setVariable(const QString &name, const QByteArray &value, QString *error, const char *guid)
+{
+    if (!allowFirmwareAccess()) {
+        *error = QCoreApplication::translate("efi", "Windows didn't allow changing the firmware's settings");
+        return false;
+    }
+    // Non-volatile, and there both at boot and while running (what boot entries are).
+    const DWORD attributes = 0x7;
+    if (!SetFirmwareEnvironmentVariableExW(win::wide(name).c_str(), win::wide(QLatin1Char('{') + QLatin1String(guid) + QLatin1Char('}')).c_str(),
+                                           value.isEmpty() ? nullptr : const_cast<char *>(value.constData()), DWORD(value.size()), attributes)) {
+        *error = QCoreApplication::translate("efi", "the firmware refused it (error %1)").arg(GetLastError());
+        return false;
+    }
+    return true;
+}
+#endif
 
 bool available()
 {
@@ -169,8 +202,12 @@ std::optional<BootEntry> parseLoadOption(int number, const QByteArray &option)
         const char *node = option.constData() + at + 4;
         // A hard disk's partition: number, start, size, its signature, the table's kind, and
         // the signature's kind (2: a GPT partition's GUID).
-        if (type == 4 && subtype == 1 && length >= 42 && uchar(node[37]) == 2)
+        if (type == 4 && subtype == 1 && length >= 42 && uchar(node[37]) == 2) {
             e.partition = guidText(node + 20);
+            e.partitionNumber = u32(node);
+            e.partitionStart = qFromLittleEndian<quint64>(node + 4);
+            e.partitionSize = qFromLittleEndian<quint64>(node + 12);
+        }
         else if (type == 4 && subtype == 4) { // a file
             QString path;
             for (qsizetype i = 0; i + 1 < length - 4; i += 2) {

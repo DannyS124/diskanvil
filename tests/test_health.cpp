@@ -18,6 +18,7 @@
 #include "../src/drives/closedsets.h"
 #include "../src/viruses/productkey.h"
 #include "../src/viruses/peinfo.h"
+#include "../src/viruses/efiboot.h"
 #include "../src/drives/blockio.h"
 #include "../src/health/surfacescan.h"
 #include "../src/tools/systemd.h"
@@ -450,6 +451,41 @@ void peVersions()
            QStringLiteral("PE: damaged files are read within bounds, and what isn't a program gives nothing"));
 }
 
+// The boot menu: entries built the firmware's way, read back the same; and this PC's own
+// entries, rebuilt from what was read of them, byte for byte up to the end of their device path.
+void bootMenu()
+{
+    const QByteArray made = efiboot::loadOption(QStringLiteral("Debian"), 1, 2048, 1048576, QStringLiteral("0f5c3a1e-8b2d-4c6e-9a7f-1234567890ab"),
+                                                QStringLiteral("/EFI/debian/shimx64.efi"));
+    const std::optional<efi::BootEntry> back = efi::parseLoadOption(7, made);
+    report(back && back->description == QLatin1String("Debian") && back->active && back->partition == QLatin1String("0f5c3a1e-8b2d-4c6e-9a7f-1234567890ab")
+               && back->path == QLatin1String("\\EFI\\debian\\shimx64.efi") && back->partitionNumber == 1 && back->partitionStart == 2048
+               && back->partitionSize == 1048576,
+           QStringLiteral("boot menu: an entry made the firmware's way reads back the same"), back ? back->partition + QLatin1Char(' ') + back->path : QString());
+    report(efiboot::orderValue({3, 1, 0x1A}) == QByteArray("\x03\x00\x01\x00\x1a\x00", 6)
+               && efiboot::orderCommand({3, 1, 0x1A}).join(QLatin1Char(' ')) == QLatin1String("efibootmgr -o 0003,0001,001A")
+               && efiboot::createCommand(QStringLiteral("/dev/nvme0n1"), 1, QStringLiteral("/EFI/debian/shimx64.efi"), QStringLiteral("Debian")).join(QLatin1Char(' '))
+                      == QLatin1String("efibootmgr -c -d /dev/nvme0n1 -p 1 -l \\EFI\\debian\\shimx64.efi -L Debian")
+               && efiboot::removeCommand(2).join(QLatin1Char(' ')) == QLatin1String("efibootmgr -b 0002 -B"),
+           QStringLiteral("boot menu: the order as the firmware keeps it, and efibootmgr's commands"));
+    // This PC's own, when it started with UEFI: rebuilt from what was read, they're the same bytes.
+    int checked = 0, same = 0;
+    QStringList differ;
+    for (const efi::BootEntry &e : efi::bootEntries()) {
+        const std::optional<QByteArray> raw = efi::variable(QStringLiteral("Boot") + efiboot::hex4(e.number));
+        if (!raw || e.partition.isEmpty() || e.path.isEmpty())
+            continue;
+        ++checked;
+        const QByteArray rebuilt = efiboot::loadOption(e.description, e.partitionNumber, e.partitionStart, e.partitionSize, e.partition, e.path, e.active);
+        // Their attributes can have more bits (hidden, a category): only the active one is ours.
+        if (raw->mid(4, rebuilt.size() - 4) == rebuilt.mid(4))
+            ++same;
+        else
+            differ << e.description;
+    }
+    report(same == checked, QStringLiteral("boot menu: this PC's %1 disk entries, rebuilt, are the firmware's own bytes").arg(checked), differ.join(QStringLiteral(", ")));
+}
+
 void healthTests()
 {
     hiddenArea();
@@ -460,6 +496,7 @@ void healthTests()
     closedSets();
     productKeys();
     peVersions();
+    bootMenu();
     rawPages();
     QTemporaryDir config;
     qputenv("XDG_CONFIG_HOME", QFile::encodeName(config.path()));

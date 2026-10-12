@@ -40,6 +40,7 @@
 #include "../src/viruses/windowspicker.h"
 #include "../src/viruses/productkeydialog.h"
 #include "../src/viruses/driversdialog.h"
+#include "../src/viruses/bootentriesdialog.h"
 #include "../src/backup/savefilesdialog.h"
 #include "../src/backup/newids.h"
 #include "../src/backup/newidsdialog.h"
@@ -2061,6 +2062,73 @@ void driversWindow()
     const QStringList backups = QDir(root + QStringLiteral("/DiskForge backups")).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
     report(start && start->number() == 4 && backups.size() == 1 && boxes.value(1).startsWith(QLatin1String("Switched off 1")),
            QStringLiteral("drivers: switched off, Disabled in the SYSTEM hive, with a backup"), boxes.join(QStringLiteral(" | ")).left(300));
+}
+
+// Boot Menu Entries on pretend firmware variables (efivarfs' files in a folder): the entries in
+// their order, then moving one up, starting one next time and removing one, as efibootmgr's
+// commands (captured, never run), and the report.
+void bootMenuWindow()
+{
+    QTemporaryDir vars;
+    const auto put = [&vars](const QString &name, const QByteArray &value) {
+        QFile f(vars.filePath(name + QStringLiteral("-") + QLatin1String(efi::kGlobal)));
+        return f.open(QIODevice::WriteOnly) && f.write(QByteArray("\x07\x00\x00\x00", 4) + value) > 0;
+    };
+    put(QStringLiteral("Boot0000"), efiboot::loadOption(QStringLiteral("Windows Boot Manager"), 1, 2048, 204800, QStringLiteral("11111111-2222-3333-4444-555555555555"),
+                                                        QStringLiteral("\\EFI\\Microsoft\\Boot\\bootmgfw.efi")));
+    put(QStringLiteral("Boot0003"), efiboot::loadOption(QStringLiteral("debian"), 1, 2048, 204800, QStringLiteral("11111111-2222-3333-4444-555555555555"),
+                                                        QStringLiteral("\\EFI\\debian\\shimx64.efi")));
+    put(QStringLiteral("BootOrder"), efiboot::orderValue({0, 3}));
+    put(QStringLiteral("BootCurrent"), efiboot::orderValue({0}));
+    const QString realVars = efi::varsDir;
+    efi::varsDir = vars.path();
+    QStringList ran;
+    BootEntriesDialog::runForTest = [&ran](const QStringList &command, QString *) {
+        ran << command.join(QLatin1Char(' '));
+        return true;
+    };
+    QStringList boxes;
+    Answerer answerer;
+    answerer.answer = [&](QWidget *modal) {
+        if (auto *box = qobject_cast<QMessageBox *>(modal)) {
+            boxes << box->text();
+            if (QAbstractButton *yes = box->button(QMessageBox::Yes))
+                yes->click();
+            else
+                box->accept();
+            return true;
+        }
+        return false;
+    };
+    UDisks udisks;
+    udisks.setInteractive(false);
+    {
+        BootEntriesDialog dialog(&udisks);
+        dialog.show();
+        auto *list = dialog.findChild<QTreeWidget *>(QStringLiteral("entries"));
+        QStringList names;
+        for (int i = 0; list && i < list->topLevelItemCount(); ++i)
+            names << list->topLevelItem(i)->text(0) + QLatin1Char('/') + list->topLevelItem(i)->text(3);
+        report(names == QStringList({QStringLiteral("Windows Boot Manager/On, started this time"), QStringLiteral("debian/On")})
+                   && list->topLevelItem(0)->text(2).contains(QLatin1String("isn't here")),
+               QStringLiteral("boot menu: the entries in order, the one started this time, and a missing partition said"), names.join(QStringLiteral(" | ")));
+        list->setCurrentItem(list->topLevelItem(1));
+        findButton(&dialog, QStringLiteral("Up"))->click();
+        dialog.findChild<QPushButton *>(QStringLiteral("saveOrder"))->click();
+        list->setCurrentItem(list->topLevelItem(1));
+        dialog.findChild<QPushButton *>(QStringLiteral("next"))->click();
+        list->setCurrentItem(list->topLevelItem(0));
+        dialog.findChild<QPushButton *>(QStringLiteral("remove"))->click();
+        report(ran == QStringList({QStringLiteral("efibootmgr -o 0003,0000"), QStringLiteral("efibootmgr -n 0003"), QStringLiteral("efibootmgr -b 0000 -B")})
+                   && boxes.value(0).contains(QLatin1String("started from this time")),
+               QStringLiteral("boot menu: the order, next time and removing, as efibootmgr's commands; removing the one in use is said"),
+               ran.join(QStringLiteral(" | ")) + QStringLiteral(" || ") + boxes.join(QStringLiteral(" | ")).left(200));
+        const QString text = BootEntriesDialog::report(&udisks, efiboot::read());
+        report(text.contains(QLatin1String("Firmware: UEFI.")) && text.contains(QLatin1String("Boot0003 debian: \\EFI\\debian\\shimx64.efi")),
+               QStringLiteral("boot menu: the report says how the PC starts"), text.left(400));
+    }
+    BootEntriesDialog::runForTest = nullptr;
+    efi::varsDir = realVars;
 }
 
 // Windows Product Key on this PC (no MSDM table, no Windows mounted): it says so in plain words,
@@ -4914,7 +4982,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},

@@ -11,6 +11,7 @@
 #include "addonoutput.h"
 #include "addonprompt.h"
 #include "addonsdialog.h"
+#include "bootentriesdialog.h"
 #include "catalogdialog.h"
 #include "closedsets.h"
 #include "copydialogs.h"
@@ -646,6 +647,12 @@ void MainWindow::createActions()
             RescueDialog(m_udisks, d->blockPath, this).exec();
     });
 
+    m_bootMenu = new QAction(themeIcon("system-reboot", "system-run"), tr("&Boot Menu Entries…"), this);
+    m_bootMenu->setObjectName(QStringLiteral("bootMenu"));
+    m_bootMenu->setToolTip(tr("The PC's own boot menu: put a system's entry back first, add one, or start one just once; and a report "
+                              "of how the PC starts"));
+    connect(m_bootMenu, &QAction::triggered, this, [this] { BootEntriesDialog(m_udisks, this).exec(); });
+
     m_saveFiles = new QAction(themeIcon("document-save-all", "document-save"), tr("&Save My Files…"), this);
     m_saveFiles->setObjectName(QStringLiteral("saveFiles"));
     m_saveFiles->setToolTip(tr("Each person's Desktop, Documents, Pictures and more, and their bookmarks, copied off a drive: before "
@@ -686,7 +693,8 @@ void MainWindow::createActions()
             const QHash<QString, QAction *> actions = {{QStringLiteral("lost-files"), m_findFiles},  {QStringLiteral("rescue-copy"), m_rescue},
                                                        {QStringLiteral("health"), m_health},         {QStringLiteral("recover-partitions"), m_recover},
                                                        {QStringLiteral("rescue-usb"), m_rescueUsb},  {QStringLiteral("virus-scan"), m_virusScan},
-                                                       {QStringLiteral("drivers"), m_drivers},       {QStringLiteral("save-files"), m_saveFiles}};
+                                                       {QStringLiteral("drivers"), m_drivers},       {QStringLiteral("save-files"), m_saveFiles},
+                                                       {QStringLiteral("boot-menu"), m_bootMenu}};
             if (QAction *action = actions.value(tool)) {
                 updateActions();
                 dialog.accept();
@@ -824,12 +832,13 @@ void MainWindow::createActions()
         tools->addAction(m_whatHappened);
         tools->addAction(m_saveFiles);
         tools->addAction(m_openSets);
+        tools->addAction(m_bootMenu);
         tools->addAction(m_drivers);
         tools->addAction(m_productKey);
         tools->addSeparator();
 #ifdef Q_OS_WIN
         // Quick Fixes' tools, and add-ons (Linux commands), aren't in the Windows version yet.
-        tools->addActions({m_saveFiles, m_virusScan, m_drivers, m_productKey, m_usage, m_cleanup, m_optimize, m_snapshots});
+        tools->addActions({m_saveFiles, m_virusScan, m_bootMenu, m_drivers, m_productKey, m_usage, m_cleanup, m_optimize, m_snapshots});
         return;
 #endif
         tools->addAction(themeIcon("tools-wizard", "system-run"), tr("&Quick Fixes…"), this, [this] {

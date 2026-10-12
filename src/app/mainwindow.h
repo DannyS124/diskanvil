@@ -66,6 +66,7 @@ private:
     QAction *m_productKey = nullptr;
     QAction *m_drivers = nullptr;
     QAction *m_saveFiles = nullptr;
+    QAction *m_bootMenu = nullptr;
     void updateJobBars();
     void showNoticesIfAny();
     void stopJob(const QString &jobPath);

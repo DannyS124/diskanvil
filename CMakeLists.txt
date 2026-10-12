@@ -88,6 +88,7 @@ add_library(diskforge-core STATIC
     src/viruses/shelllink.cpp src/viruses/shelllink.h
     src/viruses/authenticode.cpp src/viruses/authenticode.h
     src/viruses/efivars.cpp src/viruses/efivars.h
+    src/viruses/efiboot.cpp src/viruses/efiboot.h
     src/viruses/bootcheck.cpp src/viruses/bootcheck.h
     src/viruses/productkey.cpp src/viruses/productkey.h
     src/backup/savefiles.cpp src/backup/savefiles.h
@@ -184,6 +185,7 @@ add_library(diskforge-ui STATIC
     src/viruses/windowspicker.cpp src/viruses/windowspicker.h
     src/viruses/productkeydialog.cpp src/viruses/productkeydialog.h
     src/viruses/driversdialog.cpp src/viruses/driversdialog.h
+    src/viruses/bootentriesdialog.cpp src/viruses/bootentriesdialog.h
     src/backup/savefilesdialog.cpp src/backup/savefilesdialog.h
     src/backup/newidsdialog.cpp src/backup/newidsdialog.h
     src/tools/systemtools.cpp src/tools/systemtools.h

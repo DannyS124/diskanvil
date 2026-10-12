@@ -51,11 +51,18 @@ struct BootEntry {
     bool active = true;
     QString description;
     QString partition; // the partition's GPT GUID, when it names one
+    quint32 partitionNumber = 0;
+    quint64 partitionStart = 0, partitionSize = 0; // in sectors
     QString path;      // "\EFI\Microsoft\Boot\bootmgfw.efi"
 };
 std::optional<BootEntry> parseLoadOption(int number, const QByteArray &option);
 QVector<BootEntry> bootEntries(); // in BootOrder's order, then the rest
 
 QString guidText(const char *raw16); // the usual text form of a GUID kept in Microsoft's byte order
+QByteArray guidBytes(const QString &text); // and back: 16 bytes, or empty when it isn't a GUID
+#ifdef Q_OS_WIN
+// Writes a variable (non-volatile, seen at boot and while running); an empty value deletes it.
+bool setVariable(const QString &name, const QByteArray &value, QString *error, const char *guid = kGlobal);
+#endif
 
 } // namespace efi

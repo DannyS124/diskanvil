@@ -183,9 +183,10 @@ Advice advise(Symptom symptom, const Drive &d)
         a.steps << tr("Make a DiskForge Live stick (on another computer, if this one won't start).")
                 << tr("Start this computer from it, and copy your files to another drive with Save My Files (your folders and "
                       "your bookmarks).")
-                << tr("Then see to Windows: if it stopped starting just after something was installed, Windows Drivers and Services "
-                      "shows the newest drivers, and switches the suspect off.");
-        a.tools << QStringLiteral("rescue-usb") << QStringLiteral("save-files") << QStringLiteral("drivers");
+                << tr("Then see to Windows: if the PC says there's no system to start, Boot Menu Entries shows whether Windows' "
+                      "entry is gone or moved; if it stopped starting just after something was installed, Windows Drivers and "
+                      "Services shows the newest drivers, and switches the suspect off.");
+        a.tools << QStringLiteral("rescue-usb") << QStringLiteral("save-files") << QStringLiteral("boot-menu") << QStringLiteral("drivers");
         break;
     }
     return a;
