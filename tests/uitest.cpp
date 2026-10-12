@@ -4778,7 +4778,24 @@ void enhanceWindow()
     report(action && action->isVisible(), QStringLiteral("viewer: Enhance is there for a picture"));
     if (!action)
         return;
+    // On a small screen: icons only in the toolbar, and Details makes way for Enhance.
+    window.resize(900, 600);
+    QCoreApplication::processEvents();
+    auto *bar = window.findChild<QToolBar *>();
     action->setChecked(true);
+    QCoreApplication::processEvents();
+    QAction *detailsAction = nullptr;
+    for (QAction *a : bar->actions()) {
+        if (a->text() == QLatin1String("Details"))
+            detailsAction = a;
+    }
+    report(bar && bar->toolButtonStyle() == Qt::ToolButtonIconOnly && detailsAction && !detailsAction->isChecked(),
+           QStringLiteral("viewer: on a small screen only icons fit, and Details makes way for Enhance"),
+           QStringLiteral("window %1 wide, toolbar style %2, Details %3").arg(window.width()).arg(int(bar->toolButtonStyle()))
+               .arg(detailsAction ? (detailsAction->isChecked() ? QStringLiteral("on") : QStringLiteral("off")) : QStringLiteral("missing")));
+    window.resize(2400, 1000);
+    QCoreApplication::processEvents();
+    report(bar->toolButtonStyle() == Qt::ToolButtonTextBesideIcon, QStringLiteral("viewer: on a big one the words come back"));
     window.findChild<QSlider *>(QStringLiteral("sharpen"))->setValue(50);
     window.findChild<QSlider *>(QStringLiteral("brightness"))->setValue(20);
     QByteArray png;

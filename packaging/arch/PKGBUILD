@@ -22,14 +22,14 @@ optdepends=(
   'snapper: list Btrfs snapshots'
   'bubblewrap: run look-only add-ons, and Find Lost Files previews, in a read-only sandbox'
   'clamav: Scan for Viruses'
-  "ffmpeg: a film's first frame in Find Lost Files previews"
+  "ffmpeg: a film's first frame in Find Lost Files previews, and a film saved at another speed from its viewer"
   'qt6-imageformats: more picture kinds in Find Lost Files previews (WebP, TIFF...)'
   'fwupd: look for drive firmware updates in Disk Health'
   'udisks2-lvm2: show LVM volume groups'
   'wimlib: Make a Windows USB from ISOs with an install.wim over 4 GB'
   "qt6-multimedia-ffmpeg: play films and songs in Find Lost Files' viewer (Qt's FFmpeg backend)"
   'smartmontools: Seagate FARM hours and more in Disk Health'
-  'sqlite: repair SQLite files, and Firefox bookmarks in Save My Files'
+  'sqlite: browser history in What This PC Did, Firefox bookmarks in Save My Files, and repairing SQLite files'
   'mdadm: open RAID arrays and NAS drives'
   'lvm2: open LVM volumes on NAS drives'
   'efibootmgr: Boot Menu Entries, and Put DiskAnvil Live on This PC'

@@ -897,6 +897,8 @@ QString html(const Report &report, const QVector<Event> &events, const QString &
     const auto e = [](const QString &s) { return s.toHtmlEscaped(); };
     const auto when = [](const QDateTime &t) { return t.isValid() ? t.toLocalTime().toString(Qt::ISODate) : QString(); };
     const Overview &o = report.overview;
+    QStringList owner{o.owner.trimmed(), o.organisation.trimmed()};
+    owner.removeAll(QString());
     QString out = QStringLiteral("<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"><title>%1</title><style>"
                                  "body{font-family:sans-serif;margin:24px;color:#111}h1{font-size:20px}table{border-collapse:collapse;font-size:12px}"
                                  "td,th{border:1px solid #bbb;padding:3px 6px;vertical-align:top;text-align:left}th{background:#eee}"
@@ -906,7 +908,7 @@ QString html(const Report &report, const QVector<Event> &events, const QString &
     const QVector<std::pair<QString, QString>> facts = {
         {tr("System"), QStringList{o.product, o.product.contains(o.release) ? QString() : o.release, o.build}.join(QLatin1Char(' ')).simplified()},
         {tr("PC's name"), o.computerName},
-        {tr("Registered to"), QStringList{o.owner, o.organisation}.join(QStringLiteral(", ")).remove(QRegularExpression(QStringLiteral("^, |, $")))},
+        {tr("Registered to"), owner.join(QStringLiteral(", "))},
         {tr("Installed"), when(o.installed)},
         {tr("Last shut down"), when(o.lastShutdown)},
         {tr("Time zone"), o.timeZone},

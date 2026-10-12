@@ -286,7 +286,7 @@
 <context>
     <name>PlacesMap</name>
     <message numerus="yes">
-        <location filename="../src/lostfiles/placesmap.cpp" line="337"/>
+        <location filename="../src/lostfiles/placesmap.cpp" line="338"/>
         <source>%n file(s)</source>
         <translation>
             <numerusform>%n file</numerusform>

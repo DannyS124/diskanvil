@@ -191,7 +191,9 @@ done; the file found is never changed. These bring out what's there: they can't 
 they never make any up. A film plays at any speed from a tenth of normal, steps a frame at a time (the , and . keys), and
 zooms in on a part while it plays (the wheel; drag to move). Enhance works on a film's frames as they play, and Save This
 Frame keeps the one on the screen. Save a Slowed-Down Copy makes a new MP4 at the speed chosen, with what Enhance is set
-to (this needs FFmpeg, which comes with DiskAnvil Live and the Windows version; the Flatpak doesn't have it).</p>
+to. That needs FFmpeg, which comes with DiskAnvil Live and the Windows version; on Linux install it (on Arch: sudo pacman
+-S ffmpeg). The Flatpak has none of its own and uses the PC's, once it may run the PC's programs (flatpak override
+--user --talk-name=org.freedesktop.Flatpak io.github.DannyS124.DiskAnvil).</p>
 <p><b>Where was it taken?</b> A photo's or a phone film's details say the town or city it was taken in, worked out
 without the internet (from GeoNames' list of places), with Open on OpenStreetMap to see the spot (it asks first: that
 website is told the spot). Organise → Where They Were Taken shows every found photo and film that says where, on a world
@@ -213,7 +215,10 @@ opened, searches, what was typed into the Run box and Explorer, websites visited
 Brave, Vivaldi, Opera, Firefox), networks joined and its accounts. On Linux: which distribution and kernels, its
 accounts, sign-ins, start-ups and shut-downs, programs installed and removed, recent files and websites. On a Mac: its
 version and accounts. Nothing on the drive is changed, and each line says where it was read from. Save a Report keeps it
-as a web page, a spreadsheet or a PDF. It's for your own drives, or ones you're allowed to look at.</p>
+as a web page, a spreadsheet or a PDF. It's for your own drives, or ones you're allowed to look at. Websites need sqlite3
+(it comes with DiskAnvil Live and the Windows version). In the Windows version it also reads the Windows it's running on,
+but not Linux drives: Windows can't open them (DiskAnvil Live can); and a browser that's open keeps its history locked,
+so close it first.</p>
 <p><b>Ransomware:</b> Find Lost Files says when files look locked by ransomware, which family it is, and what can be
 done: a free decryptor if one exists, Windows' earlier versions of the drive, or the deleted originals.</p>
 <p><b>Is it the drive?</b> Disk Health also shows a Seagate drive's own FARM hours next to SMART's (a history that was

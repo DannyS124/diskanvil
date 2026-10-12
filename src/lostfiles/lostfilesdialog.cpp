@@ -2639,11 +2639,20 @@ void LostFilesDialog::exportFilm(int index, double speed, const enhance::Setting
     if (ffmpeg == QLatin1String("ffmpeg"))
         ffmpeg.clear();
 #else
-    const QString ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
+    QString ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
 #endif
+    // The Flatpak has no ffmpeg of its own: the PC's, when it's allowed to run it (as add-ons are).
+    const bool onHost = ffmpeg.isEmpty() && host::inFlatpak() && host::programExists(QStringLiteral("ffmpeg"));
+    if (onHost)
+        ffmpeg = QStringLiteral("ffmpeg");
     if (ffmpeg.isEmpty()) {
-        QMessageBox::information(this, windowTitle(), tr("Saving a film at another speed needs ffmpeg, which isn't installed here. A frame can "
-                                                         "still be saved, and the film played at any speed."));
+        QMessageBox::information(this, windowTitle(),
+                                 host::inFlatpak()
+                                     ? tr("Saving a film at another speed needs ffmpeg. The Flatpak uses this PC's, when ffmpeg is installed and the "
+                                          "Flatpak may run it:\nflatpak override --user --talk-name=org.freedesktop.Flatpak io.github.DannyS124.DiskAnvil\n"
+                                          "A frame can still be saved, and the film played at any speed.")
+                                     : tr("Saving a film at another speed needs ffmpeg, which isn't installed here. A frame can still be saved, "
+                                          "and the film played at any speed."));
         return;
     }
     const lost::Found &f = m_model->file(index);
@@ -2663,7 +2672,12 @@ void LostFilesDialog::exportFilm(int index, double speed, const enhance::Setting
                              tr("That's on the drive being searched: saving there could overwrite the lost files. Pick a folder on another drive."));
         return;
     }
-    const QStringList args = enhance::ffmpegArguments(copy, target, speed, s);
+    // The PC's ffmpeg sees DiskAnvil's own cache folder (it's the same folder outside the Flatpak), not
+    // always where the film is going: it's made there, then moved.
+    const QString made = onHost ? QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + QStringLiteral("/film-%1.mp4").arg(QCoreApplication::applicationPid())
+                                : target;
+    QDir().mkpath(QFileInfo(made).absolutePath());
+    const QStringList command = host::command(QStringList{ffmpeg} + enhance::ffmpegArguments(copy, made, speed, s));
 
     auto *process = new QProcess(this);
     auto *wait = new QProgressDialog(tr("Making the film…"), tr("Stop"), 0, 1000, this);
@@ -2677,20 +2691,27 @@ void LostFilesDialog::exportFilm(int index, double speed, const enhance::Setting
         }
     });
     connect(wait, &QProgressDialog::canceled, process, [process] { process->kill(); });
-    connect(process, &QProcess::finished, this, [this, process, wait, target](int code, QProcess::ExitStatus status) {
+    connect(process, &QProcess::finished, this, [this, process, wait, target, made](int code, QProcess::ExitStatus status) {
         const bool cancelled = wait->wasCanceled();
         wait->deleteLater();
         process->deleteLater();
         if (status == QProcess::NormalExit && code == 0) {
+            if (made != target) {
+                QFile::remove(target);
+                if (!QFile::rename(made, target) && !(QFile::copy(made, target) && QFile::remove(made))) {
+                    QMessageBox::warning(this, windowTitle(), tr("The film was made, but couldn't be moved to %1. It's in %2.").arg(target, made));
+                    return;
+                }
+            }
             m_status->setText(tr("Saved the film as %1.").arg(QDir::toNativeSeparators(target)));
             return;
         }
-        QFile::remove(target);
+        QFile::remove(made);
         if (!cancelled)
             QMessageBox::warning(this, windowTitle(), tr("ffmpeg couldn't make the film: %1")
                                                           .arg(QString::fromLocal8Bit(process->readAllStandardError()).trimmed().section(QLatin1Char('\n'), -2)));
     });
-    process->start(ffmpeg, args);
+    process->start(command.first(), command.mid(1));
 }
 
 void LostFilesDialog::viewerSaid(const QByteArray &said)

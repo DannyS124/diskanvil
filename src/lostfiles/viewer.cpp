@@ -1366,6 +1366,7 @@ Window::Window(QWidget *parent)
     setWindowTitle(tr("Find Lost Files: Viewer"));
     setObjectName(QStringLiteral("viewer"));
     auto *bar = addToolBar(tr("Viewer"));
+    m_bar = bar;
     bar->setMovable(false);
     bar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     m_previous = bar->addAction(icon("go-previous"), tr("Previous"));
@@ -1437,7 +1438,8 @@ Window::Window(QWidget *parent)
     auto *enhanceScroll = new QScrollArea;
     enhanceScroll->setWidget(m_enhance);
     enhanceScroll->setWidgetResizable(true);
-    enhanceScroll->setMinimumWidth(280);
+    enhanceScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    enhanceScroll->setMinimumWidth(m_enhance->minimumSizeHint().width() + style()->pixelMetric(QStyle::PM_ScrollBarExtent) + 8);
     enhanceScroll->hide();
     auto *split = new QSplitter;
     split->addWidget(middle);
@@ -1476,6 +1478,14 @@ Window::Window(QWidget *parent)
     connect(m_enhanceTimer, &QTimer::timeout, this, &Window::enhanceNow);
     connect(m_enhanceAction, &QAction::toggled, this, [this, enhanceScroll](bool on) {
         enhanceScroll->setVisible(on);
+        // On a screen without room for both, Details makes way while Enhance is open.
+        if (on && m_details->isChecked() && width() < 1500) {
+            m_detailsForEnhance = true;
+            m_details->setChecked(false);
+        } else if (!on && m_detailsForEnhance) {
+            m_detailsForEnhance = false;
+            m_details->setChecked(true);
+        }
         if (!on) {
             m_enhance->reset();
             ++*m_enhanceRound;
@@ -1759,6 +1769,32 @@ void Window::showFacts()
         html += QStringLiteral("</table>");
     }
     m_facts->setText(html);
+}
+
+void Window::resizeEvent(QResizeEvent *event)
+{
+    QMainWindow::resizeEvent(event);
+    // Words beside the icons when they fit; only icons (their tooltips say what they are) when they don't.
+    if (!m_bar)
+        return;
+    // What it takes with words: each button's icon and words, and the other parts as they are.
+    int needed = 0;
+    const QFontMetrics metrics(m_bar->font());
+    for (QAction *a : m_bar->actions()) {
+        if (!a->isVisible())
+            continue;
+        QWidget *w = m_bar->widgetForAction(a);
+        if (a->isSeparator())
+            needed += 12;
+        else if (qobject_cast<QToolButton *>(w))
+            needed += m_bar->iconSize().width() + metrics.horizontalAdvance(a->iconText()) + 24;
+        else if (w)
+            needed += w->sizeHint().width();
+    }
+    m_barWidth = needed;
+    const Qt::ToolButtonStyle fits = width() >= m_barWidth ? Qt::ToolButtonTextBesideIcon : Qt::ToolButtonIconOnly;
+    if (m_bar->toolButtonStyle() != fits)
+        m_bar->setToolButtonStyle(fits);
 }
 
 void Window::keyPressEvent(QKeyEvent *event)

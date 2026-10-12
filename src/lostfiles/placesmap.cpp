@@ -81,7 +81,8 @@ void PlacesMap::showAll()
         east = std::max(east, p.longitude);
         west = std::min(west, p.longitude);
     }
-    showSpot((north + south) / 2, (east + west) / 2, std::max({east - west, (north - south) * 1.6, 0.05}) * 1.3);
+    // Pins all in one place: the region around them, so there's land and sea to see.
+    showSpot((north + south) / 2, (east + west) / 2, std::max({east - west, (north - south) * 1.6, 3.0}) * 1.3);
 }
 
 void PlacesMap::showSpot(double latitude, double longitude, double span)

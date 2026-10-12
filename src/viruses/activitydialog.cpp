@@ -151,7 +151,9 @@ void ActivityDialog::fill()
                           .join(QLatin1Char(' '))
                           .simplified());
     row(tr("PC's name"), o.computerName);
-    row(tr("Registered to"), QStringList{o.owner, o.organisation}.join(QStringLiteral(", ")).trimmed().remove(QRegularExpression(QStringLiteral("^, |, $"))));
+    QStringList owner{o.owner.trimmed(), o.organisation.trimmed()};
+    owner.removeAll(QString());
+    row(tr("Registered to"), owner.join(QStringLiteral(", ")));
     row(tr("Installed"), when(o.installed));
     row(tr("Last shut down"), when(o.lastShutdown));
     row(tr("Time zone"), o.timeZone);

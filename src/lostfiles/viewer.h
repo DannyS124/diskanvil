@@ -21,6 +21,7 @@
 #include <memory>
 
 class QIODevice;
+class QToolBar;
 class QLabel;
 class QPlainTextEdit;
 class QScrollArea;
@@ -112,6 +113,7 @@ Q_SIGNALS:
 
 protected:
     void keyPressEvent(QKeyEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
 
 private:
     void showFacts();
@@ -139,6 +141,9 @@ private:
     QAction *m_repair;
     QAction *m_enhanceAction;
     EnhancePanel *m_enhance;
+    QToolBar *m_bar = nullptr;
+    int m_barWidth = 0;              // the toolbar with words, to know when only icons fit
+    bool m_detailsForEnhance = false; // Details was put away to make room for Enhance
     QTimer *m_enhanceTimer;
     std::shared_ptr<std::atomic<int>> m_enhanceRound; // a newer request stops the ones before it
 };
