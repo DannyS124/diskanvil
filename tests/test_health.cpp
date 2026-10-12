@@ -585,7 +585,9 @@ void windowsRecovery()
            QStringLiteral("windows recovery: where reagentc says it is, in any language, and when it's off"));
     constexpr quint64 MiB = 1024 * 1024;
     Disk disk;
-    disk.device = QStringLiteral("\\\\.\\PhysicalDrive0");
+    // As the Windows build lists it: the path in blockPath, "Disk 0" for people.
+    disk.blockPath = QStringLiteral("\\\\.\\PhysicalDrive0");
+    disk.device = QStringLiteral("Disk 0");
     disk.tableType = QStringLiteral("gpt");
     Volume efi, msr, os, re;
     efi.number = 1;

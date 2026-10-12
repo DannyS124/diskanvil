@@ -40,7 +40,8 @@ Plan plan(const Location &at, const QVector<Disk> &disks, const QString &systemM
     p.rePartition = at.partition;
     const Disk *disk = nullptr;
     for (const Disk &d : disks) {
-        if (d.device.endsWith(QStringLiteral("PhysicalDrive%1").arg(at.disk), Qt::CaseInsensitive))
+        // blockPath is \\.\PhysicalDriveN on Windows (device is "Disk N", for people).
+        if (d.blockPath.endsWith(QStringLiteral("PhysicalDrive%1").arg(at.disk), Qt::CaseInsensitive))
             disk = &d;
     }
     if (!disk) {
