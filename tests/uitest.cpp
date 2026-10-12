@@ -42,6 +42,7 @@
 #include "../src/viruses/driversdialog.h"
 #include "../src/viruses/bootentriesdialog.h"
 #include "../src/backup/savefilesdialog.h"
+#include "../src/tools/linuxbootdialog.h"
 #include "../src/backup/newids.h"
 #include "../src/backup/newidsdialog.h"
 #include "../src/viruses/hashlookup.h"
@@ -2519,6 +2520,73 @@ void saveFilesWindow()
     cleanUpLoop(udisks, loopPath);
 }
 
+// Repair Linux Boot as the user, on a loop device holding a pretend Debian disk (an EFI
+// partition and an ext4 root whose fstab names it): it's found and its repair is explained;
+// Repair stays off, since a boot is repaired from DiskForge Live.
+void linuxBootWindow()
+{
+    QTemporaryDir dir;
+    const QString tree = dir.filePath(QStringLiteral("root"));
+    const auto put = [](const QString &path, const QByteArray &bytes) {
+        QDir().mkpath(QFileInfo(path).absolutePath());
+        QFile f(path);
+        return f.open(QIODevice::WriteOnly) && f.write(bytes) >= 0;
+    };
+    put(tree + QStringLiteral("/etc/os-release"), "PRETTY_NAME=\"Debian GNU/Linux 13 (trixie)\"\nID=debian\n");
+    put(tree + QStringLiteral("/etc/fstab"), "UUID=6d0a7f6e-5b1c-4c2a-9d11-0123456789ab / ext4 errors=remount-ro 0 1\nUUID=1234-ABCD /boot/efi vfat umask=0077 0 1\n");
+    put(tree + QStringLiteral("/usr/sbin/grub-install"), "");
+    const QString image = dir.filePath(QStringLiteral("debian.img"));
+    sh(QStringLiteral("truncate"), {QStringLiteral("-s"), QStringLiteral("96M"), image});
+    QProcess sfdisk;
+    sfdisk.start(QStringLiteral("sfdisk"), {QStringLiteral("-q"), image});
+    sfdisk.waitForStarted();
+    sfdisk.write("label: gpt\nstart=2048, size=65536, type=U\nstart=67584, type=L\n");
+    sfdisk.closeWriteChannel();
+    sfdisk.waitForFinished();
+    sh(QStringLiteral("mkfs.fat"), {QStringLiteral("--offset=2048"), QStringLiteral("-i"), QStringLiteral("1234ABCD"), image, QStringLiteral("32768")});
+    const int made = sh(QStringLiteral("mkfs.ext4"), {QStringLiteral("-q"), QStringLiteral("-E"), QStringLiteral("offset=%1").arg(67584LL * 512),
+                                                      QStringLiteral("-U"), QStringLiteral("6d0a7f6e-5b1c-4c2a-9d11-0123456789ab"), QStringLiteral("-d"), tree, image,
+                                                      QStringLiteral("60M")});
+    QFile backing(image);
+    QString loopPath;
+    if (made == 0 && backing.open(QIODevice::ReadWrite)) {
+        QDBusMessage call = QDBusMessage::createMethodCall(QStringLiteral("org.freedesktop.UDisks2"), QStringLiteral("/org/freedesktop/UDisks2/Manager"),
+                                                           QStringLiteral("org.freedesktop.UDisks2.Manager"), QStringLiteral("LoopSetup"));
+        call << QVariant::fromValue(QDBusUnixFileDescriptor(backing.handle())) << QVariantMap{{QStringLiteral("auth.no_user_interaction"), true}};
+        loopPath = QDBusConnection::systemBus().call(call, QDBus::Block, 30000).arguments().value(0).value<QDBusObjectPath>().path();
+        backing.close();
+    }
+    report(!loopPath.isEmpty(), QStringLiteral("linux boot: a loop device holds a Debian disk"));
+    if (loopPath.isEmpty())
+        return;
+    UDisks udisks;
+    udisks.setInteractive(false);
+    waitUntil([&] {
+        udisks.refresh();
+        const Disk *d = udisks.diskByPath(loopPath);
+        return d && d->volumes.size() == 2 && d->volumes[1].fsType == QLatin1String("ext4") && d->volumes[0].fsType == QLatin1String("vfat");
+    }, 15000);
+    {
+        LinuxBootDialog dialog(&udisks);
+        dialog.show();
+        auto *installs = dialog.findChild<QListWidget *>(QStringLiteral("installs"));
+        waitUntil([&] { return installs && installs->count() > 0; }, 30000);
+        int row = -1;
+        for (int i = 0; installs && i < installs->count(); ++i) {
+            if (installs->item(i)->text().startsWith(QLatin1String("Debian GNU/Linux 13")))
+                row = i;
+        }
+        report(row >= 0, QStringLiteral("linux boot: the Debian on it is found"), installs && installs->count() ? installs->item(0)->text() : QString());
+        if (row >= 0)
+            installs->setCurrentRow(row);
+        auto *plan = dialog.findChild<QLabel *>(QStringLiteral("plan"));
+        auto *repair = dialog.findChild<QPushButton *>(QStringLiteral("repair"));
+        report(plan && plan->text().contains(QLatin1String("grub-install")) && repair && !repair->isEnabled(),
+               QStringLiteral("linux boot: its repair is explained, and left to DiskForge Live"), plan ? plan->text().left(300) : QString());
+    }
+    cleanUpLoop(udisks, loopPath);
+}
+
 // Write Image to USB's "copy the files" way, with persistence, on a loop device of the user's
 // own (no raw access needed, so no password): a Debian-live-like ISO with a long label.
 // DISKFORGE_TEST_COPY_ISO uses a real ISO instead (one with live-boot persistence, like
@@ -4982,7 +5050,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},

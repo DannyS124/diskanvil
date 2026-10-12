@@ -370,12 +370,14 @@ private slots:
     void onDBusSignal(const QDBusMessage &message);
 #endif
 
-private:
-    bool refuseSystem(const Disk *disk, const QString &failure);
+public:
     // Unmounts (and with lockEncrypted, locks) the given volumes one at a time, then runs `then`,
     // or `failed` when one of them can't be.
     void unmountThen(const QVector<Volume> &volumes, const QString &failure, const std::function<void()> &then,
                      bool lockEncrypted = false, const std::function<void()> &failed = {});
+
+private:
+    bool refuseSystem(const Disk *disk, const QString &failure);
     void detectFilesystems();
 #ifndef Q_OS_WIN
     using SuccessText = std::function<QString(const QDBusMessage &reply)>;

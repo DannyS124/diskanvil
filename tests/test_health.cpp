@@ -19,6 +19,7 @@
 #include "../src/viruses/productkey.h"
 #include "../src/viruses/peinfo.h"
 #include "../src/viruses/efiboot.h"
+#include "../src/tools/linuxboot.h"
 #include "../src/drives/blockio.h"
 #include "../src/health/surfacescan.h"
 #include "../src/tools/systemd.h"
@@ -486,6 +487,81 @@ void bootMenu()
     report(same == checked, QStringLiteral("boot menu: this PC's %1 disk entries, rebuilt, are the firmware's own bytes").arg(checked), differ.join(QStringLiteral(", ")));
 }
 
+// Repair Linux Boot: its fstab read, each kind of install recognized from its files, and the
+// script for each (checked by bash -n, never run here: grub-install would change this PC's own
+// boot menu; the VM tests run it).
+void linuxBootRepair()
+{
+    const QVector<linuxboot::FstabEntry> fstab = linuxboot::parseFstab(
+        "# /etc/fstab\nUUID=aaaa-1111 / ext4 errors=remount-ro 0 1\n\nUUID=7B2C-1D3E  /boot/efi  vfat  umask=0077  0 1\n"
+        "PARTUUID=0f5c3a1e-8b2d-4c6e-9a7f-1234567890ab /boot ext4 defaults 0 2\nLABEL=My\\040Data /data ext4 defaults 0 2\n");
+    report(fstab.size() == 4 && fstab[1].where == QLatin1String("/boot/efi") && fstab[1].type == QLatin1String("vfat") && fstab[3].what == QLatin1String("LABEL=My Data"),
+           QStringLiteral("linux boot: its fstab is read, comments and spaces in names too"));
+    Disk disk;
+    disk.device = QStringLiteral("/dev/nvme0n1");
+    Volume esp, boot, root, data;
+    esp.device = QStringLiteral("/dev/nvme0n1p1");
+    esp.uuid = QStringLiteral("7B2C-1D3E");
+    esp.number = 1;
+    boot.device = QStringLiteral("/dev/nvme0n1p2");
+    boot.partUuid = QStringLiteral("0F5C3A1E-8B2D-4C6E-9A7F-1234567890AB");
+    root.device = QStringLiteral("/dev/nvme0n1p3");
+    root.uuid = QStringLiteral("aaaa-1111");
+    data.device = QStringLiteral("/dev/nvme0n1p4");
+    data.label = QStringLiteral("My Data");
+    disk.volumes = {esp, boot, root, data};
+    const QVector<Disk> disks{disk};
+    report(linuxboot::deviceFor(QStringLiteral("UUID=7B2C-1D3E"), disks) == esp.device
+               && linuxboot::deviceFor(QStringLiteral("PARTUUID=0f5c3a1e-8b2d-4c6e-9a7f-1234567890ab"), disks) == boot.device
+               && linuxboot::deviceFor(QStringLiteral("LABEL=My Data"), disks) == data.device && linuxboot::deviceFor(QStringLiteral("UUID=nope"), disks).isEmpty(),
+           QStringLiteral("linux boot: UUID, PARTUUID and LABEL find their partitions"));
+
+    QTemporaryDir dir;
+    const auto put = [&dir](const QString &path, const QByteArray &data) {
+        QDir().mkpath(QFileInfo(dir.filePath(path)).absolutePath());
+        QFile f(dir.filePath(path));
+        return f.open(QIODevice::WriteOnly) && f.write(data) >= 0;
+    };
+    const QByteArray etc = "UUID=aaaa-1111 / ext4 defaults 0 1\nUUID=7B2C-1D3E /boot/efi vfat umask=0077 0 1\n";
+    put(QStringLiteral("debian/etc/os-release"), "PRETTY_NAME=\"Debian GNU/Linux 13 (trixie)\"\nID=debian\n");
+    put(QStringLiteral("debian/etc/fstab"), etc);
+    put(QStringLiteral("debian/usr/sbin/grub-install"), "");
+    put(QStringLiteral("fedora/etc/os-release"), "PRETTY_NAME=\"Fedora Linux 43 (Workstation Edition)\"\nID=fedora\n");
+    put(QStringLiteral("fedora/etc/fstab"), etc);
+    put(QStringLiteral("fedora/usr/sbin/grub2-install"), "");
+    put(QStringLiteral("fedora/usr/bin/bootctl"), "");
+    put(QStringLiteral("arch/etc/os-release"), "PRETTY_NAME=\"Arch Linux\"\nID=arch\n");
+    put(QStringLiteral("arch/etc/fstab"), "UUID=aaaa-1111 / ext4 defaults 0 1\nUUID=7B2C-1D3E /efi vfat umask=0077 0 1\n");
+    put(QStringLiteral("arch/usr/bin/bootctl"), "");
+    put(QStringLiteral("top/@/etc/fstab"), etc);
+    const linuxboot::Install debian = linuxboot::inspect(dir.filePath(QStringLiteral("debian")), root.device, QString(), disks);
+    const linuxboot::Install fedora = linuxboot::inspect(dir.filePath(QStringLiteral("fedora")), root.device, QString(), disks);
+    const linuxboot::Install arch = linuxboot::inspect(dir.filePath(QStringLiteral("arch")), root.device, QStringLiteral("@"), disks);
+    report(debian.loader == linuxboot::Install::Loader::Grub && debian.id == QLatin1String("debian") && debian.espDevice == esp.device
+               && debian.espMount == QLatin1String("/boot/efi") && debian.disk == disk.device && debian.problems.isEmpty()
+               && fedora.loader == linuxboot::Install::Loader::Grub2 && arch.loader == linuxboot::Install::Loader::SystemdBoot
+               && arch.espMount == QLatin1String("/efi") && linuxboot::rootSubvolumes(dir.filePath(QStringLiteral("top"))) == QStringList{QStringLiteral("@")},
+           QStringLiteral("linux boot: Debian's GRUB, Fedora's GRUB 2 and Arch's systemd-boot are told apart, with their EFI partitions"),
+           QStringLiteral("%1 %2 %3 %4").arg(int(debian.loader)).arg(int(fedora.loader)).arg(int(arch.loader)).arg(debian.problems.join(QLatin1Char(';'))));
+
+    const QString grub = linuxboot::repairScript(debian, true), grubBios = linuxboot::repairScript(debian, false);
+    const QString grub2 = linuxboot::repairScript(fedora, true), systemdBoot = linuxboot::repairScript(arch, true);
+    bool syntax = true;
+    for (const QString &script : {grub, grubBios, grub2, systemdBoot}) {
+        QProcess bash;
+        bash.start(QStringLiteral("bash"), {QStringLiteral("-n"), QStringLiteral("-c"), script});
+        syntax = syntax && bash.waitForFinished(10000) && bash.exitCode() == 0;
+    }
+    report(syntax && grub.contains(QLatin1String("grub-install --target=x86_64-efi --efi-directory='\\''/boot/efi'\\'' --bootloader-id='\\''debian'\\''"))
+               && grubBios.contains(QLatin1String("grub-install --target=i386-pc '\\''/dev/nvme0n1'\\''")) && grub.contains(QLatin1String("update-grub"))
+               && grub2.contains(QLatin1String("shimx64.efi ]; then efibootmgr -c -d '\\''/dev/nvme0n1'\\'' -p 1"))
+               && grub2.contains(QLatin1String("grub2-mkconfig -o /boot/grub2/grub.cfg"))
+               && systemdBoot.contains(QLatin1String("mount -o subvol='@' '/dev/nvme0n1p3'")) && systemdBoot.contains(QLatin1String("bootctl install --esp-path="))
+               && grub.contains(QLatin1String("trap cleanup EXIT")),
+           QStringLiteral("linux boot: each install's own repair (quoted twice inside the chroot), in scripts bash takes"),
+           QStringLiteral("syntax %1 | ").arg(syntax) + grub.right(300));
+}
+
 void healthTests()
 {
     hiddenArea();
@@ -497,6 +573,7 @@ void healthTests()
     productKeys();
     peVersions();
     bootMenu();
+    linuxBootRepair();
     rawPages();
     QTemporaryDir config;
     qputenv("XDG_CONFIG_HOME", QFile::encodeName(config.path()));

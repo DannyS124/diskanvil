@@ -42,6 +42,7 @@
 #include "stickcheckdialog.h"
 #include "windowsusbdialog.h"
 #include "jobui.h"
+#include "linuxbootdialog.h"
 #include "noticebar.h"
 #include "powerbox.h"
 #include "productkeydialog.h"
@@ -647,6 +648,11 @@ void MainWindow::createActions()
             RescueDialog(m_udisks, d->blockPath, this).exec();
     });
 
+    m_linuxBoot = new QAction(themeIcon("tools-wizard", "system-run"), tr("Repair &Linux Boot…"), this);
+    m_linuxBoot->setObjectName(QStringLiteral("linuxBoot"));
+    m_linuxBoot->setToolTip(tr("A Linux that doesn't start because its boot loader is gone or broken: its own tools put it back"));
+    connect(m_linuxBoot, &QAction::triggered, this, [this] { LinuxBootDialog(m_udisks, this).exec(); });
+
     m_bootMenu = new QAction(themeIcon("system-reboot", "system-run"), tr("&Boot Menu Entries…"), this);
     m_bootMenu->setObjectName(QStringLiteral("bootMenu"));
     m_bootMenu->setToolTip(tr("The PC's own boot menu: put a system's entry back first, add one, or start one just once; and a report "
@@ -833,6 +839,7 @@ void MainWindow::createActions()
         tools->addAction(m_saveFiles);
         tools->addAction(m_openSets);
         tools->addAction(m_bootMenu);
+        tools->addAction(m_linuxBoot);
         tools->addAction(m_drivers);
         tools->addAction(m_productKey);
         tools->addSeparator();

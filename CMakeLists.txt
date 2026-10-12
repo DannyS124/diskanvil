@@ -92,6 +92,7 @@ add_library(diskforge-core STATIC
     src/viruses/bootcheck.cpp src/viruses/bootcheck.h
     src/viruses/productkey.cpp src/viruses/productkey.h
     src/backup/savefiles.cpp src/backup/savefiles.h
+    src/tools/linuxboot.cpp src/tools/linuxboot.h
     src/viruses/peinfo.cpp src/viruses/peinfo.h
     src/backup/newids.cpp src/backup/newids.h
     src/lostfiles/filetypes.cpp src/lostfiles/filetypes.h
@@ -187,6 +188,7 @@ add_library(diskforge-ui STATIC
     src/viruses/driversdialog.cpp src/viruses/driversdialog.h
     src/viruses/bootentriesdialog.cpp src/viruses/bootentriesdialog.h
     src/backup/savefilesdialog.cpp src/backup/savefilesdialog.h
+    src/tools/linuxbootdialog.cpp src/tools/linuxbootdialog.h
     src/backup/newidsdialog.cpp src/backup/newidsdialog.h
     src/tools/systemtools.cpp src/tools/systemtools.h
     src/drives/erasedialog.cpp src/drives/erasedialog.h
