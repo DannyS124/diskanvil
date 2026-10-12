@@ -23,6 +23,7 @@
 #include "../src/lostfiles/repair.h"
 #include "../src/lostfiles/thumbcache.h"
 #include "../src/lostfiles/ransomware.h"
+#include "../src/lostfiles/readthrough.h"
 #include "../src/common/hostprocess.h"
 #include "../src/lostfiles/textkinds.h"
 #include "../src/lostfiles/preview.h"
@@ -37,6 +38,7 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QImage>
+#include <QMutex>
 #include <QImageReader>
 #include <QPainter>
 #include <QProcess>
@@ -3000,6 +3002,78 @@ void ransomwareSigns()
            QStringLiteral("%1 %2 %3").arg(quiet.ending).arg(quiet.locked).arg(quiet.notes.join(QLatin1Char(','))));
 }
 
+// A failing drive read through into a Rescue Copy image: each part read from the drive once.
+void readThrough()
+{
+    // A drive that counts what's asked of it, with a bad spot.
+    struct Drive : lost::Layer {
+        QByteArray data;
+        lost::Extent bad;
+        mutable QMutex lock;
+        quint64 asked = 0;
+        quint64 size() const override { return quint64(data.size()); }
+        bool read(quint64 offset, char *buf, quint64 len) override
+        {
+            QMutexLocker l(&lock);
+            asked += len;
+            if (offset < bad.end() && offset + len > bad.start)
+                return false;
+            memcpy(buf, data.constData() + offset, len);
+            return true;
+        }
+    };
+    const QByteArray bytes = noise(4 * 1024 * 1024, 99);
+    auto make = [&bytes]() {
+        auto d = std::make_unique<Drive>();
+        d->data = bytes;
+        d->bad = {2 * 1024 * 1024 + 4096, 512};
+        return d;
+    };
+    QTemporaryDir dir;
+    const QString image = dir.filePath(QStringLiteral("drive.img"));
+    std::unique_ptr<Drive> first = make();
+    Drive *drive = first.get();
+    QString why;
+    std::unique_ptr<lost::ReadThrough> through = lost::ReadThrough::open(lost::Source::fromLayer(std::move(first)), image, &why);
+    lost::ReadThrough *layer = through.get();
+    const auto source = lost::Source::fromLayer(std::move(through));
+    const auto readBack = [&source](quint64 at, quint64 len) {
+        QByteArray out(qsizetype(len), Qt::Uninitialized);
+        source->read(at, out.data(), len);
+        return out;
+    };
+    const bool same = readBack(0, 200000) == bytes.left(200000) && readBack(1024 * 1024 + 7, 300000) == bytes.mid(1024 * 1024 + 7, 300000);
+    const quint64 askedOnce = drive->asked;
+    const bool again = readBack(0, 200000) == bytes.left(200000) && readBack(1024 * 1024 + 7, 300000) == bytes.mid(1024 * 1024 + 7, 300000);
+    report(layer && same && again && drive->asked == askedOnce, QStringLiteral("read through: the same bytes, and the drive asked once (the second time from the image)"),
+           why + QStringLiteral(" %1 then %2 bytes asked").arg(askedOnce).arg(drive->asked));
+    QFile file(image);
+    const QByteArray copied = file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+    report(copied.size() == bytes.size() && copied.left(200000) == bytes.left(200000) && copied.mid(1024 * 1024 + 7, 300000) == bytes.mid(1024 * 1024 + 7, 300000),
+           QStringLiteral("read through: what was read is in the image, where it is on the drive"));
+    // The bad spot: zeros there (the 64 KiB around it, as the drive gives it), marked for Rescue
+    // Copy to try again, and not asked again.
+    const quint64 badBlock = 2 * 1024 * 1024;
+    const QByteArray around = readBack(badBlock - 4096, 65536 + 8192);
+    const quint64 askedBad = drive->asked;
+    readBack(badBlock - 4096, 65536 + 8192);
+    QString problem;
+    RescueMap map;
+    const bool loaded = layer->saveMap(&problem) && map.load(layer->mapPath(), quint64(bytes.size()), &problem);
+    report(loaded && around.left(4096) == bytes.mid(qsizetype(badBlock) - 4096, 4096) && around.mid(4096, 65536) == QByteArray(65536, '\0')
+               && around.right(4096) == bytes.mid(qsizetype(badBlock) + 65536, 4096) && drive->asked == askedBad
+               && map.statusAt(badBlock + 4096) == RescueMap::NonTrimmed && map.statusAt(0) == RescueMap::Finished && map.statusAt(3 * 1024 * 1024) == RescueMap::NonTried,
+           QStringLiteral("read through: a bad spot is zeros, marked in the map for Rescue Copy, and not asked again"), problem);
+    // Another time: it carries on from the map, the drive not asked for what's in the image.
+    std::unique_ptr<Drive> second = make();
+    Drive *drive2 = second.get();
+    const auto again2 = lost::Source::fromLayer(lost::ReadThrough::open(lost::Source::fromLayer(std::move(second)), image, &why));
+    QByteArray part(200000, Qt::Uninitialized);
+    again2->read(0, part.data(), quint64(part.size()));
+    report(part == bytes.left(200000) && drive2->asked == 0, QStringLiteral("read through: another time, it carries on from the image and its map"),
+           QStringLiteral("%1 bytes asked").arg(drive2->asked));
+}
+
 void lostFilesTests()
 {
     previewQueue();
@@ -3026,4 +3100,5 @@ void lostFilesTests()
     wordSearch();
     thumbnailCaches();
     ransomwareSigns();
+    readThrough();
 }

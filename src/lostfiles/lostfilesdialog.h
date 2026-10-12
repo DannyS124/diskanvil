@@ -35,6 +35,7 @@ class QTreeWidgetItem;
 class PreviewLoader;
 namespace lost {
 class LookCopies;
+class ReadThrough;
 }
 class UDisks;
 
@@ -225,6 +226,8 @@ public:
     // For the tests: where the changed copy goes, instead of asking; and a message as if the
     // viewer had sent it.
     void setChangedCopyTarget(const QString &path) { m_changedCopyTarget = path; }
+    // For the tests: a source read through into a Rescue Copy image, as for a drive with Keep a Copy ticked.
+    void scanReadThrough(std::shared_ptr<lost::Source> drive, const QString &title, const QString &image);
     void hearFromViewer(const QByteArray &said) { viewerSaid(said); }
     void repairForTests(int index, const QString &reference = {}) { repairCopy(index, reference); }
     void findByWordsForTests(const QString &words) { findByWords(words); }
@@ -246,6 +249,9 @@ private:
     // Picking
     QTreeWidget *m_drives;
     QLabel *m_driveNote;
+    QCheckBox *m_keepCopy = nullptr;  // a Rescue Copy image of what's read (readthrough.h)
+    QString m_copyImage;              // where it is, while it's being made
+    lost::ReadThrough *m_through = nullptr; // the source's own layer, while there's one
     QPushButton *m_look;
     // Results
     QLabel *m_status;

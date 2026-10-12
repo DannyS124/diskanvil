@@ -17,6 +17,7 @@
 #include "repair.h"
 #include "thumbcache.h"
 #include "ransomware.h"
+#include "readthrough.h"
 #include "viewer.h"
 #include "udisks.h"
 #include "vdisk.h"
@@ -704,6 +705,11 @@ LostFilesDialog::LostFilesDialog(UDisks *udisks, const QString &preferredPath, Q
     m_driveNote->setTextFormat(Qt::RichText);
     m_driveNote->setObjectName(QStringLiteral("driveNote"));
     pickLayout->addWidget(m_driveNote);
+    m_keepCopy = new QCheckBox(tr("Keep a copy of what's read (a Rescue Copy image), so the drive is read only once"));
+    m_keepCopy->setObjectName(QStringLiteral("keepCopy"));
+    m_keepCopy->setToolTip(tr("Everything Find Lost Files reads from the drive goes into an image file on another drive as well, and is read "
+                              "from there after that. Best for a failing drive: Rescue Copy can finish the image later."));
+    pickLayout->addWidget(m_keepCopy);
     auto *pickButtons = new QHBoxLayout;
     auto *image = new QPushButton(tr("A Disk Image File…"));
     image->setAutoDefault(false);
@@ -1143,9 +1149,11 @@ void LostFilesDialog::driveChosen()
     }
     const Disk d = m_udisks->disks().value(item->data(0, Qt::UserRole + 2).toInt());
     QStringList notes;
-    if (health::hasUnreadableSpots(d.health))
-        notes << redText(tr("This drive has spots it can't read. Every read can make a failing drive worse: make a Rescue Copy "
-                            "of it first (Action menu) and look in the copy with \"A Disk Image File\"."));
+    const bool failing = health::hasUnreadableSpots(d.health);
+    if (failing)
+        notes << redText(tr("This drive has spots it can't read. Every read can make a failing drive worse: \"Keep a copy of what's read\" "
+                            "(below) reads each part of it once, into an image; or make a Rescue Copy first (Action menu)."));
+    m_keepCopy->setChecked(failing);
     if (d.isSystem)
         notes << tr("This is the drive the running system is on. Anything saved to it now can overwrite what was deleted, so look "
                     "soon, and save what you find to another drive.");
@@ -1173,8 +1181,46 @@ void LostFilesDialog::start()
             return;
         }
         m_driveNote->clear();
-        scanSource(lost::Source::fromFd(fd, true), title, device);
+        if (!m_keepCopy->isChecked()) {
+            scanSource(lost::Source::fromFd(fd, true), title, device);
+            return;
+        }
+        // The image goes on another drive: never the one being searched.
+        const QString suggested = QDir::homePath() + QLatin1Char('/') + tr("%1 rescue.img").arg(lost::cleanName(title));
+        const QString image = QFileDialog::getSaveFileName(this, tr("Where Should the Copy of What's Read Go?"), suggested,
+                                                           tr("Disk images (*.img)"), nullptr, QFileDialog::DontConfirmOverwrite);
+        if (image.isEmpty()) {
+            blockio::close(fd);
+            return;
+        }
+        if (blockio::pathIsOnDisk(QFileInfo(image).absolutePath(), device)) {
+            blockio::close(fd);
+            m_driveNote->setText(redText(tr("That's on the drive being searched. Pick a place on another drive.")));
+            return;
+        }
+        scanReadThrough(lost::Source::fromFd(fd, true), title, image);
+        m_diskDevice = device;
     });
+}
+
+void LostFilesDialog::scanReadThrough(std::shared_ptr<lost::Source> drive, const QString &title, const QString &image)
+{
+    QString why;
+    std::unique_ptr<lost::ReadThrough> through = lost::ReadThrough::open(drive, image, &why);
+    if (!through) {
+        m_driveNote->setText(redText(why));
+        return;
+    }
+    const QStorageInfo room(QFileInfo(image).absolutePath());
+    const QString warning = room.isValid() && quint64(room.bytesAvailable()) < drive->size()
+                                ? tr("There's less room for the image (%1) than the drive is big (%2): it can fill up if much of the drive is read.")
+                                      .arg(formatSize(quint64(room.bytesAvailable())), formatSize(drive->size()))
+                                : QString();
+    lost::ReadThrough *layer = through.get();
+    scanSource(lost::Source::fromLayer(std::move(through)), title, QString());
+    m_sourceWarning = warning;
+    m_through = layer;
+    m_copyImage = image;
 }
 
 void LostFilesDialog::chooseImage()
@@ -1210,6 +1256,8 @@ void LostFilesDialog::scanSource(std::shared_ptr<lost::Source> source, const QSt
     stopWorkers();
     m_source = std::move(source);
     m_sourceWarning.clear();
+    m_through = nullptr;
+    m_copyImage.clear();
     m_title = title;
     m_diskDevice = diskDevice;
     m_model->clear();
@@ -1421,6 +1469,11 @@ void LostFilesDialog::scanDone(bool stopped)
         text = tr("Done: found %1 deleted files on %2, and %3 that weren't deleted.").arg(deleted).arg(m_title).arg(kept);
     if (!m_sourceWarning.isEmpty())
         text += QLatin1Char(' ') + m_sourceWarning;
+    if (m_through) {
+        m_through->saveMap();
+        text += QLatin1Char(' ') + tr("What was read (%1) is in %2: Rescue Copy can finish the image from its map.")
+                                      .arg(formatSize(m_through->copied()), QDir::toNativeSeparators(m_copyImage));
+    }
     m_status->setText(text);
     refreshFolderCounts();
     updateTicked();

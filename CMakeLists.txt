@@ -76,6 +76,7 @@ add_library(diskforge-core STATIC
     src/lostfiles/mp4fix.cpp src/lostfiles/mp4fix.h
     src/lostfiles/thumbcache.cpp src/lostfiles/thumbcache.h
     src/lostfiles/ransomware.cpp src/lostfiles/ransomware.h
+    src/lostfiles/readthrough.cpp src/lostfiles/readthrough.h
     src/viruses/virusscan.cpp src/viruses/virusscan.h
     src/viruses/reghive.cpp src/viruses/reghive.h
     src/viruses/winstartup.cpp src/viruses/winstartup.h

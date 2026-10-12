@@ -3475,6 +3475,34 @@ void lostFilesRansomware()
            QStringLiteral("ransomware: What to Do explains, with No More Ransom"), boxes.value(0).left(120));
 }
 
+// Keep a copy of what's read: the search reads the drive through into a Rescue Copy image.
+void lostFilesReadThrough()
+{
+    QImage picture(160, 100, QImage::Format_RGB32);
+    picture.fill(QColor(0xff, 0x33, 0x55));
+    QByteArray png;
+    {
+        QBuffer buffer(&png);
+        buffer.open(QIODevice::WriteOnly);
+        picture.save(&buffer, "PNG");
+    }
+    QByteArray data(8 * 1024 * 1024, '\0');
+    data.replace(3 * 1024 * 1024, png.size(), png);
+    QTemporaryDir dir;
+    const QString image = dir.filePath(QStringLiteral("failing rescue.img"));
+    UDisks udisks;
+    LostFilesDialog dialog(&udisks, QString());
+    dialog.show();
+    dialog.scanReadThrough(lost::Source::fromMemory(data), QStringLiteral("Failing drive"), image);
+    auto *status = dialog.findChild<QLabel *>(QStringLiteral("status"));
+    waitUntil([&] { return status->text().startsWith(QLatin1String("Done")); }, 60000);
+    QFile copy(image);
+    const QByteArray copied = copy.open(QIODevice::ReadOnly) ? copy.readAll() : QByteArray();
+    report(status->text().contains(QLatin1String("What was read")) && status->text().contains(QLatin1String("Rescue Copy can finish"))
+               && QFileInfo::exists(image + QStringLiteral(".map")) && copied.size() == data.size() && copied.mid(3 * 1024 * 1024, png.size()) == png,
+           QStringLiteral("read through: the search fills a Rescue Copy image and its map, and says so"), status->text().right(120));
+}
+
 // Repairing through the window: a copy is repaired, and joins the list to be looked at and saved.
 void lostFilesRepaired()
 {
@@ -4038,7 +4066,7 @@ int userScenarios(const QStringList &only)
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
         {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
-        {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
+        {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},
         {"previews", previewsThroughHelper}, {"viruses", virusScanThroughWindow}, {"virusdrive", virusScanOnDrive}, {"viruswindows", virusScanWindowsDrive}, {"virusboot", virusScanBoot}, {"viruslookup", virusLookUpOnline}, {"newids", newIdsThroughWindow},
     };
