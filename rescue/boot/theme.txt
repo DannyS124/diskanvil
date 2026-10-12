@@ -12,14 +12,15 @@ terminal-height: "60%"
 
 + boot_menu {
     left = 18%
-    top = 36%
+    top = 34%
     width = 64%
-    height = 42%
+    # Room for all eight entries (with kept changes on the stick) at 1024x768, above the countdown.
+    height = 46%
     item_font = "DejaVu Sans Regular 18"
     item_color = "#9ad8ff"
     selected_item_font = "DejaVu Sans Bold 18"
     selected_item_color = "#ffffff"
-    item_height = 40
+    item_height = 36
     item_padding = 16
     item_spacing = 4
     selected_item_pixmap_style = "select_*.png"
