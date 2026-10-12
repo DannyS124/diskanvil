@@ -20,6 +20,8 @@
 #include "../src/lostfiles/ole.h"
 #include "../src/lostfiles/pictures.h"
 #include "../src/lostfiles/structure.h"
+#include "../src/lostfiles/repair.h"
+#include "../src/common/hostprocess.h"
 #include "../src/lostfiles/textkinds.h"
 #include "../src/lostfiles/preview.h"
 #include "../src/lostfiles/previewloader.h"
@@ -35,12 +37,14 @@
 #include <QImage>
 #include <QImageReader>
 #include <QPainter>
+#include <QProcess>
 #include <QRandomGenerator>
 #include <QTemporaryDir>
 #include <QTimeZone>
 #include <QtEndian>
 
 #include <archive.h>
+#include <zlib.h>
 #include <archive_entry.h>
 
 namespace {
@@ -2366,6 +2370,17 @@ void namesFromContents()
     report(true, QStringLiteral("names: %1 damaged files named without a crash").arg(runs));
 }
 
+// The names of the parts that don't check out.
+QStringList problemsIn(const QVector<structure::Part> &parts)
+{
+    QStringList out;
+    for (const structure::Part &p : parts) {
+        if (!p.problem.isEmpty())
+            out << p.name;
+    }
+    return out;
+}
+
 // What a file is made of, part by part, and where it's damaged.
 void fileStructure()
 {
@@ -2475,6 +2490,359 @@ void fileStructure()
     report(true, QStringLiteral("structure: %1 damaged files taken apart without a crash").arg(runs));
 }
 
+// --- Repairs: each kind broken the way it breaks for real, repaired on a copy, and checked by
+// something else that reads it (Qt's decoders, libarchive, poppler, zlib, sqlite3), and films
+// frame by frame against the original.
+
+QByteArray repairFile(const QString &name)
+{
+    QFile f(QStringLiteral(SOURCE_DIR "/tests/data/lostfs/repair/") + name);
+    return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
+}
+
+struct FilmTable {
+    QVector<quint32> sizes;
+    QVector<quint64> offsets; // of each frame (worked out from the chunks' with stsc)
+    QVector<qint64> shown;    // when each is shown, after it's decoded (ctts), when they're reordered
+    quint64 soundSamples = 0;
+};
+
+// A film's picture (and sound) tables, read plainly: enough for the test to compare frames.
+FilmTable filmTable(const QByteArray &d)
+{
+    FilmTable t;
+    QVector<quint64> chunks;
+    QVector<QPair<quint32, quint32>> runs; // stsc: from which chunk on, how many frames each
+    const auto be32 = [&d](qsizetype at) { return at + 4 <= d.size() ? qFromBigEndian<quint32>(d.constData() + at) : 0u; };
+    const auto be64 = [&d](qsizetype at) { return at + 8 <= d.size() ? qFromBigEndian<quint64>(d.constData() + at) : 0ull; };
+    std::function<void(qsizetype, qsizetype, QByteArray)> walk = [&](qsizetype from, qsizetype to, QByteArray handler) {
+        for (qsizetype at = from; at + 8 <= to;) {
+            const qsizetype size = qsizetype(be32(at));
+            const QByteArray type = d.mid(at + 4, 4);
+            if (size < 8 || at + size > to)
+                return;
+            if (type == "moov" || type == "trak" || type == "mdia" || type == "minf" || type == "stbl") {
+                // The handler (vide, soun) is known before the tables in its trak.
+                if (type == "trak") {
+                    const qsizetype hdlr = d.indexOf("hdlr", at);
+                    handler = hdlr > 0 && hdlr < at + size ? d.mid(hdlr + 12, 4) : QByteArray();
+                }
+                walk(at + 8, at + size, handler);
+            } else if (type == "stsz" && handler == "vide") {
+                for (quint32 i = 0; i < be32(at + 16); ++i)
+                    t.sizes << be32(at + 20 + 4 * qsizetype(i));
+            } else if (type == "stsz" && handler == "soun") {
+                t.soundSamples += be32(at + 16);
+            } else if ((type == "stco" || type == "co64") && handler == "vide") {
+                for (quint32 i = 0; i < be32(at + 12); ++i)
+                    chunks << (type == "co64" ? be64(at + 16 + 8 * qsizetype(i)) : be32(at + 16 + 4 * qsizetype(i)));
+            } else if (type == "ctts" && handler == "vide") {
+                for (quint32 i = 0; i < be32(at + 12); ++i)
+                    for (quint32 k = 0; k < be32(at + 16 + 8 * qsizetype(i)) && t.shown.size() < 1000000; ++k)
+                        t.shown << qint32(be32(at + 20 + 8 * qsizetype(i)));
+            } else if (type == "stsc" && handler == "vide") {
+                for (quint32 i = 0; i < be32(at + 12); ++i)
+                    runs << qMakePair(be32(at + 16 + 12 * qsizetype(i)), be32(at + 20 + 12 * qsizetype(i)));
+            }
+            at += size;
+        }
+    };
+    walk(0, d.size(), {});
+    // Each chunk holds so many frames, one after another.
+    qsizetype frame = 0;
+    for (qsizetype c = 0; c < chunks.size(); ++c) {
+        quint32 perChunk = 1;
+        for (const auto &[first, count] : std::as_const(runs)) {
+            if (quint32(c + 1) >= first)
+                perChunk = count;
+        }
+        quint64 at = chunks[c];
+        for (quint32 k = 0; k < perChunk && frame < t.sizes.size(); ++k, ++frame) {
+            t.offsets << at;
+            at += t.sizes[frame];
+        }
+    }
+    return t;
+}
+
+struct Repaired {
+    repair::Result result;
+    QByteArray data;
+};
+
+Repaired repaired(const char *id, const QByteArray &broken, const QByteArray &reference = {}, bool keep = true)
+{
+    QTemporaryDir dir;
+    const QString in = dir.filePath(QStringLiteral("in")), out = dir.filePath(QStringLiteral("out")), ref = dir.filePath(QStringLiteral("ref"));
+    QFile f(in);
+    if (!f.open(QIODevice::WriteOnly) || f.write(broken) != broken.size())
+        return {};
+    f.close();
+    if (!reference.isEmpty()) {
+        QFile r(ref);
+        if (!r.open(QIODevice::WriteOnly) || r.write(reference) != reference.size())
+            return {};
+    }
+    Repaired got;
+    got.result = repair::run(filetypes::typeForName(QStringLiteral("x.") + QString::fromLatin1(id)), in, out, reference.isEmpty() ? QString() : ref);
+    QFile o(out);
+    if (o.open(QIODevice::ReadOnly))
+        got.data = o.readAll();
+    if (keep && qEnvironmentVariableIsSet("DISKFORGE_REPAIR_OUT") && !got.data.isEmpty()) { // to check by hand (ffprobe, pdfinfo...)
+        QFile keep(qEnvironmentVariable("DISKFORGE_REPAIR_OUT") + QStringLiteral("/repaired-") + QString::fromLatin1(id) + QLatin1Char('-')
+                   + QString::number(qHash(broken), 16) + QLatin1Char('.') + QString::fromLatin1(id));
+        if (keep.open(QIODevice::WriteOnly))
+            keep.write(got.data);
+    }
+    return got;
+}
+
+void repairs()
+{
+    // PNG: a wrong checksum and its end cut off.
+    QByteArray png = picture("PNG");
+    const qsizetype idat = png.indexOf("IDAT");
+    png[idat - 4 + 8 + qFromBigEndian<quint32>(png.constData() + idat - 4) + 1] ^= 0x10; // its CRC
+    png.chop(12); // IEND
+    const Repaired pngFixed = repaired("png", png);
+    report(pngFixed.result.ok && !QImage::fromData(pngFixed.data, "PNG").isNull() && QImage::fromData(png, "PNG").isNull(),
+           QStringLiteral("repair: a PNG with a wrong checksum and no end opens again"), pngFixed.result.done.join(QStringLiteral("; ")) + pngFixed.result.why);
+
+    // JPEG: cut short; and its start damaged, borrowed from another photo of the same size and quality.
+    const QByteArray jpg = picture("JPG");
+    const Repaired cut = repaired("jpg", jpg.left(jpg.size() - 400));
+    report(cut.result.ok && cut.data.endsWith("\xFF\xD9") && !QImage::fromData(cut.data, "JPEG").isNull(),
+           QStringLiteral("repair: a JPEG cut short gets its end back and opens"), cut.result.done.join(QStringLiteral("; ")) + cut.result.why);
+    QImage other(320, 200, QImage::Format_RGB32);
+    other.fill(QColor(0x2b, 0xee, 0x8a));
+    QByteArray otherJpg;
+    {
+        QBuffer buffer(&otherJpg);
+        buffer.open(QIODevice::WriteOnly);
+        other.save(&buffer, "JPG", 85); // the same camera: the same size and quality
+    }
+    QByteArray startless = jpg;
+    const qsizetype sos = startless.indexOf("\xFF\xDA");
+    for (qsizetype i = 0; i < sos; ++i)
+        startless[i] = char(i * 13); // everything before the picture data: gone
+    const Repaired noRef = repaired("jpg", startless);
+    const Repaired borrowed = repaired("jpg", startless, otherJpg);
+    const qsizetype lentSos = otherJpg.indexOf("\xFF\xDA");
+    qsizetype firstDifference = 0;
+    while (firstDifference < std::min(sos, lentSos) && jpg[firstDifference] == otherJpg[firstDifference])
+        ++firstDifference;
+    report(!noRef.result.ok && noRef.result.needsReference && borrowed.result.ok
+               && QImage::fromData(borrowed.data, "JPEG").convertToFormat(QImage::Format_RGB32) == QImage::fromData(jpg, "JPEG").convertToFormat(QImage::Format_RGB32),
+           QStringLiteral("repair: a JPEG whose start is lost asks for another photo, and with its start shows exactly as it was"),
+           borrowed.result.done.join(QStringLiteral("; ")) + borrowed.result.why
+               + QStringLiteral(" | headers %1 and %2 bytes, the same to byte %3").arg(sos).arg(lentSos).arg(firstDifference));
+
+    // ZIP (a Word file): its directory cut off; and one whose entries give their sizes only after their data.
+    const QList<QPair<QByteArray, QByteArray>> members = {{"[Content_Types].xml", "<Types/>"}, {"word/document.xml", QByteArray(9000, 'w')},
+                                                          {"docProps/core.xml", "<cp:coreProperties/>"}};
+    QByteArray office = zip(members, true);
+    office.truncate(office.indexOf("PK\x01\x02"));
+    const Repaired officeFixed = repaired("docx", office);
+    QStringList listed;
+    for (const officetext::Entry &e : officetext::list(officeFixed.data, 10))
+        listed << e.path;
+    report(officeFixed.result.ok && listed == QStringList{QStringLiteral("[Content_Types].xml"), QStringLiteral("word/document.xml"), QStringLiteral("docProps/core.xml")}
+               && problemsIn(structure::parts(filetypes::typeForName(QStringLiteral("x.docx")), officeFixed.data)).isEmpty(),
+           QStringLiteral("repair: a Word file whose list of what's inside was lost gets it back, every entry checking out"),
+           officeFixed.result.done.join(QStringLiteral("; ")) + officeFixed.result.why + QStringLiteral(" | ") + listed.join(QLatin1Char(',')));
+    QByteArray streamed;
+    for (const auto &[name, content] : members) {
+        QByteArray packed(int(compressBound(uLong(content.size()))) + 64, '\0');
+        z_stream z{};
+        deflateInit2(&z, 6, Z_DEFLATED, -MAX_WBITS, 8, Z_DEFAULT_STRATEGY);
+        z.next_in = reinterpret_cast<Bytef *>(const_cast<char *>(content.constData()));
+        z.avail_in = uInt(content.size());
+        z.next_out = reinterpret_cast<Bytef *>(packed.data());
+        z.avail_out = uInt(packed.size());
+        deflate(&z, Z_FINISH);
+        packed.truncate(qsizetype(z.total_out));
+        deflateEnd(&z);
+        const quint32 crc = filetypes::crc32(reinterpret_cast<const uchar *>(content.constData()), int(content.size()));
+        streamed += le(0x04034b50, 4) + le(20, 2) + le(8, 2) + le(8, 2) + le(0, 4) + le(0, 4) + le(0, 4) + le(0, 4) + le(quint64(name.size()), 2) + le(0, 2) + name
+                  + packed + le(0x08074b50, 4) + le(crc, 4) + le(quint64(packed.size()), 4) + le(quint64(content.size()), 4);
+    }
+    const Repaired streamFixed = repaired("docx", streamed);
+    report(streamFixed.result.ok && officetext::list(streamFixed.data, 10).size() == 3
+               && problemsIn(structure::parts(filetypes::typeForName(QStringLiteral("x.docx")), streamFixed.data)).isEmpty(),
+           QStringLiteral("repair: a ZIP whose sizes come after its data is rebuilt too"), streamFixed.result.done.join(QStringLiteral("; ")) + streamFixed.result.why);
+
+    // PDF: its table pointing to the wrong place; and one whose objects are packed in object streams.
+    QByteArray shifted = QByteArray("%PDF-1.4\n%moved by an editor\n") + pdf().mid(9);
+    const Repaired pdfFixed = repaired("pdf", shifted);
+    preview::Request page;
+    page.type = filetypes::typeForName(QStringLiteral("x.pdf"));
+    page.pixels = 200;
+    page.data = pdfFixed.data;
+    page.size = quint64(page.data.size());
+    const bool pdfOpens = !preview::make(page).image.isNull();
+    QByteArray packedPdf = repairFile(QStringLiteral("packed.pdf"));
+    const qsizetype startxref = packedPdf.lastIndexOf("startxref");
+    packedPdf = packedPdf.left(startxref) + "startxref\n12\n%%EOF\n"; // points nowhere now
+    const Repaired packedFixed = repaired("pdf", packedPdf);
+    page.data = packedFixed.data;
+    page.size = quint64(page.data.size());
+    const preview::Result packedPage = preview::make(page);
+    report(pdfFixed.result.ok && pdfOpens, QStringLiteral("repair: a PDF whose table points to the wrong place opens again"),
+           pdfFixed.result.done.join(QStringLiteral("; ")) + pdfFixed.result.why);
+    report(packedFixed.result.ok && !packedPage.image.isNull() && packedPage.text.contains(QLatin1String("2 page")),
+           QStringLiteral("repair: a PDF with its objects packed in object streams gets a new table and opens, both pages"),
+           packedFixed.result.done.join(QStringLiteral("; ")) + packedFixed.result.why + QStringLiteral(" | ") + packedPage.text);
+
+    // gzip: cut short, what's there kept.
+    const QByteArray big = QByteArray(200000, 'g') + QByteArray(200000, 'z');
+    QByteArray gz;
+    {
+        z_stream z{};
+        deflateInit2(&z, 6, Z_DEFLATED, MAX_WBITS + 16, 8, Z_DEFAULT_STRATEGY);
+        QByteArray out(int(compressBound(uLong(big.size()))) + 64, '\0');
+        z.next_in = reinterpret_cast<Bytef *>(const_cast<char *>(big.constData()));
+        z.avail_in = uInt(big.size());
+        z.next_out = reinterpret_cast<Bytef *>(out.data());
+        z.avail_out = uInt(out.size());
+        deflate(&z, Z_FINISH);
+        gz = out.left(qsizetype(z.total_out));
+        deflateEnd(&z);
+    }
+    const Repaired gzFixed = repaired("gz", gz.left(gz.size() / 2));
+    QByteArray unpacked(big.size(), '\0');
+    uLongf unpackedSize = uLongf(unpacked.size());
+    {
+        z_stream z{};
+        inflateInit2(&z, MAX_WBITS + 16);
+        z.next_in = reinterpret_cast<Bytef *>(const_cast<char *>(gzFixed.data.constData()));
+        z.avail_in = uInt(gzFixed.data.size());
+        z.next_out = reinterpret_cast<Bytef *>(unpacked.data());
+        z.avail_out = uInt(unpacked.size());
+        const int result = inflate(&z, Z_FINISH);
+        unpackedSize = result == Z_STREAM_END ? z.total_out : 0;
+        inflateEnd(&z);
+    }
+    report(gzFixed.result.ok && unpackedSize > 1000 && big.startsWith(unpacked.left(qsizetype(unpackedSize))),
+           QStringLiteral("repair: a gzip file cut short keeps what still unpacks, whole and checking out"), gzFixed.result.done.join(QStringLiteral("; ")) + gzFixed.result.why);
+
+    // WAV: a recording cut off, its sizes still saying the whole length.
+    const QByteArray wave = wav();
+    const QByteArray cutWave = wave.left(wave.size() - 1000);
+    const Repaired waveFixed = repaired("wav", cutWave);
+    const qsizetype data = waveFixed.data.indexOf("data");
+    report(waveFixed.result.ok && qFromLittleEndian<quint32>(waveFixed.data.constData() + 4) == quint32(cutWave.size() - 8)
+               && qFromLittleEndian<quint32>(waveFixed.data.constData() + data + 4) == quint32(cutWave.size() - data - 8),
+           QStringLiteral("repair: a WAV recording that was cut off gets its sizes right"), waveFixed.result.done.join(QStringLiteral("; ")) + waveFixed.result.why);
+
+    // SQLite: a damaged page, recovered with sqlite3 (when it's there).
+    if (host::programExists(QStringLiteral("sqlite3"))) {
+        QTemporaryDir dir;
+        const QString db = dir.filePath(QStringLiteral("notes.db"));
+        QProcess::execute(QStringLiteral("sqlite3"), {db, QStringLiteral("CREATE TABLE notes(t TEXT); WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<2000) "
+                                                                        "INSERT INTO notes SELECT 'note number ' || i FROM n;")});
+        QFile file(db);
+        QByteArray bytes = file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+        for (qsizetype i = 4096 * 3; i < 4096 * 3 + 200; ++i)
+            bytes[i] = char(0xEE); // a page damaged
+        const Repaired dbFixed = repaired("sqlite", bytes);
+        QTemporaryDir check;
+        QFile out(check.filePath(QStringLiteral("fixed.db")));
+        if (out.open(QIODevice::WriteOnly))
+            out.write(dbFixed.data);
+        out.close();
+        QProcess count;
+        count.start(QStringLiteral("sqlite3"), {out.fileName(), QStringLiteral("SELECT count(*) FROM notes;")});
+        count.waitForFinished(10000);
+        const int rows = count.readAllStandardOutput().trimmed().toInt();
+        report(dbFixed.result.ok && rows > 1500 && rows < 2000, QStringLiteral("repair: a damaged SQLite database's other rows are recovered (sqlite3)"),
+               QStringLiteral("%1 rows; ").arg(rows) + dbFixed.result.done.join(QStringLiteral("; ")) + dbFixed.result.why);
+    } else {
+        report(true, QStringLiteral("repair: SQLite skipped, sqlite3 isn't here"));
+    }
+
+    // Films: the index cut off where the recording stopped, rebuilt from a clip that plays. Every
+    // frame is checked against the original: the same size, the same bytes where it says.
+    struct Film {
+        const char *file, *reference, *id;
+        bool sound;
+    };
+    const Film films[] = {{"h264-pcm.mov", "h264-pcm-ref.mov", "mov", true},
+                          {"h264-aac.mp4", "h264-aac-ref.mp4", "mp4", false},
+                          {"mjpeg.mov", "mjpeg-ref.mov", "mov", true},
+                          {"h265.mp4", "h265-ref.mp4", "mp4", false}};
+    for (const Film &film : films) {
+        const QByteArray whole = repairFile(QString::fromLatin1(film.file)), reference = repairFile(QString::fromLatin1(film.reference));
+        if (whole.isEmpty()) {
+            report(QString::fromLatin1(film.file).startsWith(QLatin1String("h265")), QStringLiteral("repair: %1 to test with").arg(QString::fromLatin1(film.file)));
+            continue;
+        }
+        const FilmTable original = filmTable(whole);
+        const qsizetype moov = whole.lastIndexOf("moov") - 4;
+        for (const bool unfinished : {false, true}) {
+            // As a recording that stopped: no index; unfinished, the data box's size not written
+            // and the last frame cut short too.
+            QByteArray broken = whole.left(moov);
+            if (unfinished) {
+                const qsizetype mdat = broken.indexOf("mdat") - 4;
+                qToBigEndian(quint32(0), broken.data() + mdat);
+                broken.chop(original.sizes.last() / 2);
+            }
+            const Repaired fixed = repaired(film.id, broken, reference);
+            const FilmTable rebuilt = filmTable(fixed.data);
+            // The frames still whole in what's left (with sound between them, the end cut may be only sound).
+            qsizetype want = 0;
+            while (want < original.sizes.size() && original.offsets.value(want) + original.sizes[want] <= quint64(broken.size()))
+                ++want;
+            bool same = fixed.result.ok && rebuilt.sizes.size() == want && rebuilt.offsets.size() == want;
+            QString differs;
+            for (qsizetype i = 0; same && i < want; ++i) {
+                same = rebuilt.sizes[i] == original.sizes[i]
+                    && fixed.data.mid(qsizetype(rebuilt.offsets[i]), qsizetype(rebuilt.sizes[i])) == whole.mid(qsizetype(original.offsets[i]), qsizetype(original.sizes[i]));
+                if (!same)
+                    differs = QStringLiteral("frame %1: %2 bytes, should be %3; ").arg(i).arg(rebuilt.sizes[i]).arg(original.sizes[i]);
+            }
+            const bool sound = film.sound ? rebuilt.soundSamples > original.soundSamples * 9 / 10 : rebuilt.soundSamples == 0;
+            // Frames stored out of the order they're shown in (B-frames) are shown in the same order again.
+            bool order = original.shown.isEmpty() == rebuilt.shown.isEmpty();
+            for (qsizetype i = 0; order && i < std::min(want, rebuilt.shown.size()); ++i)
+                order = rebuilt.shown[i] - rebuilt.shown[0] == original.shown[i] - original.shown[0];
+            if (!order)
+                differs += QStringLiteral("shown in another order; ");
+            report(same && sound && order,
+                   QStringLiteral("repair: %1%2, its index rebuilt: every frame where it was%3")
+                       .arg(QString::fromLatin1(film.file), unfinished ? QStringLiteral(" (unfinished)") : QString(),
+                            film.sound ? QStringLiteral(", and its sound") : QString()),
+                   differs + QStringLiteral("%1 of %2 frames, sound %3 of %4; ").arg(rebuilt.sizes.size()).arg(original.sizes.size()).arg(rebuilt.soundSamples).arg(original.soundSamples)
+                       + fixed.result.done.join(QStringLiteral("; ")) + fixed.result.why);
+        }
+    }
+    const Repaired noClip = repaired("mp4", repairFile(QStringLiteral("h264-aac.mp4")).left(10000));
+    report(!noClip.result.ok && noClip.result.needsReference, QStringLiteral("repair: a film asks for a clip that plays first"));
+    const Repaired wrongClip = repaired("mov", repairFile(QStringLiteral("h264-pcm.mov")).left(20000), repairFile(QStringLiteral("mjpeg-ref.mov")));
+    report(!wrongClip.result.ok && wrongClip.result.why.contains(QLatin1String("No frames")), QStringLiteral("repair: a clip from another camera finds no frames, and says so"),
+           wrongClip.result.why);
+
+    // Damaged ones never crash any of it.
+    QRandomGenerator rng(9090);
+    const QVector<QPair<const char *, QByteArray>> kinds = {{"png", picture("PNG")}, {"jpg", picture("JPG")}, {"docx", zip(members, true)}, {"pdf", pdf()},
+                                                            {"pdf", repairFile(QStringLiteral("packed.pdf"))}, {"gz", gz}, {"wav", wav()},
+                                                            {"mov", repairFile(QStringLiteral("h264-pcm.mov"))}, {"mp4", repairFile(QStringLiteral("h264-aac.mp4"))}};
+    int runs = 0;
+    for (const auto &[id, good] : kinds) {
+        const bool film = QByteArray(id) == "mov" || QByteArray(id) == "mp4";
+        const QByteArray reference = film ? repairFile(QByteArray(id) == "mov" ? QStringLiteral("h264-pcm-ref.mov") : QStringLiteral("h264-aac-ref.mp4")) : otherJpg;
+        for (int round = 0; round < (film ? 30 : 60); ++round, ++runs) {
+            QByteArray bad = good;
+            for (int k = 0, n = 1 + int(rng.bounded(24)); k < n; ++k)
+                bad[int(rng.bounded(quint32(bad.size())))] = char(rng.bounded(256));
+            if (round % 3 == 0)
+                bad.truncate(qsizetype(rng.bounded(quint32(bad.size()))) + 1);
+            repaired(id, bad, round % 2 ? reference : QByteArray(), false);
+        }
+    }
+    report(true, QStringLiteral("repair: %1 damaged files repaired or refused without a crash").arg(runs));
+}
+
 void lostFilesTests()
 {
     previewQueue();
@@ -2497,4 +2865,5 @@ void lostFilesTests()
     newKinds();
     namesFromContents();
     fileStructure();
+    repairs();
 }

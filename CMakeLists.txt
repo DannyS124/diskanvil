@@ -72,6 +72,8 @@ add_library(diskforge-core STATIC
     src/lostfiles/textkinds.cpp src/lostfiles/textkinds.h
     src/lostfiles/naming.cpp src/lostfiles/naming.h
     src/lostfiles/structure.cpp src/lostfiles/structure.h
+    src/lostfiles/repair.cpp src/lostfiles/repair.h
+    src/lostfiles/mp4fix.cpp src/lostfiles/mp4fix.h
     src/viruses/virusscan.cpp src/viruses/virusscan.h
     src/viruses/reghive.cpp src/viruses/reghive.h
     src/viruses/winstartup.cpp src/viruses/winstartup.h

@@ -18,6 +18,7 @@
 #include "../src/usb/imagesource.h"
 #include "../src/lostfiles/viewer.h"
 #include "../src/lostfiles/hexview.h"
+#include "../src/lostfiles/structure.h"
 #include "../src/lostfiles/lostfilesdialog.h"
 #include "../src/lostfiles/filetypes.h"
 #include "../src/common/jobui.h"
@@ -3369,6 +3370,108 @@ void virusScanOnDrive()
     cleanUpLoop(udisks, loopPath);
 }
 
+// Repairing through the window: a copy is repaired, and joins the list to be looked at and saved.
+void lostFilesRepaired()
+{
+    QImage image(200, 120, QImage::Format_RGB32);
+    image.fill(QColor(0x1f, 0x6f, 0xff));
+    QByteArray png;
+    {
+        QBuffer buffer(&png);
+        buffer.open(QIODevice::WriteOnly);
+        image.save(&buffer, "PNG");
+    }
+    const qsizetype idat = png.indexOf("IDAT");
+    png[idat + 4 + qFromBigEndian<quint32>(png.constData() + idat - 4) + 2] ^= 0x40; // its checksum
+    const auto film = [](const char *name) {
+        QFile f(QStringLiteral(SOURCE_DIR "/tests/data/lostfs/repair/") + QString::fromLatin1(name));
+        return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
+    };
+    const QByteArray whole = film("h264-pcm.mov");
+    const QByteArray broken = whole.left(whole.lastIndexOf("moov") - 4); // the recording stopped
+    QTemporaryDir dir;
+    const QString reference = dir.filePath(QStringLiteral("working clip.mov"));
+    QFile ref(reference);
+    if (!ref.open(QIODevice::WriteOnly) || ref.write(film("h264-pcm-ref.mov")) <= 0) {
+        report(false, QStringLiteral("write the working clip"));
+        return;
+    }
+    ref.close();
+    QByteArray data(8 * 1024 * 1024, '\0');
+    data.replace(64 * 1024, png.size(), png);
+    data.replace(1024 * 1024, broken.size(), broken);
+    const QString imagePath = dir.filePath(QStringLiteral("repair.img"));
+    QFile imageFile(imagePath);
+    if (!imageFile.open(QIODevice::WriteOnly) || imageFile.write(data) != data.size()) {
+        report(false, QStringLiteral("write the test image"));
+        return;
+    }
+    imageFile.close();
+
+    UDisks udisks;
+    QSettings().remove(QStringLiteral("lostFiles/order"));
+    LostFilesDialog dialog(&udisks, QString());
+    dialog.show();
+    dialog.scanImage(imagePath);
+    auto *status = dialog.findChild<QLabel *>(QStringLiteral("status"));
+    waitUntil([&] { return status->text().startsWith(QLatin1String("Done")); }, 60000);
+    auto *view = dialog.findChild<QListView *>(QStringLiteral("files"));
+    const auto *model = qobject_cast<const LostFilesModel *>(view->model());
+    int pngIndex = -1, filmIndex = -1;
+    for (int i = 0; i < model->fileCount(); ++i) {
+        const QString id = model->file(i).type >= 0 ? filetypes::types()[model->file(i).type].id : QString();
+        if (id == QLatin1String("png"))
+            pngIndex = i;
+        else if (id == QLatin1String("mov") || id == QLatin1String("mp4"))
+            filmIndex = i;
+    }
+    report(pngIndex >= 0 && filmIndex >= 0, QStringLiteral("repair: the damaged picture and the film without its index are found"),
+           QStringLiteral("%1 files").arg(model->fileCount()));
+    if (pngIndex < 0 || filmIndex < 0)
+        return;
+
+    const auto readAll = [&dialog, model](int index) {
+        const lost::Found &f = model->file(index);
+        lost::FileReader reader(f.from, f);
+        return reader.head(qint64(f.size));
+    };
+    const int before = model->fileCount();
+    dialog.repairForTests(pngIndex);
+    waitUntil([&] { return !dialog.repairing() && model->fileCount() > before; }, 30000);
+    const lost::Found fixedPng = model->file(model->fileCount() - 1);
+    report(model->fileCount() == before + 1 && fixedPng.name.endsWith(QLatin1String("(repaired).png")) && fixedPng.folder == QLatin1String("Repaired copies")
+               && !QImage::fromData(readAll(model->fileCount() - 1), "PNG").isNull() && status->text().contains(QLatin1String("checksum")),
+           QStringLiteral("repair: the picture's repaired copy joins the list, and opens"), fixedPng.name + QStringLiteral(" | ") + status->text());
+
+    // The film asks for a working clip first; it's picked in the file dialog.
+    QStringList asked;
+    Answerer answerer;
+    answerer.answer = [&](QWidget *modal) {
+        if (auto *picker = qobject_cast<QFileDialog *>(modal)) {
+            asked << picker->windowTitle();
+            // As a person would: the file's path typed in, then Open.
+            picker->selectFile(reference);
+            if (auto *name = picker->findChild<QLineEdit *>(QStringLiteral("fileNameEdit")))
+                name->setText(reference);
+            static_cast<QDialog *>(picker)->accept();
+            return true;
+        }
+        return false;
+    };
+    const int withPng = model->fileCount();
+    dialog.repairForTests(filmIndex);
+    waitUntil([&] { return !dialog.repairing() && model->fileCount() > withPng; }, 60000);
+    const QByteArray fixedFilm = readAll(model->fileCount() - 1);
+    QStringList problems;
+    for (const structure::Part &p : structure::parts(model->file(model->fileCount() - 1).type, fixedFilm))
+        if (!p.problem.isEmpty())
+            problems << p.name;
+    report(asked.size() == 1 && asked[0].contains(QLatin1String("Clip That Plays")) && model->fileCount() == withPng + 1 && fixedFilm.contains("moov") && problems.isEmpty()
+               && model->file(model->fileCount() - 1).note.contains(QLatin1String("60 frames")),
+           QStringLiteral("repair: the film asks for a clip that plays, and its repaired copy with a new index joins the list"),
+           asked.join(QLatin1Char('|')) + QStringLiteral(" | ") + model->file(model->fileCount() - 1).note);
+}
+
 // Organising what was found: names from inside, sorting, small pictures, copies and files that
 // don't open.
 void lostFilesOrganised()
@@ -3824,7 +3927,7 @@ int userScenarios(const QStringList &only)
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
         {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
-        {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
+        {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},
         {"previews", previewsThroughHelper}, {"viruses", virusScanThroughWindow}, {"virusdrive", virusScanOnDrive}, {"viruswindows", virusScanWindowsDrive}, {"virusboot", virusScanBoot}, {"viruslookup", virusLookUpOnline}, {"newids", newIdsThroughWindow},
     };
@@ -3851,6 +3954,8 @@ int main(int argc, char *argv[])
     if (argc == 2 && QByteArray(argv[1]) == "--viewer")
         return viewer::run();
     installTranslations();
+    // Qt's own file dialogs, which the tests can see and answer (the desktop's own aren't widgets).
+    QCoreApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
     // As the user: the add-on, menu and theme parts, which need no test disks.
     if (app.arguments().contains(QStringLiteral("--user"))) {
         QStringList only;

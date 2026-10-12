@@ -203,6 +203,9 @@ private:
     void viewerSaid(const QByteArray &said);
     // The viewer's changed copy of a file, saved where it's asked to be (never on the drive searched).
     void saveChangedCopy(int index, const QMap<quint64, quint8> &changes);
+    // Repairs a copy of a found file (repair.h); the repaired copy joins the list. `reference`: a
+    // working file from the same device, when the repair asked for one.
+    void repairCopy(int index, const QString &reference = {});
     // The next or previous file in the list that has something to show, -1 when there's none.
     int neighbour(int index, int step) const;
     // The times the file system kept, as "label", "value" rows.
@@ -216,6 +219,8 @@ public:
     // viewer had sent it.
     void setChangedCopyTarget(const QString &path) { m_changedCopyTarget = path; }
     void hearFromViewer(const QByteArray &said) { viewerSaid(said); }
+    void repairForTests(int index, const QString &reference = {}) { repairCopy(index, reference); }
+    bool repairing() const { return m_repairing; }
     int viewerIndex() const { return m_viewerIndex; }
     int viewerShown() const { return m_viewerShown; } // the file it said it has on the screen, -1 for none
 
@@ -283,6 +288,7 @@ private:
     QHash<int, QStringList> m_facts; // what each file said about itself, once its preview did
     bool m_warnedDrop = false;
     QString m_changedCopyTarget;
+    bool m_repairing = false;
     QWidget *m_copiesBar = nullptr;
     QLabel *m_copiesText = nullptr;
     QPushButton *m_copiesLook = nullptr;

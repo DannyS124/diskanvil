@@ -14,6 +14,7 @@
 #include "lookcopies.h"
 #include "lostfs.h"
 #include "previewloader.h"
+#include "repair.h"
 #include "viewer.h"
 #include "udisks.h"
 #include "vdisk.h"
@@ -48,6 +49,7 @@
 #include <QPlainTextEdit>
 #include <QProgressBar>
 #include <QProcess>
+#include <QPointer>
 #include <QProgressDialog>
 #include <QRegularExpression>
 #include <QPushButton>
@@ -1891,6 +1893,91 @@ void LostFilesDialog::sendToViewer(const QByteArray &message)
         m_viewerWaiting << message;
 }
 
+void LostFilesDialog::repairCopy(int index, const QString &reference)
+{
+    if (index < 0 || index >= m_model->fileCount() || m_repairing)
+        return;
+    const lost::Found f = m_model->file(index);
+    if (!repair::knows(f.type) || f.nameOnly)
+        return;
+    const QString copy = lookCopy(index);
+    if (copy.isEmpty())
+        return;
+    const QFileInfo name(f.name);
+    const QString repairedName = tr("%1 (repaired)").arg(name.completeBaseName()) + (name.suffix().isEmpty() ? QString() : QLatin1Char('.') + name.suffix());
+    QString why;
+    // Room for the repaired copy next to the look copies: never on the drive searched.
+    const QString out = m_looks->newFile(repairedName, f.size + f.size / 4 + 1024 * 1024, &why);
+    if (out.isEmpty()) {
+        QMessageBox::warning(this, windowTitle(), why);
+        return;
+    }
+    m_repairing = true;
+    auto *wait = new QProgressDialog(tr("Repairing a copy of \"%1\"…").arg(f.name), tr("Stop"), 0, 100, this);
+    wait->setWindowModality(Qt::WindowModal);
+    wait->setMinimumDuration(400);
+    auto stop = std::make_shared<std::atomic<bool>>(false);
+    connect(wait, &QProgressDialog::canceled, this, [stop] { *stop = true; });
+    auto result = std::make_shared<repair::Result>();
+    QPointer<LostFilesDialog> self(this);
+    QThread *worker = QThread::create([self, wait, stop, result, type = f.type, copy, out, reference] {
+        *result = repair::run(type, copy, out, reference, [self, wait, stop](int percent) {
+            QMetaObject::invokeMethod(wait, [wait, percent] { wait->setValue(percent); }, Qt::QueuedConnection);
+            return !*stop;
+        });
+    });
+    connect(worker, &QThread::finished, this, [this, worker, wait, result, index, f, out, repairedName] {
+        worker->deleteLater();
+        wait->deleteLater();
+        m_repairing = false;
+        if (result->needsReference) {
+            // Asked once more, with a working file from the same device.
+            const QString picked = QFileDialog::getOpenFileName(this, repair::referenceWanted(f.type),
+                                                                QStandardPaths::writableLocation(QStandardPaths::HomeLocation));
+            if (!picked.isEmpty())
+                repairCopy(index, picked);
+            else
+                m_status->setText(result->why + QLatin1Char('.'));
+            return;
+        }
+        if (!result->ok) {
+            QMessageBox::information(this, windowTitle(), tr("\"%1\" couldn't be repaired: %2.").arg(f.name, result->why));
+            return;
+        }
+        // The repaired copy joins the list, to be looked at, checked and saved like any found file.
+        QString error;
+        lost::Found fixed;
+        fixed.name = repairedName;
+        fixed.folder = tr("Repaired copies");
+        fixed.type = f.type;
+        fixed.size = quint64(QFileInfo(out).size());
+        fixed.extents = {{0, fixed.size}};
+        fixed.origin = lost::Origin::FileSystem;
+        fixed.deleted = true;
+        fixed.modified = f.modified;
+        fixed.inside = f.inside;
+        fixed.condition = lost::Condition::Good;
+        fixed.note = tr("A repaired copy of \"%1\": %2.").arg(f.name, result->done.join(QStringLiteral("; ")));
+        fixed.from = lost::Source::fromImage(out, &error);
+        if (!fixed.from) {
+            QMessageBox::warning(this, windowTitle(), error);
+            return;
+        }
+        const int added = m_model->fileCount();
+        m_model->append({fixed});
+        addFolders({fixed});
+        refreshCategories();
+        m_status->setText(tr("Repaired a copy of \"%1\": %2. It's in \"Repaired copies\".").arg(f.name, result->done.join(QStringLiteral("; "))));
+        if (const int row = m_model->rowOf(added); row >= 0) {
+            m_view->setCurrentIndex(m_model->index(row));
+            m_view->scrollTo(m_model->index(row));
+        }
+        if (m_viewer && m_viewerIndex == index)
+            viewerShow(added);
+    });
+    worker->start();
+}
+
 void LostFilesDialog::saveChangedCopy(int index, const QMap<quint64, quint8> &changes)
 {
     const QString copy = m_looks && index >= 0 ? m_looks->made(index) : QString();
@@ -1967,6 +2054,13 @@ void LostFilesDialog::viewerSaid(const QByteArray &said)
             if (m_viewerIndex >= 0)
                 openInProgram(m_viewerIndex);
             break;
+        case viewer::Ask::Repair:
+            if (m_viewerIndex >= 0) {
+                raise();
+                activateWindow();
+                repairCopy(m_viewerIndex);
+            }
+            break;
         case viewer::Ask::Shown:
             m_viewerShown = m_viewerIndex;
             break;
@@ -2002,6 +2096,7 @@ void LostFilesDialog::viewerShow(int index)
     m.show.previous = neighbour(index, -1) >= 0;
     m.show.next = neighbour(index, 1) >= 0;
     m.show.openable = lost::LookCopies::safeToOpen(f.name) && !lost::LookCopies::hasMacros(copy);
+    m.show.repairable = repair::knows(f.type) ? repair::what(f.type) : QString();
     m.show.facts = factsFor(index);
     m_viewerIndex = index;
     sendToViewer(viewer::encode(m));
@@ -2238,6 +2333,12 @@ void LostFilesDialog::showFilesMenu(const QPoint &at)
         if (!lost::LookCopies::safeToOpen(m_model->file(one).name))
             open->setToolTip(tr("Programs and scripts aren't opened: they could run"));
         connect(open, &QAction::triggered, this, [this, one] { openInProgram(one); });
+        if (repair::knows(m_model->file(one).type)) {
+            QAction *fix = menu.addAction(QIcon::fromTheme(QStringLiteral("tools-wizard")), tr("Repair a Copy…"));
+            fix->setToolTip(repair::what(m_model->file(one).type));
+            fix->setEnabled(!m_repairing && !m_model->file(one).nameOnly);
+            connect(fix, &QAction::triggered, this, [this, one] { repairCopy(one); });
+        }
         menu.addSeparator();
     }
     QAction *save = menu.addAction(QIcon::fromTheme(QStringLiteral("document-save")),

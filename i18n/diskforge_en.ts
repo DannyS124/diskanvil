@@ -75,7 +75,7 @@
 <context>
     <name>LostFilesDialog</name>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1275"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1277"/>
         <source>Windows kept %n earlier version(s) of this drive, the newest from %1. Files that have changed or gone since can come back from them.</source>
         <translation>
             <numerusform>Windows kept %n earlier version of this drive, the newest from %1. Files that have changed or gone since can come back from them.</numerusform>
@@ -83,7 +83,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1318"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1320"/>
         <source>%n file(s) from the earlier versions have changed or gone since: they&apos;re in the &quot;as it was on&quot; folders.</source>
         <translation>
             <numerusform>%n file from the earlier versions have changed or gone since: they're in the "as it was on" folders.</numerusform>
@@ -91,7 +91,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1373"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1375"/>
         <source>Done: nothing deleted was found on %1. %n file(s) that weren&apos;t deleted show when &quot;Only deleted files&quot; is unticked.</source>
         <translation>
             <numerusform>Done: nothing deleted was found on %1. %n file that weren't deleted show when "Only deleted files" is unticked.</numerusform>
@@ -611,6 +611,17 @@
     </message>
 </context>
 <context>
+    <name>mp4fix</name>
+    <message numerus="yes">
+        <location filename="../src/lostfiles/mp4fix.cpp" line="805"/>
+        <source>Rebuilt the index of its %n frame(s)</source>
+        <translation>
+            <numerusform>Rebuilt the index of its %n frame</numerusform>
+            <numerusform>Rebuilt the index of its %n frames</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
     <name>newids</name>
     <message numerus="yes">
         <location filename="../src/backup/newids.cpp" line="75"/>
@@ -629,6 +640,57 @@
         <translation>
             <numerusform>%n page</numerusform>
             <numerusform>%n pages</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
+    <name>repair</name>
+    <message numerus="yes">
+        <location filename="../src/lostfiles/repair.cpp" line="221"/>
+        <source>Put %n checksum(s) right</source>
+        <translation>
+            <numerusform>Put %n checksum right</numerusform>
+            <numerusform>Put %n checksums right</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/lostfiles/repair.cpp" line="403"/>
+        <source>Rebuilt the list of what&apos;s inside it: %n file(s)</source>
+        <translation>
+            <numerusform>Rebuilt the list of what's inside it: %n file</numerusform>
+            <numerusform>Rebuilt the list of what's inside it: %n files</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/lostfiles/repair.cpp" line="405"/>
+        <source>%n of them don&apos;t match their checksum and may be damaged</source>
+        <translation>
+            <numerusform>%n of them don't match their checksum and may be damaged</numerusform>
+            <numerusform>%n of them don't match their checksum and may be damaged</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/lostfiles/repair.cpp" line="407"/>
+        <source>%n couldn&apos;t be read and were left out</source>
+        <translation>
+            <numerusform>%n couldn't be read and were left out</numerusform>
+            <numerusform>%n couldn't be read and were left out</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/lostfiles/repair.cpp" line="554"/>
+        <source>Rebuilt the table that says where its %n object(s) are</source>
+        <translation>
+            <numerusform>Rebuilt the table that says where its %n object are</numerusform>
+            <numerusform>Rebuilt the table that says where its %n objects are</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/lostfiles/repair.cpp" line="556"/>
+        <source>%n of them are packed inside object streams</source>
+        <translation>
+            <numerusform>%n of them are packed inside object streams</numerusform>
+            <numerusform>%n of them are packed inside object streams</numerusform>
         </translation>
     </message>
 </context>

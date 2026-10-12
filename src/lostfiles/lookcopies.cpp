@@ -76,6 +76,21 @@ QString LookCopies::folderFor(quint64 size, QString *why)
     return {};
 }
 
+QString LookCopies::newFile(const QString &name, quint64 size, QString *why)
+{
+    const QString folder = folderFor(size, why);
+    if (folder.isEmpty())
+        return {};
+    for (int n = 1; n < 100000; ++n) {
+        const QString own = QStringLiteral("%1/made-%2").arg(folder).arg(n);
+        if (!QFileInfo::exists(own) && QDir().mkpath(own))
+            return own + QLatin1Char('/') + cleanName(name);
+    }
+    if (why)
+        *why = tr("A folder for it couldn't be made.");
+    return {};
+}
+
 QStringList LookCopies::folders()
 {
     // Asking for a small one makes the folder in memory (or the cache one where memory won't do),

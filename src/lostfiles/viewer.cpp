@@ -133,7 +133,7 @@ QByteArray encode(const Message &m)
     case Message::ShowFile:
         s << qint32(m.show.kind) << qint32(m.show.type) << m.show.path << m.show.name << m.show.where;
         preview::writeStrings(s, m.show.facts);
-        s << m.show.previous << m.show.next << m.show.openable;
+        s << m.show.previous << m.show.next << m.show.openable << m.show.repairable;
         break;
     case Message::AskFor:
         s << qint32(m.ask);
@@ -178,7 +178,7 @@ bool decode(QByteArray &buffer, Message &m, bool *bad)
         qint32 kind = 0, fileType = -1;
         s >> kind >> fileType >> m.show.path >> m.show.name >> m.show.where;
         preview::readStrings(s, m.show.facts);
-        s >> m.show.previous >> m.show.next >> m.show.openable;
+        s >> m.show.previous >> m.show.next >> m.show.openable >> m.show.repairable;
         m.show.kind = kind >= qint32(Kind::Picture) && kind <= qint32(Kind::Bytes) ? Kind(kind) : Kind::Bytes;
         m.show.type = fileType;
         break;
@@ -186,7 +186,7 @@ bool decode(QByteArray &buffer, Message &m, bool *bad)
     case Message::AskFor: {
         qint32 ask = 0;
         s >> ask;
-        m.ask = ask >= 0 && ask <= qint32(Ask::Shown) ? Ask(ask) : Ask::Ready;
+        m.ask = ask >= 0 && ask <= qint32(Ask::Repair) ? Ask(ask) : Ask::Ready;
         break;
     }
     case Message::Facts:
@@ -933,6 +933,8 @@ Window::Window(QWidget *parent)
     m_insideAction->setCheckable(true);
     m_insideAction->setObjectName(QStringLiteral("insideAction"));
     m_insideAction->setToolTip(tr("What the file is made of, part by part, and its bytes (damage shows in red)"));
+    m_repair = bar->addAction(icon("tools-wizard"), tr("Repair"));
+    m_repair->setObjectName(QStringLiteral("repairAction"));
     m_open = bar->addAction(icon("document-open"), tr("Open in Its Own Program"));
     m_save = bar->addAction(icon("document-save"), tr("Save…"));
 
@@ -974,6 +976,7 @@ Window::Window(QWidget *parent)
     connect(m_next, &QAction::triggered, this, [this] { Q_EMIT asked(Ask::Next); });
     connect(m_open, &QAction::triggered, this, [this] { Q_EMIT asked(Ask::Open); });
     connect(m_save, &QAction::triggered, this, [this] { Q_EMIT asked(Ask::Save); });
+    connect(m_repair, &QAction::triggered, this, [this] { Q_EMIT asked(Ask::Repair); });
     connect(m_details, &QAction::toggled, m_side, &QWidget::setVisible);
     connect(m_insideAction, &QAction::toggled, this, [this](bool on) {
         if (on) {
@@ -1013,6 +1016,8 @@ void Window::present(const Show &show)
     m_previous->setEnabled(show.previous);
     m_next->setEnabled(show.next);
     m_open->setEnabled(show.openable);
+    m_repair->setVisible(!show.repairable.isEmpty());
+    m_repair->setToolTip(show.repairable + tr(" (on a copy, which then shows here)"));
     m_open->setToolTip(show.openable ? tr("Open it in the program this computer has for it (a copy)")
                                      : tr("Programs and scripts aren't opened: they could run"));
     showFacts();

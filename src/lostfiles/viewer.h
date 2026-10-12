@@ -36,11 +36,13 @@ struct Show {
     QStringList facts; // "label\tvalue", what's known about it
     bool previous = false, next = false; // whether there's one before it and after it
     bool openable = false;               // safe to open in the program the computer has for it
+    QString repairable;                  // what Repair does for it; empty when it can't be repaired
 };
 
 // What the viewer asks Find Lost Files for.
 // Shown: it has the file sent last on the screen (so Find Lost Files, and the tests, know it got it).
-enum class Ask : qint32 { Ready = 0, Previous, Next, Save, Open, Shown };
+// Repair: a repaired copy of it, shown next when it's made.
+enum class Ask : qint32 { Ready = 0, Previous, Next, Save, Open, Shown, Repair };
 
 // The messages between them, each a small header and then its body.
 struct Message {
@@ -108,6 +110,7 @@ private:
     QScrollArea *m_side;
     QAction *m_previous, *m_next, *m_zoomOut, *m_fit, *m_actual, *m_zoomIn, *m_details, *m_open, *m_save;
     QAction *m_insideAction;
+    QAction *m_repair;
 };
 
 } // namespace viewer
