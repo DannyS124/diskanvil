@@ -15,5 +15,7 @@ bool inFlatpak();
 bool programExists(const QString &name);
 // Runs a command and waits, for quick checks. Returns its exit code.
 int run(QStringList command);
+// The command to give QProcess for it: as it is, or through flatpak-spawn in the Flatpak.
+QStringList command(QStringList command);
 
 } // namespace host

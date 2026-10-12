@@ -19,6 +19,7 @@
 #include "../src/lostfiles/viewer.h"
 #include "../src/lostfiles/hexview.h"
 #include "../src/lostfiles/structure.h"
+#include "../src/lostfiles/btrfsdialog.h"
 #include "../src/lostfiles/lostfilesdialog.h"
 #include "../src/lostfiles/filetypes.h"
 #include "../src/common/jobui.h"
@@ -3503,6 +3504,126 @@ void lostFilesReadThrough()
            QStringLiteral("read through: the search fills a Rescue Copy image and its map, and says so"), status->text().right(120));
 }
 
+// btrfs: files deleted since come back out of an older copy of its file tree (btrfs-progs).
+void lostFilesBtrfs()
+{
+    if (!btrfsrestore::available()) {
+        report(true, QStringLiteral("btrfs: skipped, btrfs-progs isn't here"));
+        return;
+    }
+    QTemporaryDir dir;
+    const QString image = dir.filePath(QStringLiteral("photos.img"));
+    QFile out(image);
+    QProcess unpack;
+    unpack.start(QStringLiteral("zstd"), {QStringLiteral("-q"), QStringLiteral("-d"), QStringLiteral(SOURCE_DIR "/tests/data/lostfs/btrfs.img.zst"), QStringLiteral("-o"), image});
+    if (!unpack.waitForFinished(60000) || unpack.exitCode() != 0) {
+        report(false, QStringLiteral("btrfs: unpack the test image"));
+        return;
+    }
+    UDisks udisks;
+    LostFilesDialog dialog(&udisks, QString());
+    dialog.show();
+    dialog.scanImage(image);
+    auto *status = dialog.findChild<QLabel *>(QStringLiteral("status"));
+    waitUntil([&] { return status->text().startsWith(QLatin1String("Done")); }, 60000);
+    auto *bar = dialog.findChild<QWidget *>(QStringLiteral("btrfsBar"));
+    report(bar->isVisible(), QStringLiteral("btrfs: the window offers its older copies"));
+    const QString target = dir.filePath(QStringLiteral("back"));
+    QDir().mkpath(target);
+    QStringList listed, said;
+    Answerer answerer;
+    int step = 0;
+    answerer.answer = [&](QWidget *modal) {
+        auto *btrfs = qobject_cast<BtrfsDialog *>(modal);
+        if (!btrfs)
+            return false;
+        auto *files = btrfs->findChild<QTreeWidget *>(QStringLiteral("treeFiles"));
+        auto *text = btrfs->findChild<QLabel *>(QStringLiteral("btrfsStatus"));
+        if (step == 0 && files->topLevelItemCount() > 0 && !btrfs->busy()) {
+            for (int i = 0; i < files->topLevelItemCount(); ++i)
+                listed << files->topLevelItem(i)->text(0) + QLatin1Char(' ') + files->topLevelItem(i)->text(1);
+            btrfs->setTargetForTests(target);
+            btrfs->findChild<QPushButton *>(QStringLiteral("copyTicked"))->click();
+            step = 1;
+        } else if (step == 1 && !btrfs->busy() && text->text().startsWith(QLatin1String("Copied"))) {
+            said << text->text();
+            btrfs->reject();
+            step = 2;
+        }
+        return true;
+    };
+    dialog.findChild<QPushButton *>(QStringLiteral("btrfsLook"))->click();
+    listed.sort();
+    const QStringList restored = QDir(target).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    const QString copy = restored.isEmpty() ? QString() : target + QLatin1Char('/') + restored.first();
+    report(listed == QStringList{QStringLiteral("/Notes/ferry.txt gone"), QStringLiteral("/Pictures/2024/beach2.jpg gone"), QStringLiteral("/Pictures/2024/beach4.jpg gone")}
+               && said.size() == 1 && said[0].startsWith(QLatin1String("Copied 3 files"))
+               && QFileInfo(copy + QStringLiteral("/Notes/ferry.txt")).size() == 850 && QFileInfo(copy + QStringLiteral("/Pictures/2024/beach4.jpg")).size() == 24006,
+           QStringLiteral("btrfs: the files deleted since are listed from the older copy, and copied back whole"),
+           listed.join(QLatin1Char(',')) + QStringLiteral(" | ") + said.join(QLatin1Char(' ')));
+
+    // The same file system as a partition on a whole disk's image: it's copied out of the image first.
+    const QString disk = dir.filePath(QStringLiteral("disk.img"));
+    QFile part(image), whole(disk);
+    const qint64 at = 1024 * 1024;
+    bool made = part.open(QIODevice::ReadOnly) && whole.open(QIODevice::WriteOnly) && whole.resize(at + part.size() + at) && whole.seek(at)
+             && whole.write(part.readAll()) == part.size();
+    whole.close();
+    QProcess table;
+    table.start(QStringLiteral("sfdisk"), {QStringLiteral("--quiet"), disk});
+    table.write("label: gpt\nstart=2048, size=" + QByteArray::number(part.size() / 512) + ", type=linux\n");
+    table.closeWriteChannel();
+    made = made && table.waitForFinished(30000) && table.exitCode() == 0;
+    if (!made) {
+        report(false, QStringLiteral("btrfs: make the disk image"));
+        return;
+    }
+    dialog.scanImage(disk);
+    waitUntil([&] { return status->text().startsWith(QLatin1String("Done")); }, 60000);
+    listed.clear();
+    said.clear();
+    step = 0;
+    const QString target2 = dir.filePath(QStringLiteral("back2"));
+    QDir().mkpath(target2);
+    answerer.answer = [&](QWidget *modal) {
+        auto *btrfs = qobject_cast<BtrfsDialog *>(modal);
+        if (!btrfs)
+            return false;
+        auto *files = btrfs->findChild<QTreeWidget *>(QStringLiteral("treeFiles"));
+        if (step == 0 && files->topLevelItemCount() > 0 && !btrfs->busy()) {
+            for (int i = 0; i < files->topLevelItemCount(); ++i)
+                listed << files->topLevelItem(i)->text(0);
+            step = 1;
+            btrfs->reject();
+        }
+        return true;
+    };
+    dialog.findChild<QPushButton *>(QStringLiteral("btrfsLook"))->click();
+    report(bar->isVisible() && listed.size() == 3, QStringLiteral("btrfs: in a whole disk's image, its partition is copied out and read the same way"),
+           listed.join(QLatin1Char(',')));
+
+    // As on DiskForge Live: the drive read as root, through a read-only loop device at the
+    // partition (tried here on the disk image, when sudo needs no password).
+    if (QProcess::execute(QStringLiteral("sudo"), {QStringLiteral("-n"), QStringLiteral("true")}) != 0) {
+        report(true, QStringLiteral("btrfs: the DiskForge Live way skipped, sudo wants a password here"));
+        return;
+    }
+    QStringList live;
+    {
+        BtrfsDialog root(disk, QString(), QStringLiteral("disk"), nullptr, true, quint64(at), quint64(part.size()));
+        root.show();
+        auto *files = root.findChild<QTreeWidget *>(QStringLiteral("treeFiles"));
+        waitUntil([&] { return files->topLevelItemCount() >= 3 && !root.busy(); }, 60000);
+        for (int i = 0; i < files->topLevelItemCount(); ++i)
+            live << files->topLevelItem(i)->text(0);
+    }
+    QProcess loops;
+    loops.start(QStringLiteral("losetup"), {QStringLiteral("-j"), disk});
+    loops.waitForFinished(10000);
+    report(live.size() == 3 && loops.readAll().trimmed().isEmpty(),
+           QStringLiteral("btrfs: the DiskForge Live way, read as root through a loop device that's taken away after"), live.join(QLatin1Char(',')));
+}
+
 // Repairing through the window: a copy is repaired, and joins the list to be looked at and saved.
 void lostFilesRepaired()
 {
@@ -4066,7 +4187,7 @@ int userScenarios(const QStringList &only)
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
         {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
-        {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
+        {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},
         {"previews", previewsThroughHelper}, {"viruses", virusScanThroughWindow}, {"virusdrive", virusScanOnDrive}, {"viruswindows", virusScanWindowsDrive}, {"virusboot", virusScanBoot}, {"viruslookup", virusLookUpOnline}, {"newids", newIdsThroughWindow},
     };

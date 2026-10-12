@@ -188,6 +188,11 @@ private:
     // Signs of ransomware among the files found (ransomware.h): a bar saying so, and what can be done.
     void lookForRansomware();
     void explainRansomware();
+    // btrfs file systems in what's searched: their older file trees, through btrfs-progs (btrfsdialog.h).
+    void offerBtrfs();
+    void openBtrfs();
+    // Copies part of a file to a file of its own (a partition out of a disk image), with progress.
+    bool copyRange(const QString &from, quint64 offset, quint64 length, const QString &to, QString *why);
     // Finds text by words remembered from it (lost::WordSearch), all through the drive.
     void findByWords(const QString &words);
     void checkTheyOpen();
@@ -312,6 +317,9 @@ private:
     QLabel *m_copiesText = nullptr;
     QPushButton *m_copiesLook = nullptr;
     QWidget *m_ransomBar = nullptr;
+    QWidget *m_btrfsBar = nullptr;
+    QString m_rawImage;     // the image file searched, when it's a plain one (not a VM's disk)
+    QString m_sourceObject; // the drive or partition searched (UDisks object path)
     QLabel *m_ransomText = nullptr;
     QLabel *m_tickedInfo;
     QPushButton *m_save;

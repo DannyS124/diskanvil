@@ -77,6 +77,7 @@ add_library(diskforge-core STATIC
     src/lostfiles/thumbcache.cpp src/lostfiles/thumbcache.h
     src/lostfiles/ransomware.cpp src/lostfiles/ransomware.h
     src/lostfiles/readthrough.cpp src/lostfiles/readthrough.h
+    src/lostfiles/btrfsrestore.cpp src/lostfiles/btrfsrestore.h
     src/viruses/virusscan.cpp src/viruses/virusscan.h
     src/viruses/reghive.cpp src/viruses/reghive.h
     src/viruses/winstartup.cpp src/viruses/winstartup.h
@@ -150,6 +151,7 @@ add_library(diskforge-ui STATIC
     src/lostfiles/previewloader.cpp src/lostfiles/previewloader.h
     src/lostfiles/viewer.cpp src/lostfiles/viewer.h
     src/lostfiles/hexview.cpp src/lostfiles/hexview.h
+    src/lostfiles/btrfsdialog.cpp src/lostfiles/btrfsdialog.h
     src/app/mainwindow.cpp src/app/mainwindow.h
     src/app/dialogs.cpp src/app/dialogs.h
     src/app/tools.cpp src/app/tools.h

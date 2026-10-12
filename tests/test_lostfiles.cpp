@@ -24,6 +24,7 @@
 #include "../src/lostfiles/thumbcache.h"
 #include "../src/lostfiles/ransomware.h"
 #include "../src/lostfiles/readthrough.h"
+#include "../src/lostfiles/btrfsrestore.h"
 #include "../src/common/hostprocess.h"
 #include "../src/lostfiles/textkinds.h"
 #include "../src/lostfiles/preview.h"
@@ -3074,6 +3075,65 @@ void readThrough()
            QStringLiteral("%1 bytes asked").arg(drive2->asked));
 }
 
+// btrfs: files deleted since are listed from an older copy of the tree, and copied back
+// (btrfs-progs, run as programs of their own).
+void btrfsRestore()
+{
+    report(btrfsrestore::pathRegex({QStringLiteral("/Notes/a.b"), QStringLiteral("/Pictures/2024/x(1).jpg")})
+               == QLatin1String("^/(|Notes|Notes/a\\.b|Pictures|Pictures/2024|Pictures/2024/x\\(1\\)\\.jpg)$"),
+           QStringLiteral("btrfs: only the ticked files, and the folders on the way to them"),
+           btrfsrestore::pathRegex({QStringLiteral("/Notes/a.b"), QStringLiteral("/Pictures/2024/x(1).jpg")}));
+    if (!btrfsrestore::available()) {
+        report(true, QStringLiteral("btrfs: the rest skipped, btrfs-progs isn't here"));
+        return;
+    }
+    QTemporaryDir dir;
+    const QString image = dir.filePath(QStringLiteral("btrfs.img"));
+    QFile out(image);
+    const QByteArray bytes = unpack(QStringLiteral(SOURCE_DIR "/tests/data/lostfs/btrfs.img.zst"));
+    if (bytes.isEmpty() || !out.open(QIODevice::WriteOnly) || out.write(bytes) != bytes.size()) {
+        report(false, QStringLiteral("btrfs: unpack the test image"));
+        return;
+    }
+    out.close();
+    QString error;
+    const auto source = lost::Source::fromImage(image, &error);
+    const QVector<lost::Extent> volumes = btrfsrestore::volumes(*source);
+    report(volumes.size() == 1 && volumes[0].start == 0, QStringLiteral("btrfs: the file system is found"));
+    const auto run = [](const QStringList &command) {
+        QProcess p;
+        p.setProcessChannelMode(QProcess::MergedChannels);
+        p.start(command.first(), command.mid(1));
+        p.waitForFinished(60000);
+        return QString::fromUtf8(p.readAll());
+    };
+    const QVector<btrfsrestore::Tree> trees = btrfsrestore::parseTrees(run(btrfsrestore::findTreesCommand(image)));
+    report(trees.size() >= 2 && trees[0].at == 0 && trees[1].generation < trees[0].generation && trees[1].at > 0,
+           QStringLiteral("btrfs: the tree in use, and older ones, newest first"), QStringLiteral("%1 trees").arg(trees.size()));
+    if (trees.size() < 2)
+        return;
+    const QString target = dir.filePath(QStringLiteral("out"));
+    QDir().mkpath(target);
+    const QStringList now = btrfsrestore::parseRestored(run(btrfsrestore::restoreCommand(image, 0, target, true)), target);
+    const QStringList before = btrfsrestore::parseRestored(run(btrfsrestore::restoreCommand(image, trees[1].at, target, true)), target);
+    QStringList gone;
+    for (const QString &path : before) {
+        if (!now.contains(path))
+            gone << path;
+    }
+    gone.sort();
+    report(now.contains(QStringLiteral("/Notes/shopping.txt")) && !now.contains(QStringLiteral("/Notes/ferry.txt"))
+               && gone == QStringList{QStringLiteral("/Notes/ferry.txt"), QStringLiteral("/Pictures/2024/beach2.jpg"), QStringLiteral("/Pictures/2024/beach4.jpg")},
+           QStringLiteral("btrfs: the older tree lists the files deleted since"), gone.join(QLatin1Char(',')));
+    run(btrfsrestore::restoreCommand(image, trees[1].at, target, false, {QStringLiteral("/Notes/ferry.txt"), QStringLiteral("/Pictures/2024/beach2.jpg")}));
+    QFile ferry(target + QStringLiteral("/Notes/ferry.txt")), beach(target + QStringLiteral("/Pictures/2024/beach2.jpg"));
+    const QByteArray note = ferry.open(QIODevice::ReadOnly) ? ferry.readAll() : QByteArray();
+    const QByteArray photo = beach.open(QIODevice::ReadOnly) ? beach.readAll() : QByteArray();
+    report(note == QByteArray("Pier 3 at 07:30.\n").repeated(50) && photo.size() == 22006 && photo.startsWith("\xFF\xD8") && photo.endsWith("\xFF\xD9")
+               && !QFileInfo::exists(target + QStringLiteral("/Notes/shopping.txt")),
+           QStringLiteral("btrfs: just the ticked deleted files are copied back, whole"), QStringLiteral("%1 %2").arg(note.size()).arg(photo.size()));
+}
+
 void lostFilesTests()
 {
     previewQueue();
@@ -3101,4 +3161,5 @@ void lostFilesTests()
     thumbnailCaches();
     ransomwareSigns();
     readThrough();
+    btrfsRestore();
 }

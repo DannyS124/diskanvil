@@ -21,6 +21,13 @@ bool host::programExists(const QString &name)
     return QProcess::execute(QStringLiteral("flatpak-spawn"), {QStringLiteral("--host"), QStringLiteral("test"), QStringLiteral("-x"), path}) == 0;
 }
 
+QStringList host::command(QStringList command)
+{
+    if (inFlatpak())
+        return QStringList{QStringLiteral("flatpak-spawn"), QStringLiteral("--host")} + command;
+    return command;
+}
+
 int host::run(QStringList command)
 {
     if (inFlatpak())

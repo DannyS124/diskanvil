@@ -18,6 +18,8 @@
 #include "thumbcache.h"
 #include "ransomware.h"
 #include "readthrough.h"
+#include "rescuestick.h"
+#include "btrfsdialog.h"
 #include "viewer.h"
 #include "udisks.h"
 #include "vdisk.h"
@@ -72,6 +74,10 @@
 #include <QVBoxLayout>
 
 #include <numeric>
+
+#ifndef Q_OS_WIN
+#include <unistd.h>
+#endif
 
 namespace {
 
@@ -762,6 +768,20 @@ LostFilesDialog::LostFilesDialog(UDisks *udisks, const QString &preferredPath, Q
     ransom->addWidget(whatToDo);
     m_ransomBar->hide();
     resultsLayout->addWidget(m_ransomBar);
+    m_btrfsBar = new QWidget;
+    m_btrfsBar->setObjectName(QStringLiteral("btrfsBar"));
+    auto *btrfs = new QHBoxLayout(m_btrfsBar);
+    btrfs->setContentsMargins(0, 0, 0, 0);
+    auto *btrfsText = new QLabel(tr("There's a btrfs file system here. Older copies of its list of files can still hold files deleted since."));
+    btrfsText->setWordWrap(true);
+    auto *btrfsLook = new QPushButton(tr("Look in Older Copies…"));
+    btrfsLook->setObjectName(QStringLiteral("btrfsLook"));
+    btrfsLook->setAutoDefault(false);
+    btrfs->addWidget(btrfsText, 1);
+    btrfs->addWidget(btrfsLook);
+    m_btrfsBar->hide();
+    resultsLayout->addWidget(m_btrfsBar);
+    connect(btrfsLook, &QPushButton::clicked, this, &LostFilesDialog::openBtrfs);
     connect(whatToDo, &QPushButton::clicked, this, &LostFilesDialog::explainRansomware);
 
     auto *split = new QSplitter;
@@ -1174,7 +1194,7 @@ void LostFilesDialog::start()
     m_look->setEnabled(false);
     m_driveNote->setText(tr("Opening it (it may ask for the admin password)…"));
     // Read-only, and nothing gets unmounted: the benchmark way in.
-    openBlockThen(m_udisks, this, path, UDisks::OpenMode::Benchmark, [this, title, device](int fd) {
+    openBlockThen(m_udisks, this, path, UDisks::OpenMode::Benchmark, [this, title, device, path](int fd) {
         m_look->setEnabled(true);
         if (fd < 0) {
             m_driveNote->setText(redText(tr("It couldn't be opened for reading.")));
@@ -1183,6 +1203,7 @@ void LostFilesDialog::start()
         m_driveNote->clear();
         if (!m_keepCopy->isChecked()) {
             scanSource(lost::Source::fromFd(fd, true), title, device);
+            m_sourceObject = path;
             return;
         }
         // The image goes on another drive: never the one being searched.
@@ -1200,6 +1221,7 @@ void LostFilesDialog::start()
         }
         scanReadThrough(lost::Source::fromFd(fd, true), title, image);
         m_diskDevice = device;
+        m_sourceObject = path;
     });
 }
 
@@ -1249,6 +1271,7 @@ void LostFilesDialog::scanImage(const QString &path)
     }
     scanSource(source, QFileInfo(path).fileName(), QString());
     m_sourceWarning = warning;
+    m_rawImage = vdisk::formatOf(path).isEmpty() ? path : QString();
 }
 
 void LostFilesDialog::scanSource(std::shared_ptr<lost::Source> source, const QString &title, const QString &diskDevice)
@@ -1258,6 +1281,9 @@ void LostFilesDialog::scanSource(std::shared_ptr<lost::Source> source, const QSt
     m_sourceWarning.clear();
     m_through = nullptr;
     m_copyImage.clear();
+    m_rawImage.clear();
+    m_sourceObject.clear();
+    m_btrfsBar->hide();
     m_title = title;
     m_diskDevice = diskDevice;
     m_model->clear();
@@ -1482,6 +1508,106 @@ void LostFilesDialog::scanDone(bool stopped)
     if (!stopped)
         findThumbnails();
     lookForRansomware();
+    offerBtrfs();
+}
+
+void LostFilesDialog::offerBtrfs()
+{
+#ifdef Q_OS_WIN
+    m_btrfsBar->hide();
+#else
+    m_btrfsBar->setVisible(m_source && (!m_rawImage.isEmpty() || !m_sourceObject.isEmpty()) && !btrfsrestore::volumes(*m_source).isEmpty()
+                           && btrfsrestore::available());
+#endif
+}
+
+void LostFilesDialog::openBtrfs()
+{
+#ifndef Q_OS_WIN
+    const QVector<lost::Extent> volumes = btrfsrestore::volumes(*m_source);
+    if (volumes.isEmpty())
+        return;
+    const lost::Extent where = volumes.first();
+    // A plain image that's the file system itself goes to btrfs-progs as it is.
+    if (!m_rawImage.isEmpty() && where.start == 0 && where.length == quint64(QFileInfo(m_rawImage).size())) {
+        BtrfsDialog dialog(m_rawImage, QString(), m_title, this);
+        dialog.exec();
+        return;
+    }
+    // A partition inside a disk image: copied out to a file of its own first (instantly, on file
+    // systems that share the blocks, like btrfs and XFS), next to the copies made to look at.
+    if (!m_rawImage.isEmpty()) {
+        if (!m_looks)
+            m_looks = std::make_unique<lost::LookCopies>(m_diskDevice);
+        QString why;
+        const QString part = m_looks->newFile(QStringLiteral("btrfs.img"), where.length, &why);
+        if (part.isEmpty() || !copyRange(m_rawImage, where.start, where.length, part, &why)) {
+            QMessageBox::warning(this, windowTitle(), tr("The btrfs partition couldn't be copied out of the image: %1").arg(why));
+            return;
+        }
+        BtrfsDialog dialog(part, QString(), m_title, this);
+        dialog.exec();
+        QFile::remove(part);
+        return;
+    }
+    // On a drive, btrfs-progs reads the drive itself, which takes admin rights: DiskForge Live
+    // has them.
+    const Volume *volume = nullptr;
+    const Disk *disk = nullptr;
+    for (const Disk &d : m_udisks->disks()) {
+        if (d.blockPath == m_sourceObject)
+            disk = &d;
+        for (const Volume &v : d.volumes) {
+            if (v.objectPath == m_sourceObject)
+                volume = &v;
+        }
+    }
+    const QString device = volume ? volume->device : disk ? disk->device : QString();
+    if (!rescue::runningInRescue() || device.isEmpty()) {
+        QMessageBox::information(this, windowTitle(),
+                                 tr("btrfs-progs has to read the drive itself for this, which takes admin rights. DiskForge Live (on a USB "
+                                    "stick) can do it. On this computer: make a Rescue Copy of just the btrfs partition (Action menu), then look "
+                                    "in that file here."));
+        return;
+    }
+    BtrfsDialog dialog(device, m_diskDevice, m_title, this, true, where.start, where.length);
+    dialog.exec();
+#endif
+}
+
+bool LostFilesDialog::copyRange(const QString &from, quint64 offset, quint64 length, const QString &to, QString *why)
+{
+#ifdef Q_OS_WIN
+    Q_UNUSED(from) Q_UNUSED(offset) Q_UNUSED(length) Q_UNUSED(to)
+    *why = tr("not on Windows");
+    return false;
+#else
+    const int in = blockio::openFile(from, blockio::FileMode::Read), out = blockio::openFile(to, blockio::FileMode::Replace);
+    QProgressDialog progress(tr("Copying the btrfs partition out of the image…"), tr("Stop"), 0, 1000, this);
+    progress.setWindowModality(Qt::WindowModal);
+    progress.setMinimumDuration(500);
+    loff_t inAt = loff_t(offset), outAt = 0;
+    bool ok = in >= 0 && out >= 0;
+    // copy_file_range shares the blocks where the file system can, else copies them in the kernel.
+    for (quint64 done = 0; ok && done < length && !progress.wasCanceled();) {
+        const ssize_t n = ::copy_file_range(in, &inAt, out, &outAt, size_t(std::min<quint64>(length - done, 256ull * 1024 * 1024)), 0);
+        ok = n > 0;
+        done += quint64(std::max<ssize_t>(n, 0));
+        progress.setValue(int(done * 1000 / length));
+        QCoreApplication::processEvents();
+    }
+    if (!ok)
+        *why = QString::fromLocal8Bit(strerror(errno));
+    if (progress.wasCanceled()) {
+        ok = false;
+        *why = tr("stopped");
+    }
+    if (in >= 0)
+        blockio::close(in);
+    if (out >= 0)
+        blockio::close(out);
+    return ok;
+#endif
 }
 
 void LostFilesDialog::lookForRansomware()

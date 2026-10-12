@@ -51,6 +51,41 @@
     </message>
 </context>
 <context>
+    <name>BtrfsDialog</name>
+    <message numerus="yes">
+        <location filename="../src/lostfiles/btrfsdialog.cpp" line="147"/>
+        <source>%n copy(ies) of its file tree found. Pick one and show what it holds.</source>
+        <translation>
+            <numerusform>%n copy(ies) of its file tree found. Pick one and show what it holds.</numerusform>
+            <numerusform>%n copy(ies) of its file tree found. Pick one and show what it holds.</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/lostfiles/btrfsdialog.cpp" line="196"/>
+        <source>That copy holds %n file(s)</source>
+        <translation>
+            <numerusform>That copy holds %n file</numerusform>
+            <numerusform>That copy holds %n files</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/lostfiles/btrfsdialog.cpp" line="197"/>
+        <source>%n of them not there now (deleted, or changed since).</source>
+        <translation>
+            <numerusform>%n of them not there now (deleted, or changed since).</numerusform>
+            <numerusform>%n of them not there now (deleted, or changed since).</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/lostfiles/btrfsdialog.cpp" line="235"/>
+        <source>Copied %n file(s) to %1.</source>
+        <translation>
+            <numerusform>Copied %n file to %1.</numerusform>
+            <numerusform>Copied %n files to %1.</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
     <name>CleanupDialog</name>
     <message numerus="yes">
         <location filename="../src/tools/systemtools.cpp" line="447"/>
@@ -75,7 +110,7 @@
 <context>
     <name>LostFilesDialog</name>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1368"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1394"/>
         <source>Windows kept %n earlier version(s) of this drive, the newest from %1. Files that have changed or gone since can come back from them.</source>
         <translation>
             <numerusform>Windows kept %n earlier version of this drive, the newest from %1. Files that have changed or gone since can come back from them.</numerusform>
@@ -83,7 +118,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1411"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1437"/>
         <source>%n file(s) from the earlier versions have changed or gone since: they&apos;re in the &quot;as it was on&quot; folders.</source>
         <translation>
             <numerusform>%n file from the earlier versions have changed or gone since: they're in the "as it was on" folders.</numerusform>
@@ -91,7 +126,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1466"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1492"/>
         <source>Done: nothing deleted was found on %1. %n file(s) that weren&apos;t deleted show when &quot;Only deleted files&quot; is unticked.</source>
         <translation>
             <numerusform>Done: nothing deleted was found on %1. %n file that weren't deleted show when "Only deleted files" is unticked.</numerusform>
@@ -99,7 +134,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1496"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1622"/>
         <source>%n file(s) end in %1</source>
         <translation>
             <numerusform>%n file end in %1</numerusform>
@@ -114,7 +149,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1521"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1647"/>
         <source>%n file(s) end in &lt;b&gt;%1&lt;/b&gt;, for example %2.</source>
         <translation>
             <numerusform>%n file end in &lt;b&gt;%1&lt;/b&gt;, for example %2.</numerusform>
@@ -122,7 +157,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1528"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1654"/>
         <source>Windows kept %n earlier version(s) of this drive: &lt;b&gt;Look in Them&lt;/b&gt;, above, shows the files as they were.</source>
         <translation>
             <numerusform>Windows kept %n earlier version of this drive: &lt;b&gt;Look in Them&lt;/b&gt;, above, shows the files as they were.</numerusform>
@@ -130,7 +165,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1532"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1658"/>
         <source>Many of these programs write a locked copy and delete the original. The originals of %n locked file(s) are among the deleted files found here: tick them and save them.</source>
         <translation>
             <numerusform>Many of these programs write a locked copy and delete the original. The originals of %n locked file are among the deleted files found here: tick them and save them.</numerusform>
@@ -138,7 +173,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1570"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1696"/>
         <source>Windows kept %n small picture(s) of photos and films, some maybe deleted: see &quot;Small pictures Windows kept&quot;.</source>
         <translation>
             <numerusform>Windows kept %n small picture of photos and films, some maybe deleted: see "Small pictures Windows kept".</numerusform>
@@ -146,7 +181,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1617"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1743"/>
         <source>&quot;%1&quot; was found in %n place(s): see &quot;Found by their words&quot;.</source>
         <translation>
             <numerusform>"%1" was found in %n place: see "Found by their words".</numerusform>
