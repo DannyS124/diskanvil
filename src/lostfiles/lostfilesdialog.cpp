@@ -16,6 +16,8 @@
 #include "previewloader.h"
 #include "repair.h"
 #include "thumbcache.h"
+#include "foundreport.h"
+#include "pdfreport.h"
 #include "placesdialog.h"
 #include "placesmap.h"
 #include "timelinedialog.h"
@@ -30,24 +32,27 @@
 #include <QApplication>
 #include <QBuffer>
 #include <QCheckBox>
+#include <QClipboard>
 #include <QComboBox>
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDialogButtonBox>
 #include <QDrag>
+#include <QEventLoop>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFontDatabase>
 #include <QGridLayout>
+#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QIcon>
 #include <QImageReader>
 #include <QInputDialog>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListView>
-#include <QKeyEvent>
 #include <QListWidget>
 #include <QLocale>
 #include <QMenu>
@@ -56,12 +61,14 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPlainTextEdit>
-#include <QProgressBar>
-#include <QProcess>
 #include <QPointer>
+#include <QProcess>
+#include <QProgressBar>
 #include <QProgressDialog>
-#include <QRegularExpression>
 #include <QPushButton>
+#include <QRadioButton>
+#include <QRegularExpression>
+#include <QSaveFile>
 #include <QScreen>
 #include <QSettings>
 #include <QSplitter>
@@ -882,6 +889,12 @@ LostFilesDialog::LostFilesDialog(UDisks *udisks, const QString &preferredPath, Q
         });
         dialog.exec();
     });
+    organise->addSeparator();
+    QAction *reportAction = organise->addAction(tr("Save a Report…"));
+    reportAction->setObjectName(QStringLiteral("report"));
+    reportAction->setToolTip(tr("Every file found with what's known of it (where it was, its times, its condition, where a photo was taken), "
+                                "and its fingerprints if you want them, as a web page, a spreadsheet or a PDF"));
+    connect(reportAction, &QAction::triggered, this, &LostFilesDialog::saveReport);
     m_organise->setMenu(organise);
     filters->addWidget(m_organise);
     middleLayout->addWidget(filterBox);
@@ -2286,6 +2299,143 @@ void LostFilesDialog::sendToViewer(const QByteArray &message)
         m_viewerWaiting << message;
 }
 
+void LostFilesDialog::saveReport()
+{
+    // Which files, and whether to read each one whole for its fingerprints.
+    QVector<int> shown, all;
+    for (int row = 0; row < m_model->rowCount(); ++row) {
+        if (const int i = m_model->fileIndex(row); i >= 0)
+            shown << i;
+    }
+    for (int i = 0; i < m_model->fileCount(); ++i)
+        all << i;
+    const QVector<int> ticked = m_model->tickedIndexes();
+    QDialog ask(this);
+    ask.setWindowTitle(tr("Save a Report"));
+    auto *showing = new QRadioButton(tr("The files shown now (%L1)").arg(shown.size()));
+    auto *tickedOnes = new QRadioButton(tr("The ticked files (%L1)").arg(ticked.size()));
+    auto *everything = new QRadioButton(tr("Everything found (%L1)").arg(all.size()));
+    showing->setChecked(true);
+    tickedOnes->setEnabled(!ticked.isEmpty());
+    auto *prints = new QCheckBox(tr("With their fingerprints (MD5, SHA-1, SHA-256): every file is read whole, so it takes longer"));
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel);
+    connect(buttons, &QDialogButtonBox::accepted, &ask, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &ask, &QDialog::reject);
+    auto *layout = new QVBoxLayout(&ask);
+    layout->addWidget(wrappingLabel(tr("A list of the files with everything known about them: where they were, their times, whether they look "
+                                       "whole, and where photos and films were taken.")));
+    layout->addWidget(showing);
+    layout->addWidget(tickedOnes);
+    layout->addWidget(everything);
+    layout->addWidget(prints);
+    layout->addWidget(buttons);
+    if (ask.exec() != QDialog::Accepted)
+        return;
+    const QVector<int> indexes = tickedOnes->isChecked() ? ticked : everything->isChecked() ? all : shown;
+    QString filter;
+    const QString suggested = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + QLatin1Char('/')
+                            + tr("Find Lost Files report %1").arg(QDate::currentDate().toString(Qt::ISODate));
+    QString path = QFileDialog::getSaveFileName(this, tr("Save the Report"), suggested + QStringLiteral(".html"),
+                                                tr("Web page (*.html);;Spreadsheet (*.csv);;PDF (*.pdf)"), &filter);
+    if (path.isEmpty())
+        return;
+    const QString kind = filter.contains(QLatin1String("*.csv")) ? QStringLiteral("csv") : filter.contains(QLatin1String("*.pdf")) ? QStringLiteral("pdf")
+                                                                                                                                       : QStringLiteral("html");
+    if (QFileInfo(path).suffix().isEmpty())
+        path += QLatin1Char('.') + kind;
+
+    auto *wait = new QProgressDialog(tr("Making the report…"), tr("Stop"), 0, int(indexes.size()), this);
+    wait->setWindowModality(Qt::WindowModal);
+    wait->setMinimumDuration(300);
+    auto stop = std::make_shared<std::atomic<bool>>(false);
+    connect(wait, &QProgressDialog::canceled, this, [stop] { *stop = true; });
+    auto rows = std::make_shared<QVector<foundreport::Row>>();
+    const QVector<lost::Found> files = m_model->files();
+    QThread *worker = QThread::create([source = m_source, files, indexes, withPrints = prints->isChecked(), rows, stop, wait] {
+        *rows = foundreport::collect(source, files, indexes, withPrints, [stop, wait](int done, int) {
+            QMetaObject::invokeMethod(wait, [wait, done] { wait->setValue(done); }, Qt::QueuedConnection);
+            return !*stop;
+        });
+    });
+    connect(worker, &QThread::finished, this, [this, worker, wait, rows, files, path, kind, stop] {
+        worker->deleteLater();
+        wait->deleteLater();
+        if (*stop)
+            return;
+        foundreport::About about;
+        about.title = m_title;
+        about.source = m_diskDevice;
+        about.made = QDateTime::currentDateTime();
+        about.version = QCoreApplication::applicationVersion();
+        QString error;
+        bool ok = false;
+        if (kind == QLatin1String("pdf")) {
+            ok = pdfreport::save(foundreport::html(about, files, *rows), path, tr("Find Lost Files report"), &error);
+        } else {
+            QSaveFile out(path);
+            ok = out.open(QIODevice::WriteOnly)
+              && out.write(kind == QLatin1String("csv") ? foundreport::csv(files, *rows) : foundreport::html(about, files, *rows).toUtf8()) > 0
+              && out.commit();
+            error = out.errorString();
+        }
+        if (ok)
+            m_status->setText(tr("The report of %L1 files is saved: %2").arg(rows->size()).arg(QDir::toNativeSeparators(path)));
+        else
+            QMessageBox::warning(this, windowTitle(), tr("The report couldn't be saved: %1").arg(error));
+    });
+    worker->start();
+}
+
+void LostFilesDialog::showFingerprints(const QVector<int> &indexes)
+{
+    QVector<foundreport::Row> rows;
+    {
+        QProgressDialog wait(tr("Reading it whole…"), tr("Stop"), 0, 0, this);
+        wait.setWindowModality(Qt::WindowModal);
+        wait.setMinimumDuration(300);
+        std::atomic<bool> stop{false};
+        connect(&wait, &QProgressDialog::canceled, this, [&stop] { stop = true; });
+        const QVector<lost::Found> files = m_model->files();
+        QThread *worker = QThread::create([&] { rows = foundreport::collect(m_source, files, indexes, true, [&stop](int, int) { return !stop; }); });
+        QEventLoop loop;
+        connect(worker, &QThread::finished, &loop, &QEventLoop::quit);
+        worker->start();
+        loop.exec();
+        worker->wait();
+        delete worker;
+        if (stop)
+            return;
+    }
+    QStringList lines;
+    for (const foundreport::Row &r : std::as_const(rows)) {
+        if (!r.prints.done)
+            continue;
+        const lost::Found &f = m_model->file(r.index);
+        lines << f.name << QStringLiteral("  MD5      ") + QString::fromLatin1(r.prints.md5) << QStringLiteral("  SHA-1    ") + QString::fromLatin1(r.prints.sha1)
+              << QStringLiteral("  SHA-256  ") + QString::fromLatin1(r.prints.sha256) << QString();
+    }
+    QDialog show(this);
+    show.setWindowTitle(tr("Fingerprints"));
+    auto *text = new QPlainTextEdit(lines.join(QLatin1Char('\n')).trimmed());
+    text->setReadOnly(true);
+    text->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    text->setMinimumWidth(640);
+    auto *copy = new QPushButton(tr("Copy"));
+    connect(copy, &QPushButton::clicked, text, [text] { QGuiApplication::clipboard()->setText(text->toPlainText()); });
+    auto *close = new QPushButton(tr("Close"));
+    connect(close, &QPushButton::clicked, &show, &QDialog::accept);
+    auto *buttons = new QHBoxLayout;
+    buttons->addStretch();
+    buttons->addWidget(copy);
+    buttons->addWidget(close);
+    auto *layout = new QVBoxLayout(&show);
+    layout->addWidget(wrappingLabel(tr("The same file always gives the same fingerprints, and any change at all gives others: they show a copy is "
+                                       "the same as what was found.")));
+    layout->addWidget(text);
+    layout->addLayout(buttons);
+    show.exec();
+}
+
 void LostFilesDialog::earlierVersions(int index)
 {
     if (index < 0 || index >= m_model->fileCount())
@@ -2796,6 +2946,10 @@ void LostFilesDialog::showFilesMenu(const QPoint &at)
             fix->setEnabled(!m_repairing && !m_model->file(one).nameOnly);
             connect(fix, &QAction::triggered, this, [this, one] { repairCopy(one); });
         }
+        QAction *prints = menu.addAction(tr("Fingerprints…"));
+        prints->setToolTip(tr("Its MD5, SHA-1 and SHA-256: the same file always gives the same ones"));
+        prints->setEnabled(!m_model->file(one).nameOnly);
+        connect(prints, &QAction::triggered, this, [this, one] { showFingerprints({one}); });
         if (m_model->file(one).type >= 0 && filetypes::types()[m_model->file(one).type].id == QLatin1String("pdf")) {
             QAction *versions = menu.addAction(tr("Earlier Versions Inside It"));
             versions->setToolTip(tr("A PDF saved again keeps each earlier version inside it: they're listed as files of their own"));

@@ -372,6 +372,7 @@ void lost::Saver::run()
         total += f.size;
     int saved = 0, failed = 0;
     QStringList report, problems, namesOnly;
+    QList<QByteArray> sums;
     QByteArray buffer(1024 * 1024, Qt::Uninitialized);
     qCInfo(lcOps).noquote() << "Find Lost Files: saving" << m_files.size() << "files to" << base;
 
@@ -410,9 +411,12 @@ void lost::Saver::run()
             continue;
         }
         FileReader reader(m_source, f);
+        QCryptographicHash sha256(QCryptographicHash::Sha256);
         bool ok = true;
         for (quint64 at = 0; at < f.size && ok && !m_cancel;) {
             const qint64 n = reader.read(at, buffer.data(), buffer.size());
+            if (n > 0)
+                sha256.addData(QByteArrayView(buffer.constData(), n));
             ok = n > 0 && blockio::writeAll(fd, buffer.constData(), n);
             at += quint64(std::max<qint64>(n, 1));
             done += quint64(std::max<qint64>(n, 0));
@@ -434,7 +438,12 @@ void lost::Saver::run()
         Q_EMIT fileSaved(position, path);
         const QString shownName = path.mid(base.size() + 1);
         report << (f.condition == Condition::Good ? shownName : QStringLiteral("%1  (%2)").arg(shownName, conditionText(f.condition)));
+        sums << sha256.result().toHex() + "  " + shownName.toUtf8();
     }
+    // Each file's SHA-256, the way sha256sum writes them: proof later that they're unchanged.
+    QFile fingerprints(base + QStringLiteral("/SHA256SUMS"));
+    if (!sums.isEmpty() && QDir().mkpath(base) && fingerprints.open(QIODevice::Append | QIODevice::Text))
+        fingerprints.write(sums.join('\n') + '\n');
 
     // Saving more within the same minute lands in the same folder: its list gets added to.
     QFile summary(base + QStringLiteral("/What was saved.txt"));
@@ -445,6 +454,9 @@ void lost::Saver::run()
         if (!problems.isEmpty())
             text << tr("Not saved:") << problems << QString();
         text << tr("Saved (%1):").arg(saved) << report;
+        if (saved > 0)
+            text << QString() << tr("Each file's SHA-256 fingerprint is in SHA256SUMS, to show later that they haven't changed (on Linux: "
+                                    "sha256sum -c SHA256SUMS, in this folder).");
         if (!namesOnly.isEmpty())
             text << QString() << tr("Only their names were left, so there was nothing to save:") << namesOnly;
         summary.write(text.join(QLatin1Char('\n')).toUtf8() + '\n');

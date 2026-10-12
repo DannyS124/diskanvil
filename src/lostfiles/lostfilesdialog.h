@@ -223,6 +223,10 @@ private:
     void repairCopy(int index, const QString &reference = {});
     // A PDF's earlier versions, still inside it, listed as files of their own.
     void earlierVersions(int index);
+    // A report of what was found (foundreport.h), saved where the person says.
+    void saveReport();
+    // The fingerprints of the files picked, to copy.
+    void showFingerprints(const QVector<int> &indexes);
     // The next or previous file in the list that has something to show, -1 when there's none.
     int neighbour(int index, int step) const;
     // The times the file system kept, as "label", "value" rows.

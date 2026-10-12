@@ -19,6 +19,7 @@
 #include "../src/lostfiles/officetext.h"
 #include "../src/lostfiles/ole.h"
 #include "../src/lostfiles/places.h"
+#include "../src/lostfiles/foundreport.h"
 #include "../src/lostfiles/pictures.h"
 #include "../src/lostfiles/structure.h"
 #include "../src/lostfiles/repair.h"
@@ -662,6 +663,21 @@ void finding(const QString &dir)
     report(saved == found.size() && failedCount == 0 && same == found.size(), QStringLiteral("everything saved, byte for byte, sorted into folders"),
            QStringLiteral("%1 saved, %2 the same, in %3").arg(saved).arg(same).arg(savedTo));
     report(QFileInfo::exists(savedTo + QStringLiteral("/What was saved.txt")), QStringLiteral("with \"What was saved.txt\""));
+    // SHA256SUMS, the way sha256sum writes it: each saved file's fingerprint, checked here.
+    QFile sums(savedTo + QStringLiteral("/SHA256SUMS"));
+    int matching = 0, listed = 0;
+    if (sums.open(QIODevice::ReadOnly)) {
+        for (const QByteArray &line : sums.readAll().split('\n')) {
+            if (line.size() < 67 || line.mid(64, 2) != "  ")
+                continue;
+            ++listed;
+            QFile saved(savedTo + QLatin1Char('/') + QString::fromUtf8(line.mid(66)));
+            if (saved.open(QIODevice::ReadOnly) && QCryptographicHash::hash(saved.readAll(), QCryptographicHash::Sha256).toHex() == line.left(64))
+                ++matching;
+        }
+    }
+    report(listed == found.size() && matching == listed, QStringLiteral("with SHA256SUMS: each saved file's fingerprint, right"),
+           QStringLiteral("%1 listed, %2 right").arg(listed).arg(matching));
     lost::Saver again(source, {found[0]}, dir);
     QString againTo;
     QObject::connect(&again, &lost::Saver::finished, [&](int, int, const QString &folder, const QString &) { againTo = folder; });
@@ -3384,6 +3400,47 @@ void windowsCompressed()
     report(rounds == 6000, QStringLiteral("compressed by Windows: damaged packed data unpacks to no more than it should"), QString::number(rounds));
 }
 
+// A report of what was found: every file's details, its fingerprints, a place for a photo; as a
+// web page and as CSV a spreadsheet can't be tricked by.
+void foundReport()
+{
+    QVector<lost::Found> files(3);
+    files[0].name = QStringLiteral("=cmd|' /C calc'!A0.txt"); // a "formula" a spreadsheet would run
+    files[0].type = filetypes::typeForName(QStringLiteral("x.txt"));
+    files[0].data = "hello";
+    files[0].size = 5;
+    files[0].note = QStringLiteral("<b>not bold</b>, \"quoted\"");
+    files[1].name = QStringLiteral("leeds.jpg");
+    files[1].type = filetypes::typeForName(files[1].name);
+    files[1].data = jpegWith(exifTiff(true));
+    files[1].size = quint64(files[1].data.size());
+    files[1].deleted = true;
+    files[1].deletedAt = QDateTime(QDate(2024, 7, 20), QTime(10, 0), QTimeZone::UTC).toMSecsSinceEpoch();
+    files[2].name = QStringLiteral("gone.doc");
+    files[2].nameOnly = true;
+    const auto source = lost::Source::fromMemory(QByteArray(512, '\0'));
+    const QVector<foundreport::Row> rows = foundreport::collect(source, files, {0, 1, 2}, true);
+    report(rows.size() == 3 && rows[0].prints.done && rows[0].prints.sha256 == QCryptographicHash::hash("hello", QCryptographicHash::Sha256).toHex()
+               && rows[0].prints.md5 == "5d41402abc4b2a76b9719d911017c592" && rows[1].spot.known && rows[1].place.startsWith(QLatin1String("London"))
+               && !rows[2].prints.done,
+           QStringLiteral("report: fingerprints of each file, where a photo was taken, nothing for a name alone"));
+    foundreport::About about;
+    about.title = QStringLiteral("Test stick");
+    about.made = QDateTime(QDate(2026, 10, 12), QTime(12, 0));
+    about.version = QStringLiteral("0.5.2");
+    const QString html = foundreport::html(about, files, rows);
+    const QByteArray csv = foundreport::csv(files, rows);
+    report(html.contains(QLatin1String("&lt;b&gt;not bold&lt;/b&gt;")) && !html.contains(QLatin1String("<b>not bold")) && html.contains(QLatin1String("2cf24dba5fb0a30e"))
+               && html.contains(QLatin1String("2024-07-20T")) && html.contains(QLatin1String("GeoNames")),
+           QStringLiteral("report: the web page has every file, escaped"));
+    report(csv.startsWith("\xEF\xBB\xBF") && csv.contains("\"'=cmd|' /C calc'!A0.txt\"") == false && csv.contains("'=cmd|")
+               && csv.contains("\"<b>not bold</b>, \"\"quoted\"\"\"") && csv.contains(",-0.127500,") && csv.count('\n') == 4,
+           QStringLiteral("report: CSV, quoted, and a cell starting with = can't run as a formula"), QString::fromUtf8(csv.left(400)));
+    int stopsAt = 0;
+    foundreport::collect(source, files, {0, 1, 2}, true, [&stopsAt](int done, int) { stopsAt = done; return done < 1; });
+    report(stopsAt == 1, QStringLiteral("report: making one can be stopped"));
+}
+
 // Where a photo was taken, in words and on a map, from what DiskAnvil carries (no internet).
 void placeNames()
 {
@@ -3443,4 +3500,5 @@ void lostFilesTests()
     btrfsRestore();
     windowsCompressed();
     placeNames();
+    foundReport();
 }

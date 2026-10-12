@@ -64,6 +64,7 @@ add_library(diskanvil-core STATIC
     src/lostfiles/lostfs.cpp src/lostfiles/lostfs.h src/lostfiles/lostntfs.cpp src/lostfiles/lostraw.h
     src/lostfiles/unpack.cpp src/lostfiles/unpack.h
     src/lostfiles/places.cpp src/lostfiles/places.h
+    src/lostfiles/foundreport.cpp src/lostfiles/foundreport.h
     src/lostfiles/vshadow.cpp src/lostfiles/vshadow.h
     src/lostfiles/vdisk.cpp src/lostfiles/vdisk.h
     src/drives/fat32format.cpp src/drives/fat32format.h
