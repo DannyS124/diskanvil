@@ -40,6 +40,7 @@
 #include "../src/viruses/windowspicker.h"
 #include "../src/viruses/productkeydialog.h"
 #include "../src/viruses/driversdialog.h"
+#include "../src/backup/savefilesdialog.h"
 #include "../src/backup/newids.h"
 #include "../src/backup/newidsdialog.h"
 #include "../src/viruses/hashlookup.h"
@@ -2360,6 +2361,92 @@ void sdCardFormat()
                    && card->volumes[0].offset == 4 * 1024 * 1024 && card->volumes[0].label == QLatin1String("HOLIDAY"),
                QStringLiteral("SD card: an MBR with one FAT32 partition 4 MiB in, named HOLIDAY"),
                card && !card->volumes.isEmpty() ? QStringLiteral("%1 %2 %3").arg(card->volumes[0].fsType).arg(card->volumes[0].offset).arg(card->volumes[0].label) : QString());
+    }
+    cleanUpLoop(udisks, loopPath);
+}
+
+// Save My Files through its window, on a loop device holding an ext4 drive with a person's
+// folders on it (made with mkfs.ext4 -d, no root needed): it's mounted read-only to look, the
+// folders and bookmarks are found, saved to a folder elsewhere, and what couldn't be read is
+// listed at the end.
+void saveFilesWindow()
+{
+    QTemporaryDir dir;
+    const QString tree = dir.filePath(QStringLiteral("tree"));
+    const auto put = [](const QString &path, const QByteArray &bytes) {
+        QDir().mkpath(QFileInfo(path).absolutePath());
+        QFile f(path);
+        return f.open(QIODevice::WriteOnly) && f.write(bytes) == bytes.size();
+    };
+    put(tree + QStringLiteral("/home/carol/Documents/letter.txt"), "Dear Sam,\n");
+    put(tree + QStringLiteral("/home/carol/Pictures/2024/dog.jpg"), QByteArray(70000, 'd'));
+    put(tree + QStringLiteral("/home/carol/Documents/private.txt"), "not for others\n");
+    put(tree + QStringLiteral("/home/carol/.config/google-chrome/Default/Bookmarks"),
+        R"({"roots": {"bookmark_bar": {"type": "folder", "name": "Bookmarks bar", "children": [{"type": "url", "name": "News", "url": "https://example.com/news"}]}}})");
+    const QString image = dir.filePath(QStringLiteral("drive.img"));
+    sh(QStringLiteral("truncate"), {QStringLiteral("-s"), QStringLiteral("64M"), image});
+    const int made = sh(QStringLiteral("mkfs.ext4"), {QStringLiteral("-q"), QStringLiteral("-L"), QStringLiteral("OLDPC"), QStringLiteral("-d"), tree, image});
+    // One file no one but root can read, made so inside the image (mkfs has to read it first).
+    sh(QStringLiteral("debugfs"), {QStringLiteral("-w"), QStringLiteral("-R"), QStringLiteral("set_inode_field /home/carol/Documents/private.txt mode 0100000"), image});
+    QFile backing(image);
+    QString loopPath;
+    if (made == 0 && backing.open(QIODevice::ReadWrite)) {
+        QDBusMessage call = QDBusMessage::createMethodCall(QStringLiteral("org.freedesktop.UDisks2"), QStringLiteral("/org/freedesktop/UDisks2/Manager"),
+                                                           QStringLiteral("org.freedesktop.UDisks2.Manager"), QStringLiteral("LoopSetup"));
+        call << QVariant::fromValue(QDBusUnixFileDescriptor(backing.handle())) << QVariantMap{{QStringLiteral("auth.no_user_interaction"), true}};
+        loopPath = QDBusConnection::systemBus().call(call, QDBus::Block, 30000).arguments().value(0).value<QDBusObjectPath>().path();
+        backing.close();
+    }
+    report(!loopPath.isEmpty(), QStringLiteral("save files: a loop device holds an old PC's drive"));
+    if (loopPath.isEmpty())
+        return;
+    UDisks udisks;
+    udisks.setInteractive(false);
+    waitUntil([&] {
+        udisks.refresh();
+        const Disk *d = udisks.diskByPath(loopPath);
+        return d && !d->volumes.isEmpty() && d->volumes.first().fsType == QLatin1String("ext4");
+    }, 15000);
+    const QString to = dir.filePath(QStringLiteral("usb"));
+    QDir().mkpath(to);
+    {
+        SaveFilesDialog dialog(&udisks);
+        dialog.show();
+        auto *drives = dialog.findChild<QListWidget *>(QStringLiteral("drives"));
+        int row = -1;
+        for (int i = 0; drives && i < drives->count(); ++i) {
+            if (drives->item(i)->text().contains(QLatin1String("OLDPC")))
+                row = i;
+        }
+        report(row >= 0, QStringLiteral("save files: the drive is offered, not mounted yet"), drives && row >= 0 ? drives->item(row)->text() : QString());
+        if (row < 0) {
+            cleanUpLoop(udisks, loopPath);
+            return;
+        }
+        drives->setCurrentRow(row);
+        dialog.findChild<QPushButton *>(QStringLiteral("next"))->click();
+        auto *found = dialog.findChild<QTreeWidget *>(QStringLiteral("found"));
+        waitUntil([&] { return found->topLevelItemCount() > 0; }, 30000);
+        QStringList what;
+        for (QTreeWidgetItemIterator it(found); *it; ++it)
+            what << (*it)->text(0);
+        report(what.contains(QLatin1String("carol")) && what.contains(QLatin1String("Documents")) && what.contains(QLatin1String("Pictures"))
+                   && what.contains(QLatin1String("Chrome's bookmarks (Default)")),
+               QStringLiteral("save files: mounted read-only, carol's folders and bookmarks are found"), what.join(QStringLiteral(", ")));
+        dialog.findChild<QLineEdit *>(QStringLiteral("to"))->setText(to);
+        auto *save = dialog.findChild<QPushButton *>(QStringLiteral("save"));
+        report(save && save->isEnabled(), QStringLiteral("save files: a folder on another drive can be saved to"));
+        if (save)
+            save->click();
+        auto *summary = dialog.findChild<QLabel *>(QStringLiteral("summary"));
+        waitUntil([&] { return summary && !summary->text().isEmpty(); }, 60000);
+        report(summary && summary->text().startsWith(QLatin1String("Saved 2 file")) && summary->text().contains(QLatin1String("private.txt")),
+               QStringLiteral("save files: saved, and the file that couldn't be read is listed"), summary ? summary->text().right(300) : QString());
+        const QStringList saved = QDir(to).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+        QFile letter(to + QLatin1Char('/') + saved.value(0) + QStringLiteral("/carol/Documents/letter.txt"));
+        report(saved.size() == 1 && letter.open(QIODevice::ReadOnly) && letter.readAll() == "Dear Sam,\n"
+                   && QFile::exists(to + QLatin1Char('/') + saved.value(0) + QStringLiteral("/carol/Bookmarks/Chrome (Default).html")),
+               QStringLiteral("save files: the letter and the bookmarks are there"));
     }
     cleanUpLoop(udisks, loopPath);
 }
@@ -4827,7 +4914,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},

@@ -277,6 +277,9 @@ QVector<HomeWindow::Tile> HomeWindow::allTiles() const
     add(QStringLiteral("whathappened"), QStringLiteral("diskforge-live-whathappened"), QStringLiteral("help-hint"), tr("What Happened?"),
         tr("Lost files? Start here: the odds, what not to do, and what to do"))
         .tool = QStringLiteral("what-happened");
+    add(QStringLiteral("savefiles"), QStringLiteral("diskforge-live-savefiles"), QStringLiteral("document-save"), tr("Save My Files"),
+        tr("People's folders and bookmarks, off a PC that won't start"))
+        .tool = QStringLiteral("save-files");
     add(QStringLiteral("recover"), QStringLiteral("diskforge-live-recover"), QStringLiteral("edit-find"), tr("Get Files Back"),
         tr("Deleted files, or files from a formatted or damaged drive"))
         .tool = QStringLiteral("lost-files");

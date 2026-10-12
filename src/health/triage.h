@@ -36,7 +36,7 @@ struct Advice {
     QStringList dont;   // what not to do
     QStringList steps;  // what to do, in order, in plain words
     QStringList tools;  // the tools for it, in that order: "rescue-copy", "lost-files", "health",
-                        // "recover-partitions", "rescue-usb", "virus-scan", "drivers"
+                        // "recover-partitions", "rescue-usb", "virus-scan", "drivers", "save-files"
 };
 
 Advice advise(Symptom symptom, const Drive &drive);

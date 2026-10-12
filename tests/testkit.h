@@ -66,6 +66,7 @@ void newIdsTests();
 void fat32Tests();
 void sdcardTests();
 void luksTests();
+void saveFilesTests();
 int scanImage(const QString &path);
 int shadowImage(const QString &path);
 void raidTests();

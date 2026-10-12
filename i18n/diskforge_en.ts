@@ -118,7 +118,7 @@
 <context>
     <name>DriversDialog</name>
     <message numerus="yes">
-        <location filename="../src/viruses/driversdialog.cpp" line="154"/>
+        <location filename="../src/viruses/driversdialog.cpp" line="155"/>
         <source>%n driver(s) and service(s)</source>
         <translation>
             <numerusform>%n driver and service</numerusform>
@@ -126,7 +126,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/viruses/driversdialog.cpp" line="154"/>
+        <location filename="../src/viruses/driversdialog.cpp" line="155"/>
         <source>%n of Windows&apos; own hidden</source>
         <translation>
             <numerusform>%n of Windows' own hidden</numerusform>
@@ -134,7 +134,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/viruses/driversdialog.cpp" line="208"/>
+        <location filename="../src/viruses/driversdialog.cpp" line="209"/>
         <source>Switched off %n. The backup, and how to undo it, is in %1.</source>
         <translation>
             <numerusform>Switched off %n. The backup, and how to undo it, is in %1.</numerusform>
@@ -227,7 +227,7 @@
 <context>
     <name>MainWindow</name>
     <message numerus="yes">
-        <location filename="../src/app/mainwindow.cpp" line="1174"/>
+        <location filename="../src/app/mainwindow.cpp" line="1182"/>
         <source>%n more drive(s) need a look; their health is in the Status column.</source>
         <translation>
             <numerusform>%n more drive need a look; their health is in the Status column.</numerusform>
@@ -235,7 +235,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/app/mainwindow.cpp" line="2453"/>
+        <location filename="../src/app/mainwindow.cpp" line="2462"/>
         <source>%n add-on command(s) still running. Stop them and quit?</source>
         <translation>
             <numerusform>%n add-on command still running. Stop them and quit?</numerusform>
@@ -491,6 +491,25 @@
         <translation>
             <numerusform>Resting for %n second after %1 read errors in a row</numerusform>
             <numerusform>Resting for %n seconds after %1 read errors in a row</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
+    <name>SaveFilesDialog</name>
+    <message numerus="yes">
+        <location filename="../src/backup/savefilesdialog.cpp" line="367"/>
+        <source>Saved %n file(s), %1, to %2.</source>
+        <translation>
+            <numerusform>Saved %n file, %1, to %2.</numerusform>
+            <numerusform>Saved %n files, %1, to %2.</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/backup/savefilesdialog.cpp" line="373"/>
+        <source>…and %n more</source>
+        <translation>
+            <numerusform>…and %n more</numerusform>
+            <numerusform>…and %n more</numerusform>
         </translation>
     </message>
 </context>
@@ -816,6 +835,17 @@
         <translation>
             <numerusform>%n of them are packed inside object streams</numerusform>
             <numerusform>%n of them are packed inside object streams</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
+    <name>savefiles::Saver</name>
+    <message numerus="yes">
+        <location filename="../src/backup/savefiles.cpp" line="415"/>
+        <source>%n file(s) copied.</source>
+        <translation>
+            <numerusform>%n file copied.</numerusform>
+            <numerusform>%n files copied.</numerusform>
         </translation>
     </message>
 </context>

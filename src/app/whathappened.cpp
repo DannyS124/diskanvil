@@ -172,7 +172,8 @@ void WhatHappenedDialog::showAdvice()
                                            {QStringLiteral("recover-partitions"), tr("Recover Partitions")},
                                            {QStringLiteral("rescue-usb"), tr("Make a DiskForge Live Stick")},
                                            {QStringLiteral("virus-scan"), tr("Scan for Viruses")},
-                                           {QStringLiteral("drivers"), tr("Windows Drivers and Services")}};
+                                           {QStringLiteral("drivers"), tr("Windows Drivers and Services")},
+                                           {QStringLiteral("save-files"), tr("Save My Files")}};
     for (const QString &tool : a.tools) {
         auto *button = new QPushButton(names.value(tool, tool));
         button->setObjectName(QStringLiteral("tool-") + tool);

@@ -939,6 +939,8 @@ int main(int argc, char *argv[])
         bootTests();
     } else if (args.contains(QStringLiteral("--newids"))) {
         newIdsTests();
+    } else if (args.contains(QStringLiteral("--savefiles"))) {
+        saveFilesTests();
     } else if (args.contains(QStringLiteral("--luks"))) {
         luksTests();
     } else if (args.contains(QStringLiteral("--fat32"))) {

@@ -181,10 +181,11 @@ Advice advise(Symptom symptom, const Drive &d)
         a.odds_why = tr("Your files are usually fine. A DiskForge Live stick starts the computer without Windows, and copies them off.");
         a.dont << tr("Don't reinstall Windows or \"reset this PC\" before your files are safe.");
         a.steps << tr("Make a DiskForge Live stick (on another computer, if this one won't start).")
-                << tr("Start this computer from it, and copy your files to another drive (Find Lost Files lists them all).")
+                << tr("Start this computer from it, and copy your files to another drive with Save My Files (your folders and "
+                      "your bookmarks).")
                 << tr("Then see to Windows: if it stopped starting just after something was installed, Windows Drivers and Services "
                       "shows the newest drivers, and switches the suspect off.");
-        a.tools << QStringLiteral("rescue-usb") << QStringLiteral("lost-files") << QStringLiteral("drivers");
+        a.tools << QStringLiteral("rescue-usb") << QStringLiteral("save-files") << QStringLiteral("drivers");
         break;
     }
     return a;

@@ -115,6 +115,7 @@ void DriversDialog::load()
             fill();
         });
     });
+    m_thread->setParent(this); // gone with the window, if it's closed first
     m_thread->start();
 }
 
