@@ -840,7 +840,7 @@
 <context>
     <name>repair</name>
     <message numerus="yes">
-        <location filename="../src/lostfiles/repair.cpp" line="221"/>
+        <location filename="../src/lostfiles/repair.cpp" line="223"/>
         <source>Put %n checksum(s) right</source>
         <translation>
             <numerusform>Put %n checksum right</numerusform>
@@ -848,7 +848,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/repair.cpp" line="403"/>
+        <location filename="../src/lostfiles/repair.cpp" line="405"/>
         <source>Rebuilt the list of what&apos;s inside it: %n file(s)</source>
         <translation>
             <numerusform>Rebuilt the list of what's inside it: %n file</numerusform>
@@ -856,7 +856,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/repair.cpp" line="405"/>
+        <location filename="../src/lostfiles/repair.cpp" line="407"/>
         <source>%n of them don&apos;t match their checksum and may be damaged</source>
         <translation>
             <numerusform>%n of them don't match their checksum and may be damaged</numerusform>
@@ -864,7 +864,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/repair.cpp" line="407"/>
+        <location filename="../src/lostfiles/repair.cpp" line="409"/>
         <source>%n couldn&apos;t be read and were left out</source>
         <translation>
             <numerusform>%n couldn't be read and were left out</numerusform>
@@ -872,7 +872,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/repair.cpp" line="554"/>
+        <location filename="../src/lostfiles/repair.cpp" line="556"/>
         <source>Rebuilt the table that says where its %n object(s) are</source>
         <translation>
             <numerusform>Rebuilt the table that says where its %n object are</numerusform>
@@ -880,7 +880,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/repair.cpp" line="556"/>
+        <location filename="../src/lostfiles/repair.cpp" line="558"/>
         <source>%n of them are packed inside object streams</source>
         <translation>
             <numerusform>%n of them are packed inside object streams</numerusform>
