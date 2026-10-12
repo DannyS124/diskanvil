@@ -88,7 +88,7 @@ case "$cmd" in
         fi
     }
     # As you: the system-disk guard and everything that works on plain files.
-    for suite in guard addons gpt copy usage backup rescuemap cleanup catalog fuzz health jobs recover rescueusb stickcheck images isomode windows lostfiles viruses registry startup boot newids fat32; do
+    for suite in guard addons gpt copy usage backup rescuemap cleanup catalog fuzz health jobs recover rescueusb stickcheck images isomode windows lostfiles viruses registry startup boot newids fat32 luks savefiles clonezilla; do
         run_tests $suite ./build/diskanvil-selftest --$suite
     done
     run_tests window-user env QT_QPA_PLATFORM=offscreen ./build/diskanvil-uitest --user
@@ -99,11 +99,15 @@ case "$cmd" in
     done
     run_tests window sudo env QT_QPA_PLATFORM=offscreen ./build/diskanvil-uitest
     run_tests window-newids sudo env QT_QPA_PLATFORM=offscreen ./build/diskanvil-uitest --user --only=newids
+    # The windows that make test devices of their own, one at a time.
+    for scenario in stickcheck sdcard refresh stopwipe luksheader nas tryrepair clonezilla testboot wipecert evidence writeblock; do
+        run_tests window-$scenario sudo env QT_QPA_PLATFORM=offscreen ./build/diskanvil-uitest --only=$scenario
+    done
     # The file-based suites again with AddressSanitizer and UBSan, which catch memory errors
     # that don't crash. Last, because building it takes a while and sudo's login runs out.
     cmake -S . -B build-asan -DDISKANVIL_SANITIZE=ON -DCMAKE_BUILD_TYPE=Debug >/dev/null
     cmake --build build-asan -j"$(nproc)" --target diskanvil-selftest >/dev/null
-    for suite in addons gpt copy usage backup rescuemap catalog fuzz health jobs recover rescueusb stickcheck images isomode windows lostfiles viruses registry startup boot newids fat32; do
+    for suite in addons gpt copy usage backup rescuemap catalog fuzz health jobs recover rescueusb stickcheck images isomode windows lostfiles viruses registry startup boot newids fat32 luks savefiles clonezilla; do
         run_tests asan-$suite env ASAN_OPTIONS=detect_leaks=0 ./build-asan/diskanvil-selftest --$suite
     done
 
