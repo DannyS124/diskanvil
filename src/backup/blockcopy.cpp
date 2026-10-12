@@ -97,9 +97,7 @@ public:
             while (m_input.pos < m_input.size) {
                 ZSTD_outBuffer out{&extra, 1, 0};
                 const size_t r = ZSTD_decompressStream(m_ctx, &out, &m_input);
-                if (ZSTD_isError(r))
-                    return fail(error, QObject::tr("The backup file is damaged (%1)").arg(QString::fromLatin1(ZSTD_getErrorName(r))));
-                if (out.pos > 0)
+                if (ZSTD_isError(r) || out.pos > 0)
                     return fail(error, QObject::tr("The backup holds more data than expected"));
                 m_lastResult = r;
             }
