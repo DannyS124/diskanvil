@@ -12,6 +12,8 @@
 #include "../src/drives/sdcard.h"
 
 #include <QFile>
+#include <QFileInfo>
+#include <QDir>
 #include <QProcess>
 #include <QStandardPaths>
 #include <QTemporaryDir>
@@ -208,6 +210,12 @@ void sdcardTests()
                    && dataAt % plan.boundary == 0,
                QStringLiteral("SD cards: a %1 GB card gets %2 with its data on a %3 KiB boundary").arg(double(card.size) / GiB, 0, 'f', 1).arg(plan.fsName()).arg(plan.boundary / 1024),
                error + QStringLiteral(" start %1 data at %2").arg(start).arg(dataAt));
+        // DISKANVIL_KEEP_CARDS=<folder>: the cards are kept there too, for checking on Windows (chkdsk).
+        if (const QString keep = qEnvironmentVariable("DISKANVIL_KEEP_CARDS"); !keep.isEmpty() && made) {
+            QDir().mkpath(keep);
+            QFile::remove(keep + QLatin1Char('/') + QFileInfo(image).fileName());
+            QProcess::execute(QStringLiteral("cp"), {QStringLiteral("--sparse=always"), image, keep});
+        }
         if (card.fs != sdcard::Plan::Fs::Exfat) {
             const QString said = run(QStringLiteral("mdir"), {QStringLiteral("-i"), image + QStringLiteral("@@%1").arg(plan.partitionStart), QStringLiteral("::/")}, &code);
             report(code == 0 && said.contains(QLatin1String("CAMERA")), QStringLiteral("SD cards: mtools reads the %1 card's volume").arg(plan.fsName()), said.left(200));
