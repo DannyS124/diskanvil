@@ -19,8 +19,10 @@
 //   before it was written), rebuilt from the frames themselves and a clip that plays, made with
 //   the same camera and settings (mp4fix.h).
 
+#include <QByteArray>
 #include <QString>
 #include <QStringList>
+#include <QVector>
 
 #include <functional>
 
@@ -43,5 +45,10 @@ QString referenceWanted(int type);
 // `progress` is told how far it is (0 to 100), and returning false from it stops it.
 Result run(int type, const QString &in, const QString &out, const QString &reference = {},
            const std::function<bool(int percent)> &progress = {});
+
+// A PDF saved again after it was made keeps each earlier version whole inside it: a save adds
+// only the changes, at the end. Where each version ends, oldest first (the last is the PDF as it
+// is); one for a PDF saved once, none for what isn't a PDF.
+QVector<qint64> pdfVersions(const QByteArray &pdf);
 
 } // namespace repair

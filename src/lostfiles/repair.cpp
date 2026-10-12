@@ -18,6 +18,7 @@
 #include <QStandardPaths>
 #include <QtEndian>
 
+#include <algorithm>
 #include <cstring>
 
 #include <zlib.h>
@@ -800,6 +801,28 @@ Result run(int type, const QString &in, const QString &out, const QString &refer
     if (!file.commit())
         return fail(tr("The repaired copy couldn't be written: %1").arg(file.errorString()));
     return r;
+}
+
+QVector<qint64> pdfVersions(const QByteArray &pdf)
+{
+    QVector<qint64> ends;
+    if (!pdf.startsWith("%PDF-"))
+        return ends;
+    // Each version ends with "startxref", where its table is, and "%%EOF".
+    for (qsizetype at = pdf.indexOf("%%EOF"); at >= 0; at = pdf.indexOf("%%EOF", at + 5)) {
+        const qsizetype from = std::max<qsizetype>(0, at - 1024);
+        if (pdf.lastIndexOf("startxref", at) < from)
+            continue;
+        qsizetype end = at + 5;
+        while (end < pdf.size() && (pdf[end] == '\r' || pdf[end] == '\n') && end < at + 7)
+            ++end;
+        ends << end;
+    }
+    // A PDF made for the web ("linearized") has a small table for its first page, ended the same
+    // way: that isn't a version of its own.
+    if (ends.size() > 1 && pdf.left(1024).contains("/Linearized"))
+        ends.removeFirst();
+    return ends;
 }
 
 } // namespace repair

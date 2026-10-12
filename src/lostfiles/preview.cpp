@@ -9,6 +9,7 @@
 #include "mediainfo.h"
 #include "officetext.h"
 #include "ole.h"
+#include "repair.h"
 #include "pictures.h"
 #include "textkinds.h"
 
@@ -266,6 +267,13 @@ Result make(const Request &r)
         fact(tr("Made with"), document->info(QStringLiteral("Creator")));
         fact(tr("Turned into a PDF by"), document->info(QStringLiteral("Producer")));
         fact(tr("Pages"), QString::number(document->numPages()));
+        // Saved again since it was made: the earlier versions are still inside it.
+        if (quint64(r.data.size()) == r.size) {
+            const int saves = int(repair::pdfVersions(r.data).size()) - 1;
+            if (saves > 0)
+                fact(tr("Saved again"), QCoreApplication::translate("preview", "%n time(s) after it was made. The earlier versions are still inside it "
+                                                                                "(right-click it: Earlier Versions Inside It)", nullptr, saves));
+        }
         if (document->isEncrypted())
             fact(tr("Locked"), tr("It has a password for changing or printing it"));
         return out;

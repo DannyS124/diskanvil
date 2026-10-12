@@ -205,12 +205,36 @@ QStringList properties(int type, const QByteArray &data)
         const QDateTime local = t.toLocalTime();
         return QLocale().toString(local.date(), QLocale::LongFormat) + QStringLiteral(", ") + QLocale().toString(local.time(), QLocale::ShortFormat);
     };
+    // A length of time: Office's in minutes, OpenDocument's as "PT2H5M10S".
+    const auto spent = [](qint64 minutes) {
+        if (minutes <= 0 || minutes > 10LL * 365 * 24 * 60)
+            return QString();
+        return minutes < 60 ? QCoreApplication::translate("officetext", "%1 min").arg(minutes)
+                            : QCoreApplication::translate("officetext", "%1 h %2 min").arg(minutes / 60).arg(minutes % 60);
+    };
+    const auto isoMinutes = [](const QString &d) {
+        static const QRegularExpression parts(QStringLiteral("^P(?:(\\d+)D)?T?(?:(\\d+)H)?(?:(\\d+)M)?(?:(\\d+)(?:\\.\\d+)?S)?$"));
+        const QRegularExpressionMatch m = parts.match(d);
+        return m.hasMatch() ? m.captured(1).toLongLong() * 1440 + m.captured(2).toLongLong() * 60 + m.captured(3).toLongLong()
+                                  + (m.captured(4).toLongLong() + 59) / 60
+                            : 0LL;
+    };
     add(QT_TRANSLATE_NOOP("officetext", "Title"), v.value(QStringLiteral("title")));
+    add(QT_TRANSLATE_NOOP("officetext", "Subject"), v.value(QStringLiteral("subject")));
+    add(QT_TRANSLATE_NOOP("officetext", "Keywords"), v.value(ooxml ? QStringLiteral("keywords") : QStringLiteral("keyword")));
+    add(QT_TRANSLATE_NOOP("officetext", "Comments"), v.value(QStringLiteral("description")));
     if (ooxml) {
         add(QT_TRANSLATE_NOOP("officetext", "Author"), v.value(QStringLiteral("creator")));
         add(QT_TRANSLATE_NOOP("officetext", "Last changed by"), v.value(QStringLiteral("lastModifiedBy")));
         add(QT_TRANSLATE_NOOP("officetext", "Created"), when(v.value(QStringLiteral("created"))));
         add(QT_TRANSLATE_NOOP("officetext", "Changed"), when(v.value(QStringLiteral("modified"))));
+        add(QT_TRANSLATE_NOOP("officetext", "Last printed"), when(v.value(QStringLiteral("lastPrinted"))));
+        if (v.value(QStringLiteral("revision")).toInt() > 0)
+            add(QT_TRANSLATE_NOOP("officetext", "Times saved"), v.value(QStringLiteral("revision")));
+        add(QT_TRANSLATE_NOOP("officetext", "Editing time"), spent(v.value(QStringLiteral("TotalTime")).toLongLong()));
+        add(QT_TRANSLATE_NOOP("officetext", "Template"), v.value(QStringLiteral("Template")));
+        add(QT_TRANSLATE_NOOP("officetext", "Manager"), v.value(QStringLiteral("Manager")));
+        add(QT_TRANSLATE_NOOP("officetext", "Category"), v.value(QStringLiteral("category")));
         add(QT_TRANSLATE_NOOP("officetext", "Made with"),
             (v.value(QStringLiteral("Application")) + QLatin1Char(' ') + v.value(QStringLiteral("AppVersion"))).trimmed());
         add(QT_TRANSLATE_NOOP("officetext", "Company"), v.value(QStringLiteral("Company")));
@@ -222,6 +246,11 @@ QStringList properties(int type, const QByteArray &data)
         add(QT_TRANSLATE_NOOP("officetext", "Last changed by"), v.value(QStringLiteral("creator")));
         add(QT_TRANSLATE_NOOP("officetext", "Created"), when(v.value(QStringLiteral("creation-date"))));
         add(QT_TRANSLATE_NOOP("officetext", "Changed"), when(v.value(QStringLiteral("date"))));
+        add(QT_TRANSLATE_NOOP("officetext", "Last printed"), when(v.value(QStringLiteral("print-date"))));
+        add(QT_TRANSLATE_NOOP("officetext", "Printed by"), v.value(QStringLiteral("printed-by")));
+        if (v.value(QStringLiteral("editing-cycles")).toInt() > 0)
+            add(QT_TRANSLATE_NOOP("officetext", "Times saved"), v.value(QStringLiteral("editing-cycles")));
+        add(QT_TRANSLATE_NOOP("officetext", "Editing time"), spent(isoMinutes(v.value(QStringLiteral("editing-duration")))));
         add(QT_TRANSLATE_NOOP("officetext", "Made with"), v.value(QStringLiteral("generator")).section(QLatin1Char('$'), 0, 0));
         add(QT_TRANSLATE_NOOP("officetext", "Pages"), v.value(QStringLiteral("page-count")));
         add(QT_TRANSLATE_NOOP("officetext", "Words"), v.value(QStringLiteral("word-count")));

@@ -146,8 +146,20 @@ QString plain(const QString &raw, int most)
 struct Properties {
     QHash<quint32, QString> text;
     QHash<quint32, QDateTime> time;
+    QHash<quint32, quint64> ticks; // the same times as they're kept: some are lengths of time
     QHash<quint32, qint64> number;
 };
+
+// A length of time kept in 100 ns steps (a document's total editing time): "2 h 5 min".
+QString spent(quint64 ticks)
+{
+    const quint64 minutes = ticks / 600000000ull;
+    if (ticks == 0 || minutes > 10ull * 365 * 24 * 60)
+        return {};
+    if (minutes < 60)
+        return QCoreApplication::translate("ole", "%1 min").arg(std::max<quint64>(1, minutes));
+    return QCoreApplication::translate("ole", "%1 h %2 min").arg(minutes / 60).arg(minutes % 60);
+}
 
 Properties readProperties(const QByteArray &stream)
 {
@@ -174,6 +186,7 @@ Properties readProperties(const QByteArray &stream)
             break;
         case 0x40:
             out.time.insert(id, fromFileTime(b.le64(at + 4)));
+            out.ticks.insert(id, b.le64(at + 4));
             break;
         case 0x03:
             out.number.insert(id, qint32(b.le32(at + 4)));
@@ -820,8 +833,14 @@ QStringList properties(const File &file)
     add(tr("Created"), when(s.time.value(12)));
     add(tr("Changed"), when(s.time.value(13)));
     add(tr("Last printed"), when(s.time.value(11)));
+    if (s.text.value(9).toInt() > 0) // some programs leave it at 0
+        add(tr("Times saved"), s.text.value(9));
+    add(tr("Editing time"), spent(s.ticks.value(10)));
+    add(tr("Template"), s.text.value(7));
     add(tr("Made with"), s.text.value(18));
     add(tr("Company"), d.text.value(15));
+    add(tr("Manager"), d.text.value(14));
+    add(tr("Category"), d.text.value(2));
     add(tr("Pages"), count(s, 14));
     add(tr("Words"), count(s, 15));
     add(tr("Slides"), count(d, 7));

@@ -2286,6 +2286,55 @@ void LostFilesDialog::sendToViewer(const QByteArray &message)
         m_viewerWaiting << message;
 }
 
+void LostFilesDialog::earlierVersions(int index)
+{
+    if (index < 0 || index >= m_model->fileCount())
+        return;
+    const lost::Found f = m_model->file(index);
+    if (f.nameOnly || f.size == 0)
+        return;
+    if (f.size > 512ull * 1024 * 1024) {
+        QMessageBox::information(this, windowTitle(), tr("\"%1\" is too big to look for earlier versions in.").arg(f.name));
+        return;
+    }
+    const QByteArray pdf = lost::FileReader(m_source, f).head(qint64(f.size));
+    const QVector<qint64> ends = repair::pdfVersions(pdf);
+    if (ends.size() <= 1) {
+        QMessageBox::information(this, windowTitle(),
+                                 ends.isEmpty() ? tr("\"%1\" doesn't read as a PDF.").arg(f.name)
+                                                : tr("\"%1\" was saved once, as it is: there are no earlier versions inside it.").arg(f.name));
+        return;
+    }
+    // Each one is the start of the file, up to where that save ended: the PDF as it was then.
+    const QFileInfo name(f.name);
+    QVector<lost::Found> versions;
+    for (int i = 0; i + 1 < ends.size(); ++i) {
+        lost::Found v;
+        v.name = tr("%1 (version %2 of %3)").arg(name.completeBaseName()).arg(i + 1).arg(ends.size()) + QStringLiteral(".pdf");
+        v.folder = tr("Earlier versions");
+        v.type = f.type;
+        v.data = pdf.left(ends[i]);
+        v.size = quint64(v.data.size());
+        v.origin = lost::Origin::FileSystem;
+        v.deleted = true;
+        v.modified = f.modified;
+        v.condition = f.condition;
+        v.note = tr("\"%1\" as it was before it was saved again: version %2 of %3, still inside it.").arg(f.name).arg(i + 1).arg(ends.size());
+        versions << v;
+    }
+    const int added = m_model->fileCount();
+    m_model->append(versions);
+    addFolders(versions);
+    refreshCategories();
+    m_status->setText(tr("\"%1\" was saved again after it was made: its %n earlier version(s) are in \"Earlier versions\".", nullptr,
+                         int(versions.size()))
+                          .arg(f.name));
+    if (const int row = m_model->rowOf(added); row >= 0) {
+        m_view->setCurrentIndex(m_model->index(row));
+        m_view->scrollTo(m_model->index(row));
+    }
+}
+
 void LostFilesDialog::repairCopy(int index, const QString &reference)
 {
     if (index < 0 || index >= m_model->fileCount() || m_repairing)
@@ -2746,6 +2795,12 @@ void LostFilesDialog::showFilesMenu(const QPoint &at)
             fix->setToolTip(repair::what(m_model->file(one).type));
             fix->setEnabled(!m_repairing && !m_model->file(one).nameOnly);
             connect(fix, &QAction::triggered, this, [this, one] { repairCopy(one); });
+        }
+        if (m_model->file(one).type >= 0 && filetypes::types()[m_model->file(one).type].id == QLatin1String("pdf")) {
+            QAction *versions = menu.addAction(tr("Earlier Versions Inside It"));
+            versions->setToolTip(tr("A PDF saved again keeps each earlier version inside it: they're listed as files of their own"));
+            versions->setEnabled(!m_model->file(one).nameOnly);
+            connect(versions, &QAction::triggered, this, [this, one] { earlierVersions(one); });
         }
         menu.addSeparator();
     }

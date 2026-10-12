@@ -255,6 +255,14 @@
             <numerusform>"%1" was found in %n places: see "Found by their words".</numerusform>
         </translation>
     </message>
+    <message numerus="yes">
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="2329"/>
+        <source>&quot;%1&quot; was saved again after it was made: its %n earlier version(s) are in &quot;Earlier versions&quot;.</source>
+        <translation>
+            <numerusform>"%1" was saved again after it was made: its %n earlier version are in "Earlier versions".</numerusform>
+            <numerusform>"%1" was saved again after it was made: its %n earlier versions are in "Earlier versions".</numerusform>
+        </translation>
+    </message>
 </context>
 <context>
     <name>MainWindow</name>
@@ -873,18 +881,26 @@
 <context>
     <name>preview</name>
     <message numerus="yes">
-        <location filename="../src/lostfiles/preview.cpp" line="249"/>
+        <location filename="../src/lostfiles/preview.cpp" line="250"/>
         <source>%n page(s)</source>
         <translation>
             <numerusform>%n page</numerusform>
             <numerusform>%n pages</numerusform>
         </translation>
     </message>
+    <message numerus="yes">
+        <location filename="../src/lostfiles/preview.cpp" line="274"/>
+        <source>%n time(s) after it was made. The earlier versions are still inside it (right-click it: Earlier Versions Inside It)</source>
+        <translation>
+            <numerusform>%n time after it was made. The earlier versions are still inside it (right-click it: Earlier Versions Inside It)</numerusform>
+            <numerusform>%n times after it was made. The earlier versions are still inside it (right-click it: Earlier Versions Inside It)</numerusform>
+        </translation>
+    </message>
 </context>
 <context>
     <name>repair</name>
     <message numerus="yes">
-        <location filename="../src/lostfiles/repair.cpp" line="223"/>
+        <location filename="../src/lostfiles/repair.cpp" line="224"/>
         <source>Put %n checksum(s) right</source>
         <translation>
             <numerusform>Put %n checksum right</numerusform>
@@ -892,7 +908,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/repair.cpp" line="405"/>
+        <location filename="../src/lostfiles/repair.cpp" line="406"/>
         <source>Rebuilt the list of what&apos;s inside it: %n file(s)</source>
         <translation>
             <numerusform>Rebuilt the list of what's inside it: %n file</numerusform>
@@ -900,7 +916,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/repair.cpp" line="407"/>
+        <location filename="../src/lostfiles/repair.cpp" line="408"/>
         <source>%n of them don&apos;t match their checksum and may be damaged</source>
         <translation>
             <numerusform>%n of them don't match their checksum and may be damaged</numerusform>
@@ -908,7 +924,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/repair.cpp" line="409"/>
+        <location filename="../src/lostfiles/repair.cpp" line="410"/>
         <source>%n couldn&apos;t be read and were left out</source>
         <translation>
             <numerusform>%n couldn't be read and were left out</numerusform>
@@ -916,7 +932,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/repair.cpp" line="556"/>
+        <location filename="../src/lostfiles/repair.cpp" line="557"/>
         <source>Rebuilt the table that says where its %n object(s) are</source>
         <translation>
             <numerusform>Rebuilt the table that says where its %n object are</numerusform>
@@ -924,7 +940,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/repair.cpp" line="558"/>
+        <location filename="../src/lostfiles/repair.cpp" line="559"/>
         <source>%n of them are packed inside object streams</source>
         <translation>
             <numerusform>%n of them are packed inside object streams</numerusform>

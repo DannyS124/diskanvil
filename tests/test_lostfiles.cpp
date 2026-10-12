@@ -1695,6 +1695,47 @@ void mediaAndOffice()
     report(officetext::text(filetypes::typeNumber(QStringLiteral("xlsx")), xlsx) == QLatin1String("Name\nTotal"),
            QStringLiteral("previews: the words in an Excel sheet"));
 
+    // Who made them and when, and how they were worked on.
+    const QByteArray docxMeta = zip({{"docProps/core.xml", "<cp:coreProperties xmlns:cp=\"x\" xmlns:dc=\"y\" xmlns:dcterms=\"z\">"
+                                                           "<dc:title>Rent</dc:title><dc:creator>Sam Tester</dc:creator><cp:lastModifiedBy>Alex Other</cp:lastModifiedBy>"
+                                                           "<cp:revision>14</cp:revision><cp:lastPrinted>2024-07-15T08:00:00Z</cp:lastPrinted>"
+                                                           "<dc:subject>Flat</dc:subject><cp:keywords>rent; landlord</cp:keywords></cp:coreProperties>"},
+                                     {"docProps/app.xml", "<Properties xmlns=\"x\"><Template>Letter.dotx</Template><TotalTime>125</TotalTime>"
+                                                          "<Application>Microsoft Office Word</Application><Company>Acme</Company></Properties>"}});
+    const QStringList docxFacts = officetext::properties(filetypes::typeNumber(QStringLiteral("docx")), docxMeta);
+    const auto factOf = [](const QStringList &facts, const QString &label) {
+        for (const QString &f : facts) {
+            if (f.section(QLatin1Char('\t'), 0, 0) == label)
+                return f.section(QLatin1Char('\t'), 1);
+        }
+        return QString();
+    };
+    report(factOf(docxFacts, QStringLiteral("Times saved")) == QLatin1String("14") && factOf(docxFacts, QStringLiteral("Editing time")) == QLatin1String("2 h 5 min")
+               && factOf(docxFacts, QStringLiteral("Template")) == QLatin1String("Letter.dotx") && factOf(docxFacts, QStringLiteral("Last printed")).contains(QLatin1String("2024"))
+               && factOf(docxFacts, QStringLiteral("Last changed by")) == QLatin1String("Alex Other") && factOf(docxFacts, QStringLiteral("Keywords")) == QLatin1String("rent; landlord"),
+           QStringLiteral("documents: a Word file's saves, editing time, template, printing"), docxFacts.join(QStringLiteral(" | ")));
+    const QByteArray odtMeta = zip({{"mimetype", "application/vnd.oasis.opendocument.text"},
+                                    {"meta.xml", "<office:document-meta xmlns:office=\"o\" xmlns:meta=\"m\" xmlns:dc=\"d\"><office:meta>"
+                                                 "<meta:initial-creator>Sam Tester</meta:initial-creator><meta:editing-cycles>3</meta:editing-cycles>"
+                                                 "<meta:editing-duration>PT1H2M30S</meta:editing-duration><meta:print-date>2024-07-15T09:00:00</meta:print-date>"
+                                                 "<meta:printed-by>Sam Tester</meta:printed-by></office:meta></office:document-meta>"}});
+    const QStringList odtFacts = officetext::properties(filetypes::typeNumber(QStringLiteral("odt")), odtMeta);
+    report(factOf(odtFacts, QStringLiteral("Times saved")) == QLatin1String("3") && factOf(odtFacts, QStringLiteral("Editing time")) == QLatin1String("1 h 3 min")
+               && factOf(odtFacts, QStringLiteral("Printed by")) == QLatin1String("Sam Tester") && factOf(odtFacts, QStringLiteral("Last printed")).contains(QLatin1String("2024")),
+           QStringLiteral("documents: an OpenDocument file's saves, editing time and printing"), odtFacts.join(QStringLiteral(" | ")));
+
+    // A PDF saved again keeps its earlier versions: where each one ends.
+    const QByteArray first = "%PDF-1.7\n1 0 obj<<>>endobj\nxref\n0 1\ntrailer<<>>\nstartxref\n9\n%%EOF\n";
+    const QByteArray second = first + "2 0 obj<<>>endobj\nxref\n0 1\ntrailer<<>>\nstartxref\n80\n%%EOF\r\n";
+    const QByteArray third = second + "3 0 obj<<>>endobj\nxref\n0 1\ntrailer<<>>\nstartxref\n150\n%%EOF";
+    const QVector<qint64> ends = repair::pdfVersions(third);
+    QByteArray linear = "%PDF-1.5\n1 0 obj<</Linearized 1>>endobj\nxref\ntrailer<<>>\nstartxref\n0\n%%EOF\n";
+    linear += "2 0 obj<<>>endobj\nxref\ntrailer<<>>\nstartxref\n9\n%%EOF\n";
+    report(ends == QVector<qint64>{first.size(), second.size(), third.size()} && repair::pdfVersions(first).size() == 1
+               && repair::pdfVersions(linear).size() == 1 && repair::pdfVersions("not a pdf %%EOF").isEmpty()
+               && repair::pdfVersions("%PDF-1.4\n%%EOF in a comment, no table\n").isEmpty(),
+           QStringLiteral("documents: a PDF's earlier versions, each whole, found where they end (a web PDF's first-page table isn't one)"));
+
     bool complete = false;
     const QVector<officetext::Entry> entries = officetext::list(docx, 100, &complete);
     report(entries.size() == 2 && complete && entries[1].path == QLatin1String("word/document.xml") && entries[1].size > 100,

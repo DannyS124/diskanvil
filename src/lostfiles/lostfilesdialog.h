@@ -221,6 +221,8 @@ private:
     // Repairs a copy of a found file (repair.h); the repaired copy joins the list. `reference`: a
     // working file from the same device, when the repair asked for one.
     void repairCopy(int index, const QString &reference = {});
+    // A PDF's earlier versions, still inside it, listed as files of their own.
+    void earlierVersions(int index);
     // The next or previous file in the list that has something to show, -1 when there's none.
     int neighbour(int index, int step) const;
     // The times the file system kept, as "label", "value" rows.
