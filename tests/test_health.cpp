@@ -20,6 +20,7 @@
 #include "../src/viruses/peinfo.h"
 #include "../src/viruses/efiboot.h"
 #include "../src/tools/linuxboot.h"
+#include "../src/tools/winre.h"
 #include "../src/drives/blockio.h"
 #include "../src/health/surfacescan.h"
 #include "../src/tools/systemd.h"
@@ -562,6 +563,60 @@ void linuxBootRepair()
            QStringLiteral("syntax %1 | ").arg(syntax) + grub.right(300));
 }
 
+// Make Room for Windows Recovery: reagentc's answer in any language, Microsoft's conditions for
+// its fix, and its diskpart steps.
+void windowsRecovery()
+{
+    const winre::Location english = winre::parse(QStringLiteral("Windows Recovery Environment (Windows RE) and system reset configuration\r\n"
+                                                                "Information:\r\n\r\n    Windows RE status:         Enabled\r\n"
+                                                                "    Windows RE location:       \\\\?\\GLOBALROOT\\device\\harddisk0\\partition4\\Recovery\\WindowsRE\r\n"));
+    const winre::Location german = winre::parse(QStringLiteral("    Windows RE-Status:         Enabled\r\n"
+                                                               "    Windows RE-Speicherort:    \\\\?\\GLOBALROOT\\device\\harddisk1\\partition5\\Recovery\\WindowsRE\r\n"));
+    const winre::Location off = winre::parse(QStringLiteral("    Windows RE status:         Disabled\r\n    Windows RE location:\r\n"));
+    report(english.disk == 0 && english.partition == 4 && german.disk == 1 && german.partition == 5 && off.disk == -1,
+           QStringLiteral("windows recovery: where reagentc says it is, in any language, and when it's off"));
+    constexpr quint64 MiB = 1024 * 1024;
+    Disk disk;
+    disk.device = QStringLiteral("\\\\.\\PhysicalDrive0");
+    disk.tableType = QStringLiteral("gpt");
+    Volume efi, msr, os, re;
+    efi.number = 1;
+    efi.offset = 1 * MiB;
+    efi.size = 100 * MiB;
+    msr.number = 2;
+    msr.offset = 101 * MiB;
+    msr.size = 16 * MiB;
+    os.number = 3;
+    os.offset = 117 * MiB;
+    os.size = 60000 * MiB;
+    os.mountPoints = {QStringLiteral("C:/")};
+    os.fsTotal = os.size;
+    os.fsFree = 20000 * MiB;
+    re.number = 4;
+    re.offset = os.offset + os.size;
+    re.size = 600 * MiB;
+    re.fsTotal = 590 * MiB;
+    re.fsFree = 80 * MiB;
+    disk.volumes = {efi, msr, os, re};
+    const winre::Plan good = winre::plan(english, {disk}, QStringLiteral("C:/"));
+    report(good.needed && good.problem.isEmpty() && good.osPartition == 3 && good.rePartition == 4 && good.gpt,
+           QStringLiteral("windows recovery: 80 MB free right after Windows' partition: it needs room, and can have it"), good.problem);
+    Disk before = disk;
+    before.volumes[3].offset = 1 * MiB; // a recovery partition before Windows (older installs)
+    Disk roomy = disk;
+    roomy.volumes[3].fsFree = 300 * MiB;
+    report(!winre::plan(english, {before}, QStringLiteral("C:/")).problem.isEmpty() && !winre::plan(english, {roomy}, QStringLiteral("C:/")).needed
+               && !winre::plan(off, {disk}, QStringLiteral("C:/")).problem.isEmpty(),
+           QStringLiteral("windows recovery: not before Windows' partition, not when it has room, not when it's off"));
+    const QString gpt = winre::diskpartScript(good);
+    winre::Plan mbr = good;
+    mbr.gpt = false;
+    report(gpt.startsWith(QLatin1String("select disk 0\r\nselect partition 3\r\nshrink desired=250 minimum=250\r\nselect partition 4\r\ndelete partition override\r\n"))
+               && gpt.contains(QLatin1String("create partition primary id=de94bba4-06d1-4d40-a16a-bfd50179d6ac\r\ngpt attributes=0x8000000000000001"))
+               && gpt.contains(QLatin1String("format quick fs=ntfs label=\"Windows RE tools\"")) && winre::diskpartScript(mbr).contains(QLatin1String("set id=27")),
+           QStringLiteral("windows recovery: Microsoft's diskpart steps, for GPT and MBR"));
+}
+
 void healthTests()
 {
     hiddenArea();
@@ -574,6 +629,7 @@ void healthTests()
     peVersions();
     bootMenu();
     linuxBootRepair();
+    windowsRecovery();
     rawPages();
     QTemporaryDir config;
     qputenv("XDG_CONFIG_HOME", QFile::encodeName(config.path()));

@@ -68,6 +68,7 @@ private:
     QAction *m_saveFiles = nullptr;
     QAction *m_bootMenu = nullptr;
     QAction *m_linuxBoot = nullptr;
+    QAction *m_winRe = nullptr;
     void updateJobBars();
     void showNoticesIfAny();
     void stopJob(const QString &jobPath);

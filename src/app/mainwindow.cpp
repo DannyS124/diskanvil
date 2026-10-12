@@ -51,6 +51,7 @@
 #include "theme.h"
 #include "thememaker.h"
 #include "tryrepairdialog.h"
+#include "winredialog.h"
 #include "updates.h"
 #include "udisks.h"
 
@@ -662,6 +663,11 @@ void MainWindow::createActions()
             RescueDialog(m_udisks, d->blockPath, this).exec();
     });
 
+    m_winRe = new QAction(themeIcon("tools-wizard", "system-run"), tr("Make Room for Windows &Recovery…"), this);
+    m_winRe->setObjectName(QStringLiteral("winRe"));
+    m_winRe->setToolTip(tr("Windows Update failing with 0x80070643: its recovery partition is too small. Microsoft's fix, done for you"));
+    connect(m_winRe, &QAction::triggered, this, [this] { WinReDialog(m_udisks, this).exec(); });
+
     m_linuxBoot = new QAction(themeIcon("tools-wizard", "system-run"), tr("Repair &Linux Boot…"), this);
     m_linuxBoot->setObjectName(QStringLiteral("linuxBoot"));
     m_linuxBoot->setToolTip(tr("A Linux that doesn't start because its boot loader is gone or broken: its own tools put it back"));
@@ -859,7 +865,7 @@ void MainWindow::createActions()
         tools->addSeparator();
 #ifdef Q_OS_WIN
         // Quick Fixes' tools, and add-ons (Linux commands), aren't in the Windows version yet.
-        tools->addActions({m_saveFiles, m_virusScan, m_bootMenu, m_drivers, m_productKey, m_usage, m_cleanup, m_optimize, m_snapshots});
+        tools->addActions({m_saveFiles, m_virusScan, m_bootMenu, m_drivers, m_winRe, m_productKey, m_usage, m_cleanup, m_optimize, m_snapshots});
         return;
 #endif
         tools->addAction(themeIcon("tools-wizard", "system-run"), tr("&Quick Fixes…"), this, [this] {
