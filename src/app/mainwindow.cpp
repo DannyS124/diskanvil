@@ -18,6 +18,7 @@
 #include "clonezilladialog.h"
 #include "copydialogs.h"
 #include "erasedialog.h"
+#include "evidencedialog.h"
 #include "snapper.h"
 #include "systemtools.h"
 #include "usagedialog.h"
@@ -696,6 +697,14 @@ void MainWindow::createActions()
             RescueDialog(m_udisks, d->blockPath, this).exec();
     });
 
+    m_evidence = new QAction(themeIcon("document-save-as", "document-save"), tr("Make an E&vidence Image…"), this);
+    m_evidence->setObjectName(QStringLiteral("evidence"));
+    m_evidence->setToolTip(tr("Every sector, read-only, into an evidence file (.E01) with the case's details and hashes, and a case report"));
+    connect(m_evidence, &QAction::triggered, this, [this] {
+        if (const Disk *d = selectedDisk())
+            EvidenceDialog(m_udisks, *d, selectedVolume(), this).exec();
+    });
+
     m_certificates = new QAction(themeIcon("document-print", "document-save"), tr("Erasure &Certificates…"), this);
     m_certificates->setObjectName(QStringLiteral("certificates"));
     m_certificates->setToolTip(tr("Certificates of erasure for the drives wiped or erased here"));
@@ -881,7 +890,7 @@ void MainWindow::createActions()
     action->addSeparator();
     action->addActions({m_health, m_badSectors, m_checkStick, m_benchmark, m_raidCheck});
     action->addSeparator();
-    action->addActions({m_backup, m_restore, m_clonezilla, m_clone, m_newIds, m_rescue});
+    action->addActions({m_backup, m_restore, m_clonezilla, m_evidence, m_clone, m_newIds, m_rescue});
     action->addSeparator();
     action->addActions({m_copy, m_properties});
 
@@ -1633,6 +1642,7 @@ void MainWindow::updateActions()
     m_restore->setText(partition ? tr("R&estore Partition Backup…") : tr("R&estore Drive Backup…"));
     m_clonezilla->setEnabled(tableChangeable && partition && !v->isSystem);
     m_testBoot->setEnabled(d && !d->isRaid && !busy);
+    m_evidence->setEnabled(d && kind != DiskMap::Selection::Kind::Free && !busy && !(v ? v->isSystem : d->isSystem));
     m_properties->setEnabled(d != nullptr);
 
     const QString why = d && d->isSystem ? tr("Disk holds the running system (%1)").arg(d->systemReason)
@@ -1756,7 +1766,7 @@ void MainWindow::buildContextMenu(QMenu *menu)
         else if (m_luksRestore->isEnabled())
             add({m_luksRestore});
         menu->addSeparator();
-        add({m_backup, m_restore, m_clonezilla});
+        add({m_backup, m_restore, m_clonezilla, m_evidence});
         if (v->effectiveFsType() == QLatin1String("btrfs"))
             add({m_snapshots});
     } else if (sel.kind == DiskMap::Selection::Kind::Free) {
@@ -1767,7 +1777,7 @@ void MainWindow::buildContextMenu(QMenu *menu)
     menu->addSection(tr("Drive: %1").arg(d->model.isEmpty() ? shortDevice(d->device) : d->model));
     add({m_safelyRemove, m_detachImage, m_health, m_badSectors, m_benchmark, m_testBoot});
     if (!v)
-        add({m_backup, m_restore});
+        add({m_backup, m_restore, m_evidence});
     add({m_clone, m_newIds, m_rescue, m_findFiles});
     if (!d->isSystem && (d->removable || d->bus == QLatin1String("usb")))
         add({m_writeImage, m_windowsUsb, m_rescueUsb, m_checkStick});

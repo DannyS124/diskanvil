@@ -73,6 +73,7 @@ private:
     QAction *m_testBoot = nullptr;      // a drive
     QAction *m_testBootImage = nullptr; // a disk image file
     QAction *m_certificates = nullptr;
+    QAction *m_evidence = nullptr;
     void updateJobBars();
     void showNoticesIfAny();
     void stopJob(const QString &jobPath);

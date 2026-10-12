@@ -4,6 +4,7 @@
 #include "vdisk.h"
 
 #include "lostraw.h"
+#include "ewf.h"
 #include "zstdseek.h"
 
 #include <QCoreApplication>
@@ -869,6 +870,8 @@ QString formatOf(const QString &path)
         return QStringLiteral("VHD");
     if (start.startsWith("\x28\xB5\x2F\xFD"))
         return QStringLiteral("ZSTD");
+    if (start.startsWith(QByteArray("EVF\x09\x0d\x0a\xff\x00", 8)))
+        return QStringLiteral("E01");
     return {};
 }
 
@@ -894,6 +897,11 @@ std::shared_ptr<lost::Source> open(const QString &path, QString *problem, QStrin
         disk = Qcow2::open(file, &why, warning);
     else if (format == QLatin1String("ZSTD"))
         disk = ZstdBackup::open(file, &why);
+    else if (format == QLatin1String("E01")) {
+        ewf::Info info;
+        disk = ewf::open(path, &info);
+        why = info.problem;
+    }
     else
         disk = Vmdk::open(path, file, &why, warning);
     if (!disk) {

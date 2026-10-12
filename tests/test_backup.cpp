@@ -5,12 +5,14 @@
 
 #include "testkit.h"
 
+#include "../src/backup/ewf.h"
 #include "../src/backup/imagebackup.h"
 #include "../src/backup/partclone.h"
 #include "../src/backup/zstdseek.h"
 #include "../src/drives/blockio.h"
 #include "../src/lostfiles/vdisk.h"
 
+#include <QCryptographicHash>
 #include <QFile>
 #include <QJsonDocument>
 #include <QRandomGenerator>
@@ -254,4 +256,71 @@ void clonezillaTests()
     report(!broken.ok && broken.error.contains(QLatin1String("damaged")), QStringLiteral("clonezilla: a damaged block is caught by its checksum"), broken.error);
     const partclone::Result small = restore(images[0], 4 * MiB, &path);
     report(!small.ok && small.error.contains(QLatin1String("smaller")), QStringLiteral("clonezilla: a partition too small for it is turned down"), small.error);
+}
+
+// Evidence files (.E01): ours read back the same and keep the case; libewf's own (tests/data/ewf,
+// made by ewfacquire) reads as the data it was made from; and when there, ewfverify agrees.
+void evidenceTests()
+{
+    QTemporaryDir dir;
+    const QString raw = dir.filePath(QStringLiteral("drive.img"));
+    {
+        QFile f(raw);
+        if (f.open(QIODevice::WriteOnly)) {
+            QByteArray random(300 * 1024, Qt::Uninitialized);
+            QRandomGenerator::global()->fillRange(reinterpret_cast<quint32 *>(random.data()), int(random.size() / 4));
+            f.write(random);
+            f.write(QByteArray(200 * 1024, '\0'));
+            f.write(QByteArray("DiskForge").repeated(5000));
+            f.resize(1024 * 1024);
+        }
+    }
+    const QString e01 = dir.filePath(QStringLiteral("evidence.E01"));
+    ewf::Result result;
+    {
+        ewf::Case details{QStringLiteral("CASE7"), QStringLiteral("EV-12"), QStringLiteral("A test drive"), QStringLiteral("Sam Tester"),
+                          QStringLiteral("Bagged\tat 10:02"), QStringLiteral("WDC WD10EZEX"), QStringLiteral("WD-TEST123")};
+        ewf::Acquire job(blockio::openFile(raw, blockio::FileMode::Read), 1024 * 1024, 512, e01, details);
+        QObject::connect(&job, &ewf::Acquire::finished, [&result](const ewf::Result &r) { result = r; });
+        job.run();
+    }
+    QFile rawFile(raw);
+    const QByteArray original = rawFile.open(QIODevice::ReadOnly) ? rawFile.readAll() : QByteArray();
+    report(result.ok && result.md5 == QCryptographicHash::hash(original, QCryptographicHash::Md5) && result.sha1 == QCryptographicHash::hash(original, QCryptographicHash::Sha1)
+               && result.unreadable.isEmpty() && result.fileSize < 600 * 1024,
+           QStringLiteral("evidence: an E01 is made, its MD5 and SHA-1 the drive's, packed smaller"), result.error);
+    ewf::Info info;
+    const auto layer = ewf::open(e01, &info);
+    QByteArray back(qsizetype(info.size), '\0');
+    report(layer && info.size == 1024 * 1024 && layer->read(0, back.data(), info.size) && back == original && info.caseNumber == QLatin1String("CASE7")
+               && info.notes == QLatin1String("Bagged at 10:02") && info.serial == QLatin1String("WD-TEST123") && ewf::verify(e01).isEmpty(),
+           QStringLiteral("evidence: it reads back exactly, with its case (a tab in a note made a space), and checks out"), info.problem);
+    // A changed byte inside: the check catches it.
+    {
+        QFile f(e01);
+        if (f.open(QIODevice::ReadWrite)) {
+            f.seek(f.size() / 2);
+            const char c = f.peek(1).at(0);
+            f.write(QByteArray(1, char(c ^ 0x10)));
+        }
+    }
+    report(!ewf::verify(e01).isEmpty(), QStringLiteral("evidence: a changed byte inside is caught"), ewf::verify(e01));
+
+    const QString ref = QStringLiteral(SOURCE_DIR "/tests/data/ewf/ref.E01");
+    QFile sum(QStringLiteral(SOURCE_DIR "/tests/data/ewf/ref.sha256"));
+    const QByteArray want = sum.open(QIODevice::ReadOnly) ? sum.readAll().trimmed() : QByteArray();
+    ewf::Info refInfo;
+    const auto refLayer = ewf::open(ref, &refInfo);
+    QByteArray refData(qsizetype(refInfo.size), '\0');
+    const bool read = refLayer && refLayer->read(0, refData.data(), refInfo.size);
+    report(read && QCryptographicHash::hash(refData, QCryptographicHash::Sha256).toHex() == want && refInfo.caseNumber == QLatin1String("REF-CASE")
+               && ewf::verify(ref).isEmpty() && vdisk::formatOf(ref) == QLatin1String("E01"),
+           QStringLiteral("evidence: libewf's own E01 reads as the data it was made from"), refInfo.problem);
+    if (!QStandardPaths::findExecutable(QStringLiteral("ewfverify")).isEmpty()) {
+        QFile::remove(e01);
+        ewf::Acquire job(blockio::openFile(raw, blockio::FileMode::Read), 1024 * 1024, 512, e01, ewf::Case{});
+        job.run();
+        const QString said = sh(QStringLiteral("ewfverify"), {QStringLiteral("-q"), e01});
+        report(said.contains(QLatin1String("SUCCESS")), QStringLiteral("evidence: libewf's ewfverify agrees with ours"), said.right(200));
+    }
 }

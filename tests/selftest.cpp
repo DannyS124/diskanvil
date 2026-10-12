@@ -941,6 +941,7 @@ int main(int argc, char *argv[])
         newIdsTests();
     } else if (args.contains(QStringLiteral("--clonezilla"))) {
         clonezillaTests();
+        evidenceTests();
     } else if (args.contains(QStringLiteral("--savefiles"))) {
         saveFilesTests();
     } else if (args.contains(QStringLiteral("--luks"))) {

@@ -68,6 +68,7 @@ void sdcardTests();
 void luksTests();
 void saveFilesTests();
 void clonezillaTests();
+void evidenceTests();
 int scanImage(const QString &path);
 int shadowImage(const QString &path);
 void raidTests();

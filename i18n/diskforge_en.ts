@@ -150,9 +150,20 @@
     </message>
 </context>
 <context>
+    <name>EvidenceDialog</name>
+    <message numerus="yes">
+        <location filename="../src/backup/evidencedialog.cpp" line="217"/>
+        <source>%n stretch(es) of sectors couldn&apos;t be read: kept as zeros, and listed in the report.</source>
+        <translation>
+            <numerusform>%n stretch(es) of sectors couldn't be read: kept as zeros, and listed in the report.</numerusform>
+            <numerusform>%n stretch(es) of sectors couldn't be read: kept as zeros, and listed in the report.</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
     <name>LostFilesDialog</name>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1396"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1397"/>
         <source>Windows kept %n earlier version(s) of this drive, the newest from %1. Files that have changed or gone since can come back from them.</source>
         <translation>
             <numerusform>Windows kept %n earlier version of this drive, the newest from %1. Files that have changed or gone since can come back from them.</numerusform>
@@ -174,7 +185,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1623"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1624"/>
         <source>%n file(s) end in %1</source>
         <translation>
             <numerusform>%n file end in %1</numerusform>
@@ -189,7 +200,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1439"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1440"/>
         <source>Changed or gone since the earlier versions: %n file(s), in the &quot;as it was on&quot; folders.</source>
         <translation>
             <numerusform>Changed or gone since the earlier versions: %n file, in the "as it was on" folders.</numerusform>
@@ -197,7 +208,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1493"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1494"/>
         <source>Done: nothing deleted was found on %1. Untick &quot;Only deleted files&quot; to see what wasn&apos;t deleted: %n file(s).</source>
         <translation>
             <numerusform>Done: nothing deleted was found on %1. Untick "Only deleted files" to see what wasn't deleted: %n file.</numerusform>
@@ -205,7 +216,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1648"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1649"/>
         <source>%n file(s) end in &lt;b&gt;%1&lt;/b&gt;, for example %2.</source>
         <translation>
             <numerusform>%n file end in &lt;b&gt;%1&lt;/b&gt;, for example %2.</numerusform>
@@ -213,7 +224,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1655"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1656"/>
         <source>Windows kept %n earlier version(s) of this drive: &lt;b&gt;Look in Them&lt;/b&gt;, above, shows the files as they were.</source>
         <translation>
             <numerusform>Windows kept %n earlier version of this drive: &lt;b&gt;Look in Them&lt;/b&gt;, above, shows the files as they were.</numerusform>
@@ -221,7 +232,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1659"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1660"/>
         <source>Many of these programs write a locked copy and delete the original. The originals of %n locked file(s) are among the deleted files found here: tick them and save them.</source>
         <translation>
             <numerusform>Many of these programs write a locked copy and delete the original. The originals of %n locked file are among the deleted files found here: tick them and save them.</numerusform>
@@ -229,7 +240,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1697"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1698"/>
         <source>Windows kept %n small picture(s) of photos and films, some maybe deleted: see &quot;Small pictures Windows kept&quot;.</source>
         <translation>
             <numerusform>Windows kept %n small picture of photos and films, some maybe deleted: see "Small pictures Windows kept".</numerusform>
@@ -237,7 +248,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1744"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1745"/>
         <source>&quot;%1&quot; was found in %n place(s): see &quot;Found by their words&quot;.</source>
         <translation>
             <numerusform>"%1" was found in %n place: see "Found by their words".</numerusform>
@@ -248,7 +259,7 @@
 <context>
     <name>MainWindow</name>
     <message numerus="yes">
-        <location filename="../src/app/mainwindow.cpp" line="1281"/>
+        <location filename="../src/app/mainwindow.cpp" line="1290"/>
         <source>%n more drive(s) need a look; their health is in the Status column.</source>
         <translation>
             <numerusform>%n more drive need a look; their health is in the Status column.</numerusform>
@@ -256,7 +267,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/app/mainwindow.cpp" line="2563"/>
+        <location filename="../src/app/mainwindow.cpp" line="2573"/>
         <source>%n add-on command(s) still running. Stop them and quit?</source>
         <translation>
             <numerusform>%n add-on command still running. Stop them and quit?</numerusform>

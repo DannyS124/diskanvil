@@ -1249,7 +1249,8 @@ void LostFilesDialog::chooseImage()
 {
     const QString file = QFileDialog::getOpenFileName(
         this, tr("Choose a Disk Image"), QDir::homePath(),
-        tr("Disk images (*.img *.iso *.raw *.dd *.bin *.vdi *.vmdk *.vhd *.vhdx *.qcow2 *.zst);;DiskForge backups (*.img.zst);;"
+        tr("Disk images (*.img *.iso *.raw *.dd *.bin *.vdi *.vmdk *.vhd *.vhdx *.qcow2 *.zst *.E01 *.e01);;DiskForge backups (*.img.zst);;"
+           "Evidence files (*.E01 *.e01);;"
            "Virtual machines' disks (*.vdi *.vmdk *.vhd *.vhdx *.qcow2);;All files (*)"));
     if (!file.isEmpty())
         scanImage(file);

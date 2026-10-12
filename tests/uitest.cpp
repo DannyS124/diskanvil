@@ -44,6 +44,7 @@
 #include "../src/common/pdfreport.h"
 #include "../src/viruses/bootentriesdialog.h"
 #include "../src/backup/clonezilladialog.h"
+#include "../src/backup/evidencedialog.h"
 #include "../src/backup/imagebackup.h"
 #include "../src/backup/savefilesdialog.h"
 #include "../src/tools/linuxbootdialog.h"
@@ -2316,6 +2317,67 @@ void driveReport()
            QStringLiteral("drive report: the PDF has the drive, its verdict, its facts and its SMART attributes"), error + text.left(200));
     if (qEnvironmentVariableIsSet("DISKFORGE_UITEST_SHOTS"))
         QFile::copy(pdf, qEnvironmentVariable("DISKFORGE_UITEST_SHOTS") + QStringLiteral("/report.pdf"));
+}
+
+// Make an Evidence Image of a loop device: as root, the .E01 checks out against its own MD5 and
+// the report next to it has the case; as the user, reading the drive needs the admin password,
+// so without a prompt it's refused and said.
+void evidenceWindow()
+{
+    QTemporaryDir dir;
+    const QString image = dir.filePath(QStringLiteral("seized.img"));
+    {
+        QFile f(image);
+        if (f.open(QIODevice::WriteOnly)) {
+            f.write(QByteArray("evidence data ").repeated(40000));
+            f.resize(4 * 1024 * 1024);
+        }
+    }
+    QFile backing(image);
+    QString loopPath;
+    if (backing.open(QIODevice::ReadWrite)) {
+        QDBusMessage call = QDBusMessage::createMethodCall(QStringLiteral("org.freedesktop.UDisks2"), QStringLiteral("/org/freedesktop/UDisks2/Manager"),
+                                                           QStringLiteral("org.freedesktop.UDisks2.Manager"), QStringLiteral("LoopSetup"));
+        call << QVariant::fromValue(QDBusUnixFileDescriptor(backing.handle())) << QVariantMap{{QStringLiteral("auth.no_user_interaction"), true}};
+        loopPath = QDBusConnection::systemBus().call(call, QDBus::Block, 30000).arguments().value(0).value<QDBusObjectPath>().path();
+        backing.close();
+    }
+    UDisks udisks;
+    udisks.setInteractive(false);
+    const Disk *disk = nullptr;
+    waitUntil([&] {
+        udisks.refresh();
+        disk = udisks.diskByPath(loopPath);
+        return disk != nullptr;
+    }, 15000);
+    report(disk != nullptr, QStringLiteral("evidence: a loop device holds the drive"));
+    if (!disk)
+        return;
+    const QString e01 = dir.filePath(QStringLiteral("seized.E01"));
+    {
+        EvidenceDialog dialog(&udisks, *disk, nullptr);
+        dialog.show();
+        auto *start = dialog.findChild<QPushButton *>(QStringLiteral("start"));
+        report(!start->isEnabled(), QStringLiteral("evidence: nothing starts without a case number"));
+        dialog.findChild<QLineEdit *>(QStringLiteral("case"))->setText(QStringLiteral("2026-0042"));
+        dialog.findChild<QLineEdit *>(QStringLiteral("evidence"))->setText(QStringLiteral("ITEM-3"));
+        dialog.findChild<QLineEdit *>(QStringLiteral("examiner"))->setText(QStringLiteral("Sam Tester"));
+        dialog.findChild<QLineEdit *>(QStringLiteral("file"))->setText(e01);
+        start->click();
+        auto *status = dialog.findChild<QLabel *>(QStringLiteral("status"));
+        waitUntil([&] { return status->text().startsWith(QLatin1String("Done")) || status->text().contains(QLatin1String("couldn")); }, 60000);
+        if (geteuid() == 0) {
+            report(status->text().startsWith(QLatin1String("Done")) && status->text().contains(QLatin1String("matches")), QStringLiteral("evidence: made and checked"),
+                   status->text().left(200));
+            const QString text = pdfText(dir.filePath(QStringLiteral("seized report.pdf")));
+            report(ewf::verify(e01).isEmpty() && text.contains(QLatin1String("2026-0042")) && text.contains(QLatin1String("Read back from the file")),
+                   QStringLiteral("evidence: the E01 checks out, and the report next to it has the case and the check"), text.left(200));
+        } else {
+            report(status->text().contains(QLatin1String("be opened to read it")), QStringLiteral("evidence: as the user without a password prompt, it's refused and said"),
+                   status->text());
+        }
+    }
+    cleanUpLoop(udisks, loopPath);
 }
 
 // Windows Product Key on this PC (no MSDM table, no Windows mounted): it says so in plain words,
@@ -5420,7 +5482,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},
@@ -5465,7 +5527,7 @@ int main(int argc, char *argv[])
     }
     // As root, the ones that make their own loop device can run by themselves.
     if (!only.isEmpty()) {
-        const QVector<QPair<const char *, void (*)()>> alone = {{"stickcheck", stickCheck}, {"sdcard", sdCardFormat}, {"refresh", slowAreaRefresh}, {"stopwipe", stopWipe}, {"luksheader", luksHeaderThroughWindow}, {"nas", nasDrives}, {"tryrepair", tryRepairFirst}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"wipecert", wipeCertificate}};
+        const QVector<QPair<const char *, void (*)()>> alone = {{"stickcheck", stickCheck}, {"sdcard", sdCardFormat}, {"refresh", slowAreaRefresh}, {"stopwipe", stopWipe}, {"luksheader", luksHeaderThroughWindow}, {"nas", nasDrives}, {"tryrepair", tryRepairFirst}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"wipecert", wipeCertificate}, {"evidence", evidenceWindow}};
         for (const auto &[name, run] : alone) {
             if (only.contains(QLatin1String(name)))
                 run();
@@ -5558,6 +5620,7 @@ int main(int argc, char *argv[])
     clonezillaRestore();
     testBootWindow();
     wipeCertificate();
+    evidenceWindow();
     inspector();
     recoverThroughWindow();
     scanThroughWindow();
