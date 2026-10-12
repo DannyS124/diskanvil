@@ -24,6 +24,7 @@
 #include <QScreen>
 #include <QStandardPaths>
 #include <QStorageInfo>
+#include <QTextLayout>
 #include <QVBoxLayout>
 
 std::function<bool(const QString &, const QStringList &)> HomeWindow::launch = [](const QString &program, const QStringList &args) {
@@ -66,11 +67,13 @@ public:
         setCursor(Qt::PointingHandCursor);
         setFocusPolicy(Qt::StrongFocus);
         setAttribute(Qt::WA_Hover);
-        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        // Big tiles give up some height on a short screen (1280x800 and the like), so the
+        // programs row still shows above the taskbar.
+        setSizePolicy(QSizePolicy::Expanding, m_tile.small ? QSizePolicy::Fixed : QSizePolicy::Maximum);
     }
 
     QSize sizeHint() const override { return m_tile.small ? QSize(168, 48) : QSize(320, 100); }
-    QSize minimumSizeHint() const override { return m_tile.small ? QSize(120, 48) : QSize(240, 100); }
+    QSize minimumSizeHint() const override { return m_tile.small ? QSize(120, 48) : QSize(240, 84); }
 
 protected:
     void paintEvent(QPaintEvent *) override
@@ -110,7 +113,23 @@ protected:
                    titleMetrics.elidedText(text(), Qt::ElideRight, room));
         p.setFont(font());
         p.setPen(m_colour("dim"));
-        p.drawText(QRect(left, height() / 2 + 3, room, height() / 2 - 6), Qt::AlignTop | Qt::AlignLeft | Qt::TextWordWrap, m_tile.text);
+        // As many lines as fit; a longer one ends in "…" (the tooltip has it all).
+        const QFontMetrics metrics(font());
+        const int lines = std::max(1, (height() / 2 - 6) / metrics.lineSpacing());
+        QTextLayout layout(m_tile.text, font());
+        layout.beginLayout();
+        QStringList shown;
+        for (QTextLine line = layout.createLine(); line.isValid(); line = layout.createLine()) {
+            line.setLineWidth(room);
+            if (shown.size() == lines - 1) {
+                shown << metrics.elidedText(m_tile.text.mid(line.textStart()).simplified(), Qt::ElideRight, room);
+                break;
+            }
+            shown << m_tile.text.mid(line.textStart(), line.textLength()).trimmed();
+        }
+        layout.endLayout();
+        for (int i = 0; i < shown.size(); ++i)
+            p.drawText(QRect(left, height() / 2 + 3 + i * metrics.lineSpacing(), room, metrics.lineSpacing()), Qt::AlignTop | Qt::AlignLeft, shown[i]);
     }
 
 private:
@@ -322,9 +341,9 @@ QVector<HomeWindow::Tile> HomeWindow::allTiles() const
             .desktopId = QStringLiteral("qps");
         add(QStringLiteral("editor"), QStringLiteral("accessories-text-editor"), QStringLiteral("accessories-text-editor"), tr("Text Editor"), {})
             .desktopId = QStringLiteral("featherpad");
-        add(QStringLiteral("help"), QStringLiteral("preferences-desktop-remote-desktop"), QStringLiteral("network-connect"), tr("Let Someone Help"), {})
+        add(QStringLiteral("help"), QStringLiteral("diskanvil-live-remotehelp"), QStringLiteral("preferences-desktop-remote-desktop"), tr("Let Someone Help"), {})
             .tool = QStringLiteral("remote-help");
-        add(QStringLiteral("netboot"), QStringLiteral("network-server"), QStringLiteral("network-wired"), tr("Start Other PCs"), {}).tool =
+        add(QStringLiteral("netboot"), QStringLiteral("diskanvil-live-netboot"), QStringLiteral("network-server"), tr("Start Other PCs"), {}).tool =
             QStringLiteral("net-boot");
         add(QStringLiteral("logs"), QStringLiteral("diskanvil-live-logs"), QStringLiteral("text-x-log"), tr("Save Logs"), {}).desktopId =
             QStringLiteral("diskanvil-live-logs");
@@ -379,7 +398,7 @@ QColor HomeWindow::color(const char *role) const
 void HomeWindow::layoutTiles()
 {
     const int margins = m_mode == Mode::Desktop ? 112 : 48;
-    const int columns = std::clamp((width() - margins) / 330, 1, 4);
+    const int columns = std::clamp((width() - margins) / 290, 1, 4);
     if (columns != m_columns) {
         m_columns = columns;
         for (QAbstractButton *tile : std::as_const(m_bigTiles))

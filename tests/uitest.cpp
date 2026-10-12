@@ -130,6 +130,7 @@
 #include <QTableView>
 #include <QRadioButton>
 #include <QElapsedTimer>
+#include <QLayout>
 #include <QMessageBox>
 #include <QProcess>
 #include <QRandomGenerator>
@@ -4090,6 +4091,20 @@ void homeScreen()
             recover->click();
         report(started.size() == 1 && started[0].mid(1) == QStringList{QStringLiteral("--open"), QStringLiteral("lost-files")},
                QStringLiteral("Get Files Back opens Find Lost Files"), started.value(0).join(QLatin1Char(' ')));
+
+        // A 1280x800 screen less the taskbar: every tile shows, none under the bottom edge.
+        home.resize(1280, 752);
+        home.show();
+        QCoreApplication::processEvents();
+        QStringList under;
+        for (QAbstractButton *tile : home.findChildren<QAbstractButton *>()) {
+            if (tile->objectName().startsWith(QLatin1String("tile-")) && tile->mapTo(&home, QPoint(0, tile->height())).y() > home.height())
+                under << tile->objectName();
+        }
+        report(under.isEmpty() && home.layout()->minimumSize().height() <= 752,
+               QStringLiteral("the home screen fits a 1280x800 screen with its taskbar"),
+               QStringLiteral("needs %1 px; under the edge: %2").arg(home.layout()->minimumSize().height()).arg(under.join(QLatin1Char(' '))));
+        home.hide();
 
         // Restarting into the firmware asks first: No starts nothing, Yes restarts.
         for (const bool yes : {false, true}) {
