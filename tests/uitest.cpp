@@ -463,7 +463,8 @@ void outputWindow()
     }
     {
         // A background child too: Stop has to end the whole group.
-        std::unique_ptr<AddonOutputWindow> w(run(QStringLiteral("sleep 60 & echo started; sleep 60")));
+        // A length no other test uses, so only this command's sleeps are counted.
+        std::unique_ptr<AddonOutputWindow> w(run(QStringLiteral("sleep 61.7 & echo started; sleep 61.7")));
         waitUntil([&] {
             QThread::msleep(150);
             QApplication::processEvents();
@@ -474,11 +475,16 @@ void outputWindow()
         timer.start();
         w->stop();
         waitUntil([&] { return !w->isRunning(); }, 6000);
-        QThread::msleep(300);
-        pids.start(QStringLiteral("pgrep"), {QStringLiteral("-f"), QStringLiteral("^sleep 60$")});
-        pids.waitForFinished();
-        report(!w->isRunning() && timer.elapsed() < 5000 && pids.readAllStandardOutput().trimmed().isEmpty(),
-               QStringLiteral("Stop ends the command and everything it started"), QString::number(timer.elapsed()) + QStringLiteral(" ms"));
+        const qint64 stopped = timer.elapsed();
+        QByteArray left;
+        waitUntil([&] {
+            pids.start(QStringLiteral("pgrep"), {QStringLiteral("-f"), QStringLiteral("^sleep 61.7$")});
+            pids.waitForFinished();
+            left = pids.readAllStandardOutput().trimmed();
+            return left.isEmpty();
+        }, 3000);
+        report(!w->isRunning() && stopped < 5000 && left.isEmpty(),
+               QStringLiteral("Stop ends the command and everything it started"), QString::number(stopped) + QStringLiteral(" ms ") + QString::fromLatin1(left));
     }
 }
 
