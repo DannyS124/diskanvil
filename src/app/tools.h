@@ -90,6 +90,7 @@ private:
     QPushButton *m_longTest = nullptr;
     QPushButton *m_conveyance = nullptr;
     QPushButton *m_smartOn = nullptr;
+    QPushButton *m_noise = nullptr; // what a hard drive's sounds mean
     QPushButton *m_stopTest; // while one runs
     void checkFirmware();
     firmware::Result m_firmware;

@@ -104,6 +104,7 @@ add_library(diskforge-core STATIC
     src/addons/outputfilter.cpp src/addons/outputfilter.h
     src/health/health.cpp src/health/health.h
     src/health/triage.cpp src/health/triage.h
+    src/health/drivefacts.cpp src/health/drivefacts.h
     src/health/smartdata.cpp src/health/smartdata.h
     src/health/firmware.h
     src/health/btrfscheck.cpp src/health/btrfscheck.h

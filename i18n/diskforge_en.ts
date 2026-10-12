@@ -15,7 +15,7 @@
 <context>
     <name>BadSectorsDialog</name>
     <message numerus="yes">
-        <location filename="../src/app/tools.cpp" line="1475"/>
+        <location filename="../src/app/tools.cpp" line="1511"/>
         <source>%n area(s) read slowly. Slow spots often turn into bad sectors later, so keep a backup.</source>
         <translation>
             <numerusform>%n area read slowly. Slow spots often turn into bad sectors later, so keep a backup.</numerusform>
@@ -23,7 +23,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/app/tools.cpp" line="1503"/>
+        <location filename="../src/app/tools.cpp" line="1539"/>
         <source>Repair %n bad sector(s) on %1?</source>
         <translation>
             <numerusform>Repair %n bad sector on %1?</numerusform>
@@ -31,7 +31,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/app/tools.cpp" line="1550"/>
+        <location filename="../src/app/tools.cpp" line="1586"/>
         <source>%n block(s)</source>
         <translation>
             <numerusform>%n block</numerusform>
@@ -227,7 +227,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/app/tools.cpp" line="105"/>
+        <location filename="../src/app/tools.cpp" line="106"/>
         <source>%n sector(s)</source>
         <translation>
             <numerusform>%n sector</numerusform>

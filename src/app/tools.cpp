@@ -18,6 +18,7 @@
 #include "imagewriter.h"
 #include "rescuestick.h"
 #include "surfacescan.h"
+#include "drivefacts.h"
 #include "health.h"
 #include "systemd.h"
 #include "btrfscheck.h"
@@ -311,6 +312,28 @@ HealthDialog::HealthDialog(UDisks *udisks, const QString &blockPath, QWidget *pa
         if (const Disk *d = m_udisks->diskByPath(m_blockPath))
             m_udisks->smartSetEnabled(*d, true);
     });
+    m_noise = new QPushButton(tr("What's That Noise?"));
+    m_noise->setObjectName(QStringLiteral("noise"));
+    connect(m_noise, &QPushButton::clicked, this, [this] {
+        QMessageBox box(QMessageBox::Information, tr("What's That Noise?"),
+                        tr("<p>Hard drives make some sounds that are normal, and some that mean trouble.</p>"
+                           "<p><b>Normal</b></p><ul>"
+                           "<li>A soft whir as it spins up, then a steady hum.</li>"
+                           "<li>Quick ticks or chatter while it reads and writes: its heads moving.</li>"
+                           "<li>One click when it parks its heads, after a while idle or when the computer sleeps.</li></ul>"
+                           "<p><b>Trouble</b></p><ul>"
+                           "<li>A click every second or two, over and over: its heads can't read. Turn it off.</li>"
+                           "<li>Grinding or scraping: something is touching the disks inside. Turn it off at once: every second "
+                           "scratches them.</li>"
+                           "<li>Beeping or buzzing without spinning: its motor can't start (stuck heads, or a motor fault).</li>"
+                           "<li>Spinning up, stopping and spinning up again: it can't get ready.</li></ul>"
+                           "<p>For any of these, turn it off and don't keep trying. If the files matter a great deal, a data recovery lab "
+                           "(with a clean room) can often still get them back, and every try at home makes that harder. If it still "
+                           "works now and then, make a Rescue Copy the next time it does, before anything else.</p>"),
+                        QMessageBox::Close, this);
+        box.setTextFormat(Qt::RichText);
+        box.exec();
+    });
     auto *scan = new QPushButton(tr("Scan for Bad Sectors…"));
     connect(scan, &QPushButton::clicked, this, [this] {
         if (const Disk *d = m_udisks->diskByPath(m_blockPath))
@@ -329,6 +352,7 @@ HealthDialog::HealthDialog(UDisks *udisks, const QString &blockPath, QWidget *pa
     buttons->addWidget(longTest);
     buttons->addWidget(m_conveyance);
     buttons->addWidget(scan);
+    buttons->addWidget(m_noise);
     buttons->addWidget(refresh);
     buttons->addStretch();
     buttons->addWidget(close);
@@ -413,6 +437,17 @@ void HealthDialog::reload()
         row(tr("Unreadable sectors:"), QString::number(h.pendingSectors));
     if (!h.criticalWarnings.isEmpty())
         row(tr("Warnings:"), h.criticalWarnings.join(QStringLiteral(", ")));
+    if (const drivefacts::EmmcLife life = drivefacts::emmcLife(disk->device); life.known)
+        row(tr("Wear (eMMC):"), drivefacts::describe(life));
+    if (const QStringList off = drivefacts::misaligned(*disk); !off.isEmpty())
+        row(tr("Alignment:"), off.join(QLatin1Char('\n')) + QLatin1Char('\n')
+                                  + tr("That makes writes slower, and on an SSD wears it more. Moving the partition to a boundary fixes it "
+                                       "(a backup, a new partition, then restoring)."));
+    QStringList facts;
+    for (const drivefacts::Fact &f : drivefacts::aboutModel(disk->model, disk->revision))
+        facts << f.text;
+    if (!facts.isEmpty())
+        row(tr("About this model:"), facts.join(QLatin1Char('\n')));
     row(tr("Self-test:"), selftestText(h));
     // The ones DiskForge saw finish, newest first.
     QStringList earlier;
@@ -457,6 +492,7 @@ void HealthDialog::reload()
     m_selftest->setEnabled(!running && !h.smartOff);
     m_stopTest->setVisible(running);
     m_conveyance->setVisible(!h.nvme && !disk->isLoop && disk->rotationRate != 0);
+    m_noise->setVisible(!h.nvme && !disk->isLoop && disk->rotationRate != 0 && !disk->removable);
     m_conveyance->setEnabled(!running && !h.smartOff);
     m_smartOn->setVisible(h.smartOff);
 

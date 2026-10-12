@@ -13,6 +13,7 @@
 #include "../src/drives/powerbox.h"
 #include "../src/health/smartdata.h"
 #include "../src/health/triage.h"
+#include "../src/health/drivefacts.h"
 #include "../src/tools/systemd.h"
 
 #include <QDir>
@@ -205,10 +206,57 @@ void triageAdvice()
            QStringLiteral("what happened: TRIM only matters on an SSD that does it"));
 }
 
+// Beyond the health record: eMMC wear, alignment, and what's known about some models.
+void driveFacts()
+{
+    QTemporaryDir sys;
+    QDir().mkpath(sys.filePath(QStringLiteral("mmcblk0/device")));
+    const auto write = [&sys](const QString &name, const QByteArray &text) {
+        QFile f(sys.filePath(QStringLiteral("mmcblk0/device/") + name));
+        return f.open(QIODevice::WriteOnly) && f.write(text) == text.size();
+    };
+    write(QStringLiteral("life_time"), "0x02 0x04\n");
+    write(QStringLiteral("pre_eol_info"), "0x02\n");
+    const drivefacts::EmmcLife life = drivefacts::emmcLife(QStringLiteral("/dev/mmcblk0"), sys.path());
+    report(life.known && life.usedFrom == 30 && life.usedTo == 40 && life.reserve == 2 && drivefacts::describe(life).contains(QLatin1String("80% used"))
+               && !drivefacts::emmcLife(QStringLiteral("/dev/sda"), sys.path()).known,
+           QStringLiteral("drive facts: an eMMC drive's wear, the worse of its two estimates, and its spare blocks"), drivefacts::describe(life));
+    Disk disk;
+    Volume good, bad, extended;
+    good.number = 1;
+    good.offset = 1024 * 1024;
+    bad.number = 2;
+    bad.offset = 63 * 512;
+    extended.number = 3;
+    extended.offset = 1000;
+    extended.isContainer = true;
+    disk.volumes = {good, bad, extended};
+    const QStringList off = drivefacts::misaligned(disk);
+    report(off.size() == 1 && off[0].startsWith(QLatin1String("Partition 2")), QStringLiteral("drive facts: a partition off a 4 KiB boundary is found"),
+           off.join(QLatin1Char(',')));
+    const auto kinds = [](const QString &model, const QString &firmware) {
+        QStringList out;
+        for (const drivefacts::Fact &f : drivefacts::aboutModel(model, firmware))
+            out << QString::number(int(f.kind));
+        return out.join(QLatin1Char(','));
+    };
+    report(kinds(QStringLiteral("WDC WD40EFAX-68JH4N1"), QStringLiteral("83.00A83")) == QLatin1String("0")
+               && kinds(QStringLiteral("WDC WD40EFRX-68N32N0"), QStringLiteral("82.00A82")).isEmpty()
+               && kinds(QStringLiteral("ST8000DM004-2CX188"), QStringLiteral("0001")) == QLatin1String("0"),
+           QStringLiteral("drive facts: SMR models from the makers' lists, and their CMR siblings not"));
+    report(kinds(QStringLiteral("Samsung SSD 980 PRO 1TB"), QStringLiteral("3B2QGXA7")) == QLatin1String("1")
+               && kinds(QStringLiteral("Samsung SSD 980 PRO 1TB"), QStringLiteral("5B2QGXA7")).isEmpty()
+               && kinds(QStringLiteral("Samsung SSD 990 PRO 2TB"), QStringLiteral("1B2QJXD7")) == QLatin1String("1")
+               && kinds(QStringLiteral("Samsung SSD 990 PRO 2TB"), QStringLiteral("4B2QJXD7")).isEmpty()
+               && kinds(QStringLiteral("ST3000DM001-1ER166"), QStringLiteral("CC26")) == QLatin1String("2"),
+           QStringLiteral("drive facts: firmware with a known bug is pointed out until it's updated"));
+}
+
 void healthTests()
 {
     hiddenArea();
     triageAdvice();
+    driveFacts();
     rawPages();
     QTemporaryDir config;
     qputenv("XDG_CONFIG_HOME", QFile::encodeName(config.path()));
