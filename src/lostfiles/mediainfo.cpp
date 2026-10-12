@@ -6,6 +6,7 @@
 #include "filetypes.h"
 
 #include <QCoreApplication>
+#include <QHash>
 #include <QTimeZone>
 #include <QStringDecoder>
 #include <QStringList>
@@ -484,6 +485,351 @@ void readRiff(const Bytes &b, Info &info)
     }
 }
 
+// --- FLAC: its information blocks (the stream's facts, Vorbis-style tags, the cover)
+
+void readFlac(const Bytes &b, Info &info)
+{
+    if (!b.is(0, "fLaC"))
+        return;
+    quint64 at = 4;
+    for (int blocks = 0; blocks < 1000 && b.has(at, 4); ++blocks) {
+        const quint32 head = b.be32(at), type = (head >> 24) & 0x7F, length = head & 0xFFFFFF;
+        const quint64 body = at + 4;
+        if (type == 0 && length >= 18) { // STREAMINFO
+            const quint32 rate = b.be32(body + 10) >> 12;
+            const quint64 samples = (quint64(b.u8(body + 13) & 0x0F) << 32) | b.be32(body + 14);
+            info.codec = QStringLiteral("FLAC");
+            info.sampleRate = int(rate);
+            info.channels = ((b.u8(body + 12) >> 1) & 7) + 1;
+            if (rate && samples)
+                info.durationMs = qint64(samples * 1000 / rate);
+        } else if (type == 4) {
+            readComments(b.mid(body, length), 0, info);
+        } else if (type == 6 && info.cover.isEmpty()) { // PICTURE: kind, MIME type, words, size, then it
+            quint64 p = body + 4;
+            p += 4 + quint64(b.be32(p));
+            p += 4 + quint64(b.be32(p));
+            p += 16;
+            const quint32 size = b.be32(p);
+            if (b.has(p + 4, size) && p + 4 + size <= body + length)
+                info.cover = b.mid(p + 4, size);
+        }
+        at = body + length;
+        if (head & 0x80000000) // the last one
+            break;
+    }
+}
+
+// --- Matroska and WebM: elements inside elements, each an ID and a size
+
+struct Element {
+    quint32 id = 0;
+    quint64 body = 0, size = 0;
+    bool open = false; // its size isn't said (a live recording): it runs to the end
+};
+
+int vintLength(quint32 first)
+{
+    int length = 1;
+    while (length <= 8 && !(first & (0x80u >> (length - 1))))
+        ++length;
+    return length;
+}
+
+bool element(const Bytes &b, quint64 at, quint64 end, Element &e)
+{
+    const quint32 first = b.u8(at);
+    const int idLength = vintLength(first);
+    if (first == 0 || idLength > 4 || !b.has(at, quint64(idLength) + 1))
+        return false;
+    e.id = 0;
+    for (int i = 0; i < idLength; ++i)
+        e.id = e.id << 8 | b.u8(at + quint64(i));
+    quint64 p = at + quint64(idLength);
+    const quint32 sizeFirst = b.u8(p);
+    const int sizeLength = vintLength(sizeFirst);
+    if (sizeFirst == 0 || sizeLength > 8)
+        return false;
+    quint64 size = sizeFirst & (0xFFu >> sizeLength);
+    bool ones = size == (0xFFu >> sizeLength);
+    for (int i = 1; i < sizeLength; ++i) {
+        size = size << 8 | b.u8(p + quint64(i));
+        ones = ones && b.u8(p + quint64(i)) == 0xFF;
+    }
+    e.body = p + quint64(sizeLength);
+    e.open = ones;
+    e.size = ones || e.body > end ? (end > e.body ? end - e.body : 0) : std::min(size, end - e.body);
+    return true;
+}
+
+quint64 ebmlUnsigned(const Bytes &b, const Element &e)
+{
+    quint64 v = 0;
+    for (quint64 i = 0; i < std::min<quint64>(e.size, 8); ++i)
+        v = v << 8 | b.u8(e.body + i);
+    return v;
+}
+
+double ebmlFloat(const Bytes &b, const Element &e)
+{
+    if (e.size == 4) {
+        const quint32 bits = b.be32(e.body);
+        float f;
+        std::memcpy(&f, &bits, sizeof f);
+        return f;
+    }
+    if (e.size == 8) {
+        const quint64 bits = b.be64(e.body);
+        double d;
+        std::memcpy(&d, &bits, sizeof d);
+        return d;
+    }
+    return 0;
+}
+
+QString matroskaCodec(const QByteArray &id)
+{
+    static const QHash<QByteArray, QString> names = {
+        {"V_MPEG4/ISO/AVC", QStringLiteral("H.264")}, {"V_MPEGH/ISO/HEVC", QStringLiteral("H.265")}, {"V_AV1", QStringLiteral("AV1")},
+        {"V_VP8", QStringLiteral("VP8")},             {"V_VP9", QStringLiteral("VP9")},              {"V_THEORA", QStringLiteral("Theora")},
+        {"V_MPEG2", QStringLiteral("MPEG-2")},         {"V_MS/VFW/FOURCC", QStringLiteral("VfW")},    {"A_AAC", QStringLiteral("AAC")},
+        {"A_OPUS", QStringLiteral("Opus")},           {"A_VORBIS", QStringLiteral("Vorbis")},        {"A_FLAC", QStringLiteral("FLAC")},
+        {"A_AC3", QStringLiteral("AC-3")},            {"A_EAC3", QStringLiteral("E-AC-3")},          {"A_DTS", QStringLiteral("DTS")},
+        {"A_MPEG/L3", QStringLiteral("MP3")},         {"A_PCM/INT/LIT", QStringLiteral("PCM")},      {"A_TRUEHD", QStringLiteral("TrueHD")}};
+    if (names.contains(id))
+        return names.value(id);
+    if (id.startsWith("A_AAC"))
+        return QStringLiteral("AAC");
+    return QString::fromLatin1(id.mid(2)).left(20);
+}
+
+struct MatroskaWalk {
+    MatroskaWalk(const Bytes &bytes, Info &into)
+        : b(bytes)
+        , info(into)
+    {
+    }
+    const Bytes &b;
+    Info &info;
+    quint64 timecodeScale = 1000000;
+    double duration = -1;
+    QString videoCodec, audioCodec;
+    int steps = 0;
+
+    void walk(quint64 from, quint64 to, int depth)
+    {
+        Element e;
+        for (quint64 at = from; at < to && depth < 12 && ++steps < 200000 && element(b, at, to, e);) {
+            switch (e.id) {
+            case 0x18538067: // Segment
+            case 0x1549A966: // Info
+            case 0x1654AE6B: // Tracks
+            case 0x1941A469: // Attachments
+            case 0x1254C367: // Tags
+            case 0x7373:     // Tag
+                walk(e.body, e.body + e.size, depth + 1);
+                break;
+            case 0xAE: // TrackEntry
+                track(e);
+                break;
+            case 0x61A7: // AttachedFile: a cover, when it's a picture
+                attachment(e);
+                break;
+            case 0x67C8: // SimpleTag
+                tag(e);
+                break;
+            case 0x2AD7B1:
+                timecodeScale = std::max<quint64>(1, ebmlUnsigned(b, e));
+                break;
+            case 0x4489:
+                duration = ebmlFloat(b, e);
+                break;
+            case 0x7BA9:
+                if (info.title.isEmpty())
+                    info.title = clean(QString::fromUtf8(b.mid(e.body, e.size)));
+                break;
+            case 0x4461: { // DateUTC: nanoseconds from the start of 2001
+                const qint64 ns = qint64(ebmlUnsigned(b, e));
+                const QDateTime t = QDateTime(QDate(2001, 1, 1), QTime(0, 0), QTimeZone::UTC).addMSecs(ns / 1000000);
+                if (t.date().year() > 1990 && t.date().year() < 2200)
+                    info.recorded = t;
+                break;
+            }
+            case 0x1F43B675: // Cluster: the film itself, stepped over (the tags can be after it)
+            default:
+                break;
+            }
+            if (e.open && e.id != 0x18538067)
+                return;
+            at = e.body + e.size;
+        }
+    }
+
+    void track(const Element &entry)
+    {
+        quint64 type = 0;
+        QByteArray codec;
+        Element e;
+        for (quint64 at = entry.body, end = entry.body + entry.size; at < end && element(b, at, end, e); at = e.body + e.size) {
+            if (e.id == 0x83)
+                type = ebmlUnsigned(b, e);
+            else if (e.id == 0x86)
+                codec = b.mid(e.body, std::min<quint64>(e.size, 64));
+            else if (e.id == 0xE0 || e.id == 0xE1) { // Video, Audio
+                Element v;
+                for (quint64 p = e.body, vend = e.body + e.size; p < vend && element(b, p, vend, v); p = v.body + v.size) {
+                    if (v.id == 0xB0 && info.width == 0)
+                        info.width = int(std::min<quint64>(ebmlUnsigned(b, v), 100000));
+                    else if (v.id == 0xBA && info.height == 0)
+                        info.height = int(std::min<quint64>(ebmlUnsigned(b, v), 100000));
+                    else if (v.id == 0xB5 && info.sampleRate == 0)
+                        info.sampleRate = int(std::clamp(ebmlFloat(b, v), 0.0, 1e7));
+                    else if (v.id == 0x9F && info.channels == 0)
+                        info.channels = int(std::min<quint64>(ebmlUnsigned(b, v), 64));
+                }
+            }
+        }
+        if (type == 1 && videoCodec.isEmpty())
+            videoCodec = matroskaCodec(codec);
+        else if (type == 2 && audioCodec.isEmpty())
+            audioCodec = matroskaCodec(codec);
+    }
+
+    void attachment(const Element &file)
+    {
+        QByteArray mime;
+        Element data, e;
+        for (quint64 at = file.body, end = file.body + file.size; at < end && element(b, at, end, e); at = e.body + e.size) {
+            if (e.id == 0x4660)
+                mime = b.mid(e.body, std::min<quint64>(e.size, 64));
+            else if (e.id == 0x465C)
+                data = e;
+        }
+        if (info.cover.isEmpty() && mime.startsWith("image/") && data.size > 0 && data.size < 16 * 1024 * 1024)
+            info.cover = b.mid(data.body, data.size);
+    }
+
+    void tag(const Element &simple)
+    {
+        QString name, value;
+        Element e;
+        for (quint64 at = simple.body, end = simple.body + simple.size; at < end && element(b, at, end, e); at = e.body + e.size) {
+            if (e.id == 0x45A3)
+                name = QString::fromUtf8(b.mid(e.body, std::min<quint64>(e.size, 64))).toUpper();
+            else if (e.id == 0x4487)
+                value = clean(QString::fromUtf8(b.mid(e.body, std::min<quint64>(e.size, 1024))));
+        }
+        if (name == QLatin1String("TITLE") && info.title.isEmpty())
+            info.title = value;
+        else if ((name == QLatin1String("ARTIST") || name == QLatin1String("DIRECTOR")) && info.artist.isEmpty())
+            info.artist = value;
+        else if (name == QLatin1String("ALBUM") && info.album.isEmpty())
+            info.album = value;
+        else if ((name == QLatin1String("DATE_RELEASED") || name == QLatin1String("DATE_RECORDED")) && info.year.isEmpty())
+            info.year = value.left(4);
+    }
+};
+
+void readMatroska(const Bytes &b, Info &info)
+{
+    MatroskaWalk walk(b, info);
+    Element header;
+    if (!element(b, 0, b.size(), header) || header.id != 0x1A45DFA3)
+        return;
+    walk.walk(header.body + header.size, b.size(), 0);
+    if (walk.duration > 0)
+        info.durationMs = qint64(std::min(walk.duration * double(walk.timecodeScale) / 1e6, 1e12));
+    info.codec = !walk.videoCodec.isEmpty() ? walk.videoCodec : walk.audioCodec;
+}
+
+// --- Windows Media (ASF): objects named by GUIDs in the header
+
+void readAsf(const Bytes &b, Info &info)
+{
+    static const QByteArray header("\x30\x26\xB2\x75\x8E\x66\xCF\x11\xA6\xD9\x00\xAA\x00\x62\xCE\x6C", 16);
+    static const QByteArray fileProperties("\xA1\xDC\xAB\x8C\x47\xA9\xCF\x11\x8E\xE4\x00\xC0\x0C\x20\x53\x65", 16);
+    static const QByteArray streamProperties("\x91\x07\xDC\xB7\xB7\xA9\xCF\x11\x8E\xE6\x00\xC0\x0C\x20\x53\x65", 16);
+    static const QByteArray contentDescription("\x33\x26\xB2\x75\x8E\x66\xCF\x11\xA6\xD9\x00\xAA\x00\x62\xCE\x6C", 16);
+    static const QByteArray extendedDescription("\x40\xA4\xD0\xD2\x07\xE3\xD2\x11\x97\xF0\x00\xA0\xC9\x5E\xA8\x50", 16);
+    static const QByteArray video("\xC0\xEF\x19\xBC\x4D\x5B\xCF\x11\xA8\xFD\x00\x80\x5F\x5C\x44\x2B", 16);
+    static const QByteArray audio("\x40\x9E\x69\xF8\x4D\x5B\xCF\x11\xA8\xFD\x00\x80\x5F\x5C\x44\x2B", 16);
+    if (b.mid(0, 16) != header)
+        return;
+    const quint64 headerSize = std::min<quint64>(b.le64(16), b.size());
+    const quint32 objects = std::min<quint32>(b.le32(24), 1000);
+    const auto utf16 = [&b](quint64 at, quint64 bytes) {
+        const QByteArray raw = b.mid(at, std::min<quint64>(bytes, 4096));
+        return clean(QString::fromUtf16(reinterpret_cast<const char16_t *>(raw.constData()), raw.size() / 2));
+    };
+    QString videoCodec, audioCodec;
+    quint64 at = 30;
+    for (quint32 i = 0; i < objects && at + 24 <= headerSize; ++i) {
+        const QByteArray guid = b.mid(at, 16);
+        const quint64 size = b.le64(at + 16);
+        if (size < 24)
+            break;
+        if (guid == fileProperties) {
+            const quint64 play = b.le64(at + 64), preroll = b.le64(at + 80);
+            if (play / 10000 > preroll)
+                info.durationMs = qint64(play / 10000 - preroll);
+            const quint64 created = b.le64(at + 48);
+            const QDateTime t = QDateTime(QDate(1601, 1, 1), QTime(0, 0), QTimeZone::UTC).addMSecs(qint64(created / 10000));
+            if (created && t.date().year() > 1990 && t.date().year() < 2200)
+                info.recorded = t;
+        } else if (guid == streamProperties) {
+            const QByteArray kind = b.mid(at + 24, 16);
+            const quint64 data = at + 78;
+            if (kind == video && videoCodec.isEmpty()) {
+                info.width = int(std::min<quint32>(b.le32(data), 100000));
+                info.height = int(std::min<quint32>(b.le32(data + 4), 100000));
+                const QByteArray fourcc = b.mid(data + 11 + 16, 4);
+                videoCodec = fourcc == "WMV3" ? QStringLiteral("WMV 9") : fourcc == "WVC1" ? QStringLiteral("VC-1") : QString::fromLatin1(fourcc).trimmed();
+            } else if (kind == audio && audioCodec.isEmpty()) {
+                const quint32 tag = b.le16(data);
+                info.channels = int(std::min<quint32>(b.le16(data + 2), 64));
+                info.sampleRate = int(std::min<quint32>(b.le32(data + 4), 10000000));
+                audioCodec = tag == 0x0161 ? QStringLiteral("WMA") : tag == 0x0162 ? QStringLiteral("WMA Pro") : tag == 0x0163 ? QStringLiteral("WMA Lossless")
+                           : tag == 0x000A ? QStringLiteral("WMA Voice") : tag == 0x0055 ? QStringLiteral("MP3") : tag == 0x0001 ? QStringLiteral("PCM")
+                                                                                                                                  : QString();
+            }
+        } else if (guid == contentDescription) {
+            const quint64 title = b.le16(at + 24), author = b.le16(at + 26);
+            info.title = utf16(at + 34, title);
+            info.artist = utf16(at + 34 + title, author);
+        } else if (guid == extendedDescription) {
+            quint64 p = at + 26;
+            const quint32 count = std::min<quint32>(b.le16(at + 24), 500);
+            for (quint32 k = 0; k < count && p + 6 <= at + size; ++k) {
+                const quint64 nameLength = b.le16(p);
+                const QString name = utf16(p + 2, nameLength);
+                const quint32 type = b.le16(p + 2 + nameLength);
+                const quint64 valueLength = b.le16(p + 4 + nameLength), value = p + 6 + nameLength;
+                if (type == 0 && name == QLatin1String("WM/AlbumTitle"))
+                    info.album = utf16(value, valueLength);
+                else if (type == 0 && (name == QLatin1String("WM/Year") || name == QLatin1String("date"))) // "date": ffmpeg's
+                    info.year = utf16(value, valueLength).left(4);
+                else if (type == 0 && name == QLatin1String("WM/AlbumArtist") && info.artist.isEmpty())
+                    info.artist = utf16(value, valueLength);
+                else if (type == 1 && name == QLatin1String("WM/Picture") && info.cover.isEmpty()) {
+                    // A kind byte, its size, its MIME type and words (each ending in a 0), then it.
+                    quint64 q = value + 5;
+                    for (int strings = 0; strings < 2; ++strings) {
+                        while (q + 2 <= value + valueLength && b.le16(q) != 0)
+                            q += 2;
+                        q += 2;
+                    }
+                    const quint32 pictureSize = b.le32(value + 1);
+                    if (q + pictureSize <= value + valueLength)
+                        info.cover = b.mid(q, pictureSize);
+                }
+                p = value + valueLength;
+            }
+        }
+        at += size;
+    }
+    info.codec = !videoCodec.isEmpty() ? videoCodec : audioCodec;
+}
+
 QString duration(qint64 ms)
 {
     const qint64 s = (ms + 500) / 1000;
@@ -513,6 +859,12 @@ Info read(int type, const QByteArray &data, quint64 fileSize)
         readOgg(b, fileSize, info);
     } else if (id == QLatin1String("wav") || id == QLatin1String("avi")) {
         readRiff(b, info);
+    } else if (id == QLatin1String("flac")) {
+        readFlac(b, info);
+    } else if (id == QLatin1String("mkv") || id == QLatin1String("webm")) {
+        readMatroska(b, info);
+    } else if (id == QLatin1String("wmv") || id == QLatin1String("wma")) {
+        readAsf(b, info);
     }
     return info;
 }

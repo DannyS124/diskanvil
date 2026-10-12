@@ -7,7 +7,7 @@
 // what it's encoded with, its title and artist, and the cover picture it carries. For Find Lost
 // Files' previews, so it reads bytes that can be anything: every number is checked before it's
 // used and every walk has a limit. MP4 (and MOV, 3GP, M4A), MP3, Ogg (Vorbis, Opus, Theora),
-// WAV and AVI.
+// WAV, AVI, FLAC, Matroska and WebM, and Windows Media (WMV, WMA).
 
 #include <QByteArray>
 #include <QDateTime>

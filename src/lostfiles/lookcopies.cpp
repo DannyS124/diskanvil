@@ -3,6 +3,7 @@
 #include "lookcopies.h"
 
 #include "blockio.h"
+#include "ole.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -178,6 +179,16 @@ bool LookCopies::safeToOpen(const QString &name)
         QStringLiteral("bz2"), QStringLiteral("xz")};
     // The last extension is what decides: "invoice.pdf.exe" is a program.
     return name.contains(QLatin1Char('.')) && safe.contains(name.section(QLatin1Char('.'), -1).toLower());
+}
+
+bool LookCopies::hasMacros(const QString &copy)
+{
+    QFile file(copy);
+    if (!file.open(QIODevice::ReadOnly) || !file.peek(8).startsWith("\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1"))
+        return false;
+    if (file.size() > 512ll * 1024 * 1024)
+        return true; // too big to look through: treated as if it had them
+    return ole::hasMacros(ole::File(file.readAll()));
 }
 
 } // namespace lost

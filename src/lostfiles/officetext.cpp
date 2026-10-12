@@ -13,6 +13,7 @@
 #include <QHash>
 #include <QLocale>
 #include <QXmlStreamReader>
+#include <QtEndian>
 
 #include <archive.h>
 #include <archive_entry.h>
@@ -33,6 +34,9 @@ Archive open(const QByteArray &data)
     Archive a(archive_read_new(), &archive_read_free);
     archive_read_support_format_zip(a.get());
     archive_read_support_format_7zip(a.get());
+    archive_read_support_format_rar(a.get());
+    archive_read_support_format_rar5(a.get());
+    archive_read_support_format_tar(a.get()); // inside a .gz (.tar.gz)
     archive_read_support_filter_all(a.get());
     if (archive_read_open_memory(a.get(), data.constData(), size_t(data.size())) != ARCHIVE_OK)
         return Archive(nullptr, &archive_read_free);
@@ -231,11 +235,9 @@ QVector<Entry> list(const QByteArray &data, int most, bool *complete)
     if (complete)
         *complete = false;
     Archive a = open(data);
-    if (!a)
-        return out;
     archive_entry *entry = nullptr;
-    int result = ARCHIVE_OK;
-    while (out.size() < most && (result = archive_read_next_header(a.get(), &entry)) == ARCHIVE_OK) {
+    int result = ARCHIVE_FATAL;
+    while (a && out.size() < most && (result = archive_read_next_header(a.get(), &entry)) == ARCHIVE_OK) {
         Entry e;
         e.path = entryPath(entry);
         e.folder = archive_entry_filetype(entry) == AE_IFDIR || e.path.endsWith(QLatin1Char('/'));
@@ -244,6 +246,24 @@ QVector<Entry> list(const QByteArray &data, int most, bool *complete)
     }
     if (complete)
         *complete = result == ARCHIVE_EOF;
+    // A .gz that isn't a .tar.gz packs one file: its name is in the gzip header, and its size in
+    // the last four bytes (when the whole file is there).
+    const auto *b = reinterpret_cast<const uchar *>(data.constData());
+    if (out.isEmpty() && data.size() > 18 && b[0] == 0x1F && b[1] == 0x8B && b[2] == 8) {
+        Entry e;
+        if (b[3] & 8) {
+            qsizetype at = 10 + ((b[3] & 4) ? 2 + (b[10] | b[11] << 8) : 0);
+            const qsizetype zero = at < data.size() ? data.indexOf('\0', at) : -1;
+            if (zero > at && zero - at < 1024)
+                e.path = QString::fromLatin1(data.mid(at, zero - at)); // ISO 8859-1, as gzip says
+        }
+        if (e.path.isEmpty())
+            e.path = QCoreApplication::translate("officetext", "(one file, its name not kept)");
+        e.size = qFromLittleEndian<quint32>(b + data.size() - 4);
+        out.push_back(e);
+        if (complete)
+            *complete = true;
+    }
     return out;
 }
 

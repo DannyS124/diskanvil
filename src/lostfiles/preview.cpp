@@ -8,6 +8,8 @@
 #include "format.h"
 #include "mediainfo.h"
 #include "officetext.h"
+#include "ole.h"
+#include "pictures.h"
 
 #include <QBuffer>
 #include <QCoreApplication>
@@ -47,37 +49,6 @@ constexpr qint64 kMostMessage = kMostPdfData + 1024 * 1024;
 QString tr(const char *text)
 {
     return QCoreApplication::translate("preview", text);
-}
-
-QByteArray readerFormat(const QString &id)
-{
-    if (id == QLatin1String("jpg"))
-        return "jpeg";
-    if (id == QLatin1String("heic"))
-        return "heif";
-    if (id == QLatin1String("png") || id == QLatin1String("gif") || id == QLatin1String("bmp") || id == QLatin1String("webp")
-        || id == QLatin1String("avif"))
-        return id.toLatin1();
-    return {};
-}
-
-// A picture from bytes, scaled down to fit `pixels`; null when it isn't one that can be shown.
-QImage picture(QByteArray data, const QByteArray &format, int pixels)
-{
-    QBuffer buffer(&data);
-    buffer.open(QIODevice::ReadOnly);
-    QImageReader reader(&buffer, format);
-    // Only the decoder for what it's said to be ever sees the bytes.
-    reader.setDecideFormatFromContent(format.isEmpty());
-    reader.setAutoDetectImageFormat(format.isEmpty());
-    reader.setAutoTransform(true);
-    const QSize full = reader.size();
-    if (full.isValid() && pixels > 0 && (full.width() > pixels || full.height() > pixels))
-        reader.setScaledSize(full.scaled(QSize(pixels, pixels), Qt::KeepAspectRatio));
-    QImage image = reader.read();
-    if (!image.isNull() && pixels > 0 && (image.width() > pixels || image.height() > pixels))
-        image = image.scaled(pixels, pixels, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-    return image;
 }
 
 // A film's first frame, from ffmpeg when it's installed (never on DiskForge Live: too big).
@@ -245,13 +216,11 @@ Result make(const Request &r)
     const bool partial = quint64(r.data.size()) < r.size;
 
     if (type && type->category == filetypes::Category::Picture) {
-        out.image = picture(r.data, readerFormat(id), r.pixels);
+        out.image = pictures::decode(r.data, r.type, r.pixels);
         // When, with what and where it was taken, as the camera wrote it down.
         out.facts = exif::describe(exif::read(r.data));
         if (std::none_of(out.facts.cbegin(), out.facts.cend(), [](const QString &f) { return f.startsWith(exif::sizeLabel() + QLatin1Char('\t')); })) {
-            QBuffer buffer(const_cast<QByteArray *>(&r.data));
-            QImageReader reader(&buffer, readerFormat(id));
-            const QSize size = reader.size();
+            const QSize size = pictures::size(r.data, r.type);
             if (size.isValid())
                 out.facts << exif::sizeLabel() + QLatin1Char('\t') + tr("%1 × %2 pixels").arg(size.width()).arg(size.height());
         }
@@ -301,6 +270,15 @@ Result make(const Request &r)
         return out;
     }
 #endif
+    if (id == QLatin1String("doc") || id == QLatin1String("xls") || id == QLatin1String("ppt") || id == QLatin1String("msg")
+        || id == QLatin1String("ole")) {
+        const ole::File file(r.data);
+        out.text = ole::text(file);
+        out.facts = ole::properties(file);
+        if (out.text.isEmpty() && ole::locked(file))
+            out.text = tr("It's locked with a password, so its words can't be shown.");
+        return out;
+    }
     if (type && type->category == filetypes::Category::Document) {
         out.text = officetext::text(r.type, r.data);
         out.facts = officetext::properties(r.type, r.data);
@@ -327,7 +305,7 @@ Result make(const Request &r)
             out.facts << tr("Recorded") + QLatin1Char('\t') + QLocale().toString(info.recorded.toLocalTime().date(), QLocale::LongFormat)
                              + QStringLiteral(", ") + QLocale().toString(info.recorded.toLocalTime().time(), QLocale::ShortFormat);
         if (!info.cover.isEmpty())
-            out.image = picture(info.cover, QByteArray(), r.pixels);
+            out.image = pictures::decode(info.cover, -1, r.pixels);
         if (out.image.isNull() && type->category == filetypes::Category::Video)
             out.image = frame(r.data, r.pixels);
         return out;

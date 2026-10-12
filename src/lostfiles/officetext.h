@@ -28,7 +28,7 @@ struct Entry {
     quint64 size = 0;
     bool folder = false;
 };
-// What a ZIP, 7z, jar, apk or epub holds, up to `most` entries. `complete` says whether it got to
+// What a ZIP, 7z, RAR, jar, apk, epub or .tar.gz holds (or the one file a .gz packs), up to `most` entries. `complete` says whether it got to
 // the end without trouble.
 QVector<Entry> list(const QByteArray &data, int most, bool *complete = nullptr);
 

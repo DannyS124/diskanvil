@@ -50,6 +50,9 @@ public:
     // films, music and archives are; programs, scripts and anything unknown aren't, since
     // opening them could run them.
     static bool safeToOpen(const QString &name);
+    // Whether a copy carries macros: an Office 97-2003 file (.doc, .xls, .ppt) with VBA in it or
+    // Excel 4.0 macro sheets. Those aren't opened in their own program either.
+    static bool hasMacros(const QString &copy);
 
 private:
     QString m_disk;

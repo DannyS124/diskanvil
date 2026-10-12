@@ -1452,6 +1452,13 @@ void LostFilesDialog::openInProgram(int index)
         return;
     }
     const QString copy = lookCopy(index);
+    if (!copy.isEmpty() && lost::LookCopies::hasMacros(copy)) {
+        QMessageBox::information(this, windowTitle(),
+                                 tr("\"%1\" has macros in it (small programs), which could run when it's opened in its own program. "
+                                    "Look at it here with View, or save it and check it with Scan for Viruses first.")
+                                     .arg(f.name));
+        return;
+    }
     if (!copy.isEmpty() && !QDesktopServices::openUrl(QUrl::fromLocalFile(copy)))
         QMessageBox::information(this, windowTitle(), tr("There's no program on this computer for that kind of file."));
 }
@@ -1612,7 +1619,7 @@ void LostFilesDialog::viewerShow(int index)
     m.show.where = row >= 0 ? tr("%1 of %2").arg(row + 1).arg(m_model->rowCount()) : QString();
     m.show.previous = neighbour(index, -1) >= 0;
     m.show.next = neighbour(index, 1) >= 0;
-    m.show.openable = lost::LookCopies::safeToOpen(f.name);
+    m.show.openable = lost::LookCopies::safeToOpen(f.name) && !lost::LookCopies::hasMacros(copy);
     m.show.facts = factsFor(index);
     m_viewerIndex = index;
     sendToViewer(viewer::encode(m));

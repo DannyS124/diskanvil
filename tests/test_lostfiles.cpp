@@ -17,6 +17,8 @@
 #include "../src/lostfiles/lostsource.h"
 #include "../src/lostfiles/mediainfo.h"
 #include "../src/lostfiles/officetext.h"
+#include "../src/lostfiles/ole.h"
+#include "../src/lostfiles/pictures.h"
 #include "../src/lostfiles/preview.h"
 #include "../src/lostfiles/previewloader.h"
 #include "../src/lostfiles/viewer.h"
@@ -463,7 +465,7 @@ QByteArray asf(bool video)
 
 // A compound file (OLE2) as Office 97-2003 writes them: 512-byte sectors, a big stream in
 // sectors of its own and a small one in the mini stream.
-QByteArray ole(const QString &bigName, const QByteArray &big, const QString &smallName, const QByteArray &small)
+QByteArray compoundFile(const QString &bigName, const QByteArray &big, const QString &smallName, const QByteArray &small)
 {
     const quint32 kEnd = 0xFFFFFFFE, kFree = 0xFFFFFFFF, kFatSector = 0xFFFFFFFD;
     const int bigSectors = int((big.size() + 511) / 512), miniSectors = int((small.size() + 63) / 64);
@@ -559,10 +561,10 @@ QVector<Sample> samples()
         {QStringLiteral("flac"), flac()},
         {QStringLiteral("wmv"), asf(true)},
         {QStringLiteral("wma"), asf(false)},
-        {QStringLiteral("doc"), ole(QStringLiteral("WordDocument"), QByteArray(5000, 'w'), QStringLiteral("\x05SummaryInformation"), QByteArray(200, 's'))},
-        {QStringLiteral("xls"), ole(QStringLiteral("Workbook"), QByteArray(4200, 'x'), QStringLiteral("\x05SummaryInformation"), QByteArray(100, 's'))},
-        {QStringLiteral("ppt"), ole(QStringLiteral("PowerPoint Document"), QByteArray(4500, 'p'), QStringLiteral("Current User"), QByteArray(60, 'u'))},
-        {QStringLiteral("msg"), ole(QStringLiteral("__substg1.0_1000001F"), QByteArray(4800, 'b'), QStringLiteral("__substg1.0_0037001F"), QByteArray(40, 't'))},
+        {QStringLiteral("doc"), compoundFile(QStringLiteral("WordDocument"), QByteArray(5000, 'w'), QStringLiteral("\x05SummaryInformation"), QByteArray(200, 's'))},
+        {QStringLiteral("xls"), compoundFile(QStringLiteral("Workbook"), QByteArray(4200, 'x'), QStringLiteral("\x05SummaryInformation"), QByteArray(100, 's'))},
+        {QStringLiteral("ppt"), compoundFile(QStringLiteral("PowerPoint Document"), QByteArray(4500, 'p'), QStringLiteral("Current User"), QByteArray(60, 'u'))},
+        {QStringLiteral("msg"), compoundFile(QStringLiteral("__substg1.0_1000001F"), QByteArray(4800, 'b'), QStringLiteral("__substg1.0_0037001F"), QByteArray(40, 't'))},
         {QStringLiteral("gz"), gzipped(QByteArray(70000, 'z'))},
     };
     return s;
@@ -1995,6 +1997,212 @@ void viewerMessages()
            QStringLiteral("viewer: pictures, PDFs, films, songs, documents, archives, text and the rest each get their own view"));
 }
 
+// The kinds added in 0.5.2, against files made by the programs that make them for real
+// (tests/data/lostfs/types/make.sh): each is found whole, to the byte, and shown: its words,
+// its picture, its details.
+QByteArray typesFile(const QString &name)
+{
+    const QString path = QStringLiteral(SOURCE_DIR "/tests/data/lostfs/types/") + name;
+    if (name.endsWith(QLatin1String(".zst")))
+        return unpack(path);
+    QFile f(path);
+    return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
+}
+
+filetypes::Measured measured(const QByteArray &d)
+{
+    const QVector<int> types = filetypes::candidates(reinterpret_cast<const uchar *>(d.constData()), int(std::min<qsizetype>(d.size(), 512)));
+    for (int type : types) {
+        const filetypes::Reader read = [&d](quint64 at, char *buf, qint64 len) -> qint64 {
+            if (at >= quint64(d.size()))
+                return 0;
+            const qint64 n = std::min<qint64>(len, d.size() - qint64(at));
+            memcpy(buf, d.constData() + at, size_t(n));
+            return n;
+        };
+        const filetypes::Measured m = filetypes::measure(type, read);
+        if (m.size > 0)
+            return m;
+    }
+    return {};
+}
+
+preview::Result previewOf(const QByteArray &d, int type, int pixels = 256)
+{
+    preview::Request r;
+    r.type = type;
+    r.size = quint64(d.size());
+    r.pixels = pixels;
+    r.data = d;
+    return preview::make(r);
+}
+
+void newKinds()
+{
+    struct Case {
+        const char *file, *type;
+    };
+    // With the files' own names: a long "Lake trip.mkv" in the store, the real thing on a disk.
+    const Case cases[] = {{"notes.doc", "doc"},       {"budget.xls.zst", "xls"}, {"slides.ppt.zst", "ppt"}, {"ferry.msg", "msg"},
+                          {"macros.doc", "doc"},      {"picture.tif", "tif"},    {"trip.mkv", "mkv"},       {"trip.webm", "webm"},
+                          {"song.flac", "flac"},      {"trip.wmv", "wmv"},       {"song.wma", "wma"},       {"notes.txt.gz", "gz"},
+                          {"pictures.tar.gz", "gz"}};
+    QHash<QString, QByteArray> files;
+    for (const Case &c : cases) {
+        const QByteArray d = typesFile(QString::fromLatin1(c.file));
+        files.insert(QString::fromLatin1(c.file), d);
+        const filetypes::Measured m = measured(d);
+        const QString got = m.type >= 0 && m.type < filetypes::types().size() ? filetypes::types()[m.type].id : QStringLiteral("nothing");
+        report(!d.isEmpty() && got == QLatin1String(c.type) && m.complete && m.size == quint64(d.size()),
+               QStringLiteral("%1: found as %2, whole, to the byte").arg(QString::fromLatin1(c.file), got),
+               QStringLiteral("%1 bytes of %2, %3").arg(m.size).arg(d.size()).arg(m.complete ? QStringLiteral("whole") : QStringLiteral("not whole")));
+    }
+    const auto type = [](const char *id) { return filetypes::typeForName(QStringLiteral("x.") + QString::fromLatin1(id)); };
+    const auto fact = [](const QStringList &facts, const QString &label) {
+        for (const QString &f : facts) {
+            if (f.section(QLatin1Char('\t'), 0, 0) == label)
+                return f.section(QLatin1Char('\t'), 1);
+        }
+        return QString();
+    };
+
+    // Word: the text from its pieces, past the plain-ASCII ones, and what it says about itself.
+    const ole::File doc(files.value(QStringLiteral("notes.doc")));
+    const QString words = ole::text(doc, 100000);
+    report(words.startsWith(QLatin1String("Pack the blue tent and the camera.\nThe ferry leaves at 07:45 from pier 3, so don't be late."))
+               && words.contains(QStringLiteral("Unicode check: café, naïve, Straße, 東京.")) && words.endsWith(QLatin1String("Line 120 of the packing list.")),
+           QStringLiteral("doc: its words, every piece of them"), words.left(160));
+    const preview::Result docPreview = previewOf(files.value(QStringLiteral("notes.doc")), type("doc"));
+    report(fact(docPreview.facts, QStringLiteral("Title")) == QLatin1String("Holiday plans") && fact(docPreview.facts, QStringLiteral("Author")) == QLatin1String("Sam Tester")
+               && fact(docPreview.facts, QStringLiteral("Created")).contains(QLatin1String("2024")) && docPreview.text.startsWith(QLatin1String("Pack the blue tent")),
+           QStringLiteral("doc: its title, author and when it was made"), docPreview.facts.join(QStringLiteral(" | ")));
+    report(!ole::hasMacros(doc) && ole::hasMacros(ole::File(files.value(QStringLiteral("macros.doc")))),
+           QStringLiteral("doc: one with macros is told from one without"));
+
+    // Excel: both sheets, every cell, the words from the shared table even where it runs on into
+    // the records after it, and a formula's answer.
+    const ole::File xls(files.value(QStringLiteral("budget.xls.zst")));
+    const QString cells = ole::text(xls, 1000000);
+    QString missing;
+    for (int i = 1; i <= 800 && missing.isEmpty(); ++i) {
+        const QString line = QStringLiteral("Place number %1 on the long road north\t%2\n").arg(i, 4, 10, QLatin1Char('0')).arg(i * 7);
+        if (!(cells + QLatin1Char('\n')).contains(line))
+            missing = line;
+    }
+    const bool every = missing.isEmpty();
+    report(cells.startsWith(QStringLiteral("[Groceries]\nItem\tCost\nBread\t2.5\nMilk\t1.25\nCafé crème\t3.75\nTotal\t")) && cells.contains(QLatin1String("\n\n[Road]\n")) && every,
+           QStringLiteral("xls: both sheets, all 805 rows, words split across records put back together"),
+           every ? cells.left(200) : QStringLiteral("missing: ") + missing + QStringLiteral(" near: ") + cells.mid(cells.indexOf(missing.left(17)) - 60, 200));
+    report(fact(ole::properties(xls), QStringLiteral("Title")) == QLatin1String("Budget"), QStringLiteral("xls: what it says about itself"));
+
+    // PowerPoint: the slides' words, in order, without the master slides' "Click to edit".
+    const ole::File ppt(files.value(QStringLiteral("slides.ppt.zst")));
+    const QString slides = ole::text(ppt, 100000);
+    report(slides.contains(QLatin1String("Summer trip")) && slides.indexOf(QLatin1String("Day one: the lake")) < slides.indexOf(QLatin1String("Day two: the mountains"))
+               && slides.indexOf(QLatin1String("Day one")) >= 0 && !slides.contains(QLatin1String("Click to edit")),
+           QStringLiteral("ppt: the slides' words, in order"), slides.left(200));
+    report(fact(ole::properties(ppt), QStringLiteral("Title")) == QLatin1String("Trip slides") && !ole::hasMacros(ppt),
+           QStringLiteral("ppt: its title, and no macros"));
+
+    // Outlook: who, to whom, when, what about, what came with it, and the message.
+    const ole::File msg(files.value(QStringLiteral("ferry.msg")));
+    const QString email = ole::text(msg, 100000);
+    const QStringList mailFacts = ole::properties(msg);
+    report(email.startsWith(QLatin1String("From: Sam Tester <sam@example.com>\nTo: Alex Example\n")) && email.contains(QLatin1String("\nSubject: Ferry tickets\n"))
+               && email.contains(QLatin1String("\nAttached: tickets.pdf\n")) && email.contains(QLatin1String("See you at pier 3.")) && email.endsWith(QLatin1String("Sam"))
+               && fact(mailFacts, QStringLiteral("Sent")).contains(QLatin1String("2024")) && fact(mailFacts, QStringLiteral("Subject")) == QLatin1String("Ferry tickets"),
+           QStringLiteral("msg: the email with its sender, recipient, date, subject and attachment"), email.left(200));
+    // Locked: a password-protected Office 2007+ file is a compound file of two streams.
+    report(ole::locked(ole::File(compoundFile(QStringLiteral("EncryptedPackage"), QByteArray(5000, 'e'), QStringLiteral("EncryptionInfo"), QByteArray(200, 'i'))))
+               && !ole::locked(doc),
+           QStringLiteral("office: a locked file is told apart"));
+
+    // Pictures: a TIFF through Qt's reader; a raw photo through the JPEG the camera put in it; a
+    // Photoshop file through our own reading of its merged picture, packed or not.
+    const QImage tif = pictures::decode(files.value(QStringLiteral("picture.tif")), type("tif"), 0);
+    report(tif.size() == QSize(96, 64) && qRed(tif.pixel(30, 30)) > 200 && qGreen(tif.pixel(72, 32)) > 200,
+           QStringLiteral("tif: the picture"), QStringLiteral("%1x%2").arg(tif.width()).arg(tif.height()));
+    const QImage nef = pictures::decode(tiff("NIKON CORPORATION"), type("nef"), 0);
+    report(nef.size() == QSize(320, 200) && previewOf(tiff("NIKON CORPORATION"), type("nef"), 64).image.width() == 64,
+           QStringLiteral("raw: the camera's own JPEG inside it, full size and as a thumbnail"));
+    const QImage raw = pictures::decode(raf(), type("raf"), 0);
+    report(raw.size() == QSize(320, 200), QStringLiteral("raf: the camera's own JPEG inside it"));
+    const QImage flat = pictures::decode(psd(false), type("psd"), 0), packed = pictures::decode(psd(true), type("psd"), 0);
+    report(flat.size() == QSize(4, 4) && flat.pixel(1, 1) == qRgb(0x77, 0x77, 0x77) && packed.size() == QSize(4, 4)
+               && packed.pixel(0, 0) == qRgb(0x10, 0x10, 0x10) && packed.pixel(3, 2) == qRgb(0x40, 0x40, 0x40),
+           QStringLiteral("psd: the merged picture, as it is and packed row by row"));
+    QByteArray cut = psd(true);
+    cut.chop(10);
+    report(pictures::decode(cut, type("psd"), 0).height() == 2, QStringLiteral("psd: cut short, the rows that are there")); // blue's last 2 rows gone
+
+    // Films and songs: how long, how big, what with, the tags and the cover.
+    const auto media = [&files, &type](const char *file, const char *id) {
+        return mediainfo::read(type(id), files.value(QString::fromLatin1(file)), quint64(files.value(QString::fromLatin1(file)).size()));
+    };
+    const mediainfo::Info mkv = media("trip.mkv", "mkv");
+    report(mkv.width == 64 && mkv.height == 48 && mkv.codec == QLatin1String("MJPEG") && qAbs(mkv.durationMs - 2000) < 50 && mkv.title == QLatin1String("Lake trip")
+               && mkv.artist == QLatin1String("Sam Tester") && !mkv.cover.isEmpty() && mkv.recorded.date() == QDate(2024, 7, 14),
+           QStringLiteral("mkv: size, codec, length, title, artist, cover and date"), mediainfo::describe(mkv));
+    const mediainfo::Info webm = media("trip.webm", "webm");
+    report(webm.width == 64 && webm.codec == QLatin1String("VP9") && qAbs(webm.durationMs - 1000) < 50, QStringLiteral("webm: size, codec and length"),
+           mediainfo::describe(webm));
+    const mediainfo::Info flac = media("song.flac", "flac");
+    report(flac.codec == QLatin1String("FLAC") && flac.sampleRate == 44100 && qAbs(flac.durationMs - 1500) < 30 && flac.title == QLatin1String("Lake trip")
+               && flac.album == QLatin1String("Summer") && flac.year == QLatin1String("2024") && !QImage::fromData(flac.cover).isNull(),
+           QStringLiteral("flac: length, rate, tags and cover"), mediainfo::describe(flac));
+    const mediainfo::Info wmv = media("trip.wmv", "wmv");
+    report(wmv.width == 64 && wmv.height == 48 && wmv.codec == QLatin1String("WMV2") && qAbs(wmv.durationMs - 2000) < 150 && wmv.title == QLatin1String("Lake trip")
+               && wmv.artist == QLatin1String("Sam Tester"),
+           QStringLiteral("wmv: size, codec, length, title and artist"), mediainfo::describe(wmv));
+    const mediainfo::Info wma = media("song.wma", "wma");
+    report(wma.codec == QLatin1String("WMA") && wma.sampleRate == 44100 && wma.album == QLatin1String("Summer") && wma.year == QLatin1String("2024"),
+           QStringLiteral("wma: codec, rate, album and year"), mediainfo::describe(wma));
+
+    // Archives: a .gz's one file, by the name it kept; what a .tar.gz holds; a RAR's files.
+    const QVector<officetext::Entry> gz = officetext::list(files.value(QStringLiteral("notes.txt.gz")), 10);
+    report(gz.size() == 1 && gz[0].path == QLatin1String("notes.txt") && gz[0].size == 20, QStringLiteral("gz: the file it packs, its name and size"));
+    const QVector<officetext::Entry> tgz = officetext::list(files.value(QStringLiteral("pictures.tar.gz")), 10);
+    report(tgz.size() == 2 && tgz[0].path == QLatin1String("cover.jpg") && tgz[1].path == QLatin1String("picture.tif"), QStringLiteral("tar.gz: what's in it"));
+    const QVector<officetext::Entry> rar5List = officetext::list(rar5(), 10), rar4List = officetext::list(rar4(), 10);
+    report(rar5List.size() == 1 && rar5List[0].path == QLatin1String("notes.txt") && rar5List[0].size == 2500 && rar4List.size() == 1
+               && rar4List[0].path == QLatin1String("old.txt") && rar4List[0].size == 1800,
+           QStringLiteral("rar: what's in a RAR 5 and a RAR 4 archive"),
+           QStringLiteral("%1 %2 / %3 %4").arg(rar5List.value(0).path).arg(rar5List.value(0).size).arg(rar4List.value(0).path).arg(rar4List.value(0).size));
+
+    // The viewer shows each in its own way.
+    const auto kind = [](const char *name) { return viewer::kindFor(filetypes::typeForName(QString::fromLatin1(name)), QString::fromLatin1(name)); };
+    report(kind("a.nef") == viewer::Kind::Picture && kind("b.psd") == viewer::Kind::Picture && kind("c.mkv") == viewer::Kind::Film
+               && kind("d.flac") == viewer::Kind::Song && kind("e.doc") == viewer::Kind::Words && kind("f.msg") == viewer::Kind::Words
+               && kind("g.rar") == viewer::Kind::Words,
+           QStringLiteral("viewer: the new kinds each get their view"));
+
+    // Damaged ones never crash any of it.
+    QRandomGenerator rng(2026);
+    int runs = 0;
+    for (const Case &c : cases) {
+        const QByteArray good = files.value(QString::fromLatin1(c.file));
+        for (int round = 0; round < 60; ++round, ++runs) {
+            QByteArray bad = good;
+            for (int k = 0, n = 1 + int(rng.bounded(16)); k < n; ++k)
+                bad[int(rng.bounded(quint32(bad.size())))] = char(rng.bounded(256));
+            if (round % 3 == 0)
+                bad.truncate(qsizetype(rng.bounded(quint32(bad.size()))));
+            const ole::File f(bad);
+            ole::text(f, 20000);
+            ole::properties(f);
+            previewOf(bad, type(c.type), 64);
+            measured(bad);
+        }
+    }
+    for (int round = 0; round < 300; ++round, ++runs) {
+        QByteArray bad = round % 2 ? psd(true) : tiff("SONY");
+        for (int k = 0, n = 1 + int(rng.bounded(8)); k < n; ++k)
+            bad[int(rng.bounded(quint32(bad.size())))] = char(rng.bounded(256));
+        pictures::decode(bad, type(round % 2 ? "psd" : "arw"), 64);
+    }
+    report(true, QStringLiteral("new kinds: %1 damaged files read without a crash").arg(runs));
+}
+
 void lostFilesTests()
 {
     previewQueue();
@@ -2014,4 +2222,5 @@ void lostFilesTests()
     virtualDisks();
     virtualDiskFuzz();
     mediaAndOffice();
+    newKinds();
 }

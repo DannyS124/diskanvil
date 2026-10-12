@@ -8,6 +8,8 @@
 #include "hostprocess.h"
 #include "mediainfo.h"
 #include "officetext.h"
+#include "ole.h"
+#include "pictures.h"
 #include "preview.h"
 
 #include <QAbstractScrollArea>
@@ -92,6 +94,8 @@ Kind kindFor(int type, const QString &name)
         const filetypes::Type &t = filetypes::types()[type];
         if (t.id == QLatin1String("pdf"))
             return Kind::Pdf;
+        if (t.id == QLatin1String("ole"))
+            return Kind::Words;
         switch (t.category) {
         case filetypes::Category::Picture:
             return Kind::Picture;
@@ -198,10 +202,23 @@ public:
         viewport()->setCursor(Qt::OpenHandCursor);
     }
 
-    bool load(const QString &path, QString *why)
+    bool load(const QString &path, int type, QString *why)
     {
         clear();
-        QImageReader reader(path);
+        // Raw photos and Photoshop files: our own reading of them (pictures.h), the same as the previews.
+        const QString id = type >= 0 && type < filetypes::types().size() ? filetypes::types()[type].id : QString();
+        if (pictures::isRaw(id) || id == QLatin1String("psd")) {
+            QFile file(path);
+            QString problem;
+            m_image = file.open(QIODevice::ReadOnly) ? pictures::decode(file.read(512ll * 1024 * 1024), type, 0, &problem) : QImage();
+            if (m_image.isNull()) {
+                *why = viewer::tr("This picture can't be shown: %1.").arg(problem.isEmpty() ? file.errorString() : problem);
+                return false;
+            }
+            fit();
+            return true;
+        }
+        QImageReader reader(path, pictures::readerFormat(id));
         reader.setAutoTransform(true); // the way the camera was held
         if (reader.supportsAnimation() && reader.imageCount() > 1) {
             m_movie = new QMovie(path, QByteArray(), this);
@@ -557,6 +574,13 @@ public:
         m_player->setVideoOutput(m_video);
         m_screen->addWidget(m_video);
         QObject::connect(m_player, &QMediaPlayer::playbackStateChanged, this, [this] { showState(); });
+        // At the end it goes back to the start, paused, showing the first picture (not an empty screen).
+        QObject::connect(m_player, &QMediaPlayer::mediaStatusChanged, this, [this](QMediaPlayer::MediaStatus status) {
+            if (status == QMediaPlayer::EndOfMedia) {
+                m_player->setPosition(0);
+                m_player->pause();
+            }
+        });
         QObject::connect(m_player, &QMediaPlayer::durationChanged, this, [this](qint64 ms) {
             m_position->setRange(0, int(ms / 100));
             showTime();
@@ -807,7 +831,7 @@ void Window::present(const Show &show)
 
     QString why;
     Kind kind = show.kind;
-    if (kind == Kind::Picture && !m_picture->load(show.path, &why))
+    if (kind == Kind::Picture && !m_picture->load(show.path, show.type, &why))
         kind = Kind::Bytes;
     else if (kind == Kind::Pdf && !m_pdf->load(show.path, &why))
         kind = Kind::Bytes;
@@ -819,8 +843,14 @@ void Window::present(const Show &show)
         QByteArray data = file.open(QIODevice::ReadOnly) ? file.read(64 * 1024 * 1024) : QByteArray();
         QString text;
         const filetypes::Type *type = show.type >= 0 && show.type < filetypes::types().size() ? &filetypes::types()[show.type] : nullptr;
-        if (type && type->category == filetypes::Category::Document)
+        if (type && QStringList{QStringLiteral("doc"), QStringLiteral("xls"), QStringLiteral("ppt"), QStringLiteral("msg"), QStringLiteral("ole")}.contains(type->id)) {
+            const ole::File compound(data);
+            text = ole::text(compound, 2000000);
+            if (text.isEmpty() && ole::locked(compound))
+                why = tr("It's locked with a password, so its words can't be shown.");
+        } else if (type && type->category == filetypes::Category::Document) {
             text = officetext::text(show.type, data, 2000000);
+        }
         if (text.isEmpty() && type && (type->category == filetypes::Category::Archive || type->id == QLatin1String("epub"))) {
             QStringList lines;
             for (const officetext::Entry &e : officetext::list(data, 20000))
@@ -837,7 +867,8 @@ void Window::present(const Show &show)
                 text = QString::fromLatin1(data);
         }
         if (text.isEmpty()) {
-            why = tr("No words could be read from it: it may be damaged.");
+            if (why.isEmpty())
+                why = tr("No words could be read from it: it may be damaged.");
             kind = Kind::Bytes;
         } else {
             m_words->setPlainText(text);

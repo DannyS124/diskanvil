@@ -68,6 +68,7 @@ add_library(diskforge-core STATIC
     src/lostfiles/exif.cpp src/lostfiles/exif.h
     src/lostfiles/lookcopies.cpp src/lostfiles/lookcopies.h
     src/lostfiles/officetext.cpp src/lostfiles/officetext.h
+    src/lostfiles/ole.cpp src/lostfiles/ole.h
     src/viruses/virusscan.cpp src/viruses/virusscan.h
     src/viruses/reghive.cpp src/viruses/reghive.h
     src/viruses/winstartup.cpp src/viruses/winstartup.h
@@ -137,6 +138,7 @@ add_library(diskforge-ui STATIC
     src/app/homewindow.cpp src/app/homewindow.h
     src/lostfiles/lostfilesdialog.cpp src/lostfiles/lostfilesdialog.h
     src/lostfiles/preview.cpp src/lostfiles/preview.h
+    src/lostfiles/pictures.cpp src/lostfiles/pictures.h
     src/lostfiles/previewloader.cpp src/lostfiles/previewloader.h
     src/lostfiles/viewer.cpp src/lostfiles/viewer.h
     src/app/mainwindow.cpp src/app/mainwindow.h
