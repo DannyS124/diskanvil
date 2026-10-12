@@ -14,6 +14,8 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 
+#include <unistd.h>
+
 namespace {
 
 bool put(const QString &path, const QByteArray &data)
@@ -104,13 +106,18 @@ void saveFilesTests()
         saver.run();
     }
     const QString saved = result.folder;
+    // As root (a build container) every file can be read, the "unreadable" one too.
+    const bool asRoot = ::geteuid() == 0;
+    if (asRoot)
+        out << "SKIP  save files: the file that can't be read (root reads everything)" << Qt::endl;
     report(read(saved + QStringLiteral("/alice/Documents/taxes/2025.txt")) == QByteArray(300000, 't') && read(saved + QStringLiteral("/bob/Pictures/cat.png")).size() == 2000
-               && result.files == 5 && result.failed.size() == 1 && result.failed.first().startsWith(QLatin1String("alice/Documents/stuck.txt")),
+               && (asRoot ? result.files == 6 && result.failed.isEmpty()
+                        : result.files == 5 && result.failed.size() == 1 && result.failed.first().startsWith(QLatin1String("alice/Documents/stuck.txt"))),
            QStringLiteral("save files: everything readable is copied, and the file that can't be read is listed, not a stop"),
            QStringLiteral("%1 files, failed: %2").arg(result.files).arg(result.failed.join(QStringLiteral("; "))));
     const QString note = QString::fromUtf8(read(saved + QStringLiteral("/What was saved.txt")));
     const QString firefox = QString::fromUtf8(read(saved + QStringLiteral("/bob/Bookmarks/Firefox (ab12.default-release).html")));
-    report(note.contains(QLatin1String("Not saved:")) && note.contains(QLatin1String("stuck.txt")) && QFile::exists(saved + QStringLiteral("/alice/Bookmarks/Chrome (Default).html"))
+    report((asRoot || (note.contains(QLatin1String("Not saved:")) && note.contains(QLatin1String("stuck.txt")))) && QFile::exists(saved + QStringLiteral("/alice/Bookmarks/Chrome (Default).html"))
                && QFile::exists(saved + QStringLiteral("/alice/Bookmarks/Chrome (Default)/Bookmarks")),
            QStringLiteral("save files: a note says what was saved and what wasn't, and the bookmarks are there twice (html, and the browser's own)"));
     if (sqlite)
