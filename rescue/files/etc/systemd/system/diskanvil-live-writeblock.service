@@ -1,0 +1,16 @@
+# DiskAnvil Live started from "Start with drives write-protected" (diskanvil-live.writeblock on
+# the kernel line): every drive but its own stick is read-only before anything can mount it.
+[Unit]
+Description=DiskAnvil Live: drives write-protected
+ConditionKernelCommandLine=diskanvil-live.writeblock
+DefaultDependencies=no
+After=systemd-udev-trigger.service systemd-udev-settle.service
+Before=udisks2.service sysinit.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/diskanvil-live-writeblock on
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target

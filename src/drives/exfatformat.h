@@ -3,7 +3,7 @@
 
 #pragma once
 
-// DiskForge's own exFAT formatter, from Microsoft's published exFAT specification (2019). It's
+// DiskAnvil's own exFAT formatter, from Microsoft's published exFAT specification (2019). It's
 // here so a memory card gets the SD Card Association's layout on every system (sdcard.h):
 // Windows' own format can't place exFAT's tables on a card's erase blocks, and UDisks doesn't
 // pass mkfs.exfat's options on.

@@ -11,7 +11,7 @@
 // Sets a USB stick up through UDisks, one step at a time: a new partition table, its
 // partitions (each with its file system and label), their flags, then mounts the ones asked
 // for. Every step waits until UDisks shows the result before the next one starts. Make a
-// DiskForge Live USB, the file copy mode of Write Image to USB and Make a Windows USB use it.
+// DiskAnvil Live USB, the file copy mode of Write Image to USB and Make a Windows USB use it.
 //
 // It erases the stick: the dialogs ask first.
 class UsbPrep : public UDisksSteps

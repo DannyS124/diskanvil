@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # The icons for the Windows version, which has no icon theme of its own to borrow from:
-# DiskForge Live's, drawn for its dark desktop, and a light copy for Windows' usual light
+# DiskAnvil Live's, drawn for its dark desktop, and a light copy for Windows' usual light
 # windows, with each of its colours swapped for one that stands out on white.
-#   icons.py <DiskForge Live's theme folder> <out folder>
-# Ends with <out>/DiskForge-Dark and <out>/DiskForge-Light; DiskForge picks one by how light
+#   icons.py <DiskAnvil Live's theme folder> <out folder>
+# Ends with <out>/DiskAnvil-Dark and <out>/DiskAnvil-Light; DiskAnvil picks one by how light
 # its windows are.
 import os
 import shutil
@@ -54,8 +54,8 @@ def main():
     if len(sys.argv) != 3:
         sys.exit(__doc__ or "icons.py <theme folder> <out folder>")
     source, out = sys.argv[1], sys.argv[2]
-    copy_theme(source, os.path.join(out, "DiskForge-Dark"), "DiskForge Dark", "DiskForge Live's own icons", {})
-    copy_theme(source, os.path.join(out, "DiskForge-Light"), "DiskForge Light", "DiskForge Live's icons, for light windows", LIGHT)
+    copy_theme(source, os.path.join(out, "DiskAnvil-Dark"), "DiskAnvil Dark", "DiskAnvil Live's own icons", {})
+    copy_theme(source, os.path.join(out, "DiskAnvil-Light"), "DiskAnvil Light", "DiskAnvil Live's icons, for light windows", LIGHT)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=DiskAnvil
+GenericName=Disk Manager
+Comment=View, format, resize and partition disks
+Exec=@CMAKE_INSTALL_FULL_BINDIR@/diskanvil
+Icon=io.github.DannyS124.DiskAnvil
+Terminal=false
+StartupNotify=true
+Categories=Qt;System;Filesystem;
+Keywords=disk;manager;partition;editor;drive;usb;mount;format;resize;volume;gpt;mbr;

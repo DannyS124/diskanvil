@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Write an Image
+Comment=Put an ISO or a disk image on a USB stick (compressed ones too)
+Exec=diskanvil --open write-image
+Icon=diskanvil-live-writeimage
+Categories=System;

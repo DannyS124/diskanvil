@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Downloads the Windows builds of Qt and the other libraries DiskForge needs from MSYS2's UCRT64
+# Downloads the Windows builds of Qt and the other libraries DiskAnvil needs from MSYS2's UCRT64
 # repository, with everything they depend on, and unpacks them into one folder that the cross
 # build uses as its sysroot. Each package is checked against the checksum in the repository list.
 #   fetch-msys2.py <folder> <package>...
@@ -14,7 +14,7 @@ import urllib.request
 
 REPO = "https://repo.msys2.org/mingw/ucrt64"
 PREFIX = "mingw-w64-ucrt-x86_64-"
-# Things a package lists as needed that aren't needed to build or run DiskForge on Windows.
+# Things a package lists as needed that aren't needed to build or run DiskAnvil on Windows.
 SKIP = {"python", "perl", "tcl", "tk", "sqlite3", "gdb", "cmake", "ninja", "pkgconf"}
 
 

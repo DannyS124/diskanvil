@@ -7,7 +7,7 @@
 // itself so it starts again after every restart, read from a Windows' registry, scheduled
 // tasks and startup folders, and what looks odd about each entry, in plain words.
 //
-// A Windows on a drive that isn't running (DiskForge Live, or another drive) is read from its
+// A Windows on a drive that isn't running (DiskAnvil Live, or another drive) is read from its
 // files; the Windows that's running, through the registry API (the Windows version).
 
 #include "reghive.h"

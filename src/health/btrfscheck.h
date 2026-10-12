@@ -6,7 +6,7 @@
 // Btrfs keeps count of the read, write and checksum errors it has seen on each drive of a
 // file system, and the kernel shows them in /sys/fs/btrfs (readable by anyone, only while
 // it's mounted). A scrub reads everything back and checks it; it runs as systemd's
-// btrfs-scrub@ unit, which comes with btrfs-progs, so DiskForge never runs it as root
+// btrfs-scrub@ unit, which comes with btrfs-progs, so DiskAnvil never runs it as root
 // itself.
 
 #include <QString>

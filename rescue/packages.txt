@@ -39,7 +39,7 @@ open-vm-tools
 open-vm-tools-desktop
 spice-vdagent
 
-# The desktop (LXQt on X11, light and Qt like DiskForge). xserver-xorg brings the drivers
+# The desktop (LXQt on X11, light and Qt like DiskAnvil). xserver-xorg brings the drivers
 # for every graphics card X has one for.
 xserver-xorg
 # Lets X start as root, which "Safe graphics" (nomodeset, the VESA driver) needs
@@ -78,7 +78,7 @@ firefox-esr
 ca-certificates
 curl
 
-# Disk tools (DiskForge itself comes from our own .deb). The libblockdev plugins are how UDisks
+# Disk tools (DiskAnvil itself comes from our own .deb). The libblockdev plugins are how UDisks
 # does encryption, RAID, NVMe and the rest.
 udisks2
 udisks2-lvm2

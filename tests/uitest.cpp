@@ -7,9 +7,12 @@
 // - The right-click menus of the system disk offer nothing that writes to it.
 // - Clone Drive, with the disk list refreshed while its dialog is open.
 // - Back Up a partition, damage it, Restore it, and it's back exactly.
-// sudo QT_QPA_PLATFORM=offscreen build/diskforge-uitest
+// sudo QT_QPA_PLATFORM=offscreen build/diskanvil-uitest
 
 #include "../src/drives/writeblock.h"
+#include "../src/app/oldname.h"
+#include "../src/tools/remotehelp.h"
+#include "../src/tools/remotehelpdialog.h"
 #include "../src/addons/addonoutput.h"
 #include "../src/addons/addonform.h"
 #include "../src/addons/addonmaker.h"
@@ -179,7 +182,7 @@ void waitUntil(const std::function<bool()> &done, int ms)
 QAction *findAction(MainWindow &window, const QString &startsWith)
 {
     for (QAction *a : window.findChildren<QAction *>()) {
-        // Pinned add-on actions carry their add-on id and label; they're never DiskForge's own.
+        // Pinned add-on actions carry their add-on id and label; they're never DiskAnvil's own.
         if (a->data().toStringList().size() == 2)
             continue;
         if (a->text().remove(QLatin1Char('&')).startsWith(startsWith))
@@ -604,9 +607,9 @@ void addonMenus()
         edits.first()->setKeySequence(QKeySequence(Qt::Key_J));
         Q_EMIT edits.first()->editingFinished();
     }
-    report(warnings.size() == 2 && warnings.value(0).contains(QLatin1String("DiskForge's own")) && warnings.value(1).contains(QLatin1String("Ctrl"))
+    report(warnings.size() == 2 && warnings.value(0).contains(QLatin1String("DiskAnvil's own")) && warnings.value(1).contains(QLatin1String("Ctrl"))
                && Addons::shortcut(keyOf(QStringLiteral("Look Around"))) == QLatin1String("Ctrl+Alt+K"),
-           QStringLiteral("the Add-ons window refuses a shortcut DiskForge uses, or one without Ctrl/Alt"), warnings.join(QStringLiteral(" / ")));
+           QStringLiteral("the Add-ons window refuses a shortcut DiskAnvil uses, or one without Ctrl/Alt"), warnings.join(QStringLiteral(" / ")));
     for (QPushButton *button : dialog.findChildren<QPushButton *>()) {
         if (button->text() == QStringLiteral("Settings…"))
             button->click();
@@ -1008,7 +1011,7 @@ void lockInMap()
                                               QStringLiteral("--pbkdf"), QStringLiteral("pbkdf2"), QStringLiteral("--pbkdf-force-iterations"), QStringLiteral("1000"),
                                               QStringLiteral("--key-file=-"), part});
     luks.waitForStarted();
-    luks.write("diskforge-test");
+    luks.write("diskanvil-test");
     luks.closeWriteChannel();
     luks.waitForFinished(60000);
     report(luks.exitCode() == 0, QStringLiteral("make a LUKS test partition"), QString::fromLocal8Bit(luks.readAllStandardError()).trimmed());
@@ -1050,7 +1053,7 @@ void lockInMap()
     answerer.answer = [&asked](QWidget *modal) {
         if (auto *input = qobject_cast<QInputDialog *>(modal)) {
             asked = input->windowTitle();
-            input->setTextValue(QStringLiteral("diskforge-test"));
+            input->setTextValue(QStringLiteral("diskanvil-test"));
             input->accept();
             return true;
         }
@@ -1218,13 +1221,13 @@ void tryRepairFirst()
         waitUntil([&] { return status->text().startsWith(QLatin1String("The repair ran")) || status->text().contains(QLatin1String("couldn't")); }, 60000);
         report(status->text().startsWith(QLatin1String("The repair ran")) && dialog.findChild<QPlainTextEdit *>(QStringLiteral("output"))->toPlainText().contains(QLatin1String("MODIFIED")),
                QStringLiteral("try first: the repair runs on the stand-in"), status->text().left(160));
-        report(sh(QStringLiteral("e2fsck"), {QStringLiteral("-fn"), loop}) == 4 && sh(QStringLiteral("e2fsck"), {QStringLiteral("-fn"), QStringLiteral("/dev/mapper/diskforge-try")}) == 0,
+        report(sh(QStringLiteral("e2fsck"), {QStringLiteral("-fn"), loop}) == 4 && sh(QStringLiteral("e2fsck"), {QStringLiteral("-fn"), QStringLiteral("/dev/mapper/diskanvil-try")}) == 0,
                QStringLiteral("try first: the stand-in is repaired, the partition itself untouched"));
         findButton(&dialog, QStringLiteral("Throw It Away"))->click();
     }
     QString mapped;
     sh(QStringLiteral("dmsetup"), {QStringLiteral("ls")}, &mapped);
-    report(!mapped.contains(QLatin1String("diskforge-try")) && !QFile::exists(QStringLiteral("/tmp/diskforge-try.changes")),
+    report(!mapped.contains(QLatin1String("diskanvil-try")) && !QFile::exists(QStringLiteral("/tmp/diskanvil-try.changes")),
            QStringLiteral("try first: thrown away, nothing is left behind"), mapped.trimmed());
     sh(QStringLiteral("losetup"), {QStringLiteral("-d"), loop});
 }
@@ -1707,7 +1710,7 @@ int filesMatchingSums(const QString &root, int *listed)
     return good;
 }
 
-// Make a DiskForge Live USB writes the boot code for BIOS PCs into the stick's image file instead
+// Make a DiskAnvil Live USB writes the boot code for BIOS PCs into the stick's image file instead
 // of going through UDisks (see RescueUsbDialog::openStickForTest).
 void writeBiosBootTo(const QString &image)
 {
@@ -1734,14 +1737,14 @@ bool biosBootMatches(const QString &image, const QString &root, QString *detail)
         && uchar(start[510]) == 0x55 && uchar(start[511]) == 0xAA && start.mid(512) == core;
 }
 
-// Inside DiskForge Live, Make a DiskForge Live USB copies the stick it runs from. Here the stick
+// Inside DiskAnvil Live, Make a DiskAnvil Live USB copies the stick it runs from. Here the stick
 // made a moment ago (mounted at `sourceRoot`, build ID "test") stands in for it, with a fake
 // rescue conf: the dialog finds it by its build ID, won't copy it onto itself, and copies it
 // onto a second stick with every file checked.
 void copyRunningStick(UDisks &udisks, const QString &sourceLoop, const QString &sourceRoot, const QTemporaryDir &dir)
 {
     const QString realConf = rescue::rescueConfPath;
-    rescue::rescueConfPath = dir.filePath(QStringLiteral("diskforge-live.conf"));
+    rescue::rescueConfPath = dir.filePath(QStringLiteral("diskanvil-live.conf"));
     QFile conf(rescue::rescueConfPath);
     if (!conf.open(QIODevice::WriteOnly) || conf.write("VERSION=0.0.1\nBUILD_ID=test\n") < 0) {
         report(false, QStringLiteral("write a test rescue conf"), conf.errorString());
@@ -1788,7 +1791,7 @@ void copyRunningStick(UDisks &udisks, const QString &sourceLoop, const QString &
         auto *targets = dialog.findChild<QComboBox *>(QStringLiteral("targets"));
         auto *warning = dialog.findChild<QLabel *>(QStringLiteral("warning"));
         auto *confirm = dialog.findChild<QLineEdit *>(QStringLiteral("confirm"));
-        QPushButton *make = findButton(&dialog, QStringLiteral("Make the DiskForge Live USB"));
+        QPushButton *make = findButton(&dialog, QStringLiteral("Make the DiskAnvil Live USB"));
         report(imageEdit->text() == sourceRoot && info->text().startsWith(QLatin1String("A copy of the rescue stick")),
                QStringLiteral("the dialog starts with the running stick"), info->text());
         report(targets->currentData().toString() == sourceLoop && warning->text().contains(QLatin1String("being copied"))
@@ -1801,11 +1804,11 @@ void copyRunningStick(UDisks &udisks, const QString &sourceLoop, const QString &
             make->click();
         waitUntil([&] { return !dialog.isVisible() || boxes.size() > 0; }, 120000);
         waitUntil([&] { return !dialog.isVisible(); }, 5000);
-        report(boxes.size() == 1 && boxes[0].startsWith(QLatin1String("The DiskForge Live USB is ready")), QStringLiteral("the copy is ready"),
+        report(boxes.size() == 1 && boxes[0].startsWith(QLatin1String("The DiskAnvil Live USB is ready")), QStringLiteral("the copy is ready"),
                boxes.join(QStringLiteral(" | ")));
     }
     RescueUsbDialog::openStickForTest = nullptr;
-    const QString root = mountStick(udisks, loopPath, QStringLiteral("DISKFORGE"));
+    const QString root = mountStick(udisks, loopPath, QStringLiteral("DISKANVIL"));
     int listed = 0;
     const int good = filesMatchingSums(root, &listed);
     report(listed > 0 && good == listed && rescue::stickInfo(root).id == QLatin1String("test"),
@@ -1817,18 +1820,18 @@ void copyRunningStick(UDisks &udisks, const QString &sourceLoop, const QString &
     cleanUpLoop(udisks, loopPath);
 }
 
-// Make a DiskForge Live USB on a loop device of the user's own (UDisks lets you set those up and
+// Make a DiskAnvil Live USB on a loop device of the user's own (UDisks lets you set those up and
 // change them without a password), through the dialog like a user would.
-// DISKFORGE_TEST_RESCUE_ISO uses a real rescue image instead of a small made-up one, and with
-// it DISKFORGE_TEST_STICK keeps the stick's image file afterwards, to boot it in a VM.
+// DISKANVIL_TEST_RESCUE_ISO uses a real rescue image instead of a small made-up one, and with
+// it DISKANVIL_TEST_STICK keeps the stick's image file afterwards, to boot it in a VM.
 void rescueUsb()
 {
     QTemporaryDir dir;
-    QString iso = qEnvironmentVariable("DISKFORGE_TEST_RESCUE_ISO");
+    QString iso = qEnvironmentVariable("DISKANVIL_TEST_RESCUE_ISO");
     if (iso.isEmpty()) {
         const QString tree = dir.filePath(QStringLiteral("tree"));
         QMap<QString, QByteArray> files;
-        files[QStringLiteral(".disk/diskforge-live")] = "DiskForge Live\nversion=0.0.1\nbuilt=2026-10-09\nid=test\n";
+        files[QStringLiteral(".disk/diskanvil-live")] = "DiskAnvil Live\nversion=0.0.1\nbuilt=2026-10-09\nid=test\n";
         files[QStringLiteral("EFI/BOOT/BOOTX64.EFI")] = QByteArray(300000, 'x');
         files[QStringLiteral("boot/grub/i386-pc/stick-boot.img")] = QByteArray(510, 'b') + QByteArray("\x55\xaa", 2);
         files[QStringLiteral("boot/grub/i386-pc/stick-core.img")] = QByteArray(40000, 'c');
@@ -1848,12 +1851,12 @@ void rescueUsb()
         iso = dir.filePath(QStringLiteral("rescue.iso"));
         if (sh(QStringLiteral("xorriso"), {QStringLiteral("-as"), QStringLiteral("mkisofs"), QStringLiteral("-quiet"), QStringLiteral("-J"),
                                            QStringLiteral("-joliet-long"), QStringLiteral("-R"), QStringLiteral("-o"), iso, tree}) != 0) {
-            out << "SKIP  Make a DiskForge Live USB: xorriso isn't installed" << Qt::endl;
+            out << "SKIP  Make a DiskAnvil Live USB: xorriso isn't installed" << Qt::endl;
             return;
         }
     }
     // Only with a real image: the other scenarios would make their own sticks over it.
-    QString stickImage = qEnvironmentVariable("DISKFORGE_TEST_RESCUE_ISO").isEmpty() ? QString() : qEnvironmentVariable("DISKFORGE_TEST_STICK");
+    QString stickImage = qEnvironmentVariable("DISKANVIL_TEST_RESCUE_ISO").isEmpty() ? QString() : qEnvironmentVariable("DISKANVIL_TEST_STICK");
     if (stickImage.isEmpty())
         stickImage = dir.filePath(QStringLiteral("stick.img"));
     const bool big = QFileInfo(iso).size() > 100 * 1024 * 1024;
@@ -1861,7 +1864,7 @@ void rescueUsb()
     sh(QStringLiteral("truncate"), {QStringLiteral("-s"), big ? QStringLiteral("3G") : QStringLiteral("600M"), stickImage});
 
     const QString loopPath = userLoop(stickImage);
-    report(!loopPath.isEmpty(), QStringLiteral("Make a DiskForge Live USB: a loop device stands in for the stick"));
+    report(!loopPath.isEmpty(), QStringLiteral("Make a DiskAnvil Live USB: a loop device stands in for the stick"));
     if (loopPath.isEmpty())
         return;
 
@@ -1898,9 +1901,9 @@ void rescueUsb()
         auto *image = dialog.findChild<QLineEdit *>(QStringLiteral("image"));
         auto *confirm = dialog.findChild<QLineEdit *>(QStringLiteral("confirm"));
         auto *info = dialog.findChild<QLabel *>(QStringLiteral("imageInfo"));
-        QPushButton *make = findButton(&dialog, QStringLiteral("Make the DiskForge Live USB"));
+        QPushButton *make = findButton(&dialog, QStringLiteral("Make the DiskAnvil Live USB"));
         image->setText(iso);
-        report(info->text().contains(QLatin1String("DiskForge Live")), QStringLiteral("the dialog reads the image"), info->text());
+        report(info->text().contains(QLatin1String("DiskAnvil Live")), QStringLiteral("the dialog reads the image"), info->text());
         report(make && !make->isEnabled(), QStringLiteral("nothing happens before the device name is typed"));
         confirm->setText(shortDevice(device));
         report(make && make->isEnabled(), QStringLiteral("typing it unlocks the button"));
@@ -1908,7 +1911,7 @@ void rescueUsb()
             make->click();
         waitUntil([&] { return !dialog.isVisible() || boxes.size() > 0; }, big ? 900000 : 120000);
         waitUntil([&] { return !dialog.isVisible(); }, 5000);
-        report(boxes.size() == 1 && boxes[0].startsWith(QLatin1String("The DiskForge Live USB is ready")), QStringLiteral("it reports the stick ready"),
+        report(boxes.size() == 1 && boxes[0].startsWith(QLatin1String("The DiskAnvil Live USB is ready")), QStringLiteral("it reports the stick ready"),
                (boxes + steps).join(QStringLiteral(" | ")));
         readyText = boxes.value(0);
     }
@@ -1922,7 +1925,7 @@ void rescueUsb()
         stick = udisks.diskByPath(loopPath);
         part = nullptr;
         for (const Volume &v : stick ? stick->volumes : QVector<Volume>()) {
-            if (v.label == QLatin1String("DISKFORGE"))
+            if (v.label == QLatin1String("DISKANVIL"))
                 part = &v;
         }
         return part != nullptr;
@@ -1934,7 +1937,7 @@ void rescueUsb()
     report(part && part->mountPoints.isEmpty(), QStringLiteral("and it's unmounted at the end"));
     const bool madeOne = part != nullptr;
     if (madeOne) {
-        const QString root = mountStick(udisks, loopPath, QStringLiteral("DISKFORGE"));
+        const QString root = mountStick(udisks, loopPath, QStringLiteral("DISKANVIL"));
         int listed = 0;
         const int good = filesMatchingSums(root, &listed);
         report(listed > 0 && good == listed, QStringLiteral("every file on it matches sha256sum.txt"),
@@ -1949,8 +1952,8 @@ void rescueUsb()
         QCoreApplication::processEvents();
         auto *stickInfo = again.findChild<QLabel *>(QStringLiteral("stickInfo"));
         QPushButton *openLogs = findButton(&again, QStringLiteral("Open Logs"));
-        report(stickInfo && stickInfo->text().contains(QLatin1String("has DiskForge Live")) && openLogs && openLogs->isVisibleTo(&again),
-               QStringLiteral("opened again, it says the stick has DiskForge Live and offers its logs"), stickInfo ? stickInfo->text() : QString());
+        report(stickInfo && stickInfo->text().contains(QLatin1String("has DiskAnvil Live")) && openLogs && openLogs->isVisibleTo(&again),
+               QStringLiteral("opened again, it says the stick has DiskAnvil Live and offers its logs"), stickInfo ? stickInfo->text() : QString());
         again.close();
         // The made-up image's build ID is "test"; a real one has its own.
         if (rescue::stickInfo(root).id == QLatin1String("test"))
@@ -2092,7 +2095,7 @@ void driversWindow()
         if (list->topLevelItem(i)->text(0) == QLatin1String("Drv"))
             drv = list->topLevelItem(i);
     }
-    report(drv && drv->text(1) == QLatin1String("DiskForge Test Company") && drv->text(3) == QLatin1String("Driver") && names.size() >= 3,
+    report(drv && drv->text(1) == QLatin1String("DiskAnvil Test Company") && drv->text(3) == QLatin1String("Driver") && names.size() >= 3,
            QStringLiteral("drivers: listed with who made each, from its version resource"), names.join(QStringLiteral(", ")));
     if (drv) {
         list->clearSelection();
@@ -2105,7 +2108,7 @@ void driversWindow()
     QString error;
     system.open(root + QStringLiteral("/Windows/System32/config/SYSTEM"), &error);
     const auto start = system.value(system.key(QStringLiteral("ControlSet001\\Services\\Drv")), QStringLiteral("Start"));
-    const QStringList backups = QDir(root + QStringLiteral("/DiskForge backups")).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    const QStringList backups = QDir(root + QStringLiteral("/DiskAnvil backups")).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
     report(start && start->number() == 4 && backups.size() == 1 && boxes.value(1).startsWith(QLatin1String("Switched off 1")),
            QStringLiteral("drivers: switched off, Disabled in the SYSTEM hive, with a backup"), boxes.join(QStringLiteral(" | ")).left(300));
 }
@@ -2203,7 +2206,7 @@ void certificateWindow()
     r.zeros = true;
     r.started = QDateTime(QDate(2026, 10, 11), QTime(9, 0));
     r.finished = QDateTime(QDate(2026, 10, 11), QTime(11, 32));
-    r.app = QStringLiteral("DiskForge test");
+    r.app = QStringLiteral("DiskAnvil test");
     erasure::remember(r);
     const QVector<erasure::Record> all = erasure::all();
     report(all.size() == 1 && all[0].id.size() == 12 && all[0].serial == r.serial, QStringLiteral("certificate: the erasure is remembered, with a number of its own"));
@@ -2230,8 +2233,8 @@ void certificateWindow()
         dialog.findChild<QPushButton *>(QStringLiteral("save"))->click();
     }
     const QString text = pdfText(pdf);
-    if (qEnvironmentVariableIsSet("DISKFORGE_UITEST_SHOTS"))
-        QFile::copy(pdf, qEnvironmentVariable("DISKFORGE_UITEST_SHOTS") + QStringLiteral("/certificate.pdf"));
+    if (qEnvironmentVariableIsSet("DISKANVIL_UITEST_SHOTS"))
+        QFile::copy(pdf, qEnvironmentVariable("DISKANVIL_UITEST_SHOTS") + QStringLiteral("/certificate.pdf"));
     report(text.contains(QLatin1String("Certificate of Erasure")) && text.contains(QLatin1String("WD-WCC6Y0TEST")) && text.contains(QLatin1String("Order 4711"))
                && text.contains(QLatin1String("Sam Tester")) && text.contains(all.value(0).id) && text.contains(QLatin1String("Wipe Disk")),
            QStringLiteral("certificate: the PDF says what was erased, how, for whom and by whom"), text.left(300));
@@ -2319,8 +2322,8 @@ void driveReport()
     report(saved && text.contains(QLatin1String("Drive Report")) && text.contains(drive->serial) && text.contains(QLatin1String("Temperature"))
                && text.contains(QLatin1String("power-on-hours")),
            QStringLiteral("drive report: the PDF has the drive, its verdict, its facts and its SMART attributes"), error + text.left(200));
-    if (qEnvironmentVariableIsSet("DISKFORGE_UITEST_SHOTS"))
-        QFile::copy(pdf, qEnvironmentVariable("DISKFORGE_UITEST_SHOTS") + QStringLiteral("/report.pdf"));
+    if (qEnvironmentVariableIsSet("DISKANVIL_UITEST_SHOTS"))
+        QFile::copy(pdf, qEnvironmentVariable("DISKANVIL_UITEST_SHOTS") + QStringLiteral("/report.pdf"));
 }
 
 // Make an Evidence Image of a loop device: as root, the .E01 checks out against its own MD5 and
@@ -2411,8 +2414,8 @@ void productKeyWindow()
         look->click();
     waitUntil([&] { return !asked.isEmpty(); }, 5000);
     report(asked.value(0) == QLatin1String("Which Windows?"), QStringLiteral("product key: Look in Another Windows asks which"));
-    if (qEnvironmentVariableIsSet("DISKFORGE_UITEST_SHOTS"))
-        dialog.grab().save(qEnvironmentVariable("DISKFORGE_UITEST_SHOTS") + QStringLiteral("/productkey.png"));
+    if (qEnvironmentVariableIsSet("DISKANVIL_UITEST_SHOTS"))
+        dialog.grab().save(qEnvironmentVariable("DISKANVIL_UITEST_SHOTS") + QStringLiteral("/productkey.png"));
 }
 
 // Unlocking as VeraCrypt: the window's answers become UDisks' unlock options, with the types its
@@ -2774,7 +2777,7 @@ void saveFilesWindow()
 
 // Repair Linux Boot as the user, on a loop device holding a pretend Debian disk (an EFI
 // partition and an ext4 root whose fstab names it): it's found and its repair is explained;
-// Repair stays off, since a boot is repaired from DiskForge Live.
+// Repair stays off, since a boot is repaired from DiskAnvil Live.
 void linuxBootWindow()
 {
     QTemporaryDir dir;
@@ -2834,7 +2837,7 @@ void linuxBootWindow()
         auto *plan = dialog.findChild<QLabel *>(QStringLiteral("plan"));
         auto *repair = dialog.findChild<QPushButton *>(QStringLiteral("repair"));
         report(plan && plan->text().contains(QLatin1String("grub-install")) && repair && !repair->isEnabled(),
-               QStringLiteral("linux boot: its repair is explained, and left to DiskForge Live"), plan ? plan->text().left(300) : QString());
+               QStringLiteral("linux boot: its repair is explained, and left to DiskAnvil Live"), plan ? plan->text().left(300) : QString());
     }
     cleanUpLoop(udisks, loopPath);
 }
@@ -2997,6 +3000,103 @@ void testBootWindow()
     cleanUpLoop(udisks, loopPath);
 }
 
+// Let Someone Help: on a PC it says what to use instead; on DiskAnvil Live (stand-ins for x11vnc
+// and the helper here) it shows the address and passwords, says who connected and when they've
+// gone, and Stop ends the screen sharing and switches SSH off.
+void remoteHelpWindow()
+{
+    {
+        RemoteHelpDialog pc;
+        report(!findButton(&pc, QStringLiteral("Let Them In")), QStringLiteral("Let Someone Help: on a PC it says what does this there instead"));
+    }
+    QTemporaryDir dir;
+    const auto script = [&](const QString &name, const QByteArray &text) {
+        QFile f(dir.filePath(name));
+        if (f.open(QIODevice::WriteOnly))
+            f.write(text);
+        f.close();
+        f.setPermissions(f.permissions() | QFileDevice::ExeOwner);
+        return f.fileName();
+    };
+    const QByteArray d = dir.path().toUtf8();
+    remotehelp::x11vncForTest = script(QStringLiteral("x11vnc"), "#!/bin/sh\nfor a; do case $a in rm:*) f=${a#rm:};; esac; done\ncp \"$f\" " + d
+                                                                 + "/vnc-password; rm -f \"$f\"\necho PORT=5901\nsleep 0.5\necho \"12/10/2026 Got connection from client 10.1.2.3\" >&2\n"
+                                                                   "sleep 1.5\necho \"client_count: 0\" >&2\nexec sleep 60\n");
+    remotehelp::helperForTest = script(QStringLiteral("helper"), "#!/bin/sh\necho \"$1\" >> " + d + "/helper.log\n[ \"$1\" = ssh-on ] && cat > " + d + "/ssh-password\nexit 0\n");
+    {
+        RemoteHelpDialog dialog;
+        dialog.show();
+        dialog.findChild<QCheckBox *>(QStringLiteral("terminal"))->setChecked(true);
+        auto *status = dialog.findChild<QLabel *>(QStringLiteral("status"));
+        auto *details = dialog.findChild<QLabel *>(QStringLiteral("details"));
+        findButton(&dialog, QStringLiteral("Let Them In"))->click();
+        waitUntil([&] { return status->text().contains(QLatin1String("10.1.2.3")); }, 5000);
+        const auto read = [&](const QString &name) {
+            QFile f(dir.filePath(name));
+            return f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()).trimmed() : QString();
+        };
+        const QString vnc = read(QStringLiteral("vnc-password")), ssh = read(QStringLiteral("ssh-password"));
+        report(vnc.size() == 8 && ssh.size() == 12 && details->text().contains(vnc) && details->text().contains(ssh) && details->text().contains(QLatin1String(":5901")),
+               QStringLiteral("Let Someone Help: the passwords given out are the ones x11vnc and SSH got, with the port it took"), details->text());
+        report(status->text().contains(QLatin1String("Connected: 10.1.2.3")), QStringLiteral("Let Someone Help: it says who connected"), status->text());
+        waitUntil([&] { return status->text().contains(QLatin1String("gone")); }, 5000);
+        report(status->text().contains(QLatin1String("gone")), QStringLiteral("Let Someone Help: and when they've gone"), status->text());
+        findButton(&dialog, QStringLiteral("Stop"))->click();
+        report(!dialog.helping() && read(QStringLiteral("helper.log")) == QLatin1String("ssh-on\nssh-off") && !details->text().contains(vnc),
+               QStringLiteral("Let Someone Help: Stop ends it, SSH goes off, and the passwords go"), read(QStringLiteral("helper.log")));
+        // Closing it with them still in stops it too.
+        findButton(&dialog, QStringLiteral("Let Them In"))->click();
+        waitUntil([&] { return dialog.helping(); }, 3000);
+        dialog.reject();
+        report(!dialog.helping() && read(QStringLiteral("helper.log")).endsWith(QLatin1String("ssh-on\nssh-off")) && read(QStringLiteral("helper.log")).count(QLatin1String("ssh-off")) == 2,
+               QStringLiteral("Let Someone Help: closing the window stops it as well"));
+    }
+    remotehelp::x11vncForTest.clear();
+    remotehelp::helperForTest.clear();
+}
+
+// DiskAnvil was called DiskForge: its settings (the theme's name too) and its data folder move over
+// once, and not again over newer ones.
+void oldNameMoveOver()
+{
+    QTemporaryDir dir;
+    QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, dir.filePath(QStringLiteral("config")));
+    QStandardPaths::setTestModeEnabled(true);
+    const QString data = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
+    QDir(data + QStringLiteral("/diskforge")).removeRecursively();
+    QDir(data + QStringLiteral("/diskanvil")).removeRecursively();
+    {
+        QSettings before(QStringLiteral("diskforge"), QStringLiteral("diskforge"));
+        before.setValue(QStringLiteral("theme"), QStringLiteral("diskforge-live"));
+        before.setValue(QStringLiteral("certificates/by"), QStringLiteral("Danny's PC shop"));
+        QSettings addons(QStringLiteral("diskforge"), QStringLiteral("addons"));
+        addons.setValue(QStringLiteral("trusted/a"), true);
+    }
+    QDir().mkpath(data + QStringLiteral("/diskforge/clamav"));
+    QFile list(data + QStringLiteral("/diskforge/clamav/main.cvd"));
+    if (list.open(QIODevice::WriteOnly))
+        list.write("list");
+    list.close();
+    const oldname::Moved moved = oldname::moveOver();
+    QSettings now(QStringLiteral("diskanvil"), QStringLiteral("diskanvil"));
+    report(moved.settings && now.value(QStringLiteral("theme")).toString() == QLatin1String("diskanvil-live")
+               && now.value(QStringLiteral("certificates/by")).toString() == QLatin1String("Danny's PC shop")
+               && QSettings(QStringLiteral("diskanvil"), QStringLiteral("addons")).value(QStringLiteral("trusted/a")).toBool(),
+           QStringLiteral("old name: DiskForge's settings move over, its Live theme under the new name"));
+    report(moved.folders.contains(data + QStringLiteral("/diskanvil")) && QFile::exists(data + QStringLiteral("/diskanvil/clamav/main.cvd"))
+               && !QFileInfo::exists(data + QStringLiteral("/diskforge")),
+           QStringLiteral("old name: and its folder (the virus list in it)"), moved.folders.join(QStringLiteral(", ")));
+    // Once only: newer settings aren't written over.
+    now.setValue(QStringLiteral("theme"), QStringLiteral("system"));
+    now.sync();
+    const oldname::Moved again = oldname::moveOver();
+    report(!again.settings && again.folders.isEmpty() && QSettings(QStringLiteral("diskanvil"), QStringLiteral("diskanvil")).value(QStringLiteral("theme")).toString() == QLatin1String("system"),
+           QStringLiteral("old name: only once"));
+    QDir(data + QStringLiteral("/diskanvil")).removeRecursively();
+    QStandardPaths::setTestModeEnabled(false);
+    QSettings::setPath(QSettings::NativeFormat, QSettings::UserScope, QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation));
+}
+
 // Write-Protect Every Drive: off a PC it says why not; as root, with the helper from the repo
 // limited to a loop device of its own, it makes the drive and its partition read-only (a mounted
 // one goes read-only too), shows the bar, and stops the Format and Wipe buttons; one drive can be
@@ -3008,7 +3108,7 @@ void writeBlockMode()
         udisks.setInteractive(false);
         MainWindow window(&udisks);
         auto *action = window.findChild<QAction *>(QStringLiteral("writeBlock"));
-        report(action && !action->isEnabled() && action->toolTip().contains(QLatin1String("Only DiskForge Live")),
+        report(action && !action->isEnabled() && action->toolTip().contains(QLatin1String("Only DiskAnvil Live")),
                QStringLiteral("Write-Protect Every Drive: on a PC it's off, and says why"), action ? action->toolTip() : QString());
         return;
     }
@@ -3031,9 +3131,9 @@ void writeBlockMode()
     QDir().mkpath(mnt);
     sh(QStringLiteral("mount"), {part, mnt});
     const QString state = dir.filePath(QStringLiteral("state"));
-    qputenv("DISKFORGE_WRITEBLOCK_STATE", state.toLocal8Bit());
-    qputenv("DISKFORGE_WRITEBLOCK_ONLY", name.toLocal8Bit());
-    writeblock::helperForTest = QStringLiteral(SOURCE_DIR "/rescue/files/usr/local/bin/diskforge-live-writeblock");
+    qputenv("DISKANVIL_WRITEBLOCK_STATE", state.toLocal8Bit());
+    qputenv("DISKANVIL_WRITEBLOCK_ONLY", name.toLocal8Bit());
+    writeblock::helperForTest = QStringLiteral(SOURCE_DIR "/rescue/files/usr/local/bin/diskanvil-live-writeblock");
     const auto ro = [](const QString &device) {
         QString said;
         sh(QStringLiteral("blockdev"), {QStringLiteral("--getro"), device}, &said);
@@ -3051,7 +3151,7 @@ void writeBlockMode()
     window.resize(1200, 800);
     window.show();
     auto *action = window.findChild<QAction *>(QStringLiteral("writeBlock"));
-    report(action && action->isEnabled(), QStringLiteral("Write-Protect Every Drive: offered on DiskForge Live (the helper is there)"));
+    report(action && action->isEnabled(), QStringLiteral("Write-Protect Every Drive: offered on DiskAnvil Live (the helper is there)"));
     if (!action) {
         sh(QStringLiteral("umount"), {mnt});
         sh(QStringLiteral("losetup"), {QStringLiteral("-d"), loop});
@@ -3068,7 +3168,7 @@ void writeBlockMode()
         }
         return disk && disk->readOnly;
     }, 10000);
-    QFile rule(state + QStringLiteral("/90-diskforge-live-writeblock.rules"));
+    QFile rule(state + QStringLiteral("/90-diskanvil-live-writeblock.rules"));
     const QByteArray ruleText = rule.open(QIODevice::ReadOnly) ? rule.readAll() : QByteArray();
     report(writeblock::isOn() && ro(loop) && ro(part) && !canWrite() && ruleText.contains("RUN+=\"/usr/sbin/blockdev --setro $env{DEVNAME}\""),
            QStringLiteral("Write-Protect Every Drive: the drive and its partition are read-only, the mounted one too, and new drives get a udev rule"));
@@ -3137,22 +3237,22 @@ void writeBlockMode()
     report(!barShown(), QStringLiteral("Write-Protect Every Drive: and the bar goes"));
     window.close();
     writeblock::helperForTest.clear();
-    qunsetenv("DISKFORGE_WRITEBLOCK_STATE");
-    qunsetenv("DISKFORGE_WRITEBLOCK_ONLY");
+    qunsetenv("DISKANVIL_WRITEBLOCK_STATE");
+    qunsetenv("DISKANVIL_WRITEBLOCK_ONLY");
     sh(QStringLiteral("umount"), {mnt});
     sh(QStringLiteral("losetup"), {QStringLiteral("-d"), loop});
 }
 
-// Make a DiskForge Live USB with kept changes and a files drive, on a loop device: DiskForge
+// Make a DiskAnvil Live USB with kept changes and a files drive, on a loop device: DiskAnvil
 // Live's partition, a "persistence" one with live-boot's persistence.conf, and an exFAT drive on
-// the rest. Then Update: only DiskForge Live's partition is made again; its logs, the kept
+// the rest. Then Update: only DiskAnvil Live's partition is made again; its logs, the kept
 // changes and the files stay.
 void rescueUsbLayout()
 {
     QTemporaryDir dir;
     const QString tree = dir.filePath(QStringLiteral("tree"));
     QMap<QString, QByteArray> files;
-    files[QStringLiteral(".disk/diskforge-live")] = "DiskForge Live\nversion=0.0.2\nbuilt=2026-10-12\nid=test\n";
+    files[QStringLiteral(".disk/diskanvil-live")] = "DiskAnvil Live\nversion=0.0.2\nbuilt=2026-10-12\nid=test\n";
     files[QStringLiteral("EFI/BOOT/BOOTX64.EFI")] = QByteArray(300000, 'x');
     files[QStringLiteral("boot/grub/i386-pc/stick-boot.img")] = QByteArray(510, 'b') + QByteArray("\x55\xaa", 2);
     files[QStringLiteral("boot/grub/i386-pc/stick-core.img")] = QByteArray(40000, 'c');
@@ -3210,10 +3310,10 @@ void rescueUsbLayout()
         dialog.findChild<QSpinBox *>(QStringLiteral("keepSize"))->setValue(1);
         dialog.findChild<QCheckBox *>(QStringLiteral("files"))->setChecked(true);
         dialog.findChild<QLineEdit *>(QStringLiteral("confirm"))->setText(shortDevice(device));
-        findButton(&dialog, QStringLiteral("Make the DiskForge Live USB"))->click();
+        findButton(&dialog, QStringLiteral("Make the DiskAnvil Live USB"))->click();
         waitUntil([&] { return !boxes.isEmpty(); }, 180000);
     }
-    report(boxes.value(0).startsWith(QLatin1String("The DiskForge Live USB is ready")), QStringLiteral("Live USB layout: made"), boxes.join(QStringLiteral(" | ")).left(200));
+    report(boxes.value(0).startsWith(QLatin1String("The DiskAnvil Live USB is ready")), QStringLiteral("Live USB layout: made"), boxes.join(QStringLiteral(" | ")).left(200));
     QStringList parts;
     waitUntil([&] {
         udisks.refresh();
@@ -3223,18 +3323,18 @@ void rescueUsbLayout()
             parts << QStringLiteral("%1:%2:%3").arg(v.fsType, v.label).arg(v.size / (1024 * 1024));
         return parts.size() == 3;
     }, 20000);
-    report(parts.size() == 3 && parts[0] == QLatin1String("vfat:DISKFORGE:2048") && parts[1] == QLatin1String("ext4:persistence:1024")
-               && parts[2].startsWith(QLatin1String("exfat:DF-FILES:")),
-           QStringLiteral("Live USB layout: DiskForge Live's 2 GB, 1 GB keeping changes, and the files drive on the rest"), parts.join(QStringLiteral(", ")));
+    report(parts.size() == 3 && parts[0] == QLatin1String("vfat:DISKANVIL:2048") && parts[1] == QLatin1String("ext4:persistence:1024")
+               && parts[2].startsWith(QLatin1String("exfat:ANVIL-FILES:")),
+           QStringLiteral("Live USB layout: DiskAnvil Live's 2 GB, 1 GB keeping changes, and the files drive on the rest"), parts.join(QStringLiteral(", ")));
     const QString persistence = mountStick(udisks, loopPath, QStringLiteral("persistence"));
     QFile conf(persistence + QStringLiteral("/persistence.conf"));
     report(conf.open(QIODevice::ReadOnly) && conf.readAll() == "/ union\n", QStringLiteral("Live USB layout: the persistence partition has live-boot's persistence.conf"));
     conf.close();
     // Things that have to stay: a kept change, a saved file, a log; and one that has to go.
     { QFile f(persistence + QStringLiteral("/kept-change.txt")); if (f.open(QIODevice::WriteOnly)) f.write("kept"); }
-    const QString filesRoot = mountStick(udisks, loopPath, QStringLiteral("DF-FILES"));
+    const QString filesRoot = mountStick(udisks, loopPath, QStringLiteral("ANVIL-FILES"));
     { QFile f(filesRoot + QStringLiteral("/saved.txt")); if (f.open(QIODevice::WriteOnly)) f.write("saved"); }
-    const QString system = mountStick(udisks, loopPath, QStringLiteral("DISKFORGE"));
+    const QString system = mountStick(udisks, loopPath, QStringLiteral("DISKANVIL"));
     QDir().mkpath(system + QStringLiteral("/logs/2026-10-12 09.00"));
     { QFile f(system + QStringLiteral("/logs/2026-10-12 09.00/boot.log")); if (f.open(QIODevice::WriteOnly)) f.write("log"); }
     { QFile f(system + QStringLiteral("/old-version-file.txt")); if (f.open(QIODevice::WriteOnly)) f.write("old"); }
@@ -3247,19 +3347,19 @@ void rescueUsbLayout()
         auto *update = dialog.findChild<QCheckBox *>(QStringLiteral("update"));
         report(update && update->isVisibleTo(&dialog), QStringLiteral("Live USB layout: opened again, it offers to update only"));
         update->setChecked(true);
-        auto *make = findButton(&dialog, QStringLiteral("Make the DiskForge Live USB"));
+        auto *make = findButton(&dialog, QStringLiteral("Make the DiskAnvil Live USB"));
         report(make->isEnabled(), QStringLiteral("Live USB layout: an update needs no name typed (nothing else is erased)"));
         make->click();
         waitUntil([&] { return !boxes.isEmpty(); }, 180000);
     }
-    report(boxes.value(0).startsWith(QLatin1String("The DiskForge Live USB is ready")), QStringLiteral("Live USB layout: updated"), boxes.join(QStringLiteral(" | ")).left(200));
-    const QString systemAgain = mountStick(udisks, loopPath, QStringLiteral("DISKFORGE"));
+    report(boxes.value(0).startsWith(QLatin1String("The DiskAnvil Live USB is ready")), QStringLiteral("Live USB layout: updated"), boxes.join(QStringLiteral(" | ")).left(200));
+    const QString systemAgain = mountStick(udisks, loopPath, QStringLiteral("DISKANVIL"));
     const QString persistenceAgain = mountStick(udisks, loopPath, QStringLiteral("persistence"));
-    const QString filesAgain = mountStick(udisks, loopPath, QStringLiteral("DF-FILES"));
+    const QString filesAgain = mountStick(udisks, loopPath, QStringLiteral("ANVIL-FILES"));
     report(!QFile::exists(systemAgain + QStringLiteral("/old-version-file.txt")) && QFile::exists(systemAgain + QStringLiteral("/logs/2026-10-12 09.00/boot.log"))
                && QFile::exists(systemAgain + QStringLiteral("/live/filesystem.squashfs")) && QFile::exists(persistenceAgain + QStringLiteral("/kept-change.txt"))
                && QFile::exists(filesAgain + QStringLiteral("/saved.txt")) && QFile::exists(persistenceAgain + QStringLiteral("/persistence.conf")),
-           QStringLiteral("Live USB layout: the update replaced DiskForge Live's files, and kept its logs, the changes and the files"));
+           QStringLiteral("Live USB layout: the update replaced DiskAnvil Live's files, and kept its logs, the changes and the files"));
     RescueUsbDialog::allowLoopDevicesForTest = false;
     RescueUsbDialog::openStickForTest = nullptr;
     cleanUpLoop(udisks, loopPath);
@@ -3267,12 +3367,12 @@ void rescueUsbLayout()
 
 // Write Image to USB's "copy the files" way, with persistence, on a loop device of the user's
 // own (no raw access needed, so no password): a Debian-live-like ISO with a long label.
-// DISKFORGE_TEST_COPY_ISO uses a real ISO instead (one with live-boot persistence, like
-// DiskForge Live), and DISKFORGE_TEST_STICK keeps the stick's image to boot it in a VM.
+// DISKANVIL_TEST_COPY_ISO uses a real ISO instead (one with live-boot persistence, like
+// DiskAnvil Live), and DISKANVIL_TEST_STICK keeps the stick's image to boot it in a VM.
 void isoCopy()
 {
     QTemporaryDir dir;
-    const QString realIso = qEnvironmentVariable("DISKFORGE_TEST_COPY_ISO");
+    const QString realIso = qEnvironmentVariable("DISKANVIL_TEST_COPY_ISO");
     const QString tree = dir.filePath(QStringLiteral("tree"));
     auto put = [&](const QString &path, const QByteArray &data) {
         QDir().mkpath(QFileInfo(tree + QLatin1Char('/') + path).path());
@@ -3296,7 +3396,7 @@ void isoCopy()
         }
     }
     const QString label = isomode::fatLabel(filecopy::openIso(iso)->label());
-    QString image = realIso.isEmpty() ? QString() : qEnvironmentVariable("DISKFORGE_TEST_STICK");
+    QString image = realIso.isEmpty() ? QString() : qEnvironmentVariable("DISKANVIL_TEST_STICK");
     if (image.isEmpty())
         image = dir.filePath(QStringLiteral("stick.img"));
     QFile::remove(image);
@@ -3412,12 +3512,12 @@ void isoCopy()
 
 // Make a Windows USB with a small fake Windows ISO (real WIMs made by wimlib), on a loop device
 // of the user's own: install.wim split into 1 MiB parts and checked, the answer file written,
-// and the ISO's own loop device gone at the end. DISKFORGE_TEST_WINDOWS_ISO uses a real
-// Windows ISO instead (split at the real size), and DISKFORGE_TEST_STICK keeps the stick's
+// and the ISO's own loop device gone at the end. DISKANVIL_TEST_WINDOWS_ISO uses a real
+// Windows ISO instead (split at the real size), and DISKANVIL_TEST_STICK keeps the stick's
 // image, to start Windows Setup from it in a VM.
 void windowsUsb()
 {
-    const QString realIso = qEnvironmentVariable("DISKFORGE_TEST_WINDOWS_ISO");
+    const QString realIso = qEnvironmentVariable("DISKANVIL_TEST_WINDOWS_ISO");
     if (QStandardPaths::findExecutable(QStringLiteral("wimlib-imagex")).isEmpty() || QStandardPaths::findExecutable(QStringLiteral("xorriso")).isEmpty()) {
         out << "SKIP  Make a Windows USB: wimlib or xorriso isn't installed" << Qt::endl;
         return;
@@ -3452,7 +3552,7 @@ void windowsUsb()
         sh(QStringLiteral("xorriso"), {QStringLiteral("-as"), QStringLiteral("mkisofs"), QStringLiteral("-quiet"), QStringLiteral("-J"), QStringLiteral("-joliet-long"),
                                        QStringLiteral("-R"), QStringLiteral("-V"), QStringLiteral("CCCOMA_X64FRE_EN-US_DV9"), QStringLiteral("-o"), iso, tree});
     }
-    QString image = realIso.isEmpty() ? QString() : qEnvironmentVariable("DISKFORGE_TEST_STICK");
+    QString image = realIso.isEmpty() ? QString() : qEnvironmentVariable("DISKANVIL_TEST_STICK");
     if (image.isEmpty())
         image = dir.filePath(QStringLiteral("stick.img"));
     QFile::remove(image);
@@ -3531,7 +3631,7 @@ void windowsUsb()
         isoStillOpen = isoStillOpen || d.backingFile == iso;
     report(!isoStillOpen, QStringLiteral("the ISO is closed again"));
 
-    // A dialog that goes without being closed (DiskForge quitting with it open) closes it too.
+    // A dialog that goes without being closed (DiskAnvil quitting with it open) closes it too.
     auto isoOpen = [&] {
         udisks.refresh();
         for (const Disk &d : udisks.disks()) {
@@ -3577,7 +3677,7 @@ void windowsUsb()
     cleanUpLoop(udisks, loopPath);
 }
 
-// The home screen (DiskForge Live's desktop, and Tools → Quick Fixes on a PC): which tiles are there,
+// The home screen (DiskAnvil Live's desktop, and Tools → Quick Fixes on a PC): which tiles are there,
 // what each one starts, the ask before restarting into the firmware, and reading Secure Boot.
 void homeScreen()
 {
@@ -3596,8 +3696,8 @@ void homeScreen()
         if (f.open(QIODevice::WriteOnly))
             f.write("[Desktop Entry]\nName=x\n[Other]\nExec=wrong\n[Desktop Entry]\nExec=" + exec + "\n");
     };
-    desktopFile("diskforge-live-testdisk", "qterminal -e sudo testdisk %f");
-    desktopFile("diskforge-live-firmware", "systemctl reboot --firmware-setup");
+    desktopFile("diskanvil-live-testdisk", "qterminal -e sudo testdisk %f");
+    desktopFile("diskanvil-live-firmware", "systemctl reboot --firmware-setup");
     desktopFile("qterminal", "qterminal");
     HomeWindow::applicationDirs = {apps};
     auto ids = [](const HomeWindow &home) {
@@ -3614,21 +3714,21 @@ void homeScreen()
                    && tiles.contains(QLatin1String("writeimage")) && tiles.contains(QLatin1String("recover")),
                QStringLiteral("Quick Fixes: the tools, without the stick's programs or what isn't installed"), tiles.join(QLatin1Char(' ')));
         auto *copy = fixes.findChild<QAbstractButton *>(QStringLiteral("tile-copystick"));
-        report(copy && copy->text() == QLatin1String("Make a DiskForge Live USB"), QStringLiteral("on a PC the stick tile makes a DiskForge Live USB"),
+        report(copy && copy->text() == QLatin1String("Make a DiskAnvil Live USB"), QStringLiteral("on a PC the stick tile makes a DiskAnvil Live USB"),
                copy ? copy->text() : QString());
         started.clear();
         if (auto *write = fixes.findChild<QAbstractButton *>(QStringLiteral("tile-writeimage")))
             write->click();
         report(started.size() == 1 && started[0].mid(1) == QStringList{QStringLiteral("--open"), QStringLiteral("write-image")}
                    && started[0][0] == QCoreApplication::applicationFilePath(),
-               QStringLiteral("a tool tile starts DiskForge with that tool"), started.value(0).join(QLatin1Char(' ')));
+               QStringLiteral("a tool tile starts DiskAnvil with that tool"), started.value(0).join(QLatin1Char(' ')));
     }
     {
         HomeWindow home(&udisks, HomeWindow::Mode::Desktop);
         const QStringList tiles = ids(home);
         report(tiles.contains(QLatin1String("drives")) && tiles.contains(QLatin1String("terminal")) && tiles.contains(QLatin1String("firmware"))
                    && !tiles.contains(QLatin1String("web")),
-               QStringLiteral("the home screen: DiskForge, the tools and the programs that are there"), tiles.join(QLatin1Char(' ')));
+               QStringLiteral("the home screen: DiskAnvil, the tools and the programs that are there"), tiles.join(QLatin1Char(' ')));
         started.clear();
         if (auto *testdisk = home.findChild<QAbstractButton *>(QStringLiteral("tile-testdisk")))
             testdisk->click();
@@ -4020,11 +4120,11 @@ void lostFilesFromFileSystem()
                && details->text().contains(QLatin1String("Last opened")),
            QStringLiteral("and when it was created, changed and last opened, from FAT's own records"));
 
-    // DISKFORGE_UITEST_SHOTS=folder: a picture of the window as it is now, to look at.
-    if (qEnvironmentVariableIsSet("DISKFORGE_UITEST_SHOTS")) {
+    // DISKANVIL_UITEST_SHOTS=folder: a picture of the window as it is now, to look at.
+    if (qEnvironmentVariableIsSet("DISKANVIL_UITEST_SHOTS")) {
         folders->setCurrentItem(folders->topLevelItem(0));
         QApplication::processEvents();
-        dialog.grab().save(qEnvironmentVariable("DISKFORGE_UITEST_SHOTS") + QStringLiteral("/lostfiles-fat32.png"));
+        dialog.grab().save(qEnvironmentVariable("DISKANVIL_UITEST_SHOTS") + QStringLiteral("/lostfiles-fat32.png"));
         folders->setCurrentItem(oldStuff);
     }
 
@@ -4062,7 +4162,7 @@ void lostFilesFromVirtualDisk()
     report(status->text().contains(QLatin1String("dynamic.vhdx")) && names == QStringList({QStringLiteral("notes.txt"), QStringLiteral("numbers.txt")}),
            QStringLiteral("a VHDX is read as the disk inside it"), status->text() + QStringLiteral(" / ") + names.join(QStringLiteral(", ")));
 
-    // DiskForge's own backup of a FAT drive, opened as it is: read a piece at a time.
+    // DiskAnvil's own backup of a FAT drive, opened as it is: read a piece at a time.
     const QString fat = dir.filePath(QStringLiteral("stick.img"));
     sh(QStringLiteral("truncate"), {QStringLiteral("-s"), QStringLiteral("40M"), fat});
     sh(QStringLiteral("mkfs.fat"), {QStringLiteral("-F"), QStringLiteral("32"), fat});
@@ -4085,7 +4185,7 @@ void lostFilesFromVirtualDisk()
     names.clear();
     for (int r = 0; r < view->model()->rowCount(); ++r)
         names << view->model()->index(r, 0).data().toString().toLower();
-    report(names.contains(QLatin1String("holiday.txt")), QStringLiteral("a DiskForge backup is looked through without restoring it"),
+    report(names.contains(QLatin1String("holiday.txt")), QStringLiteral("a DiskAnvil backup is looked through without restoring it"),
            status->text() + QStringLiteral(" / ") + names.join(QStringLiteral(", ")));
 }
 
@@ -4139,9 +4239,9 @@ void lostFilesFromShadowCopies()
     auto *details = dialog.findChild<QLabel *>(QStringLiteral("details"));
     report(details->text().contains(QLatin1String("isn't on the drive anymore")), QStringLiteral("a file from an earlier version says where it's from"),
            details->text().left(300));
-    if (qEnvironmentVariableIsSet("DISKFORGE_UITEST_SHOTS")) {
+    if (qEnvironmentVariableIsSet("DISKANVIL_UITEST_SHOTS")) {
         waitUntil([] { return false; }, 1500); // its picture
-        dialog.grab().save(qEnvironmentVariable("DISKFORGE_UITEST_SHOTS") + QStringLiteral("/lostfiles-copies.png"));
+        dialog.grab().save(qEnvironmentVariable("DISKANVIL_UITEST_SHOTS") + QStringLiteral("/lostfiles-copies.png"));
     }
 }
 
@@ -4247,14 +4347,14 @@ void lostFilesDeletedRecently()
     auto *ticked = dialog.findChild<QLabel *>(QStringLiteral("ticked"));
     report(ticked->text().startsWith(QLatin1String("One file ticked")), QStringLiteral("\"Tick All Shown\" leaves it out"), ticked->text());
 
-    if (qEnvironmentVariableIsSet("DISKFORGE_UITEST_SHOTS")) {
+    if (qEnvironmentVariableIsSet("DISKANVIL_UITEST_SHOTS")) {
         QApplication::processEvents();
-        dialog.grab().save(qEnvironmentVariable("DISKFORGE_UITEST_SHOTS") + QStringLiteral("/lostfiles-recent.png"));
+        dialog.grab().save(qEnvironmentVariable("DISKANVIL_UITEST_SHOTS") + QStringLiteral("/lostfiles-recent.png"));
     }
 }
 
 // A virus list of our own for Scan for Viruses: made-up "viruses" by their MD5, packed into
-// ClamAV's unsigned list kind with its own sigtool, in DiskForge's list folder.
+// ClamAV's unsigned list kind with its own sigtool, in DiskAnvil's list folder.
 bool makeVirusList(const QVector<QPair<QByteArray, const char *>> &viruses, const QString &work, QString *problem)
 {
     QByteArray lines;
@@ -4274,10 +4374,10 @@ bool makeVirusList(const QVector<QPair<QByteArray, const char *>> &viruses, cons
     sig.setProcessChannelMode(QProcess::MergedChannels);
     sig.start(QStringLiteral("sigtool"), {QStringLiteral("--build=daily.cud"), QStringLiteral("--unsigned"), QStringLiteral("--cvd-version=1"),
                                           QStringLiteral("--datadir=old")});
-    sig.write("diskforge-test\n");
+    sig.write("diskanvil-test\n");
     sig.closeWriteChannel();
     sig.waitForFinished(60000);
-    const QString own = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/diskforge/clamav");
+    const QString own = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/diskanvil/clamav");
     QDir().mkpath(own);
     QFile::remove(own + QStringLiteral("/daily.cud"));
     if (!QFile::copy(work + QStringLiteral("/daily.cud"), own + QStringLiteral("/daily.cud"))) {
@@ -4322,7 +4422,7 @@ void virusScanThroughWindow()
     }
 
     QString problem;
-    if (!makeVirusList({{trojan, "Win.Trojan.DiskForgeTest-1"}, {ransom, "Win.Ransomware.DiskForgeTest-2"}}, dir.filePath(QStringLiteral("list")),
+    if (!makeVirusList({{trojan, "Win.Trojan.DiskAnvilTest-1"}, {ransom, "Win.Ransomware.DiskAnvilTest-2"}}, dir.filePath(QStringLiteral("list")),
                        &problem)) {
         report(false, QStringLiteral("make a test virus list with sigtool"), problem);
         return;
@@ -4344,8 +4444,8 @@ void virusScanThroughWindow()
     report(status->text().startsWith(QLatin1String("Done: found 2 thing")) && status->text().contains(QLatin1String(" in 3 files."))
                && found == QStringList{QStringLiteral("/Users/a/Downloads/setup.exe=A Trojan"), QStringLiteral("/Windows/System32/helper.dll=Ransomware")},
            QStringLiteral("a quick scan finds both, in plain words"), status->text() + QLatin1Char(' ') + found.join(QStringLiteral(", ")));
-    if (qEnvironmentVariableIsSet("DISKFORGE_UITEST_SHOTS"))
-        dialog.grab().save(qEnvironmentVariable("DISKFORGE_UITEST_SHOTS") + QStringLiteral("/virusscan.png"));
+    if (qEnvironmentVariableIsSet("DISKANVIL_UITEST_SHOTS"))
+        dialog.grab().save(qEnvironmentVariable("DISKANVIL_UITEST_SHOTS") + QStringLiteral("/virusscan.png"));
 
     // Delete: asked first, with a warning for Windows' own folders; then gone, and in the log.
     QStringList boxes;
@@ -4360,7 +4460,7 @@ void virusScanThroughWindow()
     };
     dialog.deleteTicked();
     waitUntil([&] { return status->text().startsWith(QLatin1String("Deleted")); }, 10000);
-    QFile log(QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/diskforge/virus-scan.log"));
+    QFile log(QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/diskanvil/virus-scan.log"));
     const QString logged = log.open(QIODevice::ReadOnly) ? QString::fromUtf8(log.readAll()) : QString();
     report(boxes.size() == 1 && boxes[0].contains(QLatin1String("Delete these 2 file")) && boxes[0].contains(QLatin1String("Windows' own folders"))
                && !QFile::exists(drive + QStringLiteral("/Users/a/Downloads/setup.exe")) && !QFile::exists(drive + QStringLiteral("/Windows/System32/helper.dll"))
@@ -4397,7 +4497,7 @@ void virusScanWindowsDrive()
     QTemporaryDir dir;
     const QByteArray trojan = "pretend this trojan starts with windows\n";
     QString problem;
-    if (!makeVirusList({{trojan, "Win.Trojan.DiskForgeTest-4"}}, dir.filePath(QStringLiteral("list")), &problem)) {
+    if (!makeVirusList({{trojan, "Win.Trojan.DiskAnvilTest-4"}}, dir.filePath(QStringLiteral("list")), &problem)) {
         report(false, QStringLiteral("make a test virus list with sigtool"), problem);
         return;
     }
@@ -4455,11 +4555,11 @@ void virusScanWindowsDrive()
     showAll->setChecked(true);
     report(list->topLevelItemCount() > oddCount, QStringLiteral("and everything that starts, when asked"), QString::number(list->topLevelItemCount()));
     showAll->setChecked(false);
-    if (qEnvironmentVariableIsSet("DISKFORGE_UITEST_SHOTS")) {
+    if (qEnvironmentVariableIsSet("DISKANVIL_UITEST_SHOTS")) {
         tabs->setCurrentIndex(1);
-        dialog.grab().save(qEnvironmentVariable("DISKFORGE_UITEST_SHOTS") + QStringLiteral("/virus-startup.png"));
+        dialog.grab().save(qEnvironmentVariable("DISKANVIL_UITEST_SHOTS") + QStringLiteral("/virus-startup.png"));
         tabs->setCurrentIndex(0);
-        dialog.grab().save(qEnvironmentVariable("DISKFORGE_UITEST_SHOTS") + QStringLiteral("/virus-files.png"));
+        dialog.grab().save(qEnvironmentVariable("DISKANVIL_UITEST_SHOTS") + QStringLiteral("/virus-files.png"));
     }
 
     // Switching them off: what the scan found is ticked already; four more are ticked here.
@@ -4487,14 +4587,14 @@ void virusScanWindowsDrive()
     };
     dialog.switchOffTicked();
     waitUntil([&] { return status->text().startsWith(QLatin1String("Switched off")); }, 10000);
-    const QStringList backups = QDir(root + QStringLiteral("/DiskForge backups")).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
-    const QString backup = root + QStringLiteral("/DiskForge backups/") + backups.value(0);
+    const QStringList backups = QDir(root + QStringLiteral("/DiskAnvil backups")).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    const QString backup = root + QStringLiteral("/DiskAnvil backups/") + backups.value(0);
     QStringList kept = QDir(backup).entryList(QDir::Files);
     kept.sort();
     report(status->text().startsWith(QLatin1String("Switched off 6")) && boxes.size() == 1 && boxes[0].contains(QLatin1String("backup"))
                && backups.size() == 1 && QFile::exists(backup + QStringLiteral("/Tasks/Sync"))
                && kept == QStringList{QStringLiteral("NTUSER.DAT (tester)"), QStringLiteral("SOFTWARE"), QStringLiteral("SYSTEM"),
-                                      QStringLiteral("What DiskForge changed.txt")},
+                                      QStringLiteral("What DiskAnvil changed.txt")},
            QStringLiteral("switching off asks first, and keeps a backup with a note"), status->text().left(80) + QStringLiteral(" | ") + kept.join(QStringLiteral(", ")));
 
     reg::Hive software, system, user;
@@ -4673,7 +4773,7 @@ void virusLookUpOnline()
     }
     QTemporaryDir dir;
     QString problem;
-    if (!makeVirusList({{QByteArray("nothing on this drive matches this"), "Win.Trojan.DiskForgeTest-5"}}, dir.filePath(QStringLiteral("list")), &problem)) {
+    if (!makeVirusList({{QByteArray("nothing on this drive matches this"), "Win.Trojan.DiskAnvilTest-5"}}, dir.filePath(QStringLiteral("list")), &problem)) {
         report(false, QStringLiteral("make a test virus list with sigtool"), problem);
         return;
     }
@@ -4763,8 +4863,8 @@ void virusScanBoot()
 {
     using namespace testsign;
     QTemporaryDir dir;
-    const Signer root = makeCertificate("DiskForge Test Root", nullptr, true);
-    const Signer windows = makeCertificate("Microsoft Windows (DiskForge test)", &root, false);
+    const Signer root = makeCertificate("DiskAnvil Test Root", nullptr, true);
+    const Signer windows = makeCertificate("Microsoft Windows (DiskAnvil test)", &root, false);
     const QByteArray good = sign(makeProgram("Windows' boot manager"), windows, {windows.cert, root.cert});
     const QByteArray bad = makeProgram("a bootkit's boot manager");
     const QString vars = dir.filePath(QStringLiteral("efivars"));
@@ -4797,9 +4897,9 @@ void virusScanBoot()
                && manager->checkState(0) == Qt::Checked && list->topLevelItemCount() == 3, // with Secure Boot's own state
            QStringLiteral("Scan for Viruses: an unsigned Windows boot manager is found, ready to be put back"),
            tabs->tabText(2) + (manager ? QStringLiteral(": ") + manager->text(0) + QLatin1Char(' ') + manager->text(2) : QString()));
-    if (qEnvironmentVariableIsSet("DISKFORGE_UITEST_SHOTS")) {
+    if (qEnvironmentVariableIsSet("DISKANVIL_UITEST_SHOTS")) {
         tabs->setCurrentIndex(2);
-        dialog.grab().save(qEnvironmentVariable("DISKFORGE_UITEST_SHOTS") + QStringLiteral("/virus-boot.png"));
+        dialog.grab().save(qEnvironmentVariable("DISKANVIL_UITEST_SHOTS") + QStringLiteral("/virus-boot.png"));
     }
     Answerer answerer;
     answerer.answer = [&](QWidget *modal) {
@@ -4813,8 +4913,8 @@ void virusScanBoot()
     waitUntil([&] { return status->text().startsWith(QLatin1String("Put back")); }, 10000);
     QFile now(esp + QStringLiteral("/EFI/Microsoft/Boot/bootmgfw.efi"));
     const QByteArray after = now.open(QIODevice::ReadOnly) ? now.readAll() : QByteArray();
-    const QStringList backups = QDir(esp + QStringLiteral("/DiskForge backups")).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
-    report(after == good && backups.size() == 1 && QFile::exists(esp + QStringLiteral("/DiskForge backups/") + backups.value(0) + QStringLiteral("/EFI_Microsoft_Boot_bootmgfw.efi"))
+    const QStringList backups = QDir(esp + QStringLiteral("/DiskAnvil backups")).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    report(after == good && backups.size() == 1 && QFile::exists(esp + QStringLiteral("/DiskAnvil backups/") + backups.value(0) + QStringLiteral("/EFI_Microsoft_Boot_bootmgfw.efi"))
                && list->topLevelItem(0)->text(2).startsWith(QLatin1String("Windows' own copy is back")),
            QStringLiteral("Windows' own boot manager is put back, the old one kept"), status->text().left(100));
     efi::varsDir = realVars;
@@ -4835,7 +4935,7 @@ void virusScanOnDrive()
     QTemporaryDir dir;
     const QByteArray trojan = "pretend this is a trojan on a drive\n";
     QString problem;
-    if (!makeVirusList({{trojan, "Win.Trojan.DiskForgeTest-3"}}, dir.filePath(QStringLiteral("list")), &problem)) {
+    if (!makeVirusList({{trojan, "Win.Trojan.DiskAnvilTest-3"}}, dir.filePath(QStringLiteral("list")), &problem)) {
         report(false, QStringLiteral("make a test virus list with sigtool"), problem);
         return;
     }
@@ -5172,10 +5272,10 @@ void lostFilesBtrfs()
     report(bar->isVisible() && listed.size() == 3, QStringLiteral("btrfs: in a whole disk's image, its partition is copied out and read the same way"),
            listed.join(QLatin1Char(',')));
 
-    // As on DiskForge Live: the drive read as root, through a read-only loop device at the
+    // As on DiskAnvil Live: the drive read as root, through a read-only loop device at the
     // partition (tried here on the disk image, when sudo needs no password).
     if (QProcess::execute(QStringLiteral("sudo"), {QStringLiteral("-n"), QStringLiteral("true")}) != 0) {
-        report(true, QStringLiteral("btrfs: the DiskForge Live way skipped, sudo wants a password here"));
+        report(true, QStringLiteral("btrfs: the DiskAnvil Live way skipped, sudo wants a password here"));
         return;
     }
     QStringList live;
@@ -5191,7 +5291,7 @@ void lostFilesBtrfs()
     loops.start(QStringLiteral("losetup"), {QStringLiteral("-j"), disk});
     loops.waitForFinished(10000);
     report(live.size() == 3 && loops.readAll().trimmed().isEmpty(),
-           QStringLiteral("btrfs: the DiskForge Live way, read as root through a loop device that's taken away after"), live.join(QLatin1Char(',')));
+           QStringLiteral("btrfs: the DiskAnvil Live way, read as root through a loop device that's taken away after"), live.join(QLatin1Char(',')));
 }
 
 // "What Happened?": from what happened and which drive, to the odds and the right tool.
@@ -5237,8 +5337,8 @@ void whatHappened()
         if (b->objectName().startsWith(QLatin1String("tool-")) && b->isVisible())
             buttons << b->objectName().mid(5);
     }
-    if (qEnvironmentVariableIsSet("DISKFORGE_UITEST_SHOTS"))
-        dialog.grab().save(qEnvironmentVariable("DISKFORGE_UITEST_SHOTS") + QStringLiteral("/what-happened.png"));
+    if (qEnvironmentVariableIsSet("DISKANVIL_UITEST_SHOTS"))
+        dialog.grab().save(qEnvironmentVariable("DISKANVIL_UITEST_SHOTS") + QStringLiteral("/what-happened.png"));
     report(drives->item(1)->text().contains(QLatin1String("failing")) && buttons.value(0) == QLatin1String("rescue-copy"),
            QStringLiteral("what happened: on a failing drive, Make a Rescue Copy is the first button"), buttons.join(','));
 }
@@ -5467,9 +5567,9 @@ void lostFilesOrganised()
     waitUntil([&] { return !dialog.searchingWords(); }, 60000);
     report(status->text().startsWith(QLatin1String("\"test cam\" was found in 2 places")) && model->rowCount() == beforeWords + 2,
            QStringLiteral("organise: words remembered are found, and the text around them listed"), status->text());
-    if (qEnvironmentVariableIsSet("DISKFORGE_UITEST_SHOTS")) {
+    if (qEnvironmentVariableIsSet("DISKANVIL_UITEST_SHOTS")) {
         QCoreApplication::processEvents();
-        dialog.grab().save(qEnvironmentVariable("DISKFORGE_UITEST_SHOTS") + QStringLiteral("/lostfiles-organised.png"));
+        dialog.grab().save(qEnvironmentVariable("DISKANVIL_UITEST_SHOTS") + QStringLiteral("/lostfiles-organised.png"));
     }
 }
 
@@ -5603,8 +5703,8 @@ void lostFilesThroughWindow()
     const QRect room = dialog.screen()->availableGeometry();
     report(room.contains(dialog.frameGeometry()), QStringLiteral("the window fits on its screen"),
            QStringLiteral("%1x%2 on %3x%4").arg(dialog.width()).arg(dialog.height()).arg(room.width()).arg(room.height()));
-    // DISKFORGE_SHOTS=<folder>: a picture of the window as it is now, to look at by eye.
-    if (const QString shots = qEnvironmentVariable("DISKFORGE_SHOTS"); !shots.isEmpty()) {
+    // DISKANVIL_SHOTS=<folder>: a picture of the window as it is now, to look at by eye.
+    if (const QString shots = qEnvironmentVariable("DISKANVIL_SHOTS"); !shots.isEmpty()) {
         view->setCurrentIndex(view->model()->index(0, 0));
         waitUntil([&] { return !preview->pixmap().isNull(); }, 10000);
         dialog.grab().save(QDir(shots).filePath(QStringLiteral("lostfiles-%1x%2.png").arg(room.width()).arg(room.height())));
@@ -5612,7 +5712,7 @@ void lostFilesThroughWindow()
 
     // The same, as if the files were on the drive a folder in the home folder is on (/tmp can be
     // in memory): saving there is refused.
-    QTemporaryDir onDisk(QDir::homePath() + QStringLiteral("/.cache/diskforge-uitest-XXXXXX"));
+    QTemporaryDir onDisk(QDir::homePath() + QStringLiteral("/.cache/diskanvil-uitest-XXXXXX"));
     QString rootDisk;
     for (const Disk &d : udisks.disks()) {
         if (blockio::pathIsOnDisk(onDisk.path(), d.device))
@@ -5720,7 +5820,7 @@ void enterKey()
     };
     {
         RescueUsbDialog dialog(&udisks, QString());
-        check(dialog, QStringLiteral("Make a DiskForge Live USB"));
+        check(dialog, QStringLiteral("Make a DiskAnvil Live USB"));
     }
     {
         WindowsUsbDialog dialog(&udisks, QString(), nullptr, QStringLiteral("/nonexistent/Win11.iso"));
@@ -5732,17 +5832,17 @@ void enterKey()
     }
 }
 
-// In DiskForge Live the few things that only change the running system are off and say why;
+// In DiskAnvil Live the few things that only change the running system are off and say why;
 // the USB tools and everything else stay on.
 void rescueMode()
 {
     const QString realConf = rescue::rescueConfPath;
     QTemporaryDir dir;
-    rescue::rescueConfPath = dir.filePath(QStringLiteral("diskforge-live.conf"));
+    rescue::rescueConfPath = dir.filePath(QStringLiteral("diskanvil-live.conf"));
     UDisks udisks;
     const QStringList offInRescue = {QStringLiteral("Mount at Startup"), QStringLiteral("Disk Cleanup"), QStringLiteral("Btrfs Snapshots")};
     const QStringList alwaysOn = {QStringLiteral("Write Image to USB"), QStringLiteral("Make a Windows USB"),
-                                  QStringLiteral("Make a DiskForge Live USB"), QStringLiteral("Check a USB Stick"),
+                                  QStringLiteral("Make a DiskAnvil Live USB"), QStringLiteral("Check a USB Stick"),
                                   QStringLiteral("Open Disk Image"), QStringLiteral("Optimize")};
 
     auto check = [&](bool inRescue) {
@@ -5804,7 +5904,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},
@@ -5822,7 +5922,7 @@ int userScenarios(const QStringList &only)
 
 int main(int argc, char *argv[])
 {
-    // Find Lost Files starts this program as its preview helper, as it would DiskForge itself.
+    // Find Lost Files starts this program as its preview helper, as it would DiskAnvil itself.
     if (argc == 2 && QByteArray(argv[1]) == "--preview-helper") {
         qputenv("QT_QPA_PLATFORM", "offscreen");
         QGuiApplication helper(argc, argv);

@@ -221,7 +221,7 @@ QStringList filesNaming(const QString &root, const QStringList &ids)
 QStringList rewrite(const QStringList &files, const QHash<QString, QString> &renamed, QString *error)
 {
     QStringList changed;
-    const QString stamp = QStringLiteral(".diskforge-") + QDate::currentDate().toString(Qt::ISODate);
+    const QString stamp = QStringLiteral(".diskanvil-") + QDate::currentDate().toString(Qt::ISODate);
     for (const QString &path : files) {
         QFile f(path);
         if (!f.open(QIODevice::ReadOnly)) {
@@ -245,7 +245,7 @@ QStringList rewrite(const QStringList &files, const QHash<QString, QString> &ren
             *error = tr("%1 couldn't be backed up, so it wasn't changed").arg(path);
             continue;
         }
-        QFile next(path + QStringLiteral(".diskforge-new"));
+        QFile next(path + QStringLiteral(".diskanvil-new"));
         if (!next.open(QIODevice::WriteOnly) || next.write(after) != after.size()) {
             *error = tr("%1 couldn't be written: %2").arg(path, next.errorString());
             next.remove();

@@ -94,7 +94,7 @@ void hiddenArea()
            QStringLiteral("drive settings: seek noise, reading ahead, and a switch back to the drive's own"));
 }
 
-// The raw SMART and NVMe pages DiskForge reads itself on Windows: decoded the way UDisks decodes
+// The raw SMART and NVMe pages DiskAnvil reads itself on Windows: decoded the way UDisks decodes
 // them on Linux. The ATA page is QEMU's own (hw/ide/core.c), the drive the Windows VM sees.
 void rawPages()
 {
@@ -212,8 +212,8 @@ void triageAdvice()
     const triage::Advice rescue = triage::advise(Symptom::Deleted, failing);
     report(rescue.tools.value(0) == QLatin1String("rescue-copy") && rescue.odds == Odds::Fair && rescue.dont.join(' ').contains(QLatin1String("Don't check, repair")),
            QStringLiteral("what happened: on a failing drive, a Rescue Copy comes first"), rescue.tools.join(','));
-    report(triage::advise(Symptom::Deleted, system).odds_why.contains(QLatin1String("DiskForge Live")),
-           QStringLiteral("what happened: the system's own drive is best looked at from DiskForge Live"));
+    report(triage::advise(Symptom::Deleted, system).odds_why.contains(QLatin1String("DiskAnvil Live")),
+           QStringLiteral("what happened: the system's own drive is best looked at from DiskAnvil Live"));
     report(triage::advise(Symptom::Formatted, ssd).odds == Odds::Poor && triage::advise(Symptom::Formatted, card).odds == Odds::Good,
            QStringLiteral("what happened: a formatted SSD is mostly erased, a formatted card isn't"));
     const triage::Advice raw = triage::advise(Symptom::WontOpen, hdd);
@@ -446,7 +446,7 @@ void peVersions()
     QFile exe(QStringLiteral(SOURCE_DIR "/tests/data/pe/versioned.exe"));
     const QByteArray data = exe.open(QIODevice::ReadOnly) ? exe.readAll() : QByteArray();
     const QHash<QString, QString> v = peinfo::versionStrings(data);
-    report(v.value(QStringLiteral("CompanyName")) == QLatin1String("DiskForge Test Company")
+    report(v.value(QStringLiteral("CompanyName")) == QLatin1String("DiskAnvil Test Company")
                && v.value(QStringLiteral("FileDescription")) == QStringLiteral("Grüße driver for tests") && v.value(QStringLiteral("FileVersion")) == QLatin1String("3.1.4.1"),
            QStringLiteral("PE: the company and description in a program's version resource"),
            QStringList(v.keys()).join(QLatin1Char(',')) + QStringLiteral(" ") + v.value(QStringLiteral("FileDescription")));
@@ -907,7 +907,7 @@ void healthTests()
            firmware::describe(upToDate));
     report(available.state == FwState::Available && available.newVersion == QLatin1String("GG2OACA1")
                && firmware::describe(available).contains(QLatin1String("GG2OACA1")),
-           QStringLiteral("a newer version is shown, and DiskForge doesn't install it"), firmware::describe(available));
+           QStringLiteral("a newer version is shown, and DiskAnvil doesn't install it"), firmware::describe(available));
     report(stick.state == FwState::NotUpdatable && broken.state == FwState::Error && broken.error == QLatin1String("oops"),
            QStringLiteral("a drive fwupd can't update, and other errors, say so"));
 
@@ -1008,7 +1008,7 @@ void healthTests()
     report(first == QVariantMap{{QStringLiteral("ata-pm-standby"), 120}}
                && changed == QVariantMap{{QStringLiteral("ata-apm-level"), 254}, {QStringLiteral("ata-write-cache-enabled"), false}, {QStringLiteral("other-key"), true}}
                && odd == kept,
-           QStringLiteral("power settings change only what was picked, and keep keys DiskForge doesn't know"));
+           QStringLiteral("power settings change only what was picked, and keep keys DiskAnvil doesn't know"));
     report(drivepower::stateText(0x00).startsWith(QLatin1String("Asleep")) && drivepower::stateText(0xff) == QLatin1String("Spinning")
                && drivepower::stateText(0x80) == QLatin1String("Idle") && drivepower::stateText(7) == QLatin1String("Unknown"),
            QStringLiteral("power states in plain words"));

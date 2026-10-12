@@ -3,7 +3,7 @@
 
 #pragma once
 
-// Repair Linux Boot (DiskForge Live): a Linux that doesn't start any more because its boot
+// Repair Linux Boot (DiskAnvil Live): a Linux that doesn't start any more because its boot
 // loader is gone or broken (Windows' updates overwrite it, a firmware reset drops its boot entry,
 // a failed update leaves GRUB half done). Its own tools put it back, run inside it (a chroot):
 // GRUB (grub-install and its menu), GRUB 2 the Fedora and openSUSE way (shim's boot entry back,
@@ -48,7 +48,7 @@ Install inspect(const QString &root, const QString &rootDevice, const QString &s
 // The subvolume folders a Btrfs top level might hold a root in.
 QStringList rootSubvolumes(const QString &top);
 
-// The script that repairs it, run as root: mounts it at /mnt/diskforge-repair, runs its own
+// The script that repairs it, run as root: mounts it at /mnt/diskanvil-repair, runs its own
 // tools in a chroot, unmounts it all again.
 QString repairScript(const Install &install, bool uefi);
 // What it does, in plain words.

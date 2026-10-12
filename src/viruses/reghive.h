@@ -4,7 +4,7 @@
 #pragma once
 
 // Windows' registry files ("hives": SYSTEM, SOFTWARE, a user's NTUSER.DAT), read with our own
-// code, for a Windows that isn't running: the same on DiskForge Live and in the Windows version.
+// code, for a Windows that isn't running: the same on DiskAnvil Live and in the Windows version.
 //
 // Windows 8.1 and later write changes to a hive's logs (.LOG1 and .LOG2) first, and into the
 // hive itself much later. A hive taken from a PC that was shut down with Fast Startup, or

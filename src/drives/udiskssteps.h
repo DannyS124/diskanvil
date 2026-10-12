@@ -10,7 +10,7 @@
 
 class UDisks;
 
-// The way DiskForge chains UDisks calls: each one reports through operationFinished, and the
+// The way DiskAnvil chains UDisks calls: each one reports through operationFinished, and the
 // next step often has to wait until UDisks shows the result (a new partition, a mount point).
 // UsbPrep and IsoMount are built on it.
 class UDisksSteps : public QObject

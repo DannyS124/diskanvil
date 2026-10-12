@@ -1,5 +1,0 @@
-#!/bin/sh
-# Saves the logs to the stick right before the PC sleeps. If it doesn't wake up properly, they
-# show what happened up to then.
-[ "$1" = pre ] && /usr/local/bin/diskforge-live-logs --quiet
-exit 0

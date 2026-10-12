@@ -5,7 +5,7 @@
 //
 // Drives come from SetupAPI's list of disk devices and are opened as \\.\PhysicalDriveN; the
 // partition table from IOCTL_DISK_GET_DRIVE_LAYOUT_EX; what's in each partition from the
-// volumes Windows mounted (letters, labels, free space), and from DiskForge's own look at
+// volumes Windows mounted (letters, labels, free space), and from DiskAnvil's own look at
 // the first bytes for file systems Windows can't read (ext4, LUKS...). Windows tells about
 // drives and volumes coming and going through CM_Register_Notification; drive letters given
 // or taken away are noticed by watching GetLogicalDrives().
@@ -95,7 +95,7 @@ int diskNumber(const QString &blockPath)
     return blockPath.section(QStringLiteral("PhysicalDrive"), 1).toInt();
 }
 
-// Windows' name for a file system DiskForge knows by its Linux one; empty when Windows can't make it.
+// Windows' name for a file system DiskAnvil knows by its Linux one; empty when Windows can't make it.
 QString windowsFs(const QString &fsType)
 {
     if (fsType == QLatin1String("ntfs"))
@@ -107,10 +107,10 @@ QString windowsFs(const QString &fsType)
     return {};
 }
 
-// What DiskForge Live can do and Windows can't, in the words for it.
+// What DiskAnvil Live can do and Windows can't, in the words for it.
 QString onlyOnLive(const QString &fsName)
 {
-    return QCoreApplication::translate("UDisks", "Windows can't make %1 file systems; DiskForge Live can").arg(fsName);
+    return QCoreApplication::translate("UDisks", "Windows can't make %1 file systems; DiskAnvil Live can").arg(fsName);
 }
 
 constexpr quint64 kFat32Most = 32ull * 1024 * 1024 * 1024; // Windows makes FAT32 only this big
@@ -236,7 +236,7 @@ QVector<VolumeInfo> listVolumes()
             continue; // CDs, network drives and the like
         const auto *e = reinterpret_cast<const VOLUME_DISK_EXTENTS *>(extents.constData());
         if (e->NumberOfDiskExtents != 1)
-            continue; // spread over several drives (dynamic disks): not something DiskForge edits
+            continue; // spread over several drives (dynamic disks): not something DiskAnvil edits
         v.disk = e->Extents[0].DiskNumber;
         v.offset = quint64(e->Extents[0].StartingOffset.QuadPart);
 
@@ -619,12 +619,12 @@ struct UDisks::Windows {
     HCMNOTIFICATION notifications[2] = {};
     QTimer letters;
     DWORD lastLetters = 0;
-    // What DiskForge found at the start of partitions Windows can't read, so a refresh
+    // What DiskAnvil found at the start of partitions Windows can't read, so a refresh
     // doesn't read every drive again (or wake a sleeping one). By drive, offset and size.
     QHash<QString, fsprobe::Result> probed;
     // Each partition's volume, \\?\Volume{...}\, for the ones Windows mounted.
     QHash<QString, QString> volumeNames;
-    // DiskForge's own long jobs (wiping), shown like UDisks' ones; how to stop each, what to say
+    // DiskAnvil's own long jobs (wiping), shown like UDisks' ones; how to stop each, what to say
     // when it's been stopped, and the threads doing them.
     QVector<Job> jobs;
     QHash<QString, std::shared_ptr<std::atomic<bool>>> stops;
@@ -675,7 +675,7 @@ UDisks::UDisks(QObject *parent)
     m_windows->letters.start();
 
     if (!elevated())
-        m_error = tr("DiskForge needs to run as administrator to see and change drives. Right-click it and choose "
+        m_error = tr("DiskAnvil needs to run as administrator to see and change drives. Right-click it and choose "
                      "\"Run as administrator\".");
     detectFilesystems();
     refresh();
@@ -685,7 +685,7 @@ void UDisks::detectFilesystems()
 {
     // Windows formats these itself. FAT32 only up to 32 GB; the rest can't be made here.
     // Windows grows and shrinks NTFS (in use or not), not FAT or exFAT; chkdsk checks and repairs all three.
-    const QString linuxOnly = tr("Windows can't make this; DiskForge Live can");
+    const QString linuxOnly = tr("Windows can't make this; DiskAnvil Live can");
     const int both = OfflineShrink | OfflineGrow | OnlineShrink | OnlineGrow;
     m_filesystems = {
         {QStringLiteral("exfat"), tr("exFAT"), tr("USB drives, works everywhere"), 15, {}, true, 0, false, true, true},
@@ -974,7 +974,7 @@ QString UDisks::daemonVersion() const
 void UDisks::notOnWindows(const QString &failure)
 {
     QTimer::singleShot(0, this, [this, failure] {
-        emit operationFinished(false, failure + reasonAfter(failure) + tr("this isn't in the Windows version of DiskForge yet"));
+        emit operationFinished(false, failure + reasonAfter(failure) + tr("this isn't in the Windows version of DiskAnvil yet"));
     });
 }
 
@@ -1382,7 +1382,7 @@ void UDisks::giveNewDiskIds(const Disk &disk)
     });
 }
 
-// What was read from a drive's partitions is read again after DiskForge changed them.
+// What was read from a drive's partitions is read again after DiskAnvil changed them.
 void UDisks::forgetProbes(const Disk *disk)
 {
     if (!disk)
@@ -1471,7 +1471,7 @@ void UDisks::createPartition(const Disk &disk, quint64 offset, quint64 size, con
         QTimer::singleShot(0, this, [this, failure, why] { emit operationFinished(false, failure + reasonAfter(failure) + why); });
     };
     if (!passphrase.isEmpty())
-        return refuse(tr("Windows can't make LUKS encrypted partitions; DiskForge Live can"));
+        return refuse(tr("Windows can't make LUKS encrypted partitions; DiskAnvil Live can"));
     if (!fsType.isEmpty() && windows.isEmpty())
         return refuse(onlyOnLive(fs ? fs->name : fsType));
 
@@ -1487,7 +1487,7 @@ void UDisks::createPartition(const Disk &disk, quint64 offset, quint64 size, con
     const quint64 end = std::min<quint64>(start + (size + MiB - 1) / MiB * MiB, freeEnd);
     if (end <= start)
         return refuse(tr("not enough space"));
-    // Windows won't make FAT32 this big: the partition is made bare, DiskForge formats it, and only
+    // Windows won't make FAT32 this big: the partition is made bare, DiskAnvil formats it, and only
     // then does it get a letter (as raw, it would have Windows ask to format it).
     const bool ownFormat = windows == QLatin1String("FAT32") && end - start > kFat32Most;
 
@@ -1568,11 +1568,11 @@ void UDisks::format(const Volume &volume, const QString &fsType, const QString &
         QTimer::singleShot(0, this, [this, failure, why] { emit operationFinished(false, failure + reasonAfter(failure) + why); });
     };
     if (!passphrase.isEmpty())
-        return refuse(tr("Windows can't make LUKS encrypted partitions; DiskForge Live can"));
+        return refuse(tr("Windows can't make LUKS encrypted partitions; DiskAnvil Live can"));
     if (windows.isEmpty())
         return refuse(onlyOnLive(fs ? fs->name : fsType));
     if (windows == QLatin1String("FAT32") && volume.size > kFat32Most) {
-        // Windows won't make FAT32 this big; DiskForge's own formatter will.
+        // Windows won't make FAT32 this big; DiskAnvil's own formatter will.
         ownFat32(volume, label, [this, path = disk ? disk->blockPath : QString(), name, failure](bool ok, const QString &error) {
             forgetProbes(diskByPath(path));
             refresh();
@@ -1603,7 +1603,7 @@ void UDisks::format(const Volume &volume, const QString &fsType, const QString &
             });
 }
 
-// FAT32 made by DiskForge's own formatter (fat32format.cpp), where Windows won't: over 32 GB. The
+// FAT32 made by DiskAnvil's own formatter (fat32format.cpp), where Windows won't: over 32 GB. The
 // volume is locked and taken out of use, written through, and let go; Windows reads it afresh.
 // It's on a thread of its own, since a big volume's FATs take a while to write.
 void UDisks::ownFat32(const Volume &volume, const QString &label, const std::function<void(bool, const QString &)> &done)
@@ -1941,7 +1941,7 @@ void UDisks::openImage(const QString &path, bool readOnly)
     if (suffix == QLatin1String("iso"))
         refusal = tr("Windows opens ISO images itself: double-click it in File Explorer and it gets a drive letter");
     else if (suffix != QLatin1String("vhd") && suffix != QLatin1String("vhdx"))
-        refusal = tr("Windows only opens .vhd and .vhdx images as drives. Find Lost Files reads the others, and DiskForge Live opens them all");
+        refusal = tr("Windows only opens .vhd and .vhdx images as drives. Find Lost Files reads the others, and DiskAnvil Live opens them all");
     if (!refusal.isEmpty()) {
         QTimer::singleShot(0, this, [this, failure, refusal] { emit operationFinished(false, failure + reasonAfter(failure) + refusal); });
         return;

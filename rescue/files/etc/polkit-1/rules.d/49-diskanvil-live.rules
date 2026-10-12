@@ -1,0 +1,6 @@
+// DiskAnvil Live: whoever is sitting at the PC owns it, so nothing asks for a password.
+// DiskAnvil still asks before anything that erases or changes a drive.
+polkit.addRule(function(action, subject) {
+    if (subject.user == "rescue" && subject.local && subject.active)
+        return polkit.Result.YES;
+});

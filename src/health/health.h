@@ -6,7 +6,7 @@
 // What a drive's SMART data means, in plain words, and the overall verdict. The attributes
 // that count are the ones Backblaze's drive statistics show going with failures (5, 187,
 // 188, 197, 198), plus a few that point at the hardware (10, 184) or the cable (199).
-// Counters that never go down are only warned about when they've grown since DiskForge
+// Counters that never go down are only warned about when they've grown since DiskAnvil
 // last saw them (or since the warning was dismissed).
 
 #include "udisks.h"
@@ -30,7 +30,7 @@ struct AtaInput {
     int failingNow = 0;   // attributes at or under their threshold
     int failedBefore = 0; // attributes that were, at some point
     QVector<SmartAttribute> attributes;
-    QMap<int, qint64> seen; // raw values DiskForge saw before (counters that never go down)
+    QMap<int, qint64> seen; // raw values DiskAnvil saw before (counters that never go down)
     double temperatureC = -1;
     bool ssd = false;
 };
@@ -71,7 +71,7 @@ bool worseThan(const Health &h, const QStringList &dismissed);
 // and Rescue Copy, which works around them, is the way to save what's on it.
 bool hasUnreadableSpots(const Health &h);
 
-// The counters whose growth matters (184, 188, 199), with the values DiskForge remembers
+// The counters whose growth matters (184, 188, 199), with the values DiskAnvil remembers
 // for a drive. remember() stores values it hasn't seen yet; acknowledge() takes the
 // current ones as the new starting point (a dismissed warning).
 QList<int> watchedCounters();
@@ -79,11 +79,11 @@ QMap<int, qint64> seen(const QString &driveKey);
 void remember(const QString &driveKey, const QVector<SmartAttribute> &attributes);
 void acknowledge(const QString &driveKey, const QVector<SmartAttribute> &attributes);
 
-// Self-tests, kept with the drive: a test DiskForge saw finish goes into its history (the
+// Self-tests, kept with the drive: a test DiskAnvil saw finish goes into its history (the
 // newest 20), as drives keep only their last few results and NVMe drives show none of them.
 struct SelftestRecord {
     QDateTime finished;
-    QString kind;   // "short", "extended", "conveyance"; empty when DiskForge didn't start it
+    QString kind;   // "short", "extended", "conveyance"; empty when DiskAnvil didn't start it
     QString status; // as the drive put it: "success", "aborted", "error_read"...
 };
 void noteSelftestStarted(const QString &key, const QString &kind);

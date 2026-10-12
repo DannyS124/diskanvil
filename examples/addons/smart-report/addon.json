@@ -3,7 +3,7 @@
   "name": "Full SMART Report",
   "version": "1.1",
   "author": "Danny S",
-  "description": "Shows everything smartctl knows about a drive. Needs smartmontools. It uses sudo, so it asks for your password, and DiskForge asks before every run.",
+  "description": "Shows everything smartctl knows about a drive. Needs smartmontools. It uses sudo, so it asks for your password, and DiskAnvil asks before every run.",
   "actions": [
     {
       "label": "Full SMART Report",

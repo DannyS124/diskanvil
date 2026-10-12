@@ -137,7 +137,7 @@ void backupTests()
         const QString old = path("old.img.zst");
         sh(QStringLiteral("sh"), {QStringLiteral("-c"), QStringLiteral("zstd -q -c '%1' > '%2'").arg(disk, old)});
         QString problem;
-        report(!vdisk::open(old, &problem) && problem.contains(QLatin1String("before DiskForge 0.5.2")) && imagebackup::describe(old).size == quint64(32 * MiB),
+        report(!vdisk::open(old, &problem) && problem.contains(QLatin1String("before DiskAnvil 0.5.2")) && imagebackup::describe(old).size == quint64(32 * MiB),
                QStringLiteral("an older one-piece backup: its size still read, and Find Lost Files says to unpack it"), problem);
     }
 
@@ -271,7 +271,7 @@ void evidenceTests()
             QRandomGenerator::global()->fillRange(reinterpret_cast<quint32 *>(random.data()), int(random.size() / 4));
             f.write(random);
             f.write(QByteArray(200 * 1024, '\0'));
-            f.write(QByteArray("DiskForge").repeated(5000));
+            f.write(QByteArray("DiskAnvil").repeated(5000));
             f.resize(1024 * 1024);
         }
     }

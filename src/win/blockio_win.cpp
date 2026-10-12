@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // blockio on Windows. The fds are the C library's, wrapping a HANDLE (_open_osfhandle), so
-// the rest of DiskForge passes them around and closes them as on Linux; reads and writes at
+// the rest of DiskAnvil passes them around and closes them as on Linux; reads and writes at
 // a position go to the HANDLE directly.
 
 #include "blockio.h"
@@ -315,7 +315,7 @@ void syncFileSystem(const QString &path)
     QString name = win::fromWide(volume);
     if (name.endsWith(QLatin1Char('\\')))
         name.chop(1);
-    // Flushing a whole volume takes an administrator, which DiskForge is on Windows.
+    // Flushing a whole volume takes an administrator, which DiskAnvil is on Windows.
     win::Handle h = win::openDevice(name, GENERIC_READ | GENERIC_WRITE);
     if (h.valid())
         FlushFileBuffers(h.get());

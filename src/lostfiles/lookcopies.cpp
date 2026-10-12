@@ -56,7 +56,7 @@ QString LookCopies::folderFor(quint64 size, QString *why)
     const QString temp = QDir::tempPath();
     if (inMemory(QStorageInfo(temp)) && fits(QStorageInfo(temp), size, true)) {
         if (!m_memory)
-            m_memory = std::make_unique<QTemporaryDir>(temp + QStringLiteral("/diskforge-look-XXXXXX"));
+            m_memory = std::make_unique<QTemporaryDir>(temp + QStringLiteral("/diskanvil-look-XXXXXX"));
         if (m_memory->isValid())
             return m_memory->path();
     }
@@ -66,7 +66,7 @@ QString LookCopies::folderFor(quint64 size, QString *why)
         if (!usable(place) || inMemory(QStorageInfo(place)) || !fits(QStorageInfo(place), size, false))
             continue;
         if (!m_cache)
-            m_cache = std::make_unique<QTemporaryDir>(place + QStringLiteral("/diskforge-look-XXXXXX"));
+            m_cache = std::make_unique<QTemporaryDir>(place + QStringLiteral("/diskanvil-look-XXXXXX"));
         if (m_cache->isValid())
             return m_cache->path();
     }
@@ -100,7 +100,7 @@ QStringList LookCopies::folders()
         const QString cache = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
         QDir().mkpath(cache);
         if ((m_disk.isEmpty() || !blockio::pathIsOnDisk(cache, m_disk)) && !inMemory(QStorageInfo(cache)))
-            m_cache = std::make_unique<QTemporaryDir>(cache + QStringLiteral("/diskforge-look-XXXXXX"));
+            m_cache = std::make_unique<QTemporaryDir>(cache + QStringLiteral("/diskanvil-look-XXXXXX"));
     }
     QStringList out;
     for (const auto *dir : {m_memory.get(), m_cache.get(), m_picked.get()}) {
@@ -117,7 +117,7 @@ bool LookCopies::setFolder(const QString &folder, QString *why)
             *why = tr("That folder is on the drive the files are being found on. Pick one on another drive.");
         return false;
     }
-    auto picked = std::make_unique<QTemporaryDir>(folder + QStringLiteral("/diskforge-look-XXXXXX"));
+    auto picked = std::make_unique<QTemporaryDir>(folder + QStringLiteral("/diskanvil-look-XXXXXX"));
     if (!picked->isValid()) {
         if (why)
             *why = tr("A folder for the copies couldn't be made there.");

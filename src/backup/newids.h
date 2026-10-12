@@ -44,7 +44,7 @@ bool setSerial(QByteArray &boot, const QString &fsType, const QString &serial, Q
 // partition mounted at `root` has its own boot entries and menu; those are found too.)
 QStringList filesNaming(const QString &root, const QStringList &ids);
 // Puts each new ID in place of its old one (`renamed`: old to new, any case) in `files`,
-// keeping each as it was next to it ("fstab.diskforge-2026-10-10"). Returns the files changed.
+// keeping each as it was next to it ("fstab.diskanvil-2026-10-10"). Returns the files changed.
 QStringList rewrite(const QStringList &files, const QHash<QString, QString> &renamed, QString *error);
 
 } // namespace newids

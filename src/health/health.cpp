@@ -13,7 +13,7 @@ namespace {
 
 QSettings settings()
 {
-    return QSettings(QStringLiteral("diskforge"), QStringLiteral("diskforge"));
+    return QSettings(QStringLiteral("diskanvil"), QStringLiteral("diskanvil"));
 }
 
 qint64 rawOf(const QVector<SmartAttribute> &attributes, int id)

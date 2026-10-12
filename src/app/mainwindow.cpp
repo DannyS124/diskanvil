@@ -16,6 +16,7 @@
 #include "certificates.h"
 #include "closedsets.h"
 #include "writeblock.h"
+#include "remotehelpdialog.h"
 #include "clonezilladialog.h"
 #include "copydialogs.h"
 #include "erasedialog.h"
@@ -140,7 +141,7 @@ MainWindow::MainWindow(UDisks *udisks, QWidget *parent)
     , m_table(new QTreeWidget)
     , m_map(new DiskMap)
 {
-    setWindowTitle(tr("DiskForge"));
+    setWindowTitle(tr("DiskAnvil"));
 
     m_table->setColumnCount(ColumnCount);
     m_table->setHeaderLabels({tr("Volume"), tr("Device"), tr("File System"), tr("Status"),
@@ -249,7 +250,7 @@ MainWindow::MainWindow(UDisks *udisks, QWidget *parent)
         const Volume *v = volumeByPath(objectPath);
         if (clean || !v)
             return;
-        // On DiskForge Live the repair can be tried on a stand-in first, to see what it does.
+        // On DiskAnvil Live the repair can be tried on a stand-in first, to see what it does.
         const QString fs = v->effectiveFsType();
         QMessageBox ask(QMessageBox::Question, tr("Errors Found"), tr("%1 has file system errors. Repair them now?").arg(volumeTitle(*v)),
                         QMessageBox::NoButton, this);
@@ -359,13 +360,13 @@ void MainWindow::createActions()
     });
 
     // Find Lost Files: from the selected drive or partition, or picked in the window.
-    m_findFiles = new QAction(themeIcon("diskforge-live-recover", "edit-find"), tr("Find &Lost Files…"), this);
+    m_findFiles = new QAction(themeIcon("diskanvil-live-recover", "edit-find"), tr("Find &Lost Files…"), this);
     connect(m_findFiles, &QAction::triggered, this, [this] {
         const Volume *v = selectedVolume();
         const Disk *d = selectedDisk();
         LostFilesDialog(m_udisks, v ? v->objectPath : d ? d->blockPath : QString(), toolParent()).exec();
     });
-    m_findFilesImage = new QAction(themeIcon("diskforge-live-recover", "edit-find"), tr("Find Lost &Files in a Disk Image…"), this);
+    m_findFilesImage = new QAction(themeIcon("diskanvil-live-recover", "edit-find"), tr("Find Lost &Files in a Disk Image…"), this);
     connect(m_findFilesImage, &QAction::triggered, this, [this] {
         const QString file = QFileDialog::getOpenFileName(
             this, tr("Find Lost Files in a Disk Image"), QDir::homePath(),
@@ -523,7 +524,7 @@ void MainWindow::createActions()
     m_luksRestore->setObjectName(QStringLiteral("luksRestore"));
     connect(m_luksRestore, &QAction::triggered, this, &MainWindow::restoreLuksHeader);
 #ifdef Q_OS_WIN
-    m_luksBackup->setVisible(false); // LUKS is Linux's: DiskForge Live does it
+    m_luksBackup->setVisible(false); // LUKS is Linux's: DiskAnvil Live does it
     m_luksRestore->setVisible(false);
 #endif
 
@@ -554,7 +555,7 @@ void MainWindow::createActions()
         WriteImageDialog(m_udisks, d ? d->blockPath : QString(), toolParent()).exec();
     });
 
-    m_rescueUsb = new QAction(themeIcon("tools-media-optical-burn", "media-flash"), tr("Make a DiskForge &Live USB…"), this);
+    m_rescueUsb = new QAction(themeIcon("tools-media-optical-burn", "media-flash"), tr("Make a DiskAnvil &Live USB…"), this);
     connect(m_rescueUsb, &QAction::triggered, this, [this] {
         const Disk *d = selectedDisk();
         RescueUsbDialog(m_udisks, d ? d->blockPath : QString(), toolParent()).exec();
@@ -598,14 +599,14 @@ void MainWindow::createActions()
             return;
 #ifdef Q_OS_WIN
         // Windows doesn't pass a drive's own erase command through, and PCs lock it while
-        // Windows runs (DiskForge Live gets around that). Wipe Disk works here.
+        // Windows runs (DiskAnvil Live gets around that). Wipe Disk works here.
         QMessageBox box(QMessageBox::Information, tr("Secure Erase"),
                         tr("Secure Erase has the drive erase itself, spare areas and all, which only the drive can reach. "
                            "Windows doesn't let programs send it that command, and most PCs lock it while Windows runs.\n\n"
-                           "DiskForge Live does it: start the PC from a DiskForge Live USB. Wipe Disk works here, writing zeros "
+                           "DiskAnvil Live does it: start the PC from a DiskAnvil Live USB. Wipe Disk works here, writing zeros "
                            "over everything, which is as good for a hard drive."),
                         QMessageBox::Close, this);
-        QPushButton *live = box.addButton(tr("Make a DiskForge Live USB…"), QMessageBox::ActionRole);
+        QPushButton *live = box.addButton(tr("Make a DiskAnvil Live USB…"), QMessageBox::ActionRole);
         QPushButton *wipe = box.addButton(tr("Wipe Disk…"), QMessageBox::ActionRole);
         wipe->setEnabled(m_wipe->isEnabled());
         box.exec();
@@ -625,7 +626,7 @@ void MainWindow::createActions()
             return gone();
         statusBar()->showMessage(tr("Erasing %1… the drive is doing it, so there's no progress until it's done.").arg(shortDevice(fresh->device)));
         // Old controllers can lose a drive during a long erase and not notice it's back. On
-        // DiskForge Live, ask them to look again once it's done.
+        // DiskAnvil Live, ask them to look again once it's done.
         if (rescue::canRescanDrives()) {
             auto conn = std::make_shared<QMetaObject::Connection>();
             *conn = connect(m_udisks, &UDisks::operationFinished, this, [this, conn](bool, const QString &) {
@@ -778,6 +779,11 @@ void MainWindow::createActions()
     m_openSets->setToolTip(tr("Drives that belong together (a NAS's, a RAID array's, Windows' dynamic disks), opened read-only"));
     connect(m_openSets, &QAction::triggered, this, &MainWindow::openClosedSets);
 
+    m_remoteHelp = new QAction(themeIcon("preferences-desktop-remote-desktop", "network-connect"), tr("Let Someone &Help…"), this);
+    m_remoteHelp->setObjectName(QStringLiteral("remoteHelp"));
+    m_remoteHelp->setToolTip(tr("Someone you trust, on the same network, sees this screen and can use it, or works in a terminal"));
+    connect(m_remoteHelp, &QAction::triggered, this, [this] { RemoteHelpDialog(toolParent()).exec(); });
+
     m_writeBlock = new QAction(themeIcon("object-locked", "document-encrypt"), tr("Write-Protect Every Drive"), this);
     m_writeBlock->setObjectName(QStringLiteral("writeBlock"));
     m_writeBlock->setCheckable(true);
@@ -786,9 +792,9 @@ void MainWindow::createActions()
                                       "them (for evidence, or a drive that mustn't be touched)")
 #ifdef Q_OS_WIN
                                  : tr("Windows writes to a drive as soon as it's plugged in, before any program can stop it: start the PC "
-                                      "from DiskForge Live, \"Drives write-protected\", for that"));
+                                      "from DiskAnvil Live, \"Drives write-protected\", for that"));
 #else
-                                 : tr("Only DiskForge Live can: a running system's own drive can't be made read-only. Its boot menu has "
+                                 : tr("Only DiskAnvil Live can: a running system's own drive can't be made read-only. Its boot menu has "
                                       "\"Drives write-protected\" too."));
 #endif
     m_writeBlock->setEnabled(writeblock::available());
@@ -829,7 +835,7 @@ void MainWindow::createActions()
     connect(m_optimize, &QAction::triggered, this, [this] { OptimizeDialog(m_udisks, this).exec(); });
     m_cleanup = new QAction(themeIcon("edit-clear-history", "edit-clear"), tr("Disk &Cleanup…"), this);
     connect(m_cleanup, &QAction::triggered, this, [this] { CleanupDialog(m_udisks, this).exec(); });
-    m_virusScan = new QAction(themeIcon("diskforge-live-virus", "security-high"), tr("Scan for &Viruses…"), this);
+    m_virusScan = new QAction(themeIcon("diskanvil-live-virus", "security-high"), tr("Scan for &Viruses…"), this);
     m_virusScan->setToolTip(tr("Look for known malware on a drive or in a folder"));
     connect(m_virusScan, &QAction::triggered, this, [this] { VirusDialog(m_udisks, toolParent()).exec(); });
     m_snapshots = new QAction(themeIcon("camera-photo", "document-open-recent"), tr("Btrfs &Snapshots…"), this);
@@ -952,6 +958,7 @@ void MainWindow::createActions()
             m_writeBlock->setChecked(writeblock::isOn());
         }
         tools->addAction(m_writeBlock);
+        tools->addAction(m_remoteHelp);
         tools->addAction(m_bootMenu);
         tools->addAction(m_linuxBoot);
         tools->addAction(m_drivers);
@@ -1002,7 +1009,7 @@ void MainWindow::createActions()
     });
 
     QMenu *help = menuBar()->addMenu(tr("&Help"));
-    QAction *handbook = help->addAction(themeIcon("help-contents", "help-browser"), tr("DiskForge &Help"), this, [this] {
+    QAction *handbook = help->addAction(themeIcon("help-contents", "help-browser"), tr("DiskAnvil &Help"), this, [this] {
         if (!m_help)
             m_help = new HelpWindow(this);
         m_help->show();
@@ -1018,11 +1025,11 @@ void MainWindow::createActions()
     help->addAction(themeIcon("internet-services", "applications-internet"), tr("Project &Website"), this, [] {
         QDesktopServices::openUrl(QUrl(QStringLiteral(APP_HOMEPAGE)));
     });
-    help->addAction(themeIcon("help-donate", "emblem-favorite"), tr("&Support DiskForge (Ko-fi)"), this, [] {
+    help->addAction(themeIcon("help-donate", "emblem-favorite"), tr("&Support DiskAnvil (Ko-fi)"), this, [] {
         QDesktopServices::openUrl(QUrl(QStringLiteral(APP_SUPPORT_URL)));
     });
     help->addSeparator();
-    help->addAction(QApplication::windowIcon(), tr("&About DiskForge"), this, [this] {
+    help->addAction(QApplication::windowIcon(), tr("&About DiskAnvil"), this, [this] {
         AboutDialog(m_udisks->daemonVersion(), this).exec();
     });
     help->addAction(themeIcon("qtcreator", "help-about"), tr("About &Qt"), qApp, &QApplication::aboutQt);
@@ -1139,7 +1146,7 @@ void MainWindow::openClosedSets()
     // Windows opens its own dynamic disks; Linux RAID (a NAS's drives) it can't read at all.
     QMessageBox::information(this, tr("Open RAID, NAS and Dynamic Disks"),
                              tr("Windows opens its own dynamic disks by itself (Disk Management). Drives from a NAS or a Linux RAID "
-                                "array it can't read: DiskForge Live opens them, read-only."));
+                                "array it can't read: DiskAnvil Live opens them, read-only."));
 }
 #else
 namespace {
@@ -1190,7 +1197,7 @@ void MainWindow::openClosedSets()
     const QStringList missing = closedsets::missing(sets, [](const QString &program) { return host::programExists(program); });
     if (!missing.isEmpty()) {
         QMessageBox::information(this, title,
-                                 tr("Opening these takes %1, which isn't on this computer. Install it, or start from DiskForge Live, "
+                                 tr("Opening these takes %1, which isn't on this computer. Install it, or start from DiskAnvil Live, "
                                     "which has everything.")
                                      .arg(missing.join(QStringLiteral(", "))));
         return;
@@ -1204,7 +1211,7 @@ void MainWindow::openClosedSets()
                                   .arg(list.join(QLatin1Char('\n'))))
         != QMessageBox::Yes)
         return;
-    // As root: DiskForge Live's sudo, or the admin password through pkexec.
+    // As root: DiskAnvil Live's sudo, or the admin password through pkexec.
     const QString script = closedsets::openScript(sets);
     const QStringList command = rescue::runningInRescue() ? QStringList{QStringLiteral("sudo"), QStringLiteral("-n"), QStringLiteral("sh"), QStringLiteral("-c"), script}
                               : ::geteuid() == 0          ? QStringList{QStringLiteral("sh"), QStringLiteral("-c"), script}
@@ -1233,7 +1240,7 @@ void MainWindow::openClosedSets()
 void MainWindow::updateCloneNotices()
 {
     const QVector<Disk> &disks = m_udisks->disks();
-    QSettings settings(QStringLiteral("diskforge"), QStringLiteral("diskforge"));
+    QSettings settings(QStringLiteral("diskanvil"), QStringLiteral("diskanvil"));
     QVector<newids::Clash> shown;
     QStringList key;
     for (const newids::Clash &c : newids::clashes(disks)) {
@@ -1277,7 +1284,7 @@ void MainWindow::updateCloneNotices()
         const QString id = newids::clashKey(c, disks);
         connect(dismiss, &QPushButton::clicked, this, [this, id] {
             QTimer::singleShot(0, this, [this, id] {
-                QSettings(QStringLiteral("diskforge"), QStringLiteral("diskforge")).setValue(QStringLiteral("dismissed/clone-") + id, true);
+                QSettings(QStringLiteral("diskanvil"), QStringLiteral("diskanvil")).setValue(QStringLiteral("dismissed/clone-") + id, true);
                 m_cloneNoticeKey.clear();
                 updateCloneNotices();
             });
@@ -1308,7 +1315,7 @@ void MainWindow::runOnDrive(const QString &device, QAction *action)
 void MainWindow::updateNotices()
 {
     updateJobBars();
-    QSettings settings(QStringLiteral("diskforge"), QStringLiteral("diskforge"));
+    QSettings settings(QStringLiteral("diskanvil"), QStringLiteral("diskanvil"));
     QVector<const Disk *> drives;
     for (const Disk &d : m_udisks->disks()) {
         if (d.health.state != Health::State::Warning && d.health.state != Health::State::Failing)
@@ -1361,7 +1368,7 @@ void MainWindow::updateNotices()
         const QStringList signature = health::signature(h);
         connect(dismiss, &QPushButton::clicked, this, [this, blockPath, healthKey, signature] {
             QTimer::singleShot(0, this, [this, blockPath, healthKey, signature] {
-                QSettings(QStringLiteral("diskforge"), QStringLiteral("diskforge")).setValue(QStringLiteral("dismissed/") + healthKey, signature);
+                QSettings(QStringLiteral("diskanvil"), QStringLiteral("diskanvil")).setValue(QStringLiteral("dismissed/") + healthKey, signature);
                 // Counters that only matter when they grow start again from here.
                 if (const Disk *disk = m_udisks->diskByPath(blockPath))
                     health::acknowledge(healthKey, m_udisks->smartAttributes(*disk));
@@ -1749,7 +1756,7 @@ void MainWindow::updateActions()
     if (bitLocker && why.isEmpty())
         m_changePass->setToolTip(tr("Only Windows can change a BitLocker password"));
 #endif
-    // In DiskForge Live these would only change the system in memory, which starts fresh.
+    // In DiskAnvil Live these would only change the system in memory, which starts fresh.
     if (rescue::runningInRescue()) {
         for (QAction *a : {m_startup, m_cleanup, m_snapshots}) {
             a->setEnabled(false);
@@ -1803,7 +1810,8 @@ bool MainWindow::openTool(const QString &name)
                                              {QStringLiteral("check-stick"), m_checkStick},
                                              {QStringLiteral("lost-files"), m_findFiles},
                                              {QStringLiteral("virus-scan"), m_virusScan},
-                                             {QStringLiteral("save-files"), m_saveFiles}};
+                                             {QStringLiteral("save-files"), m_saveFiles},
+                                             {QStringLiteral("remote-help"), m_remoteHelp}};
     QAction *action = tools.value(name);
     if (!action)
         return false;
@@ -2044,14 +2052,14 @@ void MainWindow::showProperties()
     layout->addWidget(tree);
 #ifndef Q_OS_WIN
     // UDisks only looks for VeraCrypt when /etc/udisks2/tcrypt.conf is there as it starts
-    // (DiskForge Live has it). On a partition nothing is recognized on, that can be switched on.
+    // (DiskAnvil Live has it). On a partition nothing is recognized on, that can be switched on.
     if (v && v->fsType.isEmpty() && !v->isContainer && v->number > 0
         && host::run({QStringLiteral("test"), QStringLiteral("-e"), QStringLiteral("/etc/udisks2/tcrypt.conf")}) != 0) {
         auto *look = new QPushButton(tr("Look for VeraCrypt…"));
         look->setObjectName(QStringLiteral("lookForVeraCrypt"));
         connect(look, &QPushButton::clicked, &dialog, [&dialog] {
             QMessageBox box(QMessageBox::Question, tr("Look for VeraCrypt"),
-                            tr("VeraCrypt volumes look like random data, so UDisks (which DiskForge unlocks drives through) only "
+                            tr("VeraCrypt volumes look like random data, so UDisks (which DiskAnvil unlocks drives through) only "
                                "tries partitions like this one as VeraCrypt when the file /etc/udisks2/tcrypt.conf exists. Make it? "
                                "It takes the admin password, and UDisks restarts, which takes a moment.\n\nThen this partition "
                                "shows as \"Unknown, maybe VeraCrypt\", and Unlock asks for VeraCrypt's password."),
@@ -2062,7 +2070,7 @@ void MainWindow::showProperties()
                 return;
             const QStringList command = host::command(
                 {QStringLiteral("pkexec"), QStringLiteral("sh"), QStringLiteral("-c"),
-                 QStringLiteral("printf '%s\\n' '# Made by DiskForge: UDisks looks for VeraCrypt and TrueCrypt volumes while this file is here.' "
+                 QStringLiteral("printf '%s\\n' '# Made by DiskAnvil: UDisks looks for VeraCrypt and TrueCrypt volumes while this file is here.' "
                                 "> /etc/udisks2/tcrypt.conf && systemctl restart udisks2.service")});
             QProcess run;
             run.setProcessChannelMode(QProcess::MergedChannels);
@@ -2079,7 +2087,7 @@ void MainWindow::showProperties()
     }
 #endif
     // The hidden area (HPA): the end of an ATA drive its own settings hide, where malware and
-    // some makers' recovery tools keep things. Only hdparm sees it, so only DiskForge Live.
+    // some makers' recovery tools keep things. Only hdparm sees it, so only DiskAnvil Live.
     // hdparm asks the drive itself, whatever UDisks made of it; USB bridges rarely pass this on.
     const bool ataDrive = !v && sel.kind != DiskMap::Selection::Kind::Free && !d->isLoop && !d->nvmeNamespace && !d->isRaid && !d->isLvm
                        && d->bus != QLatin1String("usb") && d->device.startsWith(QLatin1String("/dev/sd"));
@@ -2093,12 +2101,12 @@ void MainWindow::showProperties()
                 hidden = drivepower::parseHdparmN(QString::fromLocal8Bit(hdparm.readAll()));
         }
         auto *row = new QTreeWidgetItem(tree, {tr("Hidden area (HPA)"),
-                                               !rescue::runningInRescue() ? tr("Only DiskForge Live can look")
+                                               !rescue::runningInRescue() ? tr("Only DiskAnvil Live can look")
                                                : !hidden.known            ? tr("The drive didn't say")
                                                : hidden.hidden() == 0     ? tr("None")
                                                                           : tr("%1 hidden by the drive's own settings").arg(formatSize(hidden.hidden() * 512))});
         Q_UNUSED(row)
-        // The sizes the drive itself says it can switch to (only hdparm asks, so only DiskForge Live).
+        // The sizes the drive itself says it can switch to (only hdparm asks, so only DiskAnvil Live).
         if (rescue::runningInRescue()) {
             QProcess hdparm;
             hdparm.setProcessChannelMode(QProcess::MergedChannels);
@@ -2463,10 +2471,10 @@ void MainWindow::checkForUpdates()
                 return;
             }
             QMessageBox box(QMessageBox::Information, tr("Update Available"),
-                            tr("DiskForge %1 is available. You have %2.").arg(latest, current), QMessageBox::Close, this);
+                            tr("DiskAnvil %1 is available. You have %2.").arg(latest, current), QMessageBox::Close, this);
             box.setInformativeText(tr("It installs over this version, so there's no need to uninstall first.\n\n"
                                       "Installed from the AUR:\n    yay -Syu\n\n"
-                                      "Installed from the GitHub repo:\n    cd diskforge && git pull\n    cd packaging/arch && makepkg -si"));
+                                      "Installed from the GitHub repo:\n    cd diskanvil && git pull\n    cd packaging/arch && makepkg -si"));
             QAbstractButton *open = box.addButton(tr("Open Release Page"), QMessageBox::ActionRole);
             box.exec();
             if (box.clickedButton() == open && !url.isEmpty())
@@ -2654,7 +2662,7 @@ void MainWindow::refreshAddons()
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
-    // Add-on commands shown in a window belong to DiskForge; ask before ending them.
+    // Add-on commands shown in a window belong to DiskAnvil; ask before ending them.
     QList<AddonOutputWindow *> running;
     for (AddonOutputWindow *w : findChildren<AddonOutputWindow *>()) {
         if (w->isRunning())

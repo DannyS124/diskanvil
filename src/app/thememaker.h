@@ -18,7 +18,7 @@ class QLabel;
 class QLineEdit;
 class QPushButton;
 
-// A small sample of DiskForge drawn with a theme's colors.
+// A small sample of DiskAnvil drawn with a theme's colors.
 class ThemePreview : public QWidget
 {
     Q_OBJECT
@@ -51,7 +51,7 @@ private:
     QLineEdit *m_author;
     QCheckBox *m_ownWindow;
     QMap<QString, QColor> m_window; // palette roles
-    QMap<QString, QColor> m_colors; // DiskForge's own roles
+    QMap<QString, QColor> m_colors; // DiskAnvil's own roles
     QMap<QString, QPushButton *> m_buttons;
     QWidget *m_windowBox;
     ThemePreview *m_preview;

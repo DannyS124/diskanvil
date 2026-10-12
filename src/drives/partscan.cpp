@@ -77,7 +77,7 @@ std::optional<partscan::Found> partscan::probe(int fd, quint64 offset, quint64 d
 
 #else
 
-// Windows has no libblkid: DiskForge's own probe, which knows the same file systems' headers
+// Windows has no libblkid: DiskAnvil's own probe, which knows the same file systems' headers
 // and what size they say they are. Read at each spot: the first 16 KiB (boot sectors,
 // superblocks, swap's page) and the 4 KiB 64 KiB in, where Btrfs keeps its superblock.
 std::optional<partscan::Found> partscan::probe(int fd, quint64 offset, quint64 deviceSize)

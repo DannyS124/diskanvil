@@ -12,8 +12,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: DiskForge version
-      description: Help → About DiskForge, or `diskforge --version`
+      label: DiskAnvil version
+      description: Help → About DiskAnvil, or `diskanvil --version`
       placeholder: "0.4.0"
     validations:
       required: true
@@ -25,6 +25,6 @@ body:
   - type: textarea
     id: dump
     attributes:
-      label: Output of `diskforge --dump`
-      description: Shows how DiskForge sees your disks.
+      label: Output of `diskanvil --dump`
+      description: Shows how DiskAnvil sees your disks.
       render: text

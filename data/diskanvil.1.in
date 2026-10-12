@@ -1,0 +1,82 @@
+.TH DISKANVIL 1 "October 2026" "diskanvil @PROJECT_VERSION@" "User Commands"
+.SH NAME
+diskanvil \- disk manager and partition editor
+.SH SYNOPSIS
+.B diskanvil
+.RI [ options ]
+.SH DESCRIPTION
+.B diskanvil
+shows every disk as a bar of partitions sized to scale, with a list of volumes above it, in the
+style of Windows Disk Management. From the window you can mount and unmount volumes, format
+them, create, delete and resize partitions, change labels, and write new GPT or MBR partition
+tables.
+.PP
+The program runs as the calling user. It never opens block devices itself; every change is a
+request to UDisks2, which asks for authorization through polkit. Disks holding a mount outside
+.IR /run/media ,
+.I /media
+or
+.IR /mnt ,
+or an active swap partition, are treated as system disks and are never modified.
+.SH OPTIONS
+.TP
+.B \-\-dump
+Print the disk layout as text and exit.
+.TP
+.BI \-\-select " device"
+Start with the partition
+.I device
+(for example
+.IR /dev/sdb1 )
+selected.
+.TP
+.BI \-\-screenshot " file"
+Render the main window to
+.I file
+and exit. Works with
+.BR QT_QPA_PLATFORM=offscreen .
+.TP
+.BI \-\-open " tool"
+Open just one tool, without the main window:
+.BR write-image ,
+.BR windows-usb ,
+.BR rescue-usb ,
+.BR check-stick ,
+.B lost-files
+or
+.BR virus-scan .
+DiskAnvil closes when the tool is closed.
+.TP
+.B \-\-home
+Be DiskAnvil Live's home screen, the desktop with the big tiles.
+.TP
+.BI \-\-log " file"
+Write what DiskAnvil does to
+.IR file :
+every request to UDisks2 and its result, every result shown, and Qt's warnings, one timestamped
+line each. What a request carries (passphrases among it) is never written.
+.B DISKANVIL_LOG=\fIfile\fP
+in the environment does the same.
+.TP
+.BR \-h ", " \-\-help
+Show the available options.
+.TP
+.BR \-v ", " \-\-version
+Show the version.
+.SH EXIT STATUS
+0 on success, 1 if UDisks2 cannot be reached.
+.SH SEE ALSO
+.BR udisksctl (1),
+.BR lsblk (8),
+.BR polkit (8)
+.SH BUGS
+Report bugs at https://github.com/DannyS124/diskanvil/issues
+.SH AUTHOR
+Danny S
+.SH COPYRIGHT
+Copyright \(co 2026 Danny S.
+.br
+License GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>.
+.br
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.

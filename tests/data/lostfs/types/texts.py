@@ -42,7 +42,7 @@ box.flush()
 box.close()
 
 with open(f"{out}/trip.ics", "w", newline="") as f:
-    f.write("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//DiskForge tests//EN\r\nX-WR-CALNAME:Trips\r\n"
+    f.write("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//DiskAnvil tests//EN\r\nX-WR-CALNAME:Trips\r\n"
             "BEGIN:VEVENT\r\nUID:1@example.com\r\nDTSTAMP:20240701T090000Z\r\nDTSTART:20240714T053000Z\r\n"
             "SUMMARY:Ferry to the island\r\nLOCATION:Pier 3\r\nEND:VEVENT\r\n"
             "BEGIN:VEVENT\r\nUID:2@example.com\r\nDTSTAMP:20240701T090000Z\r\nDTSTART;VALUE=DATE:20240716\r\n"

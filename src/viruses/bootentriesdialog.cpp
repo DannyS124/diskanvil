@@ -280,7 +280,7 @@ bool BootEntriesDialog::change(const QStringList &command, const std::function<b
         ok = onWindows(&said);
 #else
         Q_UNUSED(onWindows)
-        // As root: DiskForge Live's sudo, or the admin password.
+        // As root: DiskAnvil Live's sudo, or the admin password.
         const QStringList full = rescue::runningInRescue() ? QStringList{QStringLiteral("sudo"), QStringLiteral("-n")} + command
                                : ::geteuid() == 0          ? command
                                                            : host::command(QStringList{QStringLiteral("pkexec")} + command);
@@ -288,7 +288,7 @@ bool BootEntriesDialog::change(const QStringList &command, const std::function<b
         run.setProcessChannelMode(QProcess::MergedChannels);
         run.start(full.first(), full.mid(1));
         if (!run.waitForStarted(10000)) {
-            said = tr("efibootmgr isn't on this computer: install it, or use DiskForge Live");
+            said = tr("efibootmgr isn't on this computer: install it, or use DiskAnvil Live");
         } else {
             ok = run.waitForFinished(60000) && run.exitStatus() == QProcess::NormalExit && run.exitCode() == 0;
             said = QString::fromLocal8Bit(run.readAll()).trimmed();
@@ -381,7 +381,7 @@ void BootEntriesDialog::addEntry()
 QString BootEntriesDialog::report(UDisks *udisks, const efiboot::State &state)
 {
     QStringList out;
-    out << tr("How this PC starts (DiskForge, %1)").arg(QDateTime::currentDateTime().toString(Qt::ISODate)) << QString();
+    out << tr("How this PC starts (DiskAnvil, %1)").arg(QDateTime::currentDateTime().toString(Qt::ISODate)) << QString();
     if (!state.uefi) {
         out << tr("Firmware: the old BIOS way (no UEFI boot menu).");
     } else {

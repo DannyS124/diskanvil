@@ -15,7 +15,7 @@ void installTranslations()
         QCoreApplication::installTranslator(qt);
     // Falls back to English, which still supplies the plural forms.
     auto *app = new QTranslator(QCoreApplication::instance());
-    if (app->load(QLocale(), QStringLiteral("diskforge"), QStringLiteral("_"), QStringLiteral(":/i18n"))
-        || app->load(QStringLiteral("diskforge_en"), QStringLiteral(":/i18n")))
+    if (app->load(QLocale(), QStringLiteral("diskanvil"), QStringLiteral("_"), QStringLiteral(":/i18n"))
+        || app->load(QStringLiteral("diskanvil_en"), QStringLiteral(":/i18n")))
         QCoreApplication::installTranslator(app);
 }

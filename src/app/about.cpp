@@ -43,12 +43,12 @@ QString resourceText(const QString &path)
 AboutDialog::AboutDialog(const QString &udisksVersion, QWidget *parent)
     : QDialog(parent)
 {
-    setWindowTitle(tr("About DiskForge"));
+    setWindowTitle(tr("About DiskAnvil"));
     const QString homepage = QStringLiteral(APP_HOMEPAGE);
 
     auto *icon = new QLabel;
     icon->setPixmap(QApplication::windowIcon().pixmap(64, 64));
-    auto *title = new QLabel(tr("<span style=\"font-size:18pt; font-weight:bold\">DiskForge</span><br>"
+    auto *title = new QLabel(tr("<span style=\"font-size:18pt; font-weight:bold\">DiskAnvil</span><br>"
                                 "Version %1<br>Disk manager and partition editor")
                                  .arg(QApplication::applicationVersion()));
     auto *header = new QHBoxLayout;
@@ -61,7 +61,7 @@ AboutDialog::AboutDialog(const QString &udisksVersion, QWidget *parent)
                               "<p>© 2026 %1<br>Released under the GNU General Public License, version 3 or later. "
                               "This program comes with absolutely no warranty.</p>"
                               "<p>%2<br>%3</p>"
-                              "<p>DiskForge is free. If it helped you and you'd like to say thanks: %4</p>")
+                              "<p>DiskAnvil is free. If it helped you and you'd like to say thanks: %4</p>")
                                .arg(QStringLiteral(APP_AUTHOR), link(homepage, tr("Project website")),
                                     link(homepage + QStringLiteral("/issues"), tr("Report a bug")),
                                     link(QStringLiteral(APP_SUPPORT_URL), tr("buy me a coffee on Ko-fi")))),
@@ -94,7 +94,7 @@ AboutDialog::AboutDialog(const QString &udisksVersion, QWidget *parent)
 HelpWindow::HelpWindow(QWidget *parent)
     : QDialog(parent)
 {
-    setWindowTitle(tr("DiskForge Help"));
+    setWindowTitle(tr("DiskAnvil Help"));
     auto *browser = new QTextBrowser;
     browser->setOpenExternalLinks(true);
     browser->setHtml(resourceText(QStringLiteral(":/data/help.html")));

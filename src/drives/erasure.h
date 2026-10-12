@@ -21,13 +21,13 @@ struct Record {
     bool zeros = false; // a wipe with zeros: its result can be checked by reading it back
     QDateTime started, finished;
     QString checked;   // what reading it back found, when it was checked
-    QString app;       // DiskForge and its version
+    QString app;       // DiskAnvil and its version
 
     QJsonObject toJson() const;
     static Record fromJson(const QJsonObject &json);
 };
 
-// Where they're kept: a file of DiskForge's own (the tests put it elsewhere).
+// Where they're kept: a file of DiskAnvil's own (the tests put it elsewhere).
 extern QString storePath;
 void remember(const Record &record);
 QVector<Record> all(); // newest first

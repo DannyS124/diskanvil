@@ -26,7 +26,7 @@
 
 #include <algorithm>
 
-#ifdef DISKFORGE_PDF
+#ifdef DISKANVIL_PDF
 #include <poppler-qt6.h>
 #endif
 
@@ -52,7 +52,7 @@ QString tr(const char *text)
     return QCoreApplication::translate("preview", text);
 }
 
-// A film's first frame, from ffmpeg when it's installed (never on DiskForge Live: too big).
+// A film's first frame, from ffmpeg when it's installed (never on DiskAnvil Live: too big).
 QImage frame(const QByteArray &data, int pixels)
 {
     const QString ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
@@ -227,7 +227,7 @@ Result make(const Request &r)
         }
         return out;
     }
-#ifdef DISKFORGE_PDF
+#ifdef DISKANVIL_PDF
     if (id == QLatin1String("pdf")) {
         std::unique_ptr<Poppler::Document> document = Poppler::Document::loadFromData(r.data);
         if (document && document->isLocked()) {

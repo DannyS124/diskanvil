@@ -7,8 +7,8 @@
 // File System Specification): FAT16 up to 2 GB, FAT32 up to 32 GB, exFAT above, with the cluster
 // size for the card's size, and the partition and the file system's data placed on the card's
 // erase blocks ("boundary units"). Cameras and phones expect it, and the card wears less and
-// writes faster than with a computer's usual format. The same on Linux, DiskForge Live and
-// Windows: DiskForge writes it all itself.
+// writes faster than with a computer's usual format. The same on Linux, DiskAnvil Live and
+// Windows: DiskAnvil writes it all itself.
 
 #include <QString>
 

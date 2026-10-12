@@ -123,7 +123,7 @@ private:
 };
 
 // Switches an ATA drive that can to another logical sector size (hdparm --set-sector-size), on
-// DiskForge Live. Everything on it goes: type-to-confirm.
+// DiskAnvil Live. Everything on it goes: type-to-confirm.
 class SectorSizeDialog : public QDialog
 {
     Q_OBJECT

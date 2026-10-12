@@ -79,10 +79,10 @@ QString age(const QDateTime &when)
 
 QString logPath()
 {
-    // On DiskForge Live: with the session's logs, which go to the stick with Save Logs.
-    if (rescue::runningInRescue() && QFileInfo(QStringLiteral("/run/diskforge-live/session")).isWritable())
-        return QStringLiteral("/run/diskforge-live/session/virus-scan.log");
-    return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/diskforge/virus-scan.log");
+    // On DiskAnvil Live: with the session's logs, which go to the stick with Save Logs.
+    if (rescue::runningInRescue() && QFileInfo(QStringLiteral("/run/diskanvil-live/session")).isWritable())
+        return QStringLiteral("/run/diskanvil-live/session/virus-scan.log");
+    return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/diskanvil/virus-scan.log");
 }
 
 #ifdef Q_OS_WIN
@@ -153,7 +153,7 @@ VirusDialog::VirusDialog(UDisks *udisks, QWidget *parent)
         ? tr("Windows isn't running now, so malware on its drive can't hide or defend itself: this is the best time to look. "
              "Pick the drive to scan; Windows' drive is first.")
         : tr("Scan a drive or a folder for known malware. The drive Windows or Linux is running from is better scanned from "
-             "DiskForge Live, where malware can't hide.")));
+             "DiskAnvil Live, where malware can't hide.")));
     auto *engineRow = new QHBoxLayout;
     m_engineInfo->setWordWrap(true);
     m_engineInfo->setTextFormat(Qt::RichText);
@@ -385,7 +385,7 @@ void VirusDialog::loadLiveList()
         p->deleteLater();
         refreshEngine();
     });
-    p->start(QStringLiteral("diskforge-live-virus-list"), {QStringLiteral("load")});
+    p->start(QStringLiteral("diskanvil-live-virus-list"), {QStringLiteral("load")});
 }
 
 void VirusDialog::refreshEngine()
@@ -478,9 +478,9 @@ void VirusDialog::updateList()
     m_update->setEnabled(false);
     m_scan->setEnabled(false);
     m_engineInfo->setText(tr("Getting the newest list…"));
-    // A system list DiskForge can't write to: the update goes into DiskForge's own folder.
+    // A system list DiskAnvil can't write to: the update goes into DiskAnvil's own folder.
     const QString into = m_engine.databaseWritable ? m_engine.database
-                                                   : QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/diskforge/clamav");
+                                                   : QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/diskanvil/clamav");
     m_updateJob = new virus::Update(m_engine, into);
     connect(m_updateJob, &virus::Update::progress, this, [this](const QString &line) {
         m_engineInfo->setText(tr("Getting the newest list: %1").arg(line.toHtmlEscaped().left(120)));
@@ -501,7 +501,7 @@ void VirusDialog::updateList()
             refreshEngine();
             return;
         }
-        // On DiskForge Live the new list goes onto the stick for next time.
+        // On DiskAnvil Live the new list goes onto the stick for next time.
         refreshEngine();
         auto *p = new QProcess(this);
         connect(p, &QProcess::finished, this, [this, p] {
@@ -511,7 +511,7 @@ void VirusDialog::updateList()
                 m_engineInfo->setText(m_engineInfo->text() + QStringLiteral("<br>") + said.toHtmlEscaped());
         });
         p->setProcessChannelMode(QProcess::MergedChannels);
-        p->start(QStringLiteral("diskforge-live-virus-list"), {QStringLiteral("save")});
+        p->start(QStringLiteral("diskanvil-live-virus-list"), {QStringLiteral("save")});
     });
     m_thread = startOnThread(this, m_updateJob);
 }
@@ -1221,13 +1221,13 @@ void VirusDialog::putBackTicked()
     for (int i : std::as_const(picked))
         shown << QStringLiteral("• ") + m_boot.findings.at(i).where;
     const QString question = tr("Put Windows' own boot manager back over these?") + QStringLiteral("\n\n") + shown.join(QLatin1Char('\n'))
-                           + QStringLiteral("\n\n") + tr("The ones there now are kept in a \"DiskForge backups\" folder on the EFI partition.");
+                           + QStringLiteral("\n\n") + tr("The ones there now are kept in a \"DiskAnvil backups\" folder on the EFI partition.");
     if (QMessageBox::question(this, windowTitle(), question, QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
         return;
     auto apply = [this, picked](const QString &mount) {
         const QString from = m_espMount;
         m_espMount = mount;
-        const QString backup = mount + QStringLiteral("/DiskForge backups/") + QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH.mm.ss"));
+        const QString backup = mount + QStringLiteral("/DiskAnvil backups/") + QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH.mm.ss"));
         int done = 0;
         QStringList lines;
         for (int i : picked) {
@@ -1337,7 +1337,7 @@ void VirusDialog::switchOffTicked()
         shown << tr("…and %n more", nullptr, int(picked.size() - 15));
     const QString question = tr("Switch off these %n thing(s) that start with Windows?", nullptr, int(picked.size())) + QStringLiteral("\n\n")
                            + shown.join(QLatin1Char('\n')) + QStringLiteral("\n\n")
-                           + tr("Everything changed is copied to a \"DiskForge backups\" folder on that drive first, with a note saying how to put "
+                           + tr("Everything changed is copied to a \"DiskAnvil backups\" folder on that drive first, with a note saying how to put "
                                 "it back.");
     if (QMessageBox::question(this, windowTitle(), question, QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes)
         return;
@@ -1351,7 +1351,7 @@ void VirusDialog::switchOffTicked()
 #endif
         if (drive.endsWith(QLatin1Char('/')))
             drive.chop(1);
-        const QString backup = drive + QStringLiteral("/DiskForge backups/") + QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH.mm.ss"));
+        const QString backup = drive + QStringLiteral("/DiskAnvil backups/") + QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH.mm.ss"));
         auto moved = [&from, &to](QString path) {
             if (from != to && !path.isEmpty() && path.startsWith(from + QLatin1Char('/')))
                 path = to + path.mid(from.size());

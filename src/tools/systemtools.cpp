@@ -36,8 +36,8 @@ namespace {
 const QString kTrimService = QStringLiteral("fstrim.service");
 const QString kTrimTimer = QStringLiteral("fstrim.timer");
 const QString kPackageService = QStringLiteral("paccache.service");
-const QString kUninstalledService = QStringLiteral("diskforge-paccache-uninstalled.service");
-const QString kJournalService = QStringLiteral("diskforge-journal-vacuum.service");
+const QString kUninstalledService = QStringLiteral("diskanvil-paccache-uninstalled.service");
+const QString kJournalService = QStringLiteral("diskanvil-journal-vacuum.service");
 
 #ifndef Q_OS_WIN // for Optimize, which is Windows' own there
 // Mount options for a mount point, the per-mount and the file system's own together.
@@ -99,7 +99,7 @@ OptimizeDialog::OptimizeDialog(UDisks *udisks, QWidget *parent)
     layout->addWidget(m_list, 1);
     layout->addWidget(wrappingLabel(tr("<small>Hard drives don't need it, and Linux file systems don't need defragmenting the way "
                                        "Windows does. On Btrfs, defragmenting would also undo the space that snapshots share, so "
-                                       "DiskForge leaves it alone.</small>")));
+                                       "DiskAnvil leaves it alone.</small>")));
     auto *row = new QHBoxLayout;
     row->addWidget(m_weekly);
     row->addStretch();
@@ -385,7 +385,7 @@ void CleanupDialog::showSizes(const Sizes &s)
     m_trash->setEnabled(s.trash > 0);
     for (QCheckBox *c : {m_journal, m_uninstalled})
         c->setToolTip(c->isEnabled() || (c == m_journal ? journalUnit : uninstalledUnit) ? QString()
-                                                                                       : tr("Comes with DiskForge's package; it isn't installed here"));
+                                                                                       : tr("Comes with DiskAnvil's package; it isn't installed here"));
     quint64 total = 0;
     total += m_packages->isEnabled() && m_packages->isChecked() ? quint64(s.packages) : 0;
     total += m_uninstalled->isEnabled() && m_uninstalled->isChecked() ? quint64(s.uninstalled) : 0;

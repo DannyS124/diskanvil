@@ -48,9 +48,9 @@ QString startScript(const QString &device, const QString &fs, quint64 changeRoom
       << QStringLiteral("LOOP=$(losetup -f --show \"$COW\"); echo \"$LOOP\" > \"$COW.loop\"")
       << QStringLiteral("dmsetup create \"$N\" --table \"0 $SIZE snapshot %1 $LOOP N 8\"").arg(device)
       << QStringLiteral("udevadm settle") << QStringLiteral("set +e")
-      << QStringLiteral("echo DISKFORGE-TRY-READY")
+      << QStringLiteral("echo DISKANVIL-TRY-READY")
       << repair.join(QLatin1Char(' '))
-      << QStringLiteral("echo DISKFORGE-TRY-EXIT $?");
+      << QStringLiteral("echo DISKANVIL-TRY-EXIT $?");
     return s.join(QLatin1Char('\n')) + QLatin1Char('\n');
 }
 
@@ -58,7 +58,7 @@ QString lookScript(const QString &fs)
 {
     // The stand-in has the partition's ID: XFS is told not to mind.
     const QString options = fs == QLatin1String("xfs") ? QStringLiteral("ro,nouuid") : QStringLiteral("ro");
-    return QStringLiteral("mkdir -p %1 && mount -o %2 /dev/mapper/%3 %1 && echo DISKFORGE-TRY-MOUNTED\n")
+    return QStringLiteral("mkdir -p %1 && mount -o %2 /dev/mapper/%3 %1 && echo DISKANVIL-TRY-MOUNTED\n")
         .arg(QLatin1String(kMount), options, QLatin1String(kName));
 }
 
@@ -69,7 +69,7 @@ QString stopScript()
                           "dmsetup remove \"$N\" 2>/dev/null\n"
                           "[ -f \"$COW.loop\" ] && losetup -d \"$(cat \"$COW.loop\")\" 2>/dev/null\n"
                           "rm -f \"$COW\" \"$COW.loop\"\n"
-                          "echo DISKFORGE-TRY-STOPPED\n")
+                          "echo DISKANVIL-TRY-STOPPED\n")
         .arg(QLatin1String(kName), QLatin1String(kMount));
 }
 

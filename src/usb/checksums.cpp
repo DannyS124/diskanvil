@@ -39,7 +39,7 @@ checksums::Expected fromHex(QByteArray hex)
     case 64: e.algorithm = QCryptographicHash::Sha256; break;
     case 128: e.algorithm = QCryptographicHash::Sha512; break;
     default:
-        e.error = tr("That's not a checksum DiskForge knows: it takes MD5, SHA-1, SHA-256 or SHA-512.");
+        e.error = tr("That's not a checksum DiskAnvil knows: it takes MD5, SHA-1, SHA-256 or SHA-512.");
         return e;
     }
     e.hex = hex;

@@ -77,7 +77,7 @@ const QStringList kCatalogKeys = {
 
 QSettings settings()
 {
-    return QSettings(QStringLiteral("diskforge"), QStringLiteral("addons"));
+    return QSettings(QStringLiteral("diskanvil"), QStringLiteral("addons"));
 }
 
 QString hashText(const Addon &addon)
@@ -340,7 +340,7 @@ AddonTheme parseTheme(const QJsonObject &o, QString *error)
         static const QRegularExpression fsName(QStringLiteral("^[a-z0-9_]{1,24}$"));
         for (auto it = group.constBegin(); it != group.constEnd(); ++it) {
             if (known.isEmpty() ? !fsName.match(it.key()).hasMatch() : !known.contains(it.key()))
-                continue; // a newer DiskForge's name, or nonsense
+                continue; // a newer DiskAnvil's name, or nonsense
             quint32 c = 0;
             if (!parseColor(it.value(), &c)) {
                 *error = QObject::tr("The theme's \"%1\" isn't a color like #1a2b3c").arg(it.key());
@@ -454,12 +454,12 @@ QString plainDefault(const AddonField &f)
 
 QString Addons::userDir()
 {
-    return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/diskforge/addons");
+    return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/diskanvil/addons");
 }
 
 QString Addons::systemDir()
 {
-    return QStringLiteral("/usr/share/diskforge/addons");
+    return QStringLiteral("/usr/share/diskanvil/addons");
 }
 
 QStringList Addons::searchDirs()
@@ -638,7 +638,7 @@ void Addons::load()
             seen << a.id;
             a.enabled = s.value(QStringLiteral("enabled/") + a.id, true).toBool();
             a.systemWide = system;
-            // DiskForge notes the checksum of every add-on it installs. One that doesn't
+            // DiskAnvil notes the checksum of every add-on it installs. One that doesn't
             // match was put there (or changed) some other way.
             a.outside = !system && s.value(QStringLiteral("installed/") + a.id).toString() != hashText(a);
             m_addons << a;
@@ -923,7 +923,7 @@ bool Addons::prepare(const AddonAction &action, const QStringList &argv, QString
 QStringList Addons::processCommand(const AddonAction &action, const QStringList &argv)
 {
     QStringList command = action.lookOnly ? sandboxed(argv, true) : argv;
-    // --watch-bus: the host side stops when DiskForge goes away.
+    // --watch-bus: the host side stops when DiskAnvil goes away.
     if (inFlatpak())
         command = QStringList{QStringLiteral("flatpak-spawn"), QStringLiteral("--host"), QStringLiteral("--watch-bus")} + command;
     return command;
@@ -973,7 +973,7 @@ bool Addons::install(const QByteArray &data, QString *error, bool record)
 
 QString Addons::catalogUrl()
 {
-    return QStringLiteral("https://raw.githubusercontent.com/DannyS124/diskforge-addons/main/catalog.json");
+    return QStringLiteral("https://raw.githubusercontent.com/DannyS124/diskanvil-addons/main/catalog.json");
 }
 
 QString Addons::catalogSignatureUrl()
@@ -989,7 +989,7 @@ QStringList Addons::catalogKeys()
 bool Addons::isPinnedUrl(const QString &url)
 {
     static const QRegularExpression pinned(
-        QStringLiteral("^https://raw\\.githubusercontent\\.com/DannyS124/diskforge-addons/[0-9a-f]{40}/[A-Za-z0-9._/-]+\\.json$"));
+        QStringLiteral("^https://raw\\.githubusercontent\\.com/DannyS124/diskanvil-addons/[0-9a-f]{40}/[A-Za-z0-9._/-]+\\.json$"));
     // No "..": the path has to stay inside that commit of the repository.
     return pinned.match(url).hasMatch() && !url.contains(QLatin1String(".."));
 }
@@ -1015,12 +1015,12 @@ QVector<CatalogEntry> Addons::parseCatalog(const QByteArray &json, QString *erro
     }
     QJsonParseError parseError;
     const QJsonObject o = QJsonDocument::fromJson(json, &parseError).object();
-    if (parseError.error != QJsonParseError::NoError || o.value(QStringLiteral("format")).toString() != QLatin1String("diskforge-addon-catalog")) {
-        *error = QObject::tr("The add-on list isn't in a format DiskForge knows");
+    if (parseError.error != QJsonParseError::NoError || o.value(QStringLiteral("format")).toString() != QLatin1String("diskanvil-addon-catalog")) {
+        *error = QObject::tr("The add-on list isn't in a format DiskAnvil knows");
         return entries;
     }
     if (o.value(QStringLiteral("version")).toInt() > 1) {
-        *error = QObject::tr("The add-on list needs a newer DiskForge");
+        *error = QObject::tr("The add-on list needs a newer DiskAnvil");
         return entries;
     }
     static const QRegularExpression id(QStringLiteral("^[a-z0-9][a-z0-9-]*$"));

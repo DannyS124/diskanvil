@@ -1,8 +1,0 @@
-[Plymouth Theme]
-Name=DiskForge Live
-Description=The DiskForge Live logo with a glow that breathes and a bar that fills while it starts.
-ModuleName=script
-
-[script]
-ImageDir=/usr/share/plymouth/themes/diskforge-live
-ScriptFile=/usr/share/plymouth/themes/diskforge-live/diskforge-live.script

@@ -5,11 +5,11 @@
 
 // Scan for Viruses, its first layer: files, checked against an antivirus's list of known
 // malware. ClamAV everywhere it's installed, run as its own program (clamscan; libclamav is
-// GPL-2.0-only and can't be linked into GPL-3 DiskForge). On Windows without ClamAV, Microsoft
+// GPL-2.0-only and can't be linked into GPL-3 DiskAnvil). On Windows without ClamAV, Microsoft
 // Defender's own command-line scanner, which every Windows has and keeps up to date itself.
 //
-// ClamAV's list of signatures lives where DiskForge keeps it: on DiskForge Live's stick, in
-// ~/.local/share/diskforge/clamav on a Linux PC (or the system's own, when that's up to date),
+// ClamAV's list of signatures lives where DiskAnvil keeps it: on DiskAnvil Live's stick, in
+// ~/.local/share/diskanvil/clamav on a Linux PC (or the system's own, when that's up to date),
 // and in ClamAV's own folder on Windows. The first download is about 250 MB, after that only
 // the day's changes.
 
@@ -35,10 +35,10 @@ struct Engine {
     QString name() const;
 };
 
-// What this system has to scan with, and its list's age. On DiskForge Live (`live`) the list is
+// What this system has to scan with, and its list's age. On DiskAnvil Live (`live`) the list is
 // used from memory, kLiveList, where the dialog has it brought from the stick first.
 Engine findEngine(bool live = false);
-inline const char *kLiveList = "/run/diskforge-live/clamav";
+inline const char *kLiveList = "/run/diskanvil-live/clamav";
 
 // The date and signature count in the header of a ClamAV list (daily.cvd or .cld), or an
 // invalid date.
@@ -58,7 +58,7 @@ bool quickScanWants(const QString &fileName);
 // a program named like a document ("invoice.pdf.exe", which Windows shows as "invoice.pdf"), a
 // name turned around by an invisible right-to-left character ("gpj.exe" showing as "exe.jpg"),
 // or a program inside a file named like a picture or a document. Returns the find's name
-// ("DiskForge.Disguised..."), or nothing. `head` is the file's start, for the ones
+// ("DiskAnvil.Disguised..."), or nothing. `head` is the file's start, for the ones
 // disguiseNeedsHead() wants it for.
 QString disguise(const QString &fileName, const QByteArray &head = {});
 bool disguiseNeedsHead(const QString &fileName);

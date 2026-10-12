@@ -126,7 +126,7 @@ void settings(const QString &dir)
     const QString text = fstab.open(QIODevice::ReadOnly) ? QString::fromUtf8(fstab.readAll()) : QString();
     QFile grub(root + QStringLiteral("/boot/grub/grub.cfg"));
     const QString menu = grub.open(QIODevice::ReadOnly) ? QString::fromUtf8(grub.readAll()) : QString();
-    const QStringList kept = QDir(root + QStringLiteral("/etc")).entryList({QStringLiteral("fstab.diskforge-*")});
+    const QStringList kept = QDir(root + QStringLiteral("/etc")).entryList({QStringLiteral("fstab.diskanvil-*")});
     report(changed.size() == 3 && error.isEmpty() && text.contains(QLatin1String("UUID=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee /"))
                && text.contains(QLatin1String("UUID=9F2E-77C1 /boot")) && text.contains(QLatin1String("UUID=55555555-6666-7777-8888-999999999999 none swap"))
                && menu.contains(QLatin1String("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")) && kept.size() == 1,

@@ -154,7 +154,7 @@ void TestBootDialog::start()
     }
     o.format = QStringLiteral("raw");
 #ifdef Q_OS_WIN
-    // QEMU, started from DiskForge, is an administrator too, and reads the drive by its name.
+    // QEMU, started from DiskAnvil, is an administrator too, and reads the drive by its name.
     o.file = m_disk.blockPath;
     launch(o, -1);
 #else

@@ -22,7 +22,7 @@ public:
     // `device`: the partition (unmounted); `fsType` its file system.
     TryRepairDialog(const QString &device, const QString &fsType, const QString &title, QWidget *parent = nullptr);
     ~TryRepairDialog() override;
-    // Whether DiskForge can do it here (DiskForge Live, or run as root) for this file system.
+    // Whether DiskAnvil can do it here (DiskAnvil Live, or run as root) for this file system.
     static bool possible(const QString &fsType);
     // Accepted: repair it for real.
 

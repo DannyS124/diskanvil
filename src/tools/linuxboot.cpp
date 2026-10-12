@@ -141,7 +141,7 @@ Install inspect(const QString &root, const QString &rootDevice, const QString &s
     else if (exists(root, {QStringLiteral("/usr/sbin/grub-install"), QStringLiteral("/usr/bin/grub-install")}))
         in.loader = Install::Loader::Grub;
     else
-        in.problems << tr("no boot loader DiskForge knows (GRUB or systemd-boot) is installed in it");
+        in.problems << tr("no boot loader DiskAnvil knows (GRUB or systemd-boot) is installed in it");
     if (in.name.isEmpty())
         in.problems << tr("it doesn't say what it is (no os-release)");
     return in;
@@ -150,7 +150,7 @@ Install inspect(const QString &root, const QString &rootDevice, const QString &s
 QStringList plan(const Install &in, bool uefi)
 {
     QStringList out;
-    out << tr("Mount %1 (and its /boot and EFI partitions) at /mnt/diskforge-repair.").arg(in.name);
+    out << tr("Mount %1 (and its /boot and EFI partitions) at /mnt/diskanvil-repair.").arg(in.name);
     switch (in.loader) {
     case Install::Loader::Grub:
         out << (uefi ? tr("Put GRUB back on its EFI partition, with a boot menu entry for it (grub-install).")
@@ -175,7 +175,7 @@ QStringList plan(const Install &in, bool uefi)
 
 QString repairScript(const Install &in, bool uefi)
 {
-    const QString r = QStringLiteral("/mnt/diskforge-repair");
+    const QString r = QStringLiteral("/mnt/diskanvil-repair");
     QStringList s;
     s << QStringLiteral("set -u") << QStringLiteral("R=%1").arg(r) << QStringLiteral("mkdir -p \"$R\"")
       << QStringLiteral("cleanup() { umount -R \"$R\" 2>/dev/null; }") << QStringLiteral("trap cleanup EXIT")
@@ -215,7 +215,7 @@ QString repairScript(const Install &in, bool uefi)
         break;
     }
     s << QStringLiteral("chroot \"$R\" /bin/sh -c %1").arg(q(QStringLiteral("set -ex; ") + inside.join(QStringLiteral("; "))));
-    s << QStringLiteral("echo DISKFORGE-REPAIR-DONE");
+    s << QStringLiteral("echo DISKANVIL-REPAIR-DONE");
     return s.join(QLatin1Char('\n')) + QLatin1Char('\n');
 }
 

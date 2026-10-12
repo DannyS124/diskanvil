@@ -3,11 +3,11 @@
 
 #pragma once
 
-// Recover Partitions: partition layouts DiskForge remembers, and writing one back. Only the
+// Recover Partitions: partition layouts DiskAnvil remembers, and writing one back. Only the
 // partition table is ever written, never what's in the partitions.
 //
-// Every time DiskForge sees a drive with partitions, it keeps the layout (up to 10
-// different ones per drive, in ~/.local/share/diskforge/layouts). Putting an earlier one
+// Every time DiskAnvil sees a drive with partitions, it keeps the layout (up to 10
+// different ones per drive, in ~/.local/share/diskanvil/layouts). Putting an earlier one
 // back undoes a deleted partition or a wiped table.
 
 #include "gpt.h"

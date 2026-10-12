@@ -97,11 +97,11 @@ void parsing()
     program.replace(0, 2, "MZ");
     qToLittleEndian<quint32>(0x80, program.data() + 0x3C);
     program.replace(0x80, 4, QByteArray("PE\0\0", 4));
-    report(virus::disguise(QStringLiteral("invoice.pdf.exe")) == QLatin1String("DiskForge.Disguised.DoubleExtension")
-               && virus::disguise(QStringLiteral("Report.DOCX      .scr")) == QLatin1String("DiskForge.Disguised.DoubleExtension")
-               && virus::disguise(QStringLiteral("photos.jpg.lnk")) == QLatin1String("DiskForge.Disguised.DoubleExtension")
-               && virus::disguise(QStringLiteral("cute") + QChar(0x202E) + QStringLiteral("gpj.exe")) == QLatin1String("DiskForge.Disguised.RightToLeft")
-               && virus::disguise(QStringLiteral("holiday.jpg"), program) == QLatin1String("DiskForge.Disguised.ProgramInside")
+    report(virus::disguise(QStringLiteral("invoice.pdf.exe")) == QLatin1String("DiskAnvil.Disguised.DoubleExtension")
+               && virus::disguise(QStringLiteral("Report.DOCX      .scr")) == QLatin1String("DiskAnvil.Disguised.DoubleExtension")
+               && virus::disguise(QStringLiteral("photos.jpg.lnk")) == QLatin1String("DiskAnvil.Disguised.DoubleExtension")
+               && virus::disguise(QStringLiteral("cute") + QChar(0x202E) + QStringLiteral("gpj.exe")) == QLatin1String("DiskAnvil.Disguised.RightToLeft")
+               && virus::disguise(QStringLiteral("holiday.jpg"), program) == QLatin1String("DiskAnvil.Disguised.ProgramInside")
                && virus::disguise(QStringLiteral("setup.exe")).isEmpty() && virus::disguise(QStringLiteral("my.app.v2.exe")).isEmpty()
                && virus::disguise(QStringLiteral("holiday.jpg"), "\xff\xd8\xff\xe0 a real jpeg").isEmpty()
                && virus::disguise(QStringLiteral("tool.exe"), program).isEmpty(),
@@ -128,7 +128,7 @@ void scanning(const QString &dir)
     auto line = [](const QByteArray &data, const char *name) {
         return QCryptographicHash::hash(data, QCryptographicHash::Md5).toHex() + ':' + QByteArray::number(data.size()) + ':' + name + '\n';
     };
-    writeFile(db + QStringLiteral("/diskforge-test.hdb"), line(one, "DiskForge.Test.One") + line(two, "DiskForge.Test.Two"));
+    writeFile(db + QStringLiteral("/diskanvil-test.hdb"), line(one, "DiskAnvil.Test.One") + line(two, "DiskAnvil.Test.Two"));
     const QString drive = dir + QStringLiteral("/drive");
     writeFile(drive + QStringLiteral("/Users/a/Downloads/setup.exe"), one);
     writeFile(drive + QStringLiteral("/Users/a/Documents/notes: draft.txt"), two);       // not a program: a quick scan skips it
@@ -149,8 +149,8 @@ void scanning(const QString &dir)
     for (const virus::Detection &d : std::as_const(found))
         names << d.path.mid(drive.size()) + QLatin1Char('=') + d.name;
     names.sort();
-    report(completed && scanned == 4 && found.size() == 3 && names[0].startsWith(QLatin1String("/Program Files/Some app/updater.exe=DiskForge.Test.Two"))
-               && names[2].startsWith(QLatin1String("/Users/a/Downloads/setup.exe=DiskForge.Test.One")),
+    report(completed && scanned == 4 && found.size() == 3 && names[0].startsWith(QLatin1String("/Program Files/Some app/updater.exe=DiskAnvil.Test.Two"))
+               && names[2].startsWith(QLatin1String("/Users/a/Downloads/setup.exe=DiskAnvil.Test.One")),
            QStringLiteral("viruses: ClamAV finds both, in every folder, by name"), names.join(QStringLiteral(", ")) + QLatin1Char(' ') + problem);
 
     found = scan(engine, {drive}, virus::Depth::Quick, &completed, &scanned);
@@ -198,8 +198,8 @@ void scanning(const QString &dir)
     for (const virus::Detection &d : std::as_const(found))
         kinds << d.name;
     kinds.sort();
-    report(completed && kinds == QStringList{QStringLiteral("DiskForge.Disguised.DoubleExtension"), QStringLiteral("DiskForge.Disguised.ProgramInside"),
-                                             QStringLiteral("DiskForge.Disguised.RightToLeft")},
+    report(completed && kinds == QStringList{QStringLiteral("DiskAnvil.Disguised.DoubleExtension"), QStringLiteral("DiskAnvil.Disguised.ProgramInside"),
+                                             QStringLiteral("DiskAnvil.Disguised.RightToLeft")},
            QStringLiteral("viruses: a scan finds the dressed-up ones too"), kinds.join(QStringLiteral(", ")));
 
     // Stop: quickly, and it says it stopped.
@@ -222,17 +222,17 @@ void scanning(const QString &dir)
 
 void finding(const QString &dir)
 {
-    // DiskForge's own list folder is picked when it's the newest there is.
+    // DiskAnvil's own list folder is picked when it's the newest there is.
     const QByteArray oldHome = qgetenv("XDG_DATA_HOME");
     qputenv("XDG_DATA_HOME", (dir + QStringLiteral("/data")).toUtf8());
     const qint64 now = QDateTime::currentSecsSinceEpoch();
-    writeFile(dir + QStringLiteral("/data/diskforge/clamav/daily.cld"),
+    writeFile(dir + QStringLiteral("/data/diskanvil/clamav/daily.cld"),
               "ClamAV-VDB:today:27790:12345:90:md5:sig:builder:" + QByteArray::number(now) + QByteArray(450, ' '));
     const virus::Engine e = virus::findEngine();
     if (e.kind == virus::Engine::Kind::ClamAV) {
-        report(e.database == dir + QStringLiteral("/data/diskforge/clamav") && e.databaseWritable && e.signatures == 12345
+        report(e.database == dir + QStringLiteral("/data/diskanvil/clamav") && e.databaseWritable && e.signatures == 12345
                    && e.listDate == QDateTime::fromSecsSinceEpoch(now),
-               QStringLiteral("viruses: DiskForge's own, newest list is the one used"), e.database);
+               QStringLiteral("viruses: DiskAnvil's own, newest list is the one used"), e.database);
     } else {
         out << "SKIP  ClamAV isn't installed: which list is used" << Qt::endl;
     }

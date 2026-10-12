@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The installer's pages: DiskForge's own first page (what happens, and the desktop shortcut box),
+  The installer's pages: DiskAnvil's own first page (what happens, and the desktop shortcut box),
   then Windows Installer's usual progress, finish, repair-or-remove and error pages from wixl's
   copy of WiX's dialogs. Their pictures and texts come with them; msi.sh gives wixl a copy of
-  that extension with DiskForge's pictures in it (installer-art.py draws them).
+  that extension with DiskAnvil's pictures in it (installer-art.py draws them).
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Fragment>
-    <UI Id="DiskForge_UI">
+    <UI Id="DiskAnvil_UI">
       <TextStyle Id="WixUI_Font_Normal" FaceName="Segoe UI" Size="8" />
       <TextStyle Id="WixUI_Font_Bigger" FaceName="Segoe UI" Size="12" />
       <TextStyle Id="WixUI_Font_Title" FaceName="Segoe UI" Size="9" Bold="yes" />
@@ -23,12 +23,12 @@
       <DialogRef Id="ResumeDlg" />
       <DialogRef Id="UserExit" />
 
-      <Dialog Id="DiskForgeWelcomeDlg" Width="370" Height="270" Title="[ProductName] Setup">
+      <Dialog Id="DiskAnvilWelcomeDlg" Width="370" Height="270" Title="[ProductName] Setup">
         <Control Id="Bitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="234" TabSkip="no" Text="WixUI_Bmp_Dialog" />
         <Control Id="Title" Type="Text" X="135" Y="20" Width="220" Height="40" Transparent="yes" NoPrefix="yes"
                  Text="{\WixUI_Font_Bigger}Install [ProductName] [ProductVersion]" />
         <Control Id="Description" Type="Text" X="135" Y="66" Width="220" Height="96" Transparent="yes" NoPrefix="yes"
-                 Text="DiskForge goes in Program Files, with an entry in the Start menu. Windows asks for administrator rights while it's set up, and each time DiskForge starts: it needs them to work with drives.&#13;&#10;&#13;&#10;DiskForge is free software under the GNU General Public License, version 3. Settings, Apps removes it again." />
+                 Text="DiskAnvil goes in Program Files, with an entry in the Start menu. Windows asks for administrator rights while it's set up, and each time DiskAnvil starts: it needs them to work with drives.&#13;&#10;&#13;&#10;DiskAnvil is free software under the GNU General Public License, version 3. Settings, Apps removes it again." />
         <Control Id="DesktopCheckBox" Type="CheckBox" X="135" Y="176" Width="220" Height="18" CheckBoxValue="1"
                  Property="DESKTOPSHORTCUT" Text="Put a shortcut on the desktop" />
         <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
@@ -54,7 +54,7 @@
       <Publish Dialog="MaintenanceTypeDlg" Control="Back" Event="NewDialog" Value="MaintenanceWelcomeDlg" />
 
       <InstallUISequence>
-        <Show Dialog="DiskForgeWelcomeDlg" Before="ProgressDlg" Condition="NOT Installed" />
+        <Show Dialog="DiskAnvilWelcomeDlg" Before="ProgressDlg" Condition="NOT Installed" />
       </InstallUISequence>
     </UI>
   </Fragment>

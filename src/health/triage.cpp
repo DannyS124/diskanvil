@@ -97,7 +97,7 @@ Advice advise(Symptom symptom, const Drive &d)
         }
         if (d.system) {
             a.odds_why += QLatin1Char(' ') + tr("The running system is on it and writes to it all the time: the sooner the better, and "
-                                                 "best from DiskForge Live.");
+                                                 "best from DiskAnvil Live.");
             a.dont << tr("Don't keep using this computer more than you must.");
         }
         break;
@@ -164,7 +164,7 @@ Advice advise(Symptom symptom, const Drive &d)
                         "ransomware deleted.");
         a.dont << tr("Don't pay first.") << tr("Don't delete the locked files or its notes: a free way to unlock them can come out later.")
                << tr("Don't keep the computer on the network.");
-        a.steps << tr("Scan for Viruses, best from DiskForge Live, to take it off the computer.")
+        a.steps << tr("Scan for Viruses, best from DiskAnvil Live, to take it off the computer.")
                 << tr("Find Lost Files: Windows' earlier versions of the drive, and the deleted originals. Its ransomware bar says what it "
                       "is and what can be done.");
         a.tools << QStringLiteral("virus-scan") << QStringLiteral("lost-files");
@@ -178,9 +178,9 @@ Advice advise(Symptom symptom, const Drive &d)
         break;
     case Symptom::WindowsWontStart:
         a.odds = Odds::Good;
-        a.odds_why = tr("Your files are usually fine. A DiskForge Live stick starts the computer without Windows, and copies them off.");
+        a.odds_why = tr("Your files are usually fine. A DiskAnvil Live stick starts the computer without Windows, and copies them off.");
         a.dont << tr("Don't reinstall Windows or \"reset this PC\" before your files are safe.");
-        a.steps << tr("Make a DiskForge Live stick (on another computer, if this one won't start).")
+        a.steps << tr("Make a DiskAnvil Live stick (on another computer, if this one won't start).")
                 << tr("Start this computer from it, and copy your files to another drive with Save My Files (your folders and "
                       "your bookmarks).")
                 << tr("Then see to Windows: if the PC says there's no system to start, Boot Menu Entries shows whether Windows' "
@@ -238,7 +238,7 @@ Drive facts(const Disk &disk, bool runningFromStick)
     d.removable = disk.removable || disk.bus == QLatin1String("usb");
     d.failing = health::hasUnreadableSpots(disk.health);
     d.system = disk.isSystem && !runningFromStick;
-    // From DiskForge Live nothing trims the computer's own drives, but what happened before it
+    // From DiskAnvil Live nothing trims the computer's own drives, but what happened before it
     // started isn't known here.
     d.trim = runningFromStick ? Trim::Unknown : trimOf(disk);
     return d;

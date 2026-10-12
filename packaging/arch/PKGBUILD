@@ -1,13 +1,17 @@
 # Maintainer: Danny S <48356907+DannyS124@users.noreply.github.com>
-pkgname=diskforge
+pkgname=diskanvil
 pkgver=0.5.1
 pkgrel=1
 pkgdesc='Disk manager for Linux that works like Windows Disk Management'
 arch=('x86_64')
-url='https://github.com/DannyS124/diskforge'
+url='https://github.com/DannyS124/diskanvil'
 license=('GPL-3.0-or-later')
 depends=('glibc' 'hicolor-icon-theme' 'libgcc' 'libstdc++' 'openssl' 'qt6-base' 'qt6-svg' 'udisks2' 'util-linux-libs' 'zstd' 'zlib' 'libarchive' 'poppler-qt6')
 makedepends=('cmake' 'qt6-tools')
+# It was called DiskForge up to 0.5.1.
+provides=('diskforge')
+conflicts=('diskforge')
+replaces=('diskforge')
 optdepends=(
   'exfatprogs: create exFAT volumes'
   'dosfstools: create FAT32 volumes'
@@ -32,7 +36,7 @@ build() {
   cmake -S "$pkgname-$pkgver" -B build \
     -DCMAKE_BUILD_TYPE=None \
     -DCMAKE_INSTALL_PREFIX=/usr \
-    -DDISKFORGE_SELFTEST=OFF
+    -DDISKANVIL_SELFTEST=OFF
   cmake --build build
 }
 

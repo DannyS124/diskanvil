@@ -152,10 +152,10 @@ Engine findEngine(bool live)
         return e;
     e.kind = Engine::Kind::ClamAV;
     e.updater = QStandardPaths::findExecutable(QStringLiteral("freshclam"));
-    // The newest list there is: DiskForge's own (in memory on DiskForge Live), or the system's.
+    // The newest list there is: DiskAnvil's own (in memory on DiskAnvil Live), or the system's.
     const QString own = live ? QString::fromLatin1(kLiveList)
-                             : QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/diskforge/clamav");
-    QVector<QPair<QString, bool>> places; // folder, whether DiskForge can write there
+                             : QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/diskanvil/clamav");
+    QVector<QPair<QString, bool>> places; // folder, whether DiskAnvil can write there
     places << qMakePair(own, true) << qMakePair(QStringLiteral("/var/lib/clamav"), false);
     for (const auto &[folder, writable] : std::as_const(places)) {
         qint64 count = 0;
@@ -168,7 +168,7 @@ Engine findEngine(bool live)
         }
     }
     if (e.database.isEmpty()) {
-        // Nothing yet: the first download goes to DiskForge's own folder.
+        // Nothing yet: the first download goes to DiskAnvil's own folder.
         e.database = own;
         e.databaseWritable = true;
     }
@@ -243,19 +243,19 @@ QString disguise(const QString &fileName, const QByteArray &head)
 {
     // The right-to-left override turns the rest of the name around on screen.
     if (fileName.contains(QChar(0x202E)))
-        return QStringLiteral("DiskForge.Disguised.RightToLeft");
+        return QStringLiteral("DiskAnvil.Disguised.RightToLeft");
     const QString last = endOf(fileName);
     if (programEnds().contains(last)) {
         const QString rest = fileName.left(fileName.lastIndexOf(QLatin1Char('.')));
         if (rest.contains(QLatin1Char('.')) && harmlessEnds().contains(endOf(rest)))
-            return QStringLiteral("DiskForge.Disguised.DoubleExtension");
+            return QStringLiteral("DiskAnvil.Disguised.DoubleExtension");
         return {};
     }
     // A Windows program (MZ, then "PE" where the header says) named like a picture or document.
     if (harmlessEnds().contains(last) && head.size() >= 64 && head.startsWith("MZ")) {
         const quint32 pe = qFromLittleEndian<quint32>(head.constData() + 0x3C);
         if (pe >= 64 && qsizetype(pe) + 4 <= head.size() && head.mid(pe, 4) == QByteArray("PE\0\0", 4))
-            return QStringLiteral("DiskForge.Disguised.ProgramInside");
+            return QStringLiteral("DiskAnvil.Disguised.ProgramInside");
     }
     return {};
 }
@@ -472,7 +472,7 @@ void Scan::runDefender()
         if (defender.exitStatus() != QProcess::NormalExit || (defender.exitCode() != 0 && defender.exitCode() != 2)) {
             const bool off = output.contains(QLatin1String("0x800106ba"), Qt::CaseInsensitive);
             Q_EMIT finished(false, 0, 0, off ? tr("Microsoft Defender is switched off on this PC (another antivirus is in charge). Install "
-                                                  "ClamAV for Windows to scan with DiskForge, or scan with that antivirus.")
+                                                  "ClamAV for Windows to scan with DiskAnvil, or scan with that antivirus.")
                                              : tr("Microsoft Defender couldn't scan: %1").arg(output.simplified().right(200)));
             return;
         }
@@ -569,9 +569,9 @@ QString shownName(const QString &name)
 
 int severity(const QString &name)
 {
-    if (name == QLatin1String("DiskForge.Disguised.ProgramInside"))
+    if (name == QLatin1String("DiskAnvil.Disguised.ProgramInside"))
         return 1;
-    if (name.startsWith(QLatin1String("DiskForge.Disguised.")))
+    if (name.startsWith(QLatin1String("DiskAnvil.Disguised.")))
         return 2;
     if (has(name, {"eicar", "PUA.", "PUA:", "Adware", "Unwanted", "PUADlManager", "Test."}))
         return 0;
@@ -582,11 +582,11 @@ int severity(const QString &name)
 
 QString describe(const QString &name)
 {
-    if (name == QLatin1String("DiskForge.Disguised.DoubleExtension"))
+    if (name == QLatin1String("DiskAnvil.Disguised.DoubleExtension"))
         return words("A program named like a document or picture: Windows hides the end of the name, so it looks harmless.");
-    if (name == QLatin1String("DiskForge.Disguised.RightToLeft"))
+    if (name == QLatin1String("DiskAnvil.Disguised.RightToLeft"))
         return words("Its name is turned around by a hidden character, so a program looks like something else.");
-    if (name == QLatin1String("DiskForge.Disguised.ProgramInside"))
+    if (name == QLatin1String("DiskAnvil.Disguised.ProgramInside"))
         return words("A program kept in a file named like a picture or document: malware hides its parts that way.");
     if (has(name, {"eicar"}))
         return words("A harmless test file: antivirus programs use it to show they work.");

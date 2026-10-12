@@ -816,7 +816,7 @@ LostFilesDialog::LostFilesDialog(UDisks *udisks, const QString &preferredPath, Q
     m_sort->addItem(tr("By kind"), int(LostFilter::Order::Kind));
     m_sort->setToolTip(tr("The date is the one the drive kept, or for a file found by what's inside it, the one it carries "
                           "(when a photo was taken, an email sent)"));
-    m_sort->setCurrentIndex(std::max(0, m_sort->findData(QSettings().value(QStringLiteral("lostFiles/order"), 0).toInt())));
+    m_sort->setCurrentIndex(std::max(0, m_sort->findData(QSettings(QStringLiteral("diskanvil"), QStringLiteral("diskanvil")).value(QStringLiteral("lostFiles/order"), 0).toInt())));
     search->addWidget(m_sort);
     m_grid->setAutoDefault(false);
     search->addWidget(m_grid);
@@ -856,7 +856,7 @@ LostFilesDialog::LostFilesDialog(UDisks *udisks, const QString &preferredPath, Q
     m_findCopies->setToolTip(tr("Finds the files that are the same as another one found, byte for byte, so each needs saving once"));
     m_checkOpen = organise->addAction(tr("Check They Open"));
     m_checkOpen->setObjectName(QStringLiteral("checkOpen"));
-    m_checkOpen->setToolTip(tr("Opens each file shown the way its preview does (safely, apart from DiskForge), and marks the ones "
+    m_checkOpen->setToolTip(tr("Opens each file shown the way its preview does (safely, apart from DiskAnvil), and marks the ones "
                                "that don't open: they're probably damaged or partly overwritten"));
     m_findWords = organise->addAction(tr("Find by Words…"));
     m_findWords->setObjectName(QStringLiteral("findWords"));
@@ -987,7 +987,7 @@ LostFilesDialog::LostFilesDialog(UDisks *udisks, const QString &preferredPath, Q
     for (QCheckBox *box : {m_hideSmall, m_hideCopies, m_hideBroken})
         connect(box, &QCheckBox::toggled, this, &LostFilesDialog::filterChanged);
     connect(m_sort, &QComboBox::currentIndexChanged, this, [this] {
-        QSettings().setValue(QStringLiteral("lostFiles/order"), m_sort->currentData().toInt());
+        QSettings(QStringLiteral("diskanvil"), QStringLiteral("diskanvil")).setValue(QStringLiteral("lostFiles/order"), m_sort->currentData().toInt());
         filterChanged();
     });
     connect(m_findCopies, &QAction::triggered, this, &LostFilesDialog::findCopies);
@@ -1060,7 +1060,7 @@ void LostFilesDialog::hideEvent(QHideEvent *event)
 {
     // Its size and panes, for next time.
     if (m_placed) {
-        QSettings settings;
+        QSettings settings(QStringLiteral("diskanvil"), QStringLiteral("diskanvil"));
         settings.setValue(QStringLiteral("lostFiles/geometry"), saveGeometry());
         settings.setValue(QStringLiteral("lostFiles/panes"), m_split->saveState());
     }
@@ -1069,7 +1069,7 @@ void LostFilesDialog::hideEvent(QHideEvent *event)
 
 void LostFilesDialog::placeWindow()
 {
-    QSettings settings;
+    QSettings settings(QStringLiteral("diskanvil"), QStringLiteral("diskanvil"));
     const QScreen *screen = this->screen();
     const QRect room = screen ? screen->availableGeometry() : QRect(0, 0, 1280, 800);
     const QByteArray geometry = settings.value(QStringLiteral("lostFiles/geometry")).toByteArray();
@@ -1254,7 +1254,7 @@ void LostFilesDialog::chooseImage()
 {
     const QString file = QFileDialog::getOpenFileName(
         this, tr("Choose a Disk Image"), QDir::homePath(),
-        tr("Disk images (*.img *.iso *.raw *.dd *.bin *.vdi *.vmdk *.vhd *.vhdx *.qcow2 *.zst *.E01 *.e01);;DiskForge backups (*.img.zst);;"
+        tr("Disk images (*.img *.iso *.raw *.dd *.bin *.vdi *.vmdk *.vhd *.vhdx *.qcow2 *.zst *.E01 *.e01);;DiskAnvil backups (*.img.zst);;"
            "Evidence files (*.E01 *.e01);;"
            "Virtual machines' disks (*.vdi *.vmdk *.vhd *.vhdx *.qcow2);;All files (*)"));
     if (!file.isEmpty())
@@ -1263,7 +1263,7 @@ void LostFilesDialog::chooseImage()
 
 void LostFilesDialog::scanImage(const QString &path)
 {
-    // DiskForge's backups are read a piece at a time (vdisk); other packed images can't be.
+    // DiskAnvil's backups are read a piece at a time (vdisk); other packed images can't be.
     if ((path.endsWith(QLatin1String(".zst")) && vdisk::formatOf(path) != QLatin1String("ZSTD")) || path.endsWith(QLatin1String(".xz"))
         || path.endsWith(QLatin1String(".gz"))) {
         m_driveNote->setText(redText(tr("A packed image can't be looked through as it is. Unpack it first (or restore the backup "
@@ -1557,7 +1557,7 @@ void LostFilesDialog::openBtrfs()
         QFile::remove(part);
         return;
     }
-    // On a drive, btrfs-progs reads the drive itself, which takes admin rights: DiskForge Live
+    // On a drive, btrfs-progs reads the drive itself, which takes admin rights: DiskAnvil Live
     // has them.
     const Volume *volume = nullptr;
     const Disk *disk = nullptr;
@@ -1572,7 +1572,7 @@ void LostFilesDialog::openBtrfs()
     const QString device = volume ? volume->device : disk ? disk->device : QString();
     if (!rescue::runningInRescue() || device.isEmpty()) {
         QMessageBox::information(this, windowTitle(),
-                                 tr("btrfs-progs has to read the drive itself for this, which takes admin rights. DiskForge Live (on a USB "
+                                 tr("btrfs-progs has to read the drive itself for this, which takes admin rights. DiskAnvil Live (on a USB "
                                     "stick) can do it. On this computer: make a Rescue Copy of just the btrfs partition (Action menu), then look "
                                     "in that file here."));
         return;
@@ -2222,7 +2222,7 @@ void LostFilesDialog::startViewer()
     });
     const QStringList command = viewer::command(m_viewerSandboxed, m_viewerReadable);
     process->start(command.first(), command.mid(1));
-    // It looks like DiskForge does.
+    // It looks like DiskAnvil does.
     viewer::Message look;
     look.type = viewer::Message::Look;
     look.style = QApplication::style()->name();

@@ -77,7 +77,7 @@ Plan plan(quint64 size, int sectorSize)
         {2 * TiB, int(512 * KiB), 64 * MiB, Plan::Fs::Exfat},
     };
     if (size <= 64 * MiB) {
-        p.problem = tr("cards of 64 MB and less use FAT12, which DiskForge doesn't make: use Format");
+        p.problem = tr("cards of 64 MB and less use FAT12, which DiskAnvil doesn't make: use Format");
         return p;
     }
     const Row *row = nullptr;

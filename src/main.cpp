@@ -5,6 +5,7 @@
 #include "format.h"
 #include "homewindow.h"
 #include "mainwindow.h"
+#include "oldname.h"
 #include "preview.h"
 #include "translations.h"
 #include "udisks.h"
@@ -76,21 +77,23 @@ int main(int argc, char *argv[])
     }
     QApplication app(argc, argv);
 #ifdef Q_OS_WIN
-    // DiskForge's own icons, next to the program (Windows has no icon theme to borrow from);
+    // DiskAnvil's own icons, next to the program (Windows has no icon theme to borrow from);
     // Theme picks the dark or the light ones.
     QIcon::setThemeSearchPaths(QIcon::themeSearchPaths() << QCoreApplication::applicationDirPath() + QStringLiteral("/icons"));
-    QIcon::setThemeName(QStringLiteral("DiskForge-Light"));
+    QIcon::setThemeName(QStringLiteral("DiskAnvil-Light"));
 #endif
     installTranslations();
-    QApplication::setApplicationName(QStringLiteral("diskforge"));
-    QApplication::setApplicationDisplayName(QStringLiteral("DiskForge"));
+    QApplication::setApplicationName(QStringLiteral("diskanvil"));
+    QApplication::setApplicationDisplayName(QStringLiteral("DiskAnvil"));
     QApplication::setApplicationVersion(QStringLiteral(APP_VERSION));
     QApplication::setDesktopFileName(QStringLiteral(APP_ID));
     QApplication::setWindowIcon(QIcon::fromTheme(QStringLiteral(APP_ID), QIcon(QStringLiteral(":/data/" APP_ID ".svg"))));
     // Find Lost Files' viewer (viewer.h): a program of its own, so a damaged file can't take
-    // DiskForge down. Find Lost Files talks to it on its standard input and output.
+    // DiskAnvil down. Find Lost Files talks to it on its standard input and output.
     if (argc == 2 && QByteArray(argv[1]) == "--viewer")
         return viewer::run();
+    // What DiskAnvil kept while it was called DiskForge.
+    oldname::moveOver();
 
     QCommandLineParser parser;
     parser.setApplicationDescription(QStringLiteral("A Windows-style disk manager built on UDisks2."));
@@ -106,19 +109,19 @@ int main(int argc, char *argv[])
     const QCommandLineOption menuOption(QStringLiteral("menu"),
                                         QStringLiteral("With --screenshot: render the right-click menu of the selection."));
     const QCommandLineOption logOption(QStringLiteral("log"),
-                                       QStringLiteral("Write what DiskForge does to <file>. DISKFORGE_LOG=<file> does the same."),
+                                       QStringLiteral("Write what DiskAnvil does to <file>. DISKANVIL_LOG=<file> does the same."),
                                        QStringLiteral("file"));
     const QCommandLineOption openOption(QStringLiteral("open"),
                                         QStringLiteral("Open just one tool: write-image, windows-usb, rescue-usb, check-stick, lost-files or virus-scan."),
                                         QStringLiteral("tool"));
-    const QCommandLineOption homeOption(QStringLiteral("home"), QStringLiteral("Be DiskForge Live's home screen (its desktop)."));
+    const QCommandLineOption homeOption(QStringLiteral("home"), QStringLiteral("Be DiskAnvil Live's home screen (its desktop)."));
     parser.addOptions({dumpOption, screenshotOption, selectOption, menuOption, logOption, openOption, homeOption});
     parser.addPositionalArgument(QStringLiteral("images"), QStringLiteral("Disk images (.iso, .img) to open."), QStringLiteral("[image...]"));
     parser.process(app);
 
-    const QString logFile = parser.isSet(logOption) ? parser.value(logOption) : qEnvironmentVariable("DISKFORGE_LOG");
+    const QString logFile = parser.isSet(logOption) ? parser.value(logOption) : qEnvironmentVariable("DISKANVIL_LOG");
     if (!logFile.isEmpty() && applog::start(logFile)) {
-        qCInfo(lcOps).noquote() << "DiskForge" << APP_VERSION << "started, Qt" << qVersion() << "on"
+        qCInfo(lcOps).noquote() << "DiskAnvil" << APP_VERSION << "started, Qt" << qVersion() << "on"
                                 << QSysInfo::prettyProductName() << QSysInfo::kernelVersion();
     }
 
@@ -135,7 +138,7 @@ int main(int argc, char *argv[])
             QTextStream(stderr) << message << "\n";
             return 1;
         }
-        QMessageBox::critical(nullptr, QStringLiteral("DiskForge"), message);
+        QMessageBox::critical(nullptr, QStringLiteral("DiskAnvil"), message);
         return 1;
     }
 
@@ -166,7 +169,7 @@ int main(int argc, char *argv[])
 
     MainWindow window(&udisks);
     window.resize(1280, 800);
-    // On a smaller screen (a small laptop, a VM, DiskForge Live) that would put the bottom of
+    // On a smaller screen (a small laptop, a VM, DiskAnvil Live) that would put the bottom of
     // the window under the taskbar, so it takes the room there is instead. Screenshots keep
     // the size they always have.
     const QScreen *screen = QGuiApplication::primaryScreen();
@@ -184,8 +187,8 @@ int main(int argc, char *argv[])
     if (parser.isSet(selectOption) && !window.selectDevice(parser.value(selectOption)))
         QTextStream(stderr) << "No partition " << parser.value(selectOption) << "\n";
     if (parser.isSet(openOption)) {
-        // Just the tool, for launchers like the ones on DiskForge Live's desktop: no main
-        // window behind it, and DiskForge closes with it.
+        // Just the tool, for launchers like the ones on DiskAnvil Live's desktop: no main
+        // window behind it, and DiskAnvil closes with it.
         const QString tool = parser.value(openOption);
         QTimer::singleShot(0, &window, [&window, tool] {
             if (!window.openTool(tool)) {
@@ -214,6 +217,6 @@ int main(int argc, char *argv[])
         });
     }
     const int status = app.exec();
-    qCInfo(lcOps).noquote() << "DiskForge closed";
+    qCInfo(lcOps).noquote() << "DiskAnvil closed";
     return status;
 }

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Danny S
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Renders the dialogs to PNGs: QT_QPA_PLATFORM=offscreen diskforge-preview <dir>
+// Renders the dialogs to PNGs: QT_QPA_PLATFORM=offscreen diskanvil-preview <dir>
 
 #include "../src/lostfiles/preview.h"
 #include "../src/app/about.h"
@@ -76,18 +76,18 @@ void save(QWidget &widget, const QString &path)
 
 int main(int argc, char *argv[])
 {
-    // Find Lost Files starts this program as its preview helper, as it would DiskForge itself.
+    // Find Lost Files starts this program as its preview helper, as it would DiskAnvil itself.
     if (argc == 2 && QByteArray(argv[1]) == "--preview-helper") {
         qputenv("QT_QPA_PLATFORM", "offscreen");
         QGuiApplication helper(argc, argv);
         return preview::runHelper();
     }
     QApplication app(argc, argv);
-    // Without a desktop there's no icon theme; DISKFORGE_PREVIEW_ICONS=breeze-dark (say) picks one,
+    // Without a desktop there's no icon theme; DISKANVIL_PREVIEW_ICONS=breeze-dark (say) picks one,
     // for screenshots that look like the app does on a desktop.
-    if (qEnvironmentVariableIsSet("DISKFORGE_PREVIEW_ICONS")) {
+    if (qEnvironmentVariableIsSet("DISKANVIL_PREVIEW_ICONS")) {
         QIcon::setThemeSearchPaths(QIcon::themeSearchPaths() << QStringLiteral("/usr/share/icons") << QStringLiteral("/usr/local/share/icons"));
-        QIcon::setThemeName(qEnvironmentVariable("DISKFORGE_PREVIEW_ICONS"));
+        QIcon::setThemeName(qEnvironmentVariable("DISKANVIL_PREVIEW_ICONS"));
     }
     installTranslations();
     QApplication::setApplicationVersion(QStringLiteral(APP_VERSION));
@@ -261,7 +261,7 @@ int main(int argc, char *argv[])
             RecoverDialog recoverDialog(&udisks, fake, gpt::Report());
             save(recoverDialog, out.filePath(QStringLiteral("recover.png")));
         }
-        for (const char *id : {"classic", "deadshadow", "diskforge-live", "high-contrast"}) {
+        for (const char *id : {"classic", "deadshadow", "diskanvil-live", "high-contrast"}) {
             Theme::instance().use(QLatin1String(id), addons);
             save(window, out.filePath(QStringLiteral("main-%1.png").arg(QLatin1String(id))));
         }
@@ -524,7 +524,7 @@ void previewTools(UDisks &udisks, const QDir &out)
     }
 
     // Disk usage of this source tree (small and always there), once the scan is done.
-    UsageDialog usage(QStringLiteral(SOURCE_DIR), QStringLiteral("diskforge"));
+    UsageDialog usage(QStringLiteral(SOURCE_DIR), QStringLiteral("diskanvil"));
     usage.show();
     if (auto *busy = usage.findChild<QProgressBar *>()) {
         QElapsedTimer waited;
@@ -618,19 +618,19 @@ void previewCopyTools(UDisks &udisks, const QDir &out)
     save(rescue, out.filePath(QStringLiteral("rescue.png")));
 }
 
-// DiskForge Live's home screen, with DiskForge Live's own icons (from rescue/icons, the logo added the way
+// DiskAnvil Live's home screen, with DiskAnvil Live's own icons (from rescue/icons, the logo added the way
 // make-image.sh does it) and its programs, then the same tiles as the Quick Fixes window.
 void previewHome(UDisks &udisks, const QDir &out)
 {
     QTemporaryDir dir;
-    const QString theme = dir.filePath(QStringLiteral("icons/DiskForge-Live"));
+    const QString theme = dir.filePath(QStringLiteral("icons/DiskAnvil-Live"));
     QDir().mkpath(dir.filePath(QStringLiteral("icons")));
-    QProcess::execute(QStringLiteral("cp"), {QStringLiteral("-a"), QStringLiteral(SOURCE_DIR "/rescue/icons/DiskForge-Live"), dir.filePath(QStringLiteral("icons"))});
-    QFile::copy(QStringLiteral(SOURCE_DIR "/rescue/art/diskforge-live-icon.svg"), theme + QStringLiteral("/scalable/apps/diskforge-live.svg"));
+    QProcess::execute(QStringLiteral("cp"), {QStringLiteral("-a"), QStringLiteral(SOURCE_DIR "/rescue/icons/DiskAnvil-Live"), dir.filePath(QStringLiteral("icons"))});
+    QFile::copy(QStringLiteral(SOURCE_DIR "/rescue/art/diskanvil-live-icon.svg"), theme + QStringLiteral("/scalable/apps/diskanvil-live.svg"));
     const QStringList searchPaths = QIcon::themeSearchPaths();
     const QString themeName = QIcon::themeName();
     QIcon::setThemeSearchPaths(QStringList{dir.filePath(QStringLiteral("icons"))} + searchPaths);
-    QIcon::setThemeName(QStringLiteral("DiskForge-Live"));
+    QIcon::setThemeName(QStringLiteral("DiskAnvil-Live"));
 
     // The stick's launchers, plus stand-ins for the programs Debian brings.
     const QString apps = dir.filePath(QStringLiteral("applications"));

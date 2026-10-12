@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2026 Danny S
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Started by DiskAnvil's Disk Cleanup. Removes the cached files of packages that aren't
+# installed anymore (pacman-contrib's own paccache.service only trims old versions).
+
+[Unit]
+Description=Remove cached files of uninstalled packages
+Documentation=man:paccache(8)
+ConditionPathExists=/usr/bin/paccache
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/paccache -ruk0
+Nice=19
+IOSchedulingClass=idle

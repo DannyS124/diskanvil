@@ -37,7 +37,7 @@
 
 namespace {
 
-// The rescan for a PC where DiskForge doesn't run anything as root itself.
+// The rescan for a PC where DiskAnvil doesn't run anything as root itself.
 const QString kRescanCommand = QStringLiteral("echo \"- - -\" | sudo tee /sys/class/scsi_host/host*/scan");
 
 // A drive's connector edge: the small data socket, and the wide power socket with an arrow
@@ -123,7 +123,7 @@ SecureEraseDialog::SecureEraseDialog(UDisks *udisks, const QString &blockPath, i
                                  "power taken away and given back. Unplug and Replug walks you through doing that by hand. Sleep "
                                  "Now does it too, on PCs that wake up fine from sleep.")));
     m_replug->setObjectName(QStringLiteral("replug"));
-    m_howTo->setText(QStringLiteral("<a href=\"https://github.com/DannyS124/diskforge/blob/main/docs/SECURE-ERASE.md\">%1</a>")
+    m_howTo->setText(QStringLiteral("<a href=\"https://github.com/DannyS124/diskanvil/blob/main/docs/SECURE-ERASE.md\">%1</a>")
                          .arg(tr("How this works, step by step with pictures").toHtmlEscaped()));
     m_howTo->setOpenExternalLinks(true);
     m_howTo->setObjectName(QStringLiteral("howTo"));
@@ -187,10 +187,10 @@ SecureEraseDialog::SecureEraseDialog(UDisks *udisks, const QString &blockPath, i
 
     connect(m_confirm, &QLineEdit::textChanged, this, &SecureEraseDialog::updateState);
     connect(m_sleep, &QPushButton::clicked, this, [this] {
-        // Some PCs don't wake up under DiskForge Live (graphics, or the stick losing power while
+        // Some PCs don't wake up under DiskAnvil Live (graphics, or the stick losing power while
         // asleep) and hang until they're switched off.
         if (rescue::runningInRescue()) {
-            QString text = tr("Some PCs don't wake up properly from sleep under DiskForge Live, and freeze until they're switched "
+            QString text = tr("Some PCs don't wake up properly from sleep under DiskAnvil Live, and freeze until they're switched "
                               "off. Unplug and Replug does the same job without sleeping.");
             if (rescue::runningFromStick())
                 text += QStringLiteral("\n\n") + tr("It's also running from the USB stick, and many PCs cut the power to USB while "
@@ -232,7 +232,7 @@ SecureEraseDialog::SecureEraseDialog(UDisks *udisks, const QString &blockPath, i
                 return;
             if (!ready)
                 return self->setReplugStep(Replug::Off);
-            // On DiskForge Live the system lets go of the drive too, so it's gone cleanly.
+            // On DiskAnvil Live the system lets go of the drive too, so it's gone cleanly.
             if (rescue::canRescanDrives())
                 rescue::rescanDrives({QStringLiteral("detach"), name}, self, [self](bool) {
                     if (self)
@@ -301,7 +301,7 @@ QString SecureEraseDialog::replugText() const
     case Replug::Replug: {
         current = 2;
         const int waited = int(m_replugWaited.elapsed() / 1000);
-        now = tr("Wait a few seconds, then plug the power cable back in, straight and firmly. DiskForge is looking for the "
+        now = tr("Wait a few seconds, then plug the power cable back in, straight and firmly. DiskAnvil is looking for the "
                  "drive (%1 s).").arg(waited);
         if (!rescue::canRescanDrives() && waited >= 20)
             now += QStringLiteral("<br><br>") + tr("Not showing up? Some PCs don't notice a drive plugged in while they're on. "
@@ -350,7 +350,7 @@ void SecureEraseDialog::lookForDrive()
         return setReplugStep(Replug::Off);
     }
     if (tick && m_ticks % 2 == 0) {
-        // Every 6 s: on DiskForge Live, ask the controllers to look again (old ones don't notice by
+        // Every 6 s: on DiskAnvil Live, ask the controllers to look again (old ones don't notice by
         // themselves); a drive that's there but still looks frozen gets re-read, since what's
         // known about it can be from before it lost power.
         if (rescue::canRescanDrives())

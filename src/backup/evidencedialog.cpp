@@ -47,7 +47,7 @@ EvidenceDialog::EvidenceDialog(UDisks *udisks, const Disk &disk, const Volume *v
     m_title = volume ? volumeTitle(*volume) : diskTitle(disk);
     m_description->setText(volume ? tr("%1, partition %2 of %3 (serial %4)").arg(volumeTitle(*volume)).arg(volume->number).arg(disk.model, disk.serial)
                                   : tr("%1 (serial %2)").arg(disk.model, disk.serial));
-    QSettings settings(QStringLiteral("diskforge"), QStringLiteral("diskforge"));
+    QSettings settings(QStringLiteral("diskanvil"), QStringLiteral("diskanvil"));
     m_examiner->setText(settings.value(QStringLiteral("evidence/examiner")).toString());
     m_file->setText(QDir::toNativeSeparators(QDir::home().filePath(QStringLiteral("%1.E01").arg(disk.serial.isEmpty() ? shortDevice(m_device) : disk.serial))));
     for (QLineEdit *e : {m_case, m_evidence, m_description, m_examiner, m_file})
@@ -172,7 +172,7 @@ QString EvidenceDialog::reportHtml(const ewf::Case &c, const ewf::Result &r, con
 void EvidenceDialog::start()
 {
     const QString file = QDir::fromNativeSeparators(m_file->text().trimmed());
-    QSettings(QStringLiteral("diskforge"), QStringLiteral("diskforge")).setValue(QStringLiteral("evidence/examiner"), m_examiner->text().trimmed());
+    QSettings(QStringLiteral("diskanvil"), QStringLiteral("diskanvil")).setValue(QStringLiteral("evidence/examiner"), m_examiner->text().trimmed());
     const ewf::Case details{m_case->text().trimmed(), m_evidence->text().trimmed(), m_description->text().trimmed(), m_examiner->text().trimmed(),
                             m_notes->toPlainText().trimmed(), m_disk.model, m_disk.serial};
     m_start->setEnabled(false);

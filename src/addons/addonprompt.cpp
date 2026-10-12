@@ -93,7 +93,7 @@ QString addonNotes(const AddonAction &action, const AddonRisks &r)
 
 QString outsideNote()
 {
-    return note(kOrange, QObject::tr("This add-on was put in your add-on folder, or changed, without going through DiskForge. "
+    return note(kOrange, QObject::tr("This add-on was put in your add-on folder, or changed, without going through DiskAnvil. "
                                      "If you didn't do that yourself, don't run it: remove it in Tools → Add-ons."));
 }
 
@@ -112,7 +112,7 @@ bool askInstallAddon(QWidget *parent, const Addon &addon)
             parts << shown(part);
         if (!lines.isEmpty())
             lines << QString();
-        lines << act.label + (act.terminal ? QObject::tr("  (in a terminal)") : act.window ? QObject::tr("  (in a DiskForge window)") : QString());
+        lines << act.label + (act.terminal ? QObject::tr("  (in a terminal)") : act.window ? QObject::tr("  (in a DiskAnvil window)") : QString());
         lines << QStringLiteral("  ") + parts.join(QLatin1Char(' '));
         const QString actionNotes = addonNotes(act);
         if (!actionNotes.isEmpty())

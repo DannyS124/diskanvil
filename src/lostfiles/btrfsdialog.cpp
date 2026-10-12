@@ -86,7 +86,7 @@ BtrfsDialog::BtrfsDialog(const QString &device, const QString &diskDevice, const
         findTrees();
         return;
     }
-    // On DiskForge Live: a read-only loop device over just the file system, read as root.
+    // On DiskAnvil Live: a read-only loop device over just the file system, read as root.
     m_status->setText(tr("Getting the drive ready to read…"));
     QStringList losetup = {QStringLiteral("losetup"), QStringLiteral("--find"), QStringLiteral("--show"), QStringLiteral("--read-only")};
     if (offset)

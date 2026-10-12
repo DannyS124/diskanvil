@@ -3,7 +3,7 @@
 
 #pragma once
 
-// Is there newer firmware for a drive? Asked of fwupd over the system bus. DiskForge only
+// Is there newer firmware for a drive? Asked of fwupd over the system bus. DiskAnvil only
 // asks: it never downloads or installs firmware, and fwupd answers from the list it
 // downloaded itself. fwupd is only asked when it's already running, or when the user
 // presses Check, since asking starts it otherwise (a root daemon that probes hardware).

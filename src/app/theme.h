@@ -3,7 +3,7 @@
 
 #pragma once
 
-// DiskForge's own colors: the disk map, the bad sector map, the usage map, health and
+// DiskAnvil's own colors: the disk map, the bad sector map, the usage map, health and
 // warnings. Everything that draws asks here instead of picking colors itself, so a theme
 // can change them in one place.
 

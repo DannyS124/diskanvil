@@ -91,7 +91,7 @@ QStringList arguments(const Options &o, const QString &ovmfCode, const QString &
     QStringList args;
     if (o.fd >= 0)
         args << QStringLiteral("-add-fd") << QStringLiteral("fd=%1,set=1,opaque=drive").arg(o.fd);
-    args << QStringList{QStringLiteral("-name"), QStringLiteral("DiskForge: Try Starting It"), QStringLiteral("-m"), QString::number(o.memoryMiB),
+    args << QStringList{QStringLiteral("-name"), QStringLiteral("DiskAnvil: Try Starting It"), QStringLiteral("-m"), QString::number(o.memoryMiB),
                         QStringLiteral("-smp"), QStringLiteral("2"), QStringLiteral("-drive"), drive,
                         QStringLiteral("-device"), QStringLiteral("ahci,id=ahci"), QStringLiteral("-device"), QStringLiteral("ide-hd,drive=disk0,bus=ahci.0,bootindex=0"),
                         QStringLiteral("-nic"), QStringLiteral("none")};
@@ -141,7 +141,7 @@ QProcess *start(const Options &given, QObject *parent, QString *error)
     if (fd >= 0) {
         // QEMU reads it the ordinary way: a handle opened for direct reads would refuse those.
         ::fcntl(fd, F_SETFL, ::fcntl(fd, F_GETFL) & ~O_DIRECT);
-        // It's handed on to QEMU (everything DiskForge opens is kept from the programs it
+        // It's handed on to QEMU (everything DiskAnvil opens is kept from the programs it
         // starts): only while QEMU starts.
         ::fcntl(fd, F_SETFD, 0);
     }

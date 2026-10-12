@@ -123,7 +123,7 @@ bool signature::verify(const QByteArray &data, const QByteArray &armored, const 
     for (const QString &line : keys)
         known = known || (!publicKey.isEmpty() && keyBlob(line) == publicKey);
     if (!known)
-        return fail(tr("it's signed with a key DiskForge doesn't know"));
+        return fail(tr("it's signed with a key DiskAnvil doesn't know"));
 
     Reader k(publicKey);
     QByteArray keyType, key;
@@ -135,7 +135,7 @@ bool signature::verify(const QByteArray &data, const QByteArray &armored, const 
     else if (hashName == "sha256")
         algorithm = QCryptographicHash::Sha256;
     else
-        return fail(tr("the signature uses a hash DiskForge doesn't know"));
+        return fail(tr("the signature uses a hash DiskAnvil doesn't know"));
     Reader s(sigBlob);
     QByteArray sigType, sig;
     if (!s.string(&sigType) || sigType != "ssh-ed25519" || !s.string(&sig) || sig.size() != 64 || !s.atEnd())

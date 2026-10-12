@@ -1,7 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Read Me
-Comment=What's on this stick and how it works
-Exec=featherpad /usr/local/share/diskforge-live/README.txt
-Icon=diskforge-live-readme
-Categories=System;

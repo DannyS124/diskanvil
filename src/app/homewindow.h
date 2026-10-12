@@ -14,12 +14,12 @@ class QGridLayout;
 class QLabel;
 class UDisks;
 
-// DiskForge Live's home screen: big tiles for what people start the stick for, a row of everyday
+// DiskAnvil Live's home screen: big tiles for what people start the stick for, a row of everyday
 // programs, and a strip that says what state the PC is in (Secure Boot, network, drives). In
-// DiskForge Live it is the desktop itself (diskforge --home). On a normal PC the same tiles open as
+// DiskAnvil Live it is the desktop itself (diskanvil --home). On a normal PC the same tiles open as
 // a window, Tools → Quick Fixes, without the ones that only make sense on the stick.
 //
-// Every tile starts its tool as its own process (diskforge --open <tool>, or the program's
+// Every tile starts its tool as its own process (diskanvil --open <tool>, or the program's
 // .desktop file), so a tool that's busy or crashes never takes the home screen with it.
 class HomeWindow : public QWidget
 {
@@ -33,9 +33,9 @@ public:
         QString fallbackIcon;
         QString title;
         QString text;
-        QString tool;        // DiskForge's --open <tool>, or
+        QString tool;        // DiskAnvil's --open <tool>, or
         QString desktopId;   // a program's .desktop file, or
-        bool mainWindow = false; // DiskForge's own window
+        bool mainWindow = false; // DiskAnvil's own window
         bool small = false;  // in the programs row instead of the big tiles
         bool confirm = false; // ask first (restarting into the firmware settings)
     };

@@ -160,7 +160,7 @@ public:
         if (le32(p + 0x40) != 0xBEDA107F)
             return nullptr;
         if (le32(p + 0x44) >> 16 != 1) {
-            *problem = tr("It's from a version of VirtualBox whose disks DiskForge can't read.");
+            *problem = tr("It's from a version of VirtualBox whose disks DiskAnvil can't read.");
             return nullptr;
         }
         const quint32 type = le32(p + 0x4C);
@@ -369,7 +369,7 @@ public:
                 metaAt = le64(e + 16);
                 metaLength = le32(e + 24);
             } else if (le32(e + 28) & 1) {
-                *problem = tr("It uses a part of the format DiskForge doesn't know yet.");
+                *problem = tr("It uses a part of the format DiskAnvil doesn't know yet.");
                 return nullptr;
             }
         }
@@ -451,7 +451,7 @@ public:
             return nullptr;
         const quint32 version = be32(p + 4);
         if (version != 2 && version != 3) {
-            *problem = tr("It's from a version of QEMU whose disks DiskForge can't read.");
+            *problem = tr("It's from a version of QEMU whose disks DiskAnvil can't read.");
             return nullptr;
         }
         auto d = std::make_unique<Qcow2>();
@@ -471,11 +471,11 @@ public:
         if (version == 3) {
             const quint64 incompatible = be64(p + 72);
             if (incompatible & 4) {
-                *problem = tr("Its data is kept in another file, which DiskForge doesn't read yet.");
+                *problem = tr("Its data is kept in another file, which DiskAnvil doesn't read yet.");
                 return nullptr;
             }
             if (incompatible & ~quint64(0x1f)) {
-                *problem = tr("It uses a part of the format DiskForge doesn't know yet.");
+                *problem = tr("It uses a part of the format DiskAnvil doesn't know yet.");
                 return nullptr;
             }
             d->m_extended = incompatible & 16;
@@ -711,7 +711,7 @@ public:
                 }
                 d->add(size, std::move(sparse));
             } else {
-                *problem = tr("It's a kind of VMware disk DiskForge can't read yet (%1).").arg(kind);
+                *problem = tr("It's a kind of VMware disk DiskAnvil can't read yet (%1).").arg(kind);
                 return nullptr;
             }
         }
@@ -775,7 +775,7 @@ private:
 
 } // namespace
 
-// DiskForge's own backups (.img.zst, 0.5.2 on): zstd's seekable format, read a frame at a time.
+// DiskAnvil's own backups (.img.zst, 0.5.2 on): zstd's seekable format, read a frame at a time.
 class ZstdBackup : public lost::Layer
 {
 public:
@@ -783,7 +783,7 @@ public:
     {
         auto table = zstdseek::readTable(file->size(), [&file](quint64 offset, char *buf, quint64 len) { return file->read(offset, buf, len) == len; });
         if (!table) {
-            *problem = tr("This backup was made in one piece, before DiskForge 0.5.2: restore it, or unpack it first (zstd -d) and open the "
+            *problem = tr("This backup was made in one piece, before DiskAnvil 0.5.2: restore it, or unpack it first (zstd -d) and open the "
                           ".img.");
             return nullptr;
         }

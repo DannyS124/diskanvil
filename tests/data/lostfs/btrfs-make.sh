@@ -5,7 +5,7 @@
 #   tests/data/lostfs/btrfs-make.sh
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-work=$(mktemp -d -p "$HOME/Projects/diskforge-work")
+work=$(mktemp -d -p "$HOME/Projects/diskanvil-work")
 mnt="$work/mnt"
 mkdir "$mnt"
 trap 'mountpoint -q "$mnt" && sudo umount "$mnt"; rm -rf "$work"' EXIT

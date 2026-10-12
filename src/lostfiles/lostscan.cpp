@@ -431,7 +431,7 @@ void lost::Saver::run()
     // Saving more within the same minute lands in the same folder: its list gets added to.
     QFile summary(base + QStringLiteral("/What was saved.txt"));
     if (QDir().mkpath(base) && summary.open(QIODevice::Append | QIODevice::Text)) {
-        QStringList text = {tr("Saved by DiskForge's Find Lost Files on %1.").arg(QDateTime::currentDateTime().toString(Qt::ISODate)), QString()};
+        QStringList text = {tr("Saved by DiskAnvil's Find Lost Files on %1.").arg(QDateTime::currentDateTime().toString(Qt::ISODate)), QString()};
         if (summary.size() > 0)
             text.prepend(QString());
         if (!problems.isEmpty())

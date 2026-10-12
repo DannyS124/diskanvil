@@ -1,9 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=DiskForge Live
-Comment=The home screen: big tiles for the tools, and how the PC is doing
-Exec=diskforge --home
-Icon=diskforge-live
-# A module: if it ever stops, the session starts it again, so the desktop never goes missing.
-X-LXQt-Module=true
-OnlyShowIn=LXQt;

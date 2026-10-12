@@ -1,2 +1,0 @@
-# DiskForge Live: the live user is the PC's owner.
-rescue ALL=(ALL:ALL) NOPASSWD: ALL

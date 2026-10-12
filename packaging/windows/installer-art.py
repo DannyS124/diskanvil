@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# The pictures in DiskForge's Windows installer, drawn from its own logo at build time: the
+# The pictures in DiskAnvil's Windows installer, drawn from its own logo at build time: the
 # side panel of the first and last pages (493x312) and the strip along the top of the others
 # (493x58), as the 24-bit BMPs Windows Installer wants.
 #   installer-art.py <logo.svg> <out folder>
@@ -41,8 +41,8 @@ def main():
     mark = logo(svg, 96)
     dialog.paste(mark, ((164 - 96) // 2, 70), mark)
     name = font(20)
-    width = draw.textlength("DiskForge", font=name)
-    draw.text(((164 - width) / 2, 180), "DiskForge", font=name, fill=WHITE)
+    width = draw.textlength("DiskAnvil", font=name)
+    draw.text(((164 - width) / 2, 180), "DiskAnvil", font=name, fill=WHITE)
     draw.line((40, 214, 124, 214), fill=BLUE, width=2)
     dialog.save(os.path.join(out, "dialog.bmp"))
 

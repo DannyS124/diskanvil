@@ -4,8 +4,8 @@
 #pragma once
 
 // The PC's boot menu (UEFI): its entries, their order, and the one to start next time, changed.
-// On Linux through efibootmgr (as root: DiskForge Live's sudo, or the admin password), on
-// Windows by writing the firmware's variables (DiskForge runs as administrator there).
+// On Linux through efibootmgr (as root: DiskAnvil Live's sudo, or the admin password), on
+// Windows by writing the firmware's variables (DiskAnvil runs as administrator there).
 
 #include "efivars.h"
 

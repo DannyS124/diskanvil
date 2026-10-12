@@ -1,0 +1,16 @@
+# Saves the logs once the system is up and again on the way down.
+[Unit]
+Description=Save the DiskAnvil Live logs to the stick
+After=local-fs.target systemd-journald.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/diskanvil-live-logs --quiet
+ExecStop=/usr/local/bin/diskanvil-live-logs --quiet --final
+TimeoutSec=90
+# 2: no stick to write to (started from the ISO). The logs stay in /run/diskanvil-live.
+SuccessExitStatus=2
+
+[Install]
+WantedBy=multi-user.target

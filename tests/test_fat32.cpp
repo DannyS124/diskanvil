@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Danny S
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// DiskForge's own FAT32 formatter, checked by dosfstools' fsck.fat and mtools: small, past the
+// DiskAnvil's own FAT32 formatter, checked by dosfstools' fsck.fat and mtools: small, past the
 // 32 GB Windows stops at, and on a drive with 4096-byte sectors.
 
 #include "testkit.h"
@@ -75,7 +75,7 @@ void fat32Tests()
     report(code == 0 && said.contains(QLatin1String("TEST STICK")), QStringLiteral("FAT32: its label is read back, in capitals"), said.left(200));
     QFile note(dir.filePath(QStringLiteral("note.txt")));
     if (note.open(QIODevice::WriteOnly)) {
-        note.write("written onto DiskForge's own FAT32\n");
+        note.write("written onto DiskAnvil's own FAT32\n");
         note.close();
     }
     run(QStringLiteral("mcopy"), {QStringLiteral("-i"), small, note.fileName(), QStringLiteral("::/note.txt")}, &code);
@@ -106,7 +106,7 @@ void fat32Tests()
            QStringLiteral("FAT32: cluster sizes are Windows' own"));
 }
 
-// DiskForge's own exFAT, and memory cards laid out the SD Card Association's way.
+// DiskAnvil's own exFAT, and memory cards laid out the SD Card Association's way.
 void sdcardTests()
 {
     if (QStandardPaths::findExecutable(QStringLiteral("fsck.exfat")).isEmpty() || QStandardPaths::findExecutable(QStringLiteral("fsck.fat")).isEmpty()
@@ -225,12 +225,12 @@ void sdcardTests()
            QStringLiteral("FAT16: fsck.fat finds a 1.9 GB card's volume clean"), said.right(400));
     QFile note(dir.filePath(QStringLiteral("photo.txt")));
     if (note.open(QIODevice::WriteOnly)) {
-        note.write("a file on DiskForge's FAT16\n");
+        note.write("a file on DiskAnvil's FAT16\n");
         note.close();
     }
     run(QStringLiteral("mcopy"), {QStringLiteral("-i"), fat16, note.fileName(), QStringLiteral("::/photo.txt")}, &code);
     said = run(QStringLiteral("mtype"), {QStringLiteral("-i"), fat16, QStringLiteral("::/photo.txt")}, &code);
     int fsck = 0;
     run(QStringLiteral("fsck.fat"), {QStringLiteral("-n"), fat16}, &fsck);
-    report(code == 0 && said.contains(QLatin1String("DiskForge's FAT16")) && fsck == 0, QStringLiteral("FAT16: a file goes on and comes back, and it still checks out"));
+    report(code == 0 && said.contains(QLatin1String("DiskAnvil's FAT16")) && fsck == 0, QStringLiteral("FAT16: a file goes on and comes back, and it still checks out"));
 }

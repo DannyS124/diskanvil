@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2026 Danny S
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Started by DiskAnvil's Disk Cleanup (through polkit, like any system unit). It only
+# ever runs this one fixed command, so the app never needs to run anything as root.
+
+[Unit]
+Description=Shrink the system journal to its newest 200 MB
+Documentation=man:journalctl(1)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/journalctl --vacuum-size=200M

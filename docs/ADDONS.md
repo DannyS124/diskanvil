@@ -1,9 +1,9 @@
-# Making a DiskForge add-on
+# Making a DiskAnvil add-on
 
-An add-on is one file, `addon.json`, that adds actions to DiskForge's right-click menu and Tools
+An add-on is one file, `addon.json`, that adds actions to DiskAnvil's right-click menu and Tools
 menu. An action runs a command on the selected drive.
 
-Put it in `~/.local/share/diskforge/addons/<id>/addon.json`, or use Tools → Add-ons → Install from
+Put it in `~/.local/share/diskanvil/addons/<id>/addon.json`, or use Tools → Add-ons → Install from
 File. There are examples in [`examples/addons`](../examples/addons).
 
 Don't feel like writing JSON? Tools → Add-ons → Make an Add-on does all of this in a window, checks it
@@ -41,7 +41,7 @@ as you go, and has a Test button that runs it on the selected drive before you s
   - `command`: the program and its arguments, as a list. Placeholders: `{device}` (`/dev/sdb1`),
     `{disk}` (`/dev/sdb`), `{mountpoint}`, `{label}`, `{uuid}`, `{fstype}`, `{size}` (bytes),
     `{model}`, `{home}`.
-  - `output`: where what it prints goes: `terminal` (a terminal window), `window` (a DiskForge window
+  - `output`: where what it prints goes: `terminal` (a terminal window), `window` (a DiskAnvil window
     with Stop, Copy and Save), or `none` (the default). The old `"terminal": true` still works.
   - `ask`: things to ask in a form before it runs, each `{"id": ..., "type": ..., "label": ...,
     "default": ...}`. Types: `text`, `number` (with `min` and `max`), `choice` (with `choices`: a list
@@ -60,7 +60,7 @@ as you go, and has a Test button that runs it on the selected drive before you s
 
 ## Rules
 - Commands run as you, never as root, and without a shell. If something needs root, put `pkexec` in
-  the command (or `sudo` with `"terminal": true`). DiskForge then warns and asks before every run.
+  the command (or `sudo` with `"terminal": true`). DiskAnvil then warns and asks before every run.
 - Whoever made a drive picked its name, so values from the drive (`{label}`, `{model}`, `{uuid}`,
   `{fstype}`, `{mountpoint}`) are checked first:
   - one that would start an argument with `-` isn't run, so a drive named `--delete` can't become
@@ -79,17 +79,17 @@ as you go, and has a Test button that runs it on the selected drive before you s
   password.
 - An add-on can't pin itself to the toolbar or give itself a shortcut. Only you can, in the Add-ons
   window.
-- Before an action runs, DiskForge shows the command, one part per line, and asks. "Don't ask again"
+- Before an action runs, DiskAnvil shows the command, one part per line, and asks. "Don't ask again"
   is remembered for that exact add-on file, so any change to the file asks again. Actions that use
   admin power, or run a shell or script interpreter, ask every time.
 - Only `look_only` actions with `system_disks` are offered for the disk your system runs from.
-- DiskForge notes the add-ons it installs. One that turns up in the folder some other way (or
+- DiskAnvil notes the add-ons it installs. One that turns up in the folder some other way (or
   changes) is marked "Added outside", and its actions warn about it until you press I Added It in
   Tools → Add-ons. Hand-made add-ons get that too: press I Added It once you've checked yours.
 - Only install add-ons you trust, the same as any other program.
 
 ## Themes
-A theme sets the colors DiskForge draws with. Every color is `#rrggbb`.
+A theme sets the colors DiskAnvil draws with. Every color is `#rrggbb`.
 ```json
 {
   "id": "my-theme",
@@ -112,17 +112,17 @@ A theme sets the colors DiskForge draws with. Every color is `#rrggbb`.
 - `usage`: the colors Disk Usage takes turns with.
 
 Danger has to stay red, warning orange or yellow and good green, and text has to stay readable on its
-background. Colors that don't are swapped for DiskForge's own, and a palette with unreadable text isn't
+background. Colors that don't are swapped for DiskAnvil's own, and a palette with unreadable text isn't
 used. The Theme Maker (View → Theme → Make a Theme) shows all of this as you pick. A theme from an
 add-on marked "Added outside" isn't used until you press I Added It.
 
 ## Getting it into the list
 The list in Tools → Add-ons → Get Add-ons comes from
-[github.com/DannyS124/diskforge-addons](https://github.com/DannyS124/diskforge-addons). Open a pull request
+[github.com/DannyS124/diskanvil-addons](https://github.com/DannyS124/diskanvil-addons). Open a pull request
 there with your `addons/<id>/addon.json`. Once it's merged it goes into the list.
 
-DiskForge only installs from that repository, only files pinned to a commit, and only if the file matches
+DiskAnvil only installs from that repository, only files pinned to a commit, and only if the file matches
 the checksum in the list. The list itself is signed with the maintainer's key, which isn't stored on GitHub,
-and DiskForge only uses it if the signature checks out. It still shows the commands and asks before
+and DiskAnvil only uses it if the signature checks out. It still shows the commands and asks before
 installing, and again before each action first runs. Shells and script interpreters are only accepted in
 `look_only` actions there.

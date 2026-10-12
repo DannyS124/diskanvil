@@ -3,7 +3,7 @@
 
 #pragma once
 
-// The form an add-on asks for before an action runs, or its settings. DiskForge draws it
+// The form an add-on asks for before an action runs, or its settings. DiskAnvil draws it
 // from the field list in the add-on file; labels and values are shown as plain text.
 
 #include "addons.h"

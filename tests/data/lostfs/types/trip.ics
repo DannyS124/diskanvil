@@ -1,6 +1,6 @@
 BEGIN:VCALENDAR
 VERSION:2.0
-PRODID:-//DiskForge tests//EN
+PRODID:-//DiskAnvil tests//EN
 X-WR-CALNAME:Trips
 BEGIN:VEVENT
 UID:1@example.com

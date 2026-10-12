@@ -29,7 +29,7 @@ struct Result {
 
 // Whether the drive is one that keeps FARM: Seagate's hard drives.
 bool keeps(const QString &model);
-// The command: smartctl's JSON for everything, FARM included. On DiskForge Live it's run with sudo.
+// The command: smartctl's JSON for everything, FARM included. On DiskAnvil Live it's run with sudo.
 QStringList command(const QString &device);
 Result parse(const QByteArray &smartctlJson);
 // In plain words.

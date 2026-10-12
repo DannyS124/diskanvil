@@ -200,7 +200,7 @@ ThemeMaker::ThemeMaker(Addons *addons, QWidget *parent)
     auto *windowLayout = new QVBoxLayout(windowGroup);
     windowLayout->addWidget(m_ownWindow);
     windowLayout->addWidget(m_windowBox);
-    auto *colorGroup = new QGroupBox(tr("DiskForge's colors"));
+    auto *colorGroup = new QGroupBox(tr("DiskAnvil's colors"));
     colorGroup->setLayout(colorGrid);
     m_ownWindow->setChecked(now.currentId() != QLatin1String("system") && !Theme::builtIn(now.currentId()).palette.isEmpty());
     connect(m_ownWindow, &QCheckBox::toggled, this, &ThemeMaker::refresh);
@@ -264,7 +264,7 @@ void ThemeMaker::refresh()
     for (const QString &role : {QStringLiteral("good"), QStringLiteral("warning"), QStringLiteral("danger")}) {
         if (replaced.contains(role))
             notes << tr("\"%1\" isn't readable here or doesn't look like it means it (danger is red, warning orange, healthy "
-                        "green), so DiskForge's own is used.").arg(role);
+                        "green), so DiskAnvil's own is used.").arg(role);
     }
     m_notes->setText(notes.join(QLatin1Char('\n')));
     m_notes->setVisible(!notes.isEmpty());
@@ -292,7 +292,7 @@ void ThemeMaker::save()
         {QStringLiteral("name"), name},
         {QStringLiteral("version"), QStringLiteral("1.0")},
         {QStringLiteral("author"), m_author->text().trimmed()},
-        {QStringLiteral("description"), tr("Made with DiskForge's Theme Maker.")},
+        {QStringLiteral("description"), tr("Made with DiskAnvil's Theme Maker.")},
         {QStringLiteral("theme"), themeJson},
     };
     QString error;

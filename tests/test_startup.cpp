@@ -5,7 +5,7 @@
 // the test hives (tests/data/registry), tasks written the way Windows writes them, and
 // shortcuts Windows made, with what malware would add.
 //
-// DISKFORGE_REAL_WINDOWS=<folder>: also a real Windows drive, mounted there (read-only).
+// DISKANVIL_REAL_WINDOWS=<folder>: also a real Windows drive, mounted there (read-only).
 
 #include "testkit.h"
 
@@ -74,7 +74,7 @@ void shortcuts()
     // Damaged ones: never a crash (ASan runs this too).
     QRandomGenerator rng(1010);
     const QByteArray clean = readAll(kData + QStringLiteral("notes.lnk"));
-    const int rounds = qEnvironmentVariableIntValue("DISKFORGE_FUZZ_ROUNDS") > 0 ? qEnvironmentVariableIntValue("DISKFORGE_FUZZ_ROUNDS") : 500;
+    const int rounds = qEnvironmentVariableIntValue("DISKANVIL_FUZZ_ROUNDS") > 0 ? qEnvironmentVariableIntValue("DISKANVIL_FUZZ_ROUNDS") : 500;
     for (int round = 0; round < rounds; ++round) {
         QByteArray bytes = clean;
         for (int i = 0, flips = 1 + int(rng.bounded(12)); i < flips; ++i)
@@ -215,9 +215,9 @@ void commands()
 
 void realWindows()
 {
-    const QString root = qEnvironmentVariable("DISKFORGE_REAL_WINDOWS");
+    const QString root = qEnvironmentVariable("DISKANVIL_REAL_WINDOWS");
     if (root.isEmpty()) {
-        out << "SKIP  startup: no real Windows drive (DISKFORGE_REAL_WINDOWS)" << Qt::endl;
+        out << "SKIP  startup: no real Windows drive (DISKANVIL_REAL_WINDOWS)" << Qt::endl;
         return;
     }
     QElapsedTimer t;

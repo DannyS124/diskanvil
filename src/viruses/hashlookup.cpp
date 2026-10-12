@@ -51,7 +51,7 @@ void Lookup::ask(const QStringList &sha256)
     for (const QString &hash : sha256) {
         QNetworkRequest request{QUrl(server + QStringLiteral("/lookup/sha256/") + hash)};
         request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
-        request.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("DiskForge/" APP_VERSION));
+        request.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("DiskAnvil/" APP_VERSION));
         request.setRawHeader("Accept", "application/json");
         request.setTransferTimeout(20000);
         QNetworkReply *reply = m_network.get(request);

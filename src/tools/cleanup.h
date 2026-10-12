@@ -38,6 +38,6 @@ qint64 packageCacheReclaimable(bool uninstalled = false);
 // Parses "disk space saved: 1.23 GiB" from paccache's dry run.
 qint64 parsePaccacheSaved(const QString &output);
 
-constexpr quint64 kJournalKeep = 200ull * 1024 * 1024; // what diskforge-journal-vacuum.service keeps
+constexpr quint64 kJournalKeep = 200ull * 1024 * 1024; // what diskanvil-journal-vacuum.service keeps
 
 } // namespace cleanup

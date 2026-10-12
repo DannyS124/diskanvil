@@ -1,0 +1,9 @@
+[Unit]
+Description=Save the DiskAnvil Live logs to the stick (every few minutes)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/diskanvil-live-logs --quiet
+TimeoutSec=90
+# 2: no stick to write to (started from the ISO). The logs stay in /run/diskanvil-live.
+SuccessExitStatus=2

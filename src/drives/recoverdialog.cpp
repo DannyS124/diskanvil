@@ -120,7 +120,7 @@ void RecoverDialog::build()
     setWindowTitle(tr("Recover Partitions on %1").arg(diskTitle(m_disk)));
     m_intro->setWordWrap(true);
     m_intro->setText(tr("Puts a partition table back: from the copy GPT keeps at the end of the drive, or from a layout "
-                        "DiskForge saw on this drive before. Only the table is written; what's in the partitions isn't "
+                        "DiskAnvil saw on this drive before. Only the table is written; what's in the partitions isn't "
                         "touched. The table there now is remembered first, so this can be undone the same way."));
     m_problem->setWordWrap(true);
     m_problem->setTextFormat(Qt::RichText);
@@ -214,7 +214,7 @@ void RecoverDialog::listSources(const gpt::Report &report)
     for (const Source &s : std::as_const(m_sources))
         m_list->addItem(s.title); // plain text: names and labels come from the drive
     if (m_sources.isEmpty())
-        m_problem->setText(tr("There's nothing to put back: the table is intact, and DiskForge hasn't seen another layout on this drive."));
+        m_problem->setText(tr("There's nothing to put back: the table is intact, and DiskAnvil hasn't seen another layout on this drive."));
     else
         m_list->setCurrentRow(0);
     refresh();

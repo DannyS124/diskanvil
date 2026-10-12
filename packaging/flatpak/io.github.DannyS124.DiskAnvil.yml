@@ -1,0 +1,84 @@
+# SPDX-FileCopyrightText: 2026 Danny S
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Built by .github/workflows/bundles.yml and attached to each GitHub release. Not for
+# Flathub: a disk manager needs more access than Flathub allows.
+#
+# Inside the Flatpak, Disk Usage and the snapshots view only see what's shared with it
+# (your home, /run/media and /mnt), and add-ons need permission to run host programs:
+#   flatpak override --user --talk-name=org.freedesktop.Flatpak io.github.DannyS124.DiskAnvil
+id: io.github.DannyS124.DiskAnvil
+runtime: org.kde.Platform
+runtime-version: '6.9'
+sdk: org.kde.Sdk
+command: diskanvil
+finish-args:
+  - --share=ipc
+  - --share=network # the add-on list and Check for Updates, only when you open them
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --system-talk-name=org.freedesktop.UDisks2
+  - --system-talk-name=org.freedesktop.systemd1
+  - --system-talk-name=org.freedesktop.login1
+  - --system-talk-name=org.opensuse.Snapper
+  - --system-talk-name=org.freedesktop.fwupd # asks about firmware updates, never installs them
+  - --filesystem=home
+  - --filesystem=/run/media
+  - --filesystem=/mnt
+modules:
+  # Make a Windows USB splits install.wim with wimlib-imagex, which the KDE runtime doesn't have.
+  # The same source Arch builds from: the v1.14.5 tag, pinned to its commit.
+  - name: wimlib
+    buildsystem: autotools
+    config-opts:
+      - --without-ntfs-3g
+      - --without-fuse
+      - --disable-static
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+      - /share/man
+    sources:
+      - type: git
+        url: https://github.com/ebiggers/wimlib.git
+        tag: v1.14.5
+        commit: cd5e231c348c255ae5088873b5a66ee0eb96fa07
+  # PDF pages in Find Lost Files' previews: the KDE runtime has no poppler. The version DiskAnvil
+  # Live has; the hash is of the release tarball, whose signature (Albert Astals Cid,
+  # CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7) was checked.
+  - name: poppler
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DENABLE_QT5=OFF
+      - -DENABLE_QT6=ON
+      - -DENABLE_GLIB=OFF
+      - -DENABLE_CPP=OFF
+      - -DENABLE_UTILS=OFF
+      - -DENABLE_BOOST=OFF
+      - -DENABLE_NSS3=OFF
+      - -DENABLE_GPGME=OFF
+      - -DENABLE_LIBCURL=OFF
+      - -DENABLE_LIBTIFF=OFF
+      - -DBUILD_GTK_TESTS=OFF
+      - -DBUILD_QT5_TESTS=OFF
+      - -DBUILD_QT6_TESTS=OFF
+      - -DBUILD_CPP_TESTS=OFF
+      - -DBUILD_MANUAL_TESTS=OFF
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+    sources:
+      - type: archive
+        url: https://poppler.freedesktop.org/poppler-25.03.0.tar.xz
+        sha256: 97da4ff88517a6bbd729529f195f85c8d7a0c3bb4a3d57cb0c685cbb052fe837
+  - name: diskanvil
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DDISKANVIL_SELFTEST=OFF
+      - -DDISKANVIL_SYSTEMD_UNIT=OFF
+    sources:
+      - type: dir
+        path: ../..

@@ -121,7 +121,7 @@ void ProductKeyDialog::readFirmware(bool askForRights)
     if (table.open(QIODevice::ReadOnly)) {
         data = table.readAll();
     } else if (askForRights) {
-        // Only root reads the firmware's tables: DiskForge Live's sudo, or the admin password.
+        // Only root reads the firmware's tables: DiskAnvil Live's sudo, or the admin password.
         const QStringList command = rescue::runningInRescue() ? QStringList{QStringLiteral("sudo"), QStringLiteral("-n"), QStringLiteral("cat"), path}
                                                               : host::command({QStringLiteral("pkexec"), QStringLiteral("cat"), path});
         QProcess cat;

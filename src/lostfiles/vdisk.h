@@ -4,7 +4,7 @@
 #pragma once
 
 // Virtual machines' disk files, read as the disk inside them: VirtualBox's .vdi, VMware's .vmdk,
-// Windows' and Hyper-V's .vhd and .vhdx, and QEMU's .qcow2. And DiskForge's own backups
+// Windows' and Hyper-V's .vhd and .vhdx, and QEMU's .qcow2. And DiskAnvil's own backups
 // (.img.zst), unpacked a piece at a time, and forensic evidence files (.E01). Our own readers, from each format's
 // published description. Only ever read: the file isn't changed.
 

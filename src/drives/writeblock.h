@@ -3,10 +3,10 @@
 
 #pragma once
 
-// DiskForge Live's write protection: every drive but its own stick made read-only by the kernel,
+// DiskAnvil Live's write protection: every drive but its own stick made read-only by the kernel,
 // and drives plugged in later too, so nothing done can change them (evidence, a drive that mustn't
-// be touched). The helper diskforge-live-writeblock does it, as root; DiskForge switches it on and
-// off and lets single drives be written (somewhere to save to). DiskForge Live only: on a PC its
+// be touched). The helper diskanvil-live-writeblock does it, as root; DiskAnvil switches it on and
+// off and lets single drives be written (somewhere to save to). DiskAnvil Live only: on a PC its
 // own running system can't be made read-only, and Windows writes to a drive the moment it's
 // plugged in, before any program can stop it.
 
@@ -15,7 +15,7 @@
 
 namespace writeblock {
 
-bool available(); // DiskForge Live, with the helper
+bool available(); // DiskAnvil Live, with the helper
 bool isOn();
 QStringList allowed(); // drives let through ("sdb")
 
@@ -23,7 +23,7 @@ QStringList allowed(); // drives let through ("sdb")
 QStringList command(const QStringList &args);
 
 // The tests run the repo's copy, on a loop device, with its state in a folder of their own
-// (DISKFORGE_WRITEBLOCK_STATE and DISKFORGE_WRITEBLOCK_ONLY are passed on to it).
+// (DISKANVIL_WRITEBLOCK_STATE and DISKANVIL_WRITEBLOCK_ONLY are passed on to it).
 inline QString helperForTest;
 
 } // namespace writeblock

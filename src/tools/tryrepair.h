@@ -3,7 +3,7 @@
 
 #pragma once
 
-// Try a Repair First (DiskForge Live): a file system's repair run on a stand-in for the
+// Try a Repair First (DiskAnvil Live): a file system's repair run on a stand-in for the
 // partition (a device-mapper snapshot: reads come from the partition, writes go to a file in
 // memory), so what it would do can be looked at before anything on the drive changes. Then the
 // real repair, or nothing.
@@ -13,8 +13,8 @@
 
 namespace tryrepair {
 
-inline constexpr char kName[] = "diskforge-try";
-inline constexpr char kMount[] = "/mnt/diskforge-try";
+inline constexpr char kName[] = "diskanvil-try";
+inline constexpr char kMount[] = "/mnt/diskanvil-try";
 
 // The repair for a file system, on `device`; empty when there's none to try.
 QStringList repairCommand(const QString &fsType, const QString &device);

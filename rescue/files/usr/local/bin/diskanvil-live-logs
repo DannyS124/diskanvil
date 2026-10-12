@@ -1,0 +1,172 @@
+#!/bin/bash
+# Gathers what happened on this boot into one folder and copies it to the rescue stick, into
+# logs/ there. systemd runs it at boot, every few minutes and at shutdown; "Save Logs" on the
+# desktop runs it too.
+#
+#   diskanvil-live-logs            save now and say where
+#   diskanvil-live-logs --quiet    the same without a word (systemd)
+#   diskanvil-live-logs --notify   from the desktop: a pop-up says how it went
+#   diskanvil-live-logs --final    the last save, on the way down
+#
+# Exits 0 when the logs are on the stick, 2 when there's no stick to put them on (started
+# from the ISO; not a problem as such), 1 when writing to the stick failed.
+#
+# The stick stays read-only while the system runs. It's only writable for the moment the
+# files are copied, so pulling it out at the wrong time is unlikely to hurt it.
+set -u
+quiet=no notify=no final=no
+for arg in "$@"; do
+    case $arg in
+    --quiet) quiet=yes ;;
+    --notify) notify=yes ;;
+    --final) final=yes ;;
+    esac
+done
+
+if [ "$notify" = yes ] && [ "$(id -u)" != 0 ]; then
+    # The saving needs root, the pop-up has to come from the desktop's user.
+    if message=$(sudo -n "$0" 2>&1); then
+        notify-send -a "Save Logs" -i text-x-log "Logs saved" "$message"
+    else
+        notify-send -a "Save Logs" -u critical -i dialog-error "Couldn't save the logs" "$message"
+    fi
+    exit 0
+fi
+[ "$(id -u)" = 0 ] || exec sudo -n "$0" "$@"
+
+. /etc/diskanvil-live.conf
+state=/run/diskanvil-live
+mkdir -p "$state"
+exec 9>"$state/logs.lock"
+flock -w 60 9 || { echo "Another save is still running."; exit 1; }
+
+# run <seconds> <command...>: a stuck drive mustn't hang the save
+run() {
+    local seconds=$1
+    shift
+    timeout -k 5 "$seconds" "$@" 2>&1
+}
+
+# One folder per boot: date, time and the PC's model, picked once.
+if [ ! -s "$state/log-folder" ]; then
+    model=$(cat /sys/class/dmi/id/sys_vendor /sys/class/dmi/id/product_name 2>/dev/null |
+        tr '\n' ' ' | tr -cs 'A-Za-z0-9.' '-' | sed 's/^-*//; s/-*$//' | cut -c1-40)
+    echo "$(date +%Y-%m-%d_%H%M%S)_${model:-PC}" > "$state/log-folder"
+fi
+folder=$(cat "$state/log-folder")
+dir=$state/logs/$folder
+mkdir -p "$dir"
+
+boot_mode() {
+    if [ ! -d /sys/firmware/efi ]; then
+        echo "BIOS (no UEFI, so no Secure Boot)"
+        return
+    fi
+    local sb=/sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c
+    if [ -r "$sb" ] && [ "$(od -An -t u1 -j4 -N1 "$sb" | tr -d ' ')" = 1 ]; then
+        echo "UEFI, Secure Boot on"
+    else
+        echo "UEFI, Secure Boot off"
+    fi
+}
+
+# The stick to write to (find_stick: the one this system started from, or one made from the
+# same ISO).
+. /usr/local/lib/diskanvil-live/find-stick.sh
+
+stick=$(find_stick) || stick=
+
+{
+    echo "DiskAnvil Live $VERSION, built $BUILT (build $BUILD_ID)"
+    echo "Saved:      $(date '+%Y-%m-%d %H:%M:%S %Z')$([ "$final" = yes ] && echo ', on the way down')"
+    echo "Up for:     $(uptime -p)"
+    echo "PC:         $(cat /sys/class/dmi/id/sys_vendor /sys/class/dmi/id/product_name 2>/dev/null | tr '\n' ' ')"
+    echo "Firmware:   $(cat /sys/class/dmi/id/bios_vendor /sys/class/dmi/id/bios_version /sys/class/dmi/id/bios_date 2>/dev/null | tr '\n' ' ')"
+    echo "Boot:       $(boot_mode)"
+    if [ -n "$stick" ]; then
+        echo "Stick:      $(findmnt -no SOURCE,FSTYPE "$stick")"
+    else
+        echo "Stick:      not found (started from a CD or an ISO?)"
+    fi
+    echo "Kernel:     $(uname -r)"
+    echo "Options:    $(cat /proc/cmdline)"
+    echo "CPU:        $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ *//')"
+    echo "Memory:     $(free -h | awk '/^Mem:/ {print $2 " total, " $7 " free"}')"
+    echo "Desktop:    $(if pgrep -x Xorg >/dev/null; then echo running; else echo 'not running'; fi)"
+    echo "DiskAnvil:  $(if pgrep -x diskanvil >/dev/null; then echo running; else echo 'not running'; fi)"
+    echo "Graphics:"
+    lspci -k 2>/dev/null | grep -A3 -E 'VGA|3D|Display' | grep -E 'VGA|3D|Display|driver in use' | sed 's/^/    /'
+    echo "Network:"
+    ip -br addr 2>/dev/null | grep -v '^lo ' | sed 's/^/    /'
+    echo
+    echo "Failed services:"
+    systemctl --failed --no-legend --plain 2>/dev/null | sed 's/^/    /'
+    echo
+    echo "Drives:"
+    lsblk -d -e 7 -o NAME,SIZE,TRAN,MODEL,SERIAL 2>/dev/null | sed 's/^/    /'
+    echo
+    echo "Errors this boot: $(journalctl -b -p err --no-pager -q 2>/dev/null | wc -l) (the lines are in errors.txt)"
+} > "$dir/summary.txt"
+
+run 60 journalctl -b --no-pager -o short-iso-precise > "$dir/journal.txt"
+run 30 journalctl -b --no-pager -o short-iso-precise -p warning > "$dir/errors.txt"
+run 10 dmesg > "$dir/kernel.txt"
+{
+    echo "== dmidecode"; run 20 dmidecode -t system -t baseboard -t bios
+    echo "== lscpu"; run 10 lscpu
+    echo "== memory"; free -h
+    echo "== PCI"; run 20 lspci -nnk
+    echo "== USB"; run 20 lsusb; run 20 lsusb -t
+    if [ -d /sys/firmware/efi ]; then
+        echo "== UEFI boot entries"; run 10 efibootmgr -v
+        echo "== Secure Boot"; run 10 mokutil --sb-state
+    fi
+} > "$dir/hardware.txt"
+{
+    echo "== lsblk"; run 20 lsblk -o NAME,SIZE,TYPE,FSTYPE,FSVER,LABEL,UUID,MOUNTPOINTS,MODEL,SERIAL,TRAN,RM,RO
+    echo "== blkid"; run 20 blkid
+    for disk in $(lsblk -dn -e 1,7,11 -o NAME 2>/dev/null); do
+        echo "== smartctl /dev/$disk"; run 30 smartctl -x "/dev/$disk"
+    done
+} > "$dir/disks.txt"
+# These two ask services over D-Bus, which is already gone on the way down, so the last
+# save keeps what the one before found.
+if [ "$final" = no ]; then
+    run 20 udisksctl dump > "$dir/udisks.txt"
+    {
+        echo "== NetworkManager"; run 10 nmcli general; run 10 nmcli device
+        echo "== addresses"; ip addr
+    } > "$dir/network.txt"
+fi
+# The desktop's own logs, DiskAnvil's among them
+for file in "$state"/session/*.log /home/rescue/.local/share/xorg/Xorg.*.log; do
+    [ -f "$file" ] && cp "$file" "$dir/"
+done
+
+result=0
+if [ -z "$stick" ]; then
+    message="There's no rescue stick to write to (started from the ISO, or the stick came out). The logs are in $dir for now. Plug in a stick made from this ISO and save again."
+    result=2
+elif [ "$(findmnt -no FSTYPE "$stick")" != vfat ]; then
+    message="This copy of DiskAnvil Live is read-only (written as an ISO), so the logs are in $dir for now."
+    result=2
+elif ! mount -o remount,rw "$stick"; then
+    message="Couldn't write to the stick. The logs are in $dir for now."
+    result=1
+else
+    if mkdir -p "$stick/logs/$folder" && cp -r "$dir/." "$stick/logs/$folder/"; then
+        message="They're on the stick, in logs/$folder"
+    else
+        message="Couldn't copy everything to the stick (is it full?). The logs are in $dir."
+        result=1
+    fi
+    # The 30 newest boots are plenty.
+    ls -1d "$stick"/logs/*/ 2>/dev/null | sort | head -n -30 | xargs -r rm -rf
+    sync
+    mount -o remount,ro "$stick"
+fi
+if [ "$stick" = "$state/stick" ]; then
+    umount "$stick"
+fi
+[ "$quiet" = yes ] || echo "$message"
+exit $result

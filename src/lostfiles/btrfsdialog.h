@@ -24,7 +24,7 @@ class BtrfsDialog : public QDialog
     Q_OBJECT
 public:
     // `device`: the file system's file, or a drive with it `offset` bytes in (`size` long), read
-    // through a read-only loop device made with sudo (DiskForge Live: `privileged`).
+    // through a read-only loop device made with sudo (DiskAnvil Live: `privileged`).
     // `diskDevice`: the drive it's on ("/dev/sdb"), so nothing is copied onto it.
     BtrfsDialog(const QString &device, const QString &diskDevice, const QString &title, QWidget *parent = nullptr, bool privileged = false,
                 quint64 offset = 0, quint64 size = 0);

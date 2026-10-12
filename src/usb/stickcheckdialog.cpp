@@ -189,7 +189,7 @@ void StickCheckDialog::updateState()
 void StickCheckDialog::reject()
 {
     if (m_prep) {
-        QMessageBox::information(this, windowTitle(), tr("One moment: DiskForge is in the middle of making the partition."));
+        QMessageBox::information(this, windowTitle(), tr("One moment: DiskAnvil is in the middle of making the partition."));
         return;
     }
     if (m_running) {

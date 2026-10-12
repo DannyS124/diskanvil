@@ -284,7 +284,7 @@ void UDisks::refresh()
         d.isDynamicVolume = preferred.startsWith(QLatin1String("/dev/mapper/ldm_vol_"));
         if (d.isLoop ? d.backingFile.isEmpty() : (d.drivePath == QLatin1String("/") && !d.isRaid && !d.isDynamicVolume))
             continue;
-        // A live system's own image (DiskForge Live, any Debian live): part of the system, not a disk.
+        // A live system's own image (DiskAnvil Live, any Debian live): part of the system, not a disk.
         if (d.isLoop && d.backingFile.startsWith(QLatin1String("/run/live/")))
             continue;
         if (d.isRaid) {
@@ -517,10 +517,10 @@ void UDisks::refresh()
             for (const QString &mp : v.mountPoints + v.cleartextMountPoints) {
                 if (!isUserMount(mp)) {
                     v.isSystem = true;
-                    // Running from DiskForge Live: live-boot mounts the stick there.
-                    if (QFileInfo::exists(mp + QStringLiteral("/.disk/diskforge-live")) || QFileInfo::exists(mp + QStringLiteral("/.disk/bluespark"))
-                        || QFileInfo::exists(mp + QStringLiteral("/.disk/diskforge-rescue")))
-                        d.systemReason = tr("DiskForge Live is running from it");
+                    // Running from DiskAnvil Live: live-boot mounts the stick there.
+                    if (QFileInfo::exists(mp + QStringLiteral("/.disk/diskanvil-live")) || QFileInfo::exists(mp + QStringLiteral("/.disk/diskforge-live"))
+                        || QFileInfo::exists(mp + QStringLiteral("/.disk/bluespark")) || QFileInfo::exists(mp + QStringLiteral("/.disk/diskforge-rescue")))
+                        d.systemReason = tr("DiskAnvil Live is running from it");
                     else if (d.systemReason.isEmpty())
                         d.systemReason = tr("Holds %1").arg(mp);
                 }

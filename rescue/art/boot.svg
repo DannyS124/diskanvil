@@ -19,8 +19,8 @@
   </defs>
   <rect width="1920" height="1080" fill="url(#bg)"/>
   <rect width="1920" height="1080" fill="url(#glow)"/>
-  <image x="890" y="56" width="140" height="140" xlink:href="diskforge-live-icon.svg"/>
-  <text x="960" y="276" text-anchor="middle" font-family="DejaVu Sans" font-weight="bold" font-size="64" letter-spacing="-1" fill="#9ad8ff">Disk<tspan fill="#00e5ff">Forge</tspan><tspan fill="#2bee8a" dx="18">Live</tspan></text>
+  <image x="890" y="56" width="140" height="140" xlink:href="diskanvil-live-icon.svg"/>
+  <text x="960" y="276" text-anchor="middle" font-family="DejaVu Sans" font-weight="bold" font-size="64" letter-spacing="-1" fill="#9ad8ff">Disk<tspan fill="#00e5ff">Anvil</tspan><tspan fill="#2bee8a" dx="18">Live</tspan></text>
   <text x="960" y="316" text-anchor="middle" font-family="DejaVu Sans" font-size="22" letter-spacing="4" fill="#7f93b5">RESCUE  ·  RECOVER  ·  REPAIR</text>
   <rect x="560" y="344" width="800" height="2" fill="url(#rule)"/>
 </svg>

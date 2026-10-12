@@ -329,7 +329,7 @@ bool extras(UDisks &udisks)
     if (fd < 0)
         return false;
     {
-        // Programs DiskForge starts (add-ons, terminals) must never get an open disk.
+        // Programs DiskAnvil starts (add-ons, terminals) must never get an open disk.
         const QString device = diskWithFile(udisks, second)->device;
         QProcess child;
         child.start(QStringLiteral("sh"), {QStringLiteral("-c"), QStringLiteral("for f in /proc/$$/fd/*; do readlink \"$f\"; done")});
@@ -393,7 +393,7 @@ void badSectorTests()
     }
     const QString loop = sh(QStringLiteral("losetup"), {QStringLiteral("-f"), QStringLiteral("--show"), image});
     report(loop.startsWith(QLatin1String("/dev/loop")), QStringLiteral("attach test image"), loop);
-    const QString name = QStringLiteral("diskforge-dust-test");
+    const QString name = QStringLiteral("diskanvil-dust-test");
     const QString dev = QStringLiteral("/dev/mapper/") + name;
     sh(QStringLiteral("modprobe"), {QStringLiteral("dm-dust")});
     sh(QStringLiteral("dmsetup"), {QStringLiteral("create"), name, QStringLiteral("--table"),
@@ -621,7 +621,7 @@ void addonTests()
         return Addon();
     };
     report(find(QStringLiteral("mine")).id == QLatin1String("mine") && !find(QStringLiteral("mine")).outside,
-           QStringLiteral("one installed through DiskForge isn't flagged"));
+           QStringLiteral("one installed through DiskAnvil isn't flagged"));
     Addon a = find(QStringLiteral("mine"));
     report(!Addons::isTrusted(a, a.actions[0]), QStringLiteral("a new action isn't trusted yet"));
     Addons::trust(a, a.actions[0]);
@@ -748,7 +748,7 @@ void addonTests()
            QStringLiteral("a setting's default can't depend on a drive"));
     broken(R"({"id":"x","actions":[{"label":"L","output":"sideways","command":["echo"]}]})", "output", QStringLiteral("an unknown output is refused"));
     broken(R"({"id":"x","actions":[{"label":"L","output":"window","command":["sudo","ls"]}]})", "terminal",
-           QStringLiteral("sudo in a DiskForge window is refused (it needs a terminal)"));
+           QStringLiteral("sudo in a DiskAnvil window is refused (it needs a terminal)"));
     broken(R"({"id":"x","theme":{"colors":{"danger":"red"}}})", "color", QStringLiteral("a theme color that isn't #rrggbb is refused"));
     broken(R"({"id":"x","theme":{"colors":{"danger":"#ff000080"}}})", "color", QStringLiteral("a see-through theme color is refused"));
     broken(R"({"id":"x"})", "No actions", QStringLiteral("an add-on with no actions and no theme is refused"));
@@ -803,7 +803,7 @@ void addonTests()
     };
     // Not under /tmp: the sandbox gets an empty one of its own.
     QDir().mkpath(QDir::homePath() + QStringLiteral("/.cache"));
-    QTemporaryDir scratchDir(QDir::homePath() + QStringLiteral("/.cache/diskforge-sandbox-test-XXXXXX"));
+    QTemporaryDir scratchDir(QDir::homePath() + QStringLiteral("/.cache/diskanvil-sandbox-test-XXXXXX"));
     const QString scratch = scratchDir.path();
     write(scratch + QStringLiteral("/readme"), "hello");
     report(inSandbox(QStringLiteral("grep -q hello '%1/readme'").arg(scratch)) == 0, QStringLiteral("the sandbox can read your files"));
@@ -822,7 +822,7 @@ void addonTests()
     for (const QFileInfo &mount : QDir(media).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
         if (!mount.isWritable())
             continue;
-        const QString probe = mount.filePath() + QStringLiteral("/.diskforge-sandbox-test");
+        const QString probe = mount.filePath() + QStringLiteral("/.diskanvil-sandbox-test");
         report(inSandbox(QStringLiteral("ls '%1' >/dev/null && ! touch '%2' 2>/dev/null").arg(mount.filePath(), probe)) == 0 && !QFile::exists(probe),
                QStringLiteral("a mounted drive (%1) is readable in it, but not writable").arg(mount.fileName()));
         QFile::remove(probe);
@@ -1010,8 +1010,8 @@ int main(int argc, char *argv[])
     } else {
         if (!root) {
             out << "Disk changes need a password, so the unattended run uses root:\n"
-                   "  sudo ./build/diskforge-selftest      operations on a throwaway 512 MB image\n"
-                   "  ./build/diskforge-selftest --guard   system disk is refused (as you)" << Qt::endl;
+                   "  sudo ./build/diskanvil-selftest      operations on a throwaway 512 MB image\n"
+                   "  ./build/diskanvil-selftest --guard   system disk is refused (as you)" << Qt::endl;
             return 2;
         }
         QTemporaryDir dir;

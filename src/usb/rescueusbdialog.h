@@ -22,11 +22,11 @@ class QPushButton;
 class QThread;
 class UsbPrep;
 
-// Make a DiskForge Live USB: puts the DiskForge Live ISO onto a USB stick.
+// Make a DiskAnvil Live USB: puts the DiskAnvil Live ISO onto a USB stick.
 // Unlike Write Image to USB, the stick gets a normal FAT32 partition with the ISO's files on
 // it, so the rescue system can keep its logs there and any PC can read them. The steps:
 // a new MBR table, one FAT32 partition marked bootable, mount it, copy and check the files,
-// unmount. It also opens the logs folder of a stick that already has DiskForge Live on it.
+// unmount. It also opens the logs folder of a stick that already has DiskAnvil Live on it.
 class RescueUsbDialog : public QDialog
 {
     Q_OBJECT
@@ -51,15 +51,15 @@ private:
     void updateState();
     void openLogs();
     const Disk *target() const;
-    const Volume *rescueVolume(const Disk &disk) const; // a FAT32 "DISKFORGE" (or older "BLUESPARK", "DFRESCUE") partition
+    const Volume *rescueVolume(const Disk &disk) const; // a FAT32 "DISKANVIL" (or older "BLUESPARK", "DFRESCUE") partition
 
     void start();
     void copyFiles(const QString &mountPoint);
-    // The stick's layout: DiskForge Live's partition, then (when asked for) one keeping changes
+    // The stick's layout: DiskAnvil Live's partition, then (when asked for) one keeping changes
     // between starts and one for files. Sizes in bytes; 0 for the rest of the stick.
     quint64 systemSize() const;
     bool laidOut(const Disk &disk) const; // already has the parts kept by Update
-    void update(); // DiskForge Live's partition made again, the others kept
+    void update(); // DiskAnvil Live's partition made again, the others kept
     void writeBiosBoot();
     QString readyText(bool bios) const;
     void finish(bool ok, const QString &message, bool alreadyShown = false);
@@ -76,7 +76,7 @@ private:
     QCheckBox *m_keep;    // a persistence partition: changes kept between starts
     QSpinBox *m_keepSize; // its size, in GB
     QCheckBox *m_files;   // an exFAT partition on the rest, for files
-    QCheckBox *m_update;  // only DiskForge Live's partition, on a stick laid out this way already
+    QCheckBox *m_update;  // only DiskAnvil Live's partition, on a stick laid out this way already
     QString m_persistenceMount; // where the persistence partition is mounted while it's made
     QPushButton *m_make;
     QProgressBar *m_progress;

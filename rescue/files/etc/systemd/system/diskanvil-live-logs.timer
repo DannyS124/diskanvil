@@ -1,0 +1,11 @@
+# If the PC freezes or loses power, the logs on the stick are at most a few minutes old.
+[Unit]
+Description=Save the DiskAnvil Live logs every few minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=3min
+Unit=diskanvil-live-logs-again.service
+
+[Install]
+WantedBy=timers.target

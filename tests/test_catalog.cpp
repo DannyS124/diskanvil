@@ -19,7 +19,7 @@ const QString kCommit = QStringLiteral("0123456789abcdef0123456789abcdef01234567
 
 QString pinned(const QString &path)
 {
-    return QStringLiteral("https://raw.githubusercontent.com/DannyS124/diskforge-addons/%1/%2").arg(kCommit, path);
+    return QStringLiteral("https://raw.githubusercontent.com/DannyS124/diskanvil-addons/%1/%2").arg(kCommit, path);
 }
 
 QString sha(const QByteArray &data)
@@ -56,12 +56,12 @@ void catalogTests()
 
     const QByteArray manifest = R"({"id":"hello","name":"Hello","actions":[{"label":"Say hello","command":["echo","{device}"]}]})";
     const QString good = sha(manifest);
-    const QByteArray list = "{\"format\":\"diskforge-addon-catalog\",\"version\":1,\"addons\":["
+    const QByteArray list = "{\"format\":\"diskanvil-addon-catalog\",\"version\":1,\"addons\":["
         + entry(QStringLiteral("hello"), pinned(QStringLiteral("addons/hello/addon.json")), good) + ","
         + entry(QStringLiteral("other"), pinned(QStringLiteral("addons/other/addon.json")), good) + ","
         + entry(QStringLiteral("plain-http"), pinned(QStringLiteral("a.json")).replace(QStringLiteral("https"), QStringLiteral("http")), good) + ","
         + entry(QStringLiteral("elsewhere"), QStringLiteral("https://evil.example.com/%1/a.json").arg(kCommit), good) + ","
-        + entry(QStringLiteral("branch"), QStringLiteral("https://raw.githubusercontent.com/DannyS124/diskforge-addons/main/a.json"), good) + ","
+        + entry(QStringLiteral("branch"), QStringLiteral("https://raw.githubusercontent.com/DannyS124/diskanvil-addons/main/a.json"), good) + ","
         + entry(QStringLiteral("dots"), pinned(QStringLiteral("../../other-repo/a.json")), good) + ","
         + entry(QStringLiteral("short-hash"), pinned(QStringLiteral("a.json")), good.left(63)) + ","
         + entry(QStringLiteral("Bad Id"), pinned(QStringLiteral("a.json")), good) + "]}";
@@ -77,7 +77,7 @@ void catalogTests()
     report(Addons::parseCatalog(QByteArray(Addons::kMaxDownload + 1, ' '), &error).isEmpty() && error.contains(QLatin1String("big")),
            QStringLiteral("an oversized list is refused"), error);
 
-    const QString installed = data.filePath(QStringLiteral("diskforge/addons/hello/addon.json"));
+    const QString installed = data.filePath(QStringLiteral("diskanvil/addons/hello/addon.json"));
     CatalogEntry hello = entries.value(0);
     error.clear();
     CatalogEntry wrong = hello;
@@ -120,7 +120,7 @@ void catalogTests()
                                                  + options + QStringList{file});
             return readFile(file + QStringLiteral(".sig"));
         };
-        const QByteArray sig = sign(list, QStringLiteral("diskforge-addons"));
+        const QByteArray sig = sign(list, QStringLiteral("diskanvil-addons"));
         error.clear();
         report(Addons::parseSignedCatalog(list, sig, {pub}, &error).size() == 2, QStringLiteral("a list signed with a known key is read"), error);
         error.clear();
@@ -130,12 +130,12 @@ void catalogTests()
                QStringLiteral("a list changed after signing isn't"), error);
         error.clear();
         report(Addons::parseSignedCatalog(list, sig, Addons::catalogKeys(), &error).isEmpty() && error.contains(QLatin1String("key")),
-               QStringLiteral("nor one signed with a key DiskForge doesn't know"), error);
+               QStringLiteral("nor one signed with a key DiskAnvil doesn't know"), error);
         error.clear();
         report(Addons::parseSignedCatalog(list, sign(list, QStringLiteral("git")), {pub}, &error).isEmpty() && error.contains(QLatin1String("something else")),
                QStringLiteral("nor a signature made for something else (a git commit)"), error);
         error.clear();
-        report(Addons::parseSignedCatalog(list, sign(list, QStringLiteral("diskforge-addons"), {QStringLiteral("-O"), QStringLiteral("hashalg=sha256")}),
+        report(Addons::parseSignedCatalog(list, sign(list, QStringLiteral("diskanvil-addons"), {QStringLiteral("-O"), QStringLiteral("hashalg=sha256")}),
                                           {pub}, &error).size() == 2,
                QStringLiteral("sha256 signatures work too"), error);
         error.clear();
@@ -149,16 +149,16 @@ void catalogTests()
 
     // The real catalog, if the add-ons repository sits next to this one: every entry has to
     // go through the same checks, using the file exactly as it is in the pinned commit.
-    const QString repo = QStringLiteral(SOURCE_DIR "/../diskforge-addons");
+    const QString repo = QStringLiteral(SOURCE_DIR "/../diskanvil-addons");
     QFile real(repo + QStringLiteral("/catalog.json"));
     if (!real.open(QIODevice::ReadOnly)) {
-        out << "SKIP  the diskforge-addons repository isn't next to this one" << Qt::endl;
+        out << "SKIP  the diskanvil-addons repository isn't next to this one" << Qt::endl;
         return;
     }
     error.clear();
     const QByteArray realData = real.readAll();
     const QVector<CatalogEntry> listed = Addons::parseSignedCatalog(realData, readFile(repo + QStringLiteral("/catalog.json.sig")), Addons::catalogKeys(), &error);
-    report(!listed.isEmpty() && error.isEmpty(), QStringLiteral("the real catalog is signed with DiskForge's key and accepted whole"),
+    report(!listed.isEmpty() && error.isEmpty(), QStringLiteral("the real catalog is signed with DiskAnvil's key and accepted whole"),
            QStringLiteral("%1 add-on(s) %2").arg(listed.size()).arg(error));
     for (const CatalogEntry &e : listed) {
         const QString commitAndPath = e.url.section(QLatin1Char('/'), 5, 5) + QLatin1Char(':') + e.url.section(QLatin1Char('/'), 6);

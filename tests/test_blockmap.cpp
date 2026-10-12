@@ -99,7 +99,7 @@ void blockMapTests()
     // 32 MiB: good, then 1 MiB that takes 400 ms, then 1 MiB that can't be read, then good.
     const QString table = QStringLiteral("0 %1 linear LOOP 0\n%1 %2 delay LOOP %1 400\n%3 %2 error\n%4 %5 linear LOOP %4")
                               .arg(20 * kSectors).arg(kSectors).arg(21 * kSectors).arg(22 * kSectors).arg(10 * kSectors);
-    const TestDevice mixed = create(dir, 32, QStringLiteral("diskforge-map-test"), table);
+    const TestDevice mixed = create(dir, 32, QStringLiteral("diskanvil-map-test"), table);
     report(!mixed.name.isEmpty(), QStringLiteral("create a test device with slow and unreadable parts"), mixed.loop);
     if (!mixed.name.isEmpty()) {
         BlockMapData map(32 * MiB, false);
@@ -119,7 +119,7 @@ void blockMapTests()
     remove(mixed);
 
     // Every read takes 80 ms, like a cheap USB stick. That's the stick, not a problem.
-    const TestDevice slow = create(dir, 12, QStringLiteral("diskforge-slowstick-test"),
+    const TestDevice slow = create(dir, 12, QStringLiteral("diskanvil-slowstick-test"),
                                    QStringLiteral("0 %1 delay LOOP 0 80").arg(12 * kSectors));
     if (!slow.name.isEmpty()) {
         BlockMapData map(12 * MiB, false);

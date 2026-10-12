@@ -4,8 +4,8 @@
 
 // Find Lost Files' viewer: a found file shown in full before it's saved. Pictures to zoom into,
 // PDFs page by page, films and songs that play, documents' words, and the bytes of anything
-// else. It runs as its own program (diskforge --viewer), in a sandbox on Linux, so a damaged
-// file can't take DiskForge down. Find Lost Files hands it copies of found files (lookcopies.h)
+// else. It runs as its own program (diskanvil --viewer), in a sandbox on Linux, so a damaged
+// file can't take DiskAnvil down. Find Lost Files hands it copies of found files (lookcopies.h)
 // on its standard input, and it asks back on its standard output for the one before or after,
 // or for this one to be saved or opened in its own program.
 
@@ -59,7 +59,7 @@ QByteArray encode(const Message &message);
 // while it's still coming; `bad` when what's there isn't one.
 bool decode(QByteArray &buffer, Message &message, bool *bad);
 
-// The viewer program: diskforge --viewer.
+// The viewer program: diskanvil --viewer.
 int run();
 // How it's started: this program with --viewer, in a bubblewrap sandbox on Linux when `sandbox`
 // and bwrap is there (not in the Flatpak, a sandbox already). The sandbox has the screen, the

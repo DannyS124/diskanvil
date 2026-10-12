@@ -6,7 +6,7 @@
 // What starts at a spot on a drive, from its first bytes: a file system, an encrypted
 // container, swap, a RAID or LVM member. Windows only knows its own file systems, so on
 // Windows this is how a Linux partition shows up as ext4 or LUKS instead of "unknown".
-// The names are the ones Linux (libblkid) uses, so the rest of DiskForge needn't care.
+// The names are the ones Linux (libblkid) uses, so the rest of DiskAnvil needn't care.
 
 #include <QByteArray>
 #include <QString>

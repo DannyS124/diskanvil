@@ -48,7 +48,7 @@ WinReDialog::WinReDialog(UDisks *udisks, QWidget *parent)
     auto *layout = new QVBoxLayout(this);
     layout->addWidget(wrappingLabel(tr("Windows keeps a small recovery system (WinRE) in a partition of its own. When that partition is "
                                        "too small, Windows' updates to it fail with error 0x80070643, over and over. Microsoft's fix "
-                                       "(KB5028997) gives it 250 MB from Windows' own partition: DiskForge does those steps for you.")));
+                                       "(KB5028997) gives it 250 MB from Windows' own partition: DiskAnvil does those steps for you.")));
     layout->addWidget(m_state);
     layout->addWidget(m_output, 1);
     layout->addLayout(buttons);

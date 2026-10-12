@@ -2,13 +2,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 cmake_minimum_required(VERSION 3.21)
-project(diskforge
+project(diskanvil
     VERSION 0.5.2
     DESCRIPTION "Disk manager for Linux in the style of Windows Disk Management"
-    HOMEPAGE_URL "https://github.com/DannyS124/diskforge"
+    HOMEPAGE_URL "https://github.com/DannyS124/diskanvil"
     LANGUAGES CXX)
 
-set(APP_ID "io.github.DannyS124.DiskForge")
+set(APP_ID "io.github.DannyS124.DiskAnvil")
 set(APP_AUTHOR "Danny S")
 set(APP_AUTHOR_URL "https://github.com/DannyS124")
 
@@ -34,8 +34,8 @@ pkg_check_modules(ARCHIVE REQUIRED IMPORTED_TARGET libarchive) # unpacks compres
 find_package(OpenSSL 1.1.1 REQUIRED COMPONENTS Crypto)
 
 # Memory and undefined-behaviour checks for the crash tests (release.sh builds this in build-asan).
-option(DISKFORGE_SANITIZE "Build with AddressSanitizer and UBSan" OFF)
-if(DISKFORGE_SANITIZE)
+option(DISKANVIL_SANITIZE "Build with AddressSanitizer and UBSan" OFF)
+if(DISKANVIL_SANITIZE)
     add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all)
     add_link_options(-fsanitize=address,undefined)
 endif()
@@ -50,7 +50,7 @@ set(APP_DEFINITIONS
 
 # Everything that talks to UDisks2 (or Windows' disk API) or touches devices, shared with the
 # test tools.
-add_library(diskforge-core STATIC
+add_library(diskanvil-core STATIC
     src/drives/udisks.h src/drives/udisks_common.cpp
     src/drives/fsprobe.cpp src/drives/fsprobe.h
     src/common/format.cpp src/common/format.h
@@ -142,29 +142,29 @@ add_library(diskforge-core STATIC
     src/drives/partscan.cpp src/drives/partscan.h
 )
 if(WIN32)
-    target_sources(diskforge-core PRIVATE
+    target_sources(diskanvil-core PRIVATE
         src/win/blockio_win.cpp
         src/win/udisks_win.cpp
         src/win/winutil.cpp src/win/winutil.h
         src/win/winstartup_win.cpp
         src/win/unavailable.cpp)
-    target_link_libraries(diskforge-core PUBLIC Qt6::Core PRIVATE PkgConfig::ZSTD PkgConfig::ZLIB PkgConfig::ARCHIVE OpenSSL::Crypto
+    target_link_libraries(diskanvil-core PUBLIC Qt6::Core PRIVATE PkgConfig::ZSTD PkgConfig::ZLIB PkgConfig::ARCHIVE OpenSSL::Crypto
         setupapi cfgmgr32 ole32 oleaut32 wbemuuid uuid virtdisk)
     # Large files and the Windows 10 API (CM_Register_Notification, storage queries).
-    target_compile_definitions(diskforge-core PUBLIC _FILE_OFFSET_BITS=64 _WIN32_WINNT=0x0A00 WINVER=0x0A00 UNICODE _UNICODE NOMINMAX)
+    target_compile_definitions(diskanvil-core PUBLIC _FILE_OFFSET_BITS=64 _WIN32_WINNT=0x0A00 WINVER=0x0A00 UNICODE _UNICODE NOMINMAX)
 else()
-    target_sources(diskforge-core PRIVATE
+    target_sources(diskanvil-core PRIVATE
         src/drives/udisks.cpp src/drives/operations.cpp src/drives/dbusnames.h
         src/tools/systemd.cpp src/tools/snapper.cpp src/health/firmware.cpp)
-    target_link_libraries(diskforge-core PUBLIC Qt6::Core Qt6::DBus PRIVATE PkgConfig::ZSTD PkgConfig::ZLIB PkgConfig::BLKID PkgConfig::ARCHIVE OpenSSL::Crypto)
+    target_link_libraries(diskanvil-core PUBLIC Qt6::Core Qt6::DBus PRIVATE PkgConfig::ZSTD PkgConfig::ZLIB PkgConfig::BLKID PkgConfig::ARCHIVE OpenSSL::Crypto)
 endif()
 # The sources sit in folders by feature and include each other by file name.
-target_include_directories(diskforge-core PUBLIC src src/addons src/app src/backup src/common src/drives src/health src/lostfiles src/tools src/usb src/viruses)
-target_compile_definitions(diskforge-core PUBLIC ${APP_DEFINITIONS})
-target_compile_options(diskforge-core PRIVATE -Wall -Wextra)
+target_include_directories(diskanvil-core PUBLIC src src/addons src/app src/backup src/common src/drives src/health src/lostfiles src/tools src/usb src/viruses)
+target_compile_definitions(diskanvil-core PUBLIC ${APP_DEFINITIONS})
+target_compile_options(diskanvil-core PRIVATE -Wall -Wextra)
 
 # Windows and dialogs, shared by the app, the dialog preview and the window test.
-add_library(diskforge-ui STATIC
+add_library(diskanvil-ui STATIC
     src/app/diskmap.cpp src/app/diskmap.h
     src/app/homewindow.cpp src/app/homewindow.h
     src/app/whathappened.cpp src/app/whathappened.h
@@ -207,6 +207,8 @@ add_library(diskforge-ui STATIC
     src/tools/tryrepairdialog.cpp src/tools/tryrepairdialog.h
     src/tools/winredialog.cpp src/tools/winredialog.h
     src/tools/testbootdialog.cpp src/tools/testbootdialog.h
+    src/tools/remotehelpdialog.cpp src/tools/remotehelpdialog.h
+    src/tools/remotehelp.cpp src/tools/remotehelp.h
     src/backup/newidsdialog.cpp src/backup/newidsdialog.h
     src/tools/systemtools.cpp src/tools/systemtools.h
     src/drives/erasedialog.cpp src/drives/erasedialog.h
@@ -225,132 +227,137 @@ add_library(diskforge-ui STATIC
     src/app/updates.cpp src/app/updates.h
     src/app/translations.cpp src/app/translations.h
     src/app/theme.cpp src/app/theme.h
+    src/app/oldname.cpp src/app/oldname.h
     src/app/thememaker.cpp src/app/thememaker.h
 )
-target_link_libraries(diskforge-ui PUBLIC diskforge-core Qt6::Widgets Qt6::Network)
+target_link_libraries(diskanvil-ui PUBLIC diskanvil-core Qt6::Widgets Qt6::Network)
 # PDF pages in Find Lost Files' previews, when poppler's Qt 6 library is there (releases have it).
-option(DISKFORGE_PDF "Show PDF pages in Find Lost Files (needs poppler-qt6)" ON)
-if(DISKFORGE_PDF)
+option(DISKANVIL_PDF "Show PDF pages in Find Lost Files (needs poppler-qt6)" ON)
+if(DISKANVIL_PDF)
     pkg_check_modules(POPPLER IMPORTED_TARGET poppler-qt6)
     if(POPPLER_FOUND)
-        target_link_libraries(diskforge-ui PRIVATE PkgConfig::POPPLER)
-        target_compile_definitions(diskforge-ui PRIVATE DISKFORGE_PDF)
+        target_link_libraries(diskanvil-ui PRIVATE PkgConfig::POPPLER)
+        target_compile_definitions(diskanvil-ui PRIVATE DISKANVIL_PDF)
     else()
         message(STATUS "poppler-qt6 not found: Find Lost Files shows PDFs without their pages")
     endif()
 endif()
 # Films and songs that play in Find Lost Files' viewer, when Qt Multimedia is there (releases have it).
-option(DISKFORGE_MEDIA "Play films and songs in Find Lost Files' viewer (needs Qt Multimedia)" ON)
-if(DISKFORGE_MEDIA)
+option(DISKANVIL_MEDIA "Play films and songs in Find Lost Files' viewer (needs Qt Multimedia)" ON)
+if(DISKANVIL_MEDIA)
     find_package(Qt6 6.8 QUIET COMPONENTS Multimedia MultimediaWidgets)
     if(Qt6Multimedia_FOUND AND Qt6MultimediaWidgets_FOUND)
-        target_link_libraries(diskforge-ui PRIVATE Qt6::Multimedia Qt6::MultimediaWidgets)
-        target_compile_definitions(diskforge-ui PRIVATE DISKFORGE_MEDIA)
+        target_link_libraries(diskanvil-ui PRIVATE Qt6::Multimedia Qt6::MultimediaWidgets)
+        target_compile_definitions(diskanvil-ui PRIVATE DISKANVIL_MEDIA)
     else()
         message(STATUS "Qt Multimedia not found: Find Lost Files' viewer shows films' details without playing them")
     endif()
 endif()
 if(WIN32)
-    target_sources(diskforge-ui PRIVATE src/win/systemtools_win.cpp)
-    target_link_libraries(diskforge-ui PRIVATE powrprof shell32)
+    target_sources(diskanvil-ui PRIVATE src/win/systemtools_win.cpp)
+    target_link_libraries(diskanvil-ui PRIVATE powrprof shell32)
 endif()
-target_compile_options(diskforge-ui PRIVATE -Wall -Wextra)
+target_compile_options(diskanvil-ui PRIVATE -Wall -Wextra)
 
 # Help page, icon and license text, built into each program that shows them.
-function(diskforge_add_data target)
+function(diskanvil_add_data target)
     qt_add_resources(${target} "${target}_data" PREFIX "/" FILES data/help.html data/${APP_ID}.svg LICENSE)
     qt_add_resources(${target} "${target}_themes" PREFIX "/themes" BASE data/themes
-        FILES data/themes/classic.json data/themes/deadshadow.json data/themes/diskforge-live.json data/themes/high-contrast.json)
+        FILES data/themes/classic.json data/themes/deadshadow.json data/themes/diskanvil-live.json data/themes/high-contrast.json)
 endfunction()
 
-qt_add_executable(diskforge src/main.cpp)
-diskforge_add_data(diskforge)
+qt_add_executable(diskanvil src/main.cpp)
+diskanvil_add_data(diskanvil)
 if(WIN32)
     # Its own window (no console), the icon and version details, and it asks to run as administrator.
-    set_target_properties(diskforge PROPERTIES WIN32_EXECUTABLE ON)
-    configure_file(data/windows/diskforge.rc.in diskforge.rc @ONLY)
-    target_sources(diskforge PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/diskforge.rc)
+    set_target_properties(diskanvil PROPERTIES WIN32_EXECUTABLE ON)
+    configure_file(data/windows/diskanvil.rc.in diskanvil.rc @ONLY)
+    target_sources(diskanvil PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/diskanvil.rc)
 endif()
-target_link_libraries(diskforge PRIVATE diskforge-ui)
-target_compile_options(diskforge PRIVATE -Wall -Wextra)
+target_link_libraries(diskanvil PRIVATE diskanvil-ui)
+target_compile_options(diskanvil PRIVATE -Wall -Wextra)
 
 
 # dev tools, not installed
 if(WIN32)
-    option(DISKFORGE_SELFTEST "Build the loop-device self-test" OFF)
+    option(DISKANVIL_SELFTEST "Build the loop-device self-test" OFF)
 else()
-    option(DISKFORGE_SELFTEST "Build the loop-device self-test" ON)
+    option(DISKANVIL_SELFTEST "Build the loop-device self-test" ON)
 endif()
-if(DISKFORGE_SELFTEST)
-    qt_add_executable(diskforge-selftest tests/selftest.cpp tests/testkit.cpp tests/testkit.h tests/test_fat32.cpp tests/test_luks.cpp tests/test_savefiles.cpp
+if(DISKANVIL_SELFTEST)
+    qt_add_executable(diskanvil-selftest tests/selftest.cpp tests/testkit.cpp tests/testkit.h tests/test_fat32.cpp tests/test_luks.cpp tests/test_savefiles.cpp
         tests/test_gpt.cpp tests/test_copy.cpp tests/test_blockmap.cpp
         tests/test_usage.cpp tests/test_backup.cpp
         tests/test_rescue.cpp tests/test_clone.cpp tests/test_system.cpp
         tests/test_catalog.cpp tests/test_fuzz.cpp tests/test_health.cpp tests/test_jobs.cpp tests/test_recover.cpp tests/test_rescueusb.cpp tests/test_stickcheck.cpp tests/test_images.cpp tests/test_isomode.cpp tests/test_windows.cpp tests/test_lostfiles.cpp tests/test_viruses.cpp tests/test_registry.cpp tests/test_startup.cpp tests/test_boot.cpp tests/test_newids.cpp tests/testsign.cpp tests/testsign.h tests/test_raid.cpp tests/test_lvm.cpp)
-    target_link_libraries(diskforge-selftest PRIVATE diskforge-ui OpenSSL::Crypto)
-    target_compile_definitions(diskforge-selftest PRIVATE SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    target_link_libraries(diskanvil-selftest PRIVATE diskanvil-ui OpenSSL::Crypto)
+    target_compile_definitions(diskanvil-selftest PRIVATE SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
-    qt_add_executable(diskforge-preview tests/preview.cpp)
-    diskforge_add_data(diskforge-preview)
-    target_link_libraries(diskforge-preview PRIVATE diskforge-ui)
-    target_compile_definitions(diskforge-preview PRIVATE SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    qt_add_executable(diskanvil-preview tests/preview.cpp)
+    diskanvil_add_data(diskanvil-preview)
+    target_link_libraries(diskanvil-preview PRIVATE diskanvil-ui)
+    target_compile_definitions(diskanvil-preview PRIVATE SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
-    qt_add_executable(diskforge-uitest tests/uitest.cpp tests/testsign.cpp tests/testsign.h)
-    diskforge_add_data(diskforge-uitest)
-    target_link_libraries(diskforge-uitest PRIVATE diskforge-ui OpenSSL::Crypto)
-    target_compile_definitions(diskforge-uitest PRIVATE SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    qt_add_executable(diskanvil-uitest tests/uitest.cpp tests/testsign.cpp tests/testsign.h)
+    diskanvil_add_data(diskanvil-uitest)
+    target_link_libraries(diskanvil-uitest PRIVATE diskanvil-ui OpenSSL::Crypto)
+    target_compile_definitions(diskanvil-uitest PRIVATE SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 endif()
 
 # English plural forms ("1 sector", "2 sectors"); other languages get their own
-# i18n/diskforge_<lang>.ts (see CONTRIBUTING.md).
-set(TRANSLATED_TARGETS diskforge)
-if(DISKFORGE_SELFTEST)
+# i18n/diskanvil_<lang>.ts (see CONTRIBUTING.md).
+set(TRANSLATED_TARGETS diskanvil)
+if(DISKANVIL_SELFTEST)
     # The window tests see the real English plurals too.
-    list(APPEND TRANSLATED_TARGETS diskforge-preview diskforge-uitest)
+    list(APPEND TRANSLATED_TARGETS diskanvil-preview diskanvil-uitest)
 endif()
 qt_add_translations(TARGETS ${TRANSLATED_TARGETS}
-    SOURCE_TARGETS diskforge-core diskforge-ui diskforge
+    SOURCE_TARGETS diskanvil-core diskanvil-ui diskanvil
     TS_FILE_DIR i18n
-    PLURALS_TS_FILE i18n/diskforge_en.ts
+    PLURALS_TS_FILE i18n/diskanvil_en.ts
     RESOURCE_PREFIX /i18n)
 
 include(GNUInstallDirs)
 if(WIN32)
     # The rest (DLLs, Qt plugins) is put next to it by packaging/windows/deploy.sh.
-    install(TARGETS diskforge RUNTIME DESTINATION .)
+    install(TARGETS diskanvil RUNTIME DESTINATION .)
     return()
 endif()
 configure_file(data/${APP_ID}.desktop.in ${APP_ID}.desktop @ONLY)
 configure_file(data/${APP_ID}.metainfo.xml.in ${APP_ID}.metainfo.xml @ONLY)
-configure_file(data/diskforge.1.in diskforge.1 @ONLY)
+configure_file(data/diskanvil.1.in diskanvil.1 @ONLY)
 
-install(TARGETS diskforge RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(TARGETS diskanvil RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${APP_ID}.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${APP_ID}.metainfo.xml DESTINATION ${CMAKE_INSTALL_DATADIR}/metainfo)
 install(FILES data/${APP_ID}.svg DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/diskforge.1 DESTINATION ${CMAKE_INSTALL_MANDIR}/man1)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/diskanvil.1 DESTINATION ${CMAKE_INSTALL_MANDIR}/man1)
 # Disk Cleanup starts these to shrink the journal and the package cache; see the files for why they're units.
 # Off for Flatpak and AppImage builds, which can't add system units.
-option(DISKFORGE_SYSTEMD_UNIT "Install the journal cleanup unit" ON)
-if(DISKFORGE_SYSTEMD_UNIT)
+option(DISKANVIL_SYSTEMD_UNIT "Install the journal cleanup unit" ON)
+if(DISKANVIL_SYSTEMD_UNIT)
     pkg_get_variable(SYSTEMD_UNIT_DIR systemd systemd_system_unit_dir)
     if(NOT SYSTEMD_UNIT_DIR)
         set(SYSTEMD_UNIT_DIR ${CMAKE_INSTALL_PREFIX}/lib/systemd/system)
     endif()
-    install(FILES data/diskforge-journal-vacuum.service data/diskforge-paccache-uninstalled.service DESTINATION ${SYSTEMD_UNIT_DIR})
+    install(FILES data/diskanvil-journal-vacuum.service data/diskanvil-paccache-uninstalled.service DESTINATION ${SYSTEMD_UNIT_DIR})
 endif()
 
 # A .deb for Debian and Ubuntu: `cpack -G DEB` in the build folder (packaging/deb/build.sh does it in a
 # clean Debian container). Library dependencies come from dpkg-shlibdeps; what it can't see is listed here.
-set(CPACK_PACKAGE_NAME diskforge)
+set(CPACK_PACKAGE_NAME diskanvil)
 set(CPACK_PACKAGE_VENDOR "Danny S")
 set(CPACK_PACKAGE_CONTACT "Danny S <48356907+DannyS124@users.noreply.github.com>")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Disk manager and partition editor that works like Windows Disk Management")
-set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/DannyS124/diskforge")
+set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/DannyS124/diskanvil")
 set(CPACK_DEBIAN_PACKAGE_SECTION admin)
 set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "udisks2, polkitd, qt6-svg-plugins")
+# It was called DiskForge up to 0.5.1: this one takes its place.
+set(CPACK_DEBIAN_PACKAGE_REPLACES "diskforge")
+set(CPACK_DEBIAN_PACKAGE_BREAKS "diskforge")
+set(CPACK_DEBIAN_PACKAGE_PROVIDES "diskforge")
 set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "dosfstools, exfatprogs, ntfs-3g, btrfs-progs")
 set(CPACK_DEBIAN_PACKAGE_SUGGESTS "xfsprogs, bubblewrap, fwupd, udisks2-lvm2, snapper, wimtools, clamav, qt6-image-formats-plugins, ffmpeg")
 set(CPACK_STRIP_FILES ON)

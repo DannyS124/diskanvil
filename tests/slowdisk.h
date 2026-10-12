@@ -5,7 +5,7 @@
 
 // A test disk that writes slowly, so a wipe can be stopped halfway: a small image behind a
 // device-mapper "delay" target, with a loop device on top so UDisks lists it like any disk
-// image (DiskForge doesn't list device-mapper devices). Root only.
+// image (DiskAnvil doesn't list device-mapper devices). Root only.
 
 #include <QCoreApplication>
 #include <QFile>
@@ -17,7 +17,7 @@ struct SlowDisk {
     QString image;
     QString base;   // loop device holding the image
     QString mapper; // the delay target's name
-    QString loop;   // what DiskForge sees
+    QString loop;   // what DiskAnvil sees
     QString error;
 
     static QString run(const QString &program, const QStringList &args, int *code = nullptr)
@@ -41,7 +41,7 @@ struct SlowDisk {
         f.close();
         base = run(QStringLiteral("losetup"), {QStringLiteral("-f"), QStringLiteral("--show"), image});
         const QString sectors = run(QStringLiteral("blockdev"), {QStringLiteral("--getsz"), base});
-        mapper = QStringLiteral("diskforge-slow-%1").arg(QCoreApplication::applicationPid());
+        mapper = QStringLiteral("diskanvil-slow-%1").arg(QCoreApplication::applicationPid());
         int code = -1;
         run(QStringLiteral("dmsetup"), {QStringLiteral("create"), mapper, QStringLiteral("--table"),
                                         QStringLiteral("0 %1 delay %2 0 0 %2 0 %3").arg(sectors, base).arg(writeDelayMs)}, &code);

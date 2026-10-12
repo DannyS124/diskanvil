@@ -107,7 +107,7 @@ Header parseHeader(const QByteArray &d)
     }
     const QString format = text(d, 0x1E, 4);
     if (format != QLatin1String("0002")) {
-        h.problem = tr("it's in partclone's first format (from before 2013), which DiskForge doesn't read: restore it with Clonezilla");
+        h.problem = tr("it's in partclone's first format (from before 2013), which DiskAnvil doesn't read: restore it with Clonezilla");
         return h;
     }
     if (qFromLittleEndian<quint16>(d.constData() + 0x22) != 0xC0DE) {
@@ -131,9 +131,9 @@ Header parseHeader(const QByteArray &d)
              || h.totalBlocks > (quint64(1) << 40))
         h.problem = tr("its header doesn't add up");
     else if (bitmapMode != 1)
-        h.problem = tr("its kind of block map isn't one DiskForge reads");
+        h.problem = tr("its kind of block map isn't one DiskAnvil reads");
     else if (h.checksumMode != 0 && (h.checksumMode != 0x20 || h.checksumSize != 4 || h.blocksPerChecksum == 0))
-        h.problem = tr("its kind of checksum isn't one DiskForge reads");
+        h.problem = tr("its kind of checksum isn't one DiskAnvil reads");
     return h;
 }
 

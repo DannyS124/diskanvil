@@ -174,7 +174,7 @@ void DriversDialog::switchOff()
         return;
     QString question = tr("Switch these off, so they don't start with Windows?") + QStringLiteral("\n\n") + names.join(QLatin1Char('\n'))
                      + QStringLiteral("\n\n")
-                     + tr("Everything changed is copied to a \"DiskForge backups\" folder on that drive first, with a note saying how to "
+                     + tr("Everything changed is copied to a \"DiskAnvil backups\" folder on that drive first, with a note saying how to "
                           "put it back.");
     if (windowsOwn)
         question += QStringLiteral("\n\n") + tr("Some of these are part of Windows: switching them off can stop Windows starting at all.");
@@ -187,7 +187,7 @@ void DriversDialog::switchOff()
 #endif
     if (drive.endsWith(QLatin1Char('/')))
         drive.chop(1);
-    const QString backup = drive + QStringLiteral("/DiskForge backups/") + QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH.mm.ss"));
+    const QString backup = drive + QStringLiteral("/DiskAnvil backups/") + QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH.mm.ss"));
     QVector<startup::Entry> entries;
     for (int entry : std::as_const(picked))
         entries << m_report.entries.at(entry);

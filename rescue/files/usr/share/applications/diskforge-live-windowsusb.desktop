@@ -1,7 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Make a Windows USB
-Comment=A stick that installs Windows 10 or 11
-Exec=diskforge --open windows-usb
-Icon=diskforge-live-windowsusb
-Categories=System;

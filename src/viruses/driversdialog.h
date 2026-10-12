@@ -6,7 +6,7 @@
 // Windows Drivers and Services: everything that starts with a Windows, newest first, with who
 // made it. When Windows stops starting (a blue screen right after something was installed),
 // the newest driver is the usual suspect: switched off, with a backup and a note saying how to
-// put it back. Works on a Windows on a drive (DiskForge Live, or another drive) and on the
+// put it back. Works on a Windows on a drive (DiskAnvil Live, or another drive) and on the
 // running one (the Windows version).
 
 #include "winstartup.h"

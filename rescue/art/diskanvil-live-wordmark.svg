@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1040" height="160" viewBox="0 0 1040 160">
+  <!-- The logo with the name next to it: "Disk" in baby blue, "Anvil" in neon blue, "Live" in green. -->
+  <image x="0" y="0" width="160" height="160" xlink:href="diskanvil-live-icon.svg"/>
+  <text x="180" y="110" font-family="DejaVu Sans" font-weight="bold" font-size="96" letter-spacing="-1" fill="#9ad8ff">Disk<tspan fill="#00e5ff">Anvil</tspan><tspan fill="#2bee8a" dx="27">Live</tspan></text>
+</svg>

@@ -41,7 +41,7 @@ QVariantMap configuration(const QVariantMap &current, int standby, int apm, int 
 QString stateText(int state); // from PmGetState: "Spinning", "Asleep (spun down)", ...
 
 // The Host Protected Area: the end of an ATA drive, hidden by the drive's own settings. Only
-// hdparm can see it (UDisks can't), so only DiskForge Live shows it. From `hdparm -N`:
+// hdparm can see it (UDisks can't), so only DiskAnvil Live shows it. From `hdparm -N`:
 //   max sectors   = 976771055/976773168, HPA is enabled
 struct HiddenArea {
     bool known = false;

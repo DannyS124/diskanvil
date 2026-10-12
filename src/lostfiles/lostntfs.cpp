@@ -797,7 +797,7 @@ bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::
         }
         if (c.dataFlags & 0x0001) {
             f.condition = Condition::MaybeDamaged;
-            f.note = tr("Windows kept it compressed. DiskForge can't unpack NTFS compression yet, so it comes back as it is on the drive.");
+            f.note = tr("Windows kept it compressed. DiskAnvil can't unpack NTFS compression yet, so it comes back as it is on the drive.");
         } else if (c.dataFlags & 0x4000) {
             f.condition = Condition::MaybeDamaged;
             f.note = tr("Windows kept it encrypted (EFS). It comes back still encrypted: only the Windows account that encrypted it "

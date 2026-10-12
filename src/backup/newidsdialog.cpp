@@ -310,7 +310,7 @@ void NewIdsDialog::fixNext()
     }
     if (!v) {
         if (!m_fixed.isEmpty())
-            m_notes << tr("Changed to the new IDs: %1 (each kept as it was next to it, ending in .diskforge-<date>).")
+            m_notes << tr("Changed to the new IDs: %1 (each kept as it was next to it, ending in .diskanvil-<date>).")
                            .arg(m_fixed.join(QStringLiteral(", ")));
         return finish(true, QString());
     }

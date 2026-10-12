@@ -93,7 +93,7 @@ WindowsUsbDialog::WindowsUsbDialog(UDisks *udisks, const QString &preferredDisk,
     isoRow->addWidget(browse);
 
     // The options, remembered from last time. The account name starts as this PC's.
-    QSettings s(QStringLiteral("diskforge"), QStringLiteral("diskforge"));
+    QSettings s(QStringLiteral("diskanvil"), QStringLiteral("diskanvil"));
     s.beginGroup(QStringLiteral("windowsusb"));
     m_skipChecks->setChecked(s.value(QStringLiteral("skipChecks"), true).toBool());
     m_noAccount->setChecked(s.value(QStringLiteral("noAccount"), true).toBool());
@@ -174,7 +174,7 @@ WindowsUsbDialog::WindowsUsbDialog(UDisks *udisks, const QString &preferredDisk,
 WindowsUsbDialog::~WindowsUsbDialog()
 {
     delete m_job;
-    // Gone without being closed (DiskForge quitting with it open, say): the ISO still gets
+    // Gone without being closed (DiskAnvil quitting with it open, say): the ISO still gets
     // closed, by its IsoMount on its own, so the loop device doesn't stay behind.
     if (m_mount) {
         IsoMount *mount = m_mount;
@@ -278,7 +278,7 @@ windowsusb::Options WindowsUsbDialog::options() const
 
 void WindowsUsbDialog::saveOptions() const
 {
-    QSettings s(QStringLiteral("diskforge"), QStringLiteral("diskforge"));
+    QSettings s(QStringLiteral("diskanvil"), QStringLiteral("diskanvil"));
     s.beginGroup(QStringLiteral("windowsusb"));
     s.setValue(QStringLiteral("skipChecks"), m_skipChecks->isChecked());
     s.setValue(QStringLiteral("noAccount"), m_noAccount->isChecked());
@@ -370,7 +370,7 @@ void WindowsUsbDialog::reject()
 {
     if (m_job) {
         if (!m_job->canCancel()) {
-            QMessageBox::information(this, windowTitle(), tr("One moment: DiskForge is in the middle of setting up the stick."));
+            QMessageBox::information(this, windowTitle(), tr("One moment: DiskAnvil is in the middle of setting up the stick."));
             return;
         }
         const auto answer = QMessageBox::warning(this, windowTitle(), tr("Stop? The stick won't install anything until it's made again."),

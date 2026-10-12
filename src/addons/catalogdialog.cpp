@@ -53,7 +53,7 @@ void CatalogDialog::fetch(const QString &url, const std::function<void(const QBy
     QNetworkRequest request{QUrl(url)};
     // A redirect could lead anywhere; the URLs are exact, so none is expected.
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
-    request.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("DiskForge/" APP_VERSION));
+    request.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("DiskAnvil/" APP_VERSION));
     request.setTransferTimeout(20000);
     QNetworkReply *reply = m_net->get(request);
     connect(reply, &QNetworkReply::downloadProgress, reply, [reply](qint64 received, qint64) {

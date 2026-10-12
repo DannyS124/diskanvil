@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Copy This Rescue Stick
+Comment=Make another DiskAnvil Live stick from this one
+Exec=diskanvil --open rescue-usb
+Icon=diskanvil-live-copystick
+Categories=System;

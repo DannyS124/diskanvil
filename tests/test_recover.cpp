@@ -324,7 +324,7 @@ void scanning()
            QString::number(early.size()));
 }
 
-// DiskForge's own probe (what Windows has for Recover Partitions) against libblkid's, on file
+// DiskAnvil's own probe (what Windows has for Recover Partitions) against libblkid's, on file
 // systems made by their own tools: the same type, and the same size, which is what a found
 // partition gets. The partition has to hold all of it, so the own probe counts NTFS's last
 // sector (the boot sector's copy) and swap's header page, which libblkid leaves out.

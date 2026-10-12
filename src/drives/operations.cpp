@@ -715,7 +715,7 @@ void UDisks::openBlock(const QString &objectPath, OpenMode mode)
                 return;
             }
             const auto fd = w->reply().arguments().value(0).value<QDBusUnixFileDescriptor>();
-            // Close-on-exec: programs DiskForge starts (add-ons, terminals) must never inherit a disk.
+            // Close-on-exec: programs DiskAnvil starts (add-ons, terminals) must never inherit a disk.
             emit deviceOpened(objectPath, fd.isValid() ? ::fcntl(fd.fileDescriptor(), F_DUPFD_CLOEXEC, 0) : -1);
         });
     };

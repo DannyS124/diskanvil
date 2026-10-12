@@ -50,7 +50,7 @@ public:
         bool running() const { return active == QLatin1String("active") || active == QLatin1String("activating") || active == QLatin1String("deactivating"); }
     };
     ServiceState serviceState(const QString &service) const;
-    // Keeps a unit loaded while DiskForge runs. systemd unloads an instance (btrfs-scrub@...)
+    // Keeps a unit loaded while DiskAnvil runs. systemd unloads an instance (btrfs-scrub@...)
     // as soon as it finishes successfully, and its result with it, unless something holds it.
     void ref(const QString &unit) const;
 

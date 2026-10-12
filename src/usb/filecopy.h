@@ -13,7 +13,7 @@
 
 // Copies a tree of files onto a mounted USB stick and checks every one of them: each file is
 // hashed while it's copied, then flushed, dropped from the page cache and read back from the
-// stick. Make a DiskForge Live USB, the file copy mode of Write Image to USB and Make a Windows USB all
+// stick. Make a DiskAnvil Live USB, the file copy mode of Write Image to USB and Make a Windows USB all
 // go through this.
 namespace filecopy {
 

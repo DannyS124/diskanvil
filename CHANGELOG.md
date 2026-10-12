@@ -1,26 +1,30 @@
 # Changelog
 
 ## 0.5.2
+DiskForge is now called DiskAnvil (too many other things are called DiskForge). Your settings, add-ons, virus list
+and the rest move over by themselves the first time it starts, the new package replaces the old one, and DiskForge
+Live sticks keep working: Make a DiskAnvil Live USB can update them.
+
 New:
-- DiskForge for Windows: the same program on 64-bit Windows 10 and 11, with an installer (Program Files, the Start menu, a desktop shortcut if you want one, and Settings → Apps to remove it) or a zip to run it from a folder. Partitions, formatting, Disk Health, the USB makers, Check a USB Stick, Clone, Back Up and Restore, Disk Usage, Disk Cleanup, Optimize Drives, Recover Partitions, Find Lost Files and Scan for Viruses all work there, and it formats FAT32 over 32 GB, which Windows itself won't. The README's Windows part says what's different
-- Scan for Viruses (Tools menu, and a tile in DiskForge Live): looks through a drive or a folder with ClamAV, or on Windows with Microsoft Defender when ClamAV isn't installed. On Linux the drive is mounted read-only while it looks. Quick checks programs, scripts and documents; Everything checks every file
+- DiskAnvil for Windows: the same program on 64-bit Windows 10 and 11, with an installer (Program Files, the Start menu, a desktop shortcut if you want one, and Settings → Apps to remove it) or a zip to run it from a folder. Partitions, formatting, Disk Health, the USB makers, Check a USB Stick, Clone, Back Up and Restore, Disk Usage, Disk Cleanup, Optimize Drives, Recover Partitions, Find Lost Files and Scan for Viruses all work there, and it formats FAT32 over 32 GB, which Windows itself won't. The README's Windows part says what's different
+- Scan for Viruses (Tools menu, and a tile in DiskAnvil Live): looks through a drive or a folder with ClamAV, or on Windows with Microsoft Defender when ClamAV isn't installed. On Linux the drive is mounted read-only while it looks. Quick checks programs, scripts and documents; Everything checks every file
 - Scan for Viruses also finds files dressed up as something else: `invoice.pdf.exe`, names with a hidden character that flips them around, and programs named like a picture or a document
-- On a drive with Windows on it, Scan for Viruses goes through everything that starts with Windows, read straight from its registry files, and shows the odd ones. It can switch them off, after backing up what it changes into a "DiskForge backups" folder on that drive
+- On a drive with Windows on it, Scan for Viruses goes through everything that starts with Windows, read straight from its registry files, and shows the odd ones. It can switch them off, after backing up what it changes into a "DiskAnvil backups" folder on that drive
 - It checks the boot files too: who signed each one against the PC's own Secure Boot lists, the boot entries, the MBR's boot code and the Secure Boot settings, and can put Windows' own boot files back. On Linux it adds fwupd's firmware checks
 - Odd startup programs and boot files can be looked up online by their SHA-256 fingerprint (CIRCL's hashlookup), only when you say so, every time. Nothing else is sent
-- Found files are deleted only after you've seen the list, and every deletion is written down in a log. In DiskForge Live the virus list is kept on the stick (when it was made with Make a DiskForge Live USB), so it only needs a small update next time
+- Found files are deleted only after you've seen the list, and every deletion is written down in a log. In DiskAnvil Live the virus list is kept on the stick (when it was made with Make a DiskAnvil Live USB), so it only needs a small update next time
 - Give New IDs (Action menu): gives a copy of a drive its own disk, partition and file system IDs, so it can be used next to the drive it was copied from, and fixes a Linux on it to match (fstab, crypttab, GRUB, systemd-boot, keeping each old file). When two drives share IDs, a bar at the top says so and offers it
 - Find Lost Files brings deleted files back with their names and folders from FAT, exFAT and NTFS drives, and the files in Windows' Recycle Bin under their old names. On NTFS it reads the change journal for names of files whose records were reused, and lists what was deleted recently, newest first. Files found by what's inside them still come after, as before
-- Find Lost Files looks in Windows' earlier versions of a drive (shadow copies) and brings back what has changed or gone since, in folders named after the date of each copy. DiskForge reads them with its own code, so this works on Linux and DiskForge Live too
+- Find Lost Files looks in Windows' earlier versions of a drive (shadow copies) and brings back what has changed or gone since, in folders named after the date of each copy. DiskAnvil reads them with its own code, so this works on Linux and DiskAnvil Live too
 - Find Lost Files opens virtual machines' disks: .vdi, .vmdk, .vhd, .vhdx and .qcow2
-- Find Lost Files previews PDFs (their first page), Word, Excel, PowerPoint and OpenDocument files (their text), what's in archives, and songs and films (their details and cover, and a frame from a film when ffmpeg is installed). A separate program makes them, in a sandbox on Linux, so a damaged file can't take DiskForge down
+- Find Lost Files previews PDFs (their first page), Word, Excel, PowerPoint and OpenDocument files (their text), what's in archives, and songs and films (their details and cover, and a frame from a film when ffmpeg is installed). A separate program makes them, in a sandbox on Linux, so a damaged file can't take DiskAnvil down
 - Drive settings in Properties for every SATA drive on Linux, SSDs too: power saving, the write cache and read-ahead, plus when to spin down and seek noise for hard drives
-- Disk Health: the conveyance self-test for hard drives, Turn SMART On, and the last tests DiskForge saw finish
+- Disk Health: the conveyance self-test for hard drives, Turn SMART On, and the last tests DiskAnvil saw finish
 - Secure Erase on NVMe drives, on Linux: Sanitize (block erase or crypto erase, whichever the drive has) and the sector size it should have afterwards
 - New Partition at the end of an SSD can leave part of it unused, so it stays fast and lasts longer
-- DiskForge Live shows a hidden area (HPA) at the end of a SATA drive in Properties, and can give that space back
+- DiskAnvil Live shows a hidden area (HPA) at the end of a SATA drive in Properties, and can give that space back
 - BitLocker drives show as BitLocker and unlock with their password or their 48-digit recovery key. On Windows, Change BitLocker Password too
-- Help → Support DiskForge (Ko-fi), and a line about it in About
+- Help → Support DiskAnvil (Ko-fi), and a line about it in About
 - `--open virus-scan`
 
 Changed:
@@ -30,36 +34,36 @@ Fixed:
 - Typing a drive's name to confirm in Clone, Restore or Rescue Copy could move the keyboard to another button, so a space pressed Cancel
 - Check a USB Stick's map stayed yellow after a good check. Now it turns green
 - Tall windows could run off a small screen
-- Write Image to USB, Make a Windows USB and Make a DiskForge Live USB now refuse to write onto the stick the image is on
+- Write Image to USB, Make a Windows USB and Make a DiskAnvil Live USB now refuse to write onto the stick the image is on
 - The unlock window's explanation stretched the window instead of wrapping
 - Change Passphrase is greyed out for BitLocker drives on Linux, where only Windows can change their password
 
 ## 0.5.1
 New:
-- DiskForge Live: a rescue stick that starts any PC, new (UEFI, Secure Boot on is fine) or old (BIOS), into a small desktop with DiskForge, TestDisk, PhotoRec, a browser and a terminal, plus memtest86+ in the boot menu. It keeps a log of every start on the stick. Built from `rescue/`, see [docs/DISKFORGE-LIVE.md](docs/DISKFORGE-LIVE.md)
-- DiskForge Live has its own look (logo, boot menu, boot animation, icons, desktop theme) and opens on a home screen with big tiles for the usual jobs
-- Make a DiskForge Live USB (File menu, or right-click a stick): puts DiskForge Live on a stick as normal files on FAT32 and checks every one, so the stick still works for files. Open Logs shows what a used stick saved
+- DiskAnvil Live: a rescue stick that starts any PC, new (UEFI, Secure Boot on is fine) or old (BIOS), into a small desktop with DiskAnvil, TestDisk, PhotoRec, a browser and a terminal, plus memtest86+ in the boot menu. It keeps a log of every start on the stick. Built from `rescue/`, see [docs/DISKANVIL-LIVE.md](docs/DISKANVIL-LIVE.md)
+- DiskAnvil Live has its own look (logo, boot menu, boot animation, icons, desktop theme) and opens on a home screen with big tiles for the usual jobs
+- Make a DiskAnvil Live USB (File menu, or right-click a stick): puts DiskAnvil Live on a stick as normal files on FAT32 and checks every one, so the stick still works for files. Open Logs shows what a used stick saved
 - Find Lost Files (Action menu, or File menu for disk images): gets deleted files back, or files off a drive that was formatted or won't open, by what's inside them (pictures, documents, PDFs, videos, music, archives). Thumbnails and a preview, each file says if it looks whole, and you save the ones you tick to another drive. It only reads the drive it looks through
 - Check a USB Stick (Action menu, or right-click a stick): finds bad spots and fake sticks that say they're bigger than they are. It says how much a fake one really holds and can make it safe to use. Quick takes minutes, Full checks every byte
 - Make a Windows USB (File menu): a Windows 10 or 11 install stick from Microsoft's ISO that starts with Secure Boot on. install.wim gets split with wimlib when it's too big. Windows 11 options: skip the TPM/Secure Boot/RAM check, no Microsoft account, local account, skip the privacy questions, no automatic BitLocker
 - Write Image to USB takes compressed images (.xz, .gz, .bz2, .lzma, .zst, or a .zip) and any checksum (MD5, SHA-1, SHA-256, SHA-512, or a SHA256SUMS file)
 - Write Image to USB can copy a Linux ISO's files instead, so the stick stays usable for files (UEFI only). Ubuntu and Debian live sticks can keep changes between starts
-- Tools > Quick Fixes: the DiskForge Live home screen on a normal PC
-- A DiskForge Live theme (View > Theme)
+- Tools > Quick Fixes: the DiskAnvil Live home screen on a normal PC
+- A DiskAnvil Live theme (View > Theme)
 - `--open <tool>` opens just one tool, for launchers (write-image, windows-usb, rescue-usb, check-stick, lost-files)
-- `--log <file>` writes down what DiskForge does, for bug reports
+- `--log <file>` writes down what DiskAnvil does, for bug reports
 - A .deb for Debian and Ubuntu (`packaging/deb/build.sh`)
 
 Changed:
 - Secure Erase says in plain words why a drive refused it and what to do instead (most USB adapters block it, Wipe Disk works through any of them), and warns about USB before it starts
-- Secure Erase on a frozen drive: Unplug and Replug walks you through pulling the drive's power and plugging it back in, finds the drive again (even under a new name) and checks it's not frozen anymore. On DiskForge Live it also asks old controllers to look for the drive, which they don't do by themselves
+- Secure Erase on a frozen drive: Unplug and Replug walks you through pulling the drive's power and plugging it back in, finds the drive again (even under a new name) and checks it's not frozen anymore. On DiskAnvil Live it also asks old controllers to look for the drive, which they don't do by themselves
 - New Partition Table only asks for the admin password when something on the drive is in /etc/fstab or encrypted
 - On a live system, the system's own image isn't listed as a drive anymore
 - On a screen smaller than the window (small laptops, VMs) it opens maximized
-- Staging a release also builds DiskForge Live, and publishing attaches the ISO
+- Staging a release also builds DiskAnvil Live, and publishing attaches the ISO
 
 Fixed:
-- After a Secure Erase the drive shows up blank right away. Before, it kept showing its old partitions until DiskForge was reopened
+- After a Secure Erase the drive shows up blank right away. Before, it kept showing its old partitions until DiskAnvil was reopened
 - A window that needed a drive unmounted first (Back Up, Clone, Rescue Copy...) waited forever when the unmount failed. Now it says the drive couldn't be opened
 - Pressing Enter in Write Image to USB, Back Up or Restore no longer opens the file picker
 
@@ -71,21 +75,21 @@ Safety:
 - Add-ons that use admin power (pkexec, sudo) or run a shell ask every time, with a warning. The question shows the command one part per line
 - Look-only add-ons (new `look_only` field) run in a read-only sandbox: they can't change files, use the network or reach other programs. Only these are offered on the system disk
 - "Don't ask again" is tied to the add-on file, so any change to the file asks again
-- Add-ons that turn up in the add-on folder without going through DiskForge are flagged until you say they're yours
-- The online add-on list is signed with a key that isn't on GitHub, and DiskForge checks the signature
+- Add-ons that turn up in the add-on folder without going through DiskAnvil are flagged until you say they're yours
+- The online add-on list is signed with a key that isn't on GitHub, and DiskAnvil checks the signature
 - Drive names, file names and backup descriptions are shown as plain text, and hidden characters (like ones that flip text direction) are dropped
 - Check for Updates builds the release link itself instead of opening whatever link comes back
 - Rescue maps whose blocks don't add up are refused, and Clone refuses partition tables that run past the end of the drive
 - Every release now runs crash tests: thousands of damaged add-ons, lists, signatures, backups, maps and partition tables, also in a build with memory checks
-- Programs DiskForge starts (add-ons, terminals) don't get handed an open drive anymore
+- Programs DiskAnvil starts (add-ons, terminals) don't get handed an open drive anymore
 
 New:
 - Stop button: wipes, checks and self-tests get a bar at the top showing how far along they are, with a Stop button (also on the toolbar). A drive's own Secure Erase says up front that it can't be stopped
 - A warning bar at the top when a drive is failing or needs a look, with Back Up (or Rescue Copy), Details and Dismiss. It comes back if things get worse
 - Disk Health explains itself: every reason behind the verdict, what each number means, and the ones that count are in bold. It goes by the numbers Backblaze's drive stats tie to failures. Connection errors say to check the cable, since the drive itself may be fine
-- Firmware: Disk Health shows the drive's firmware and asks fwupd if there's a newer one. DiskForge never installs firmware itself
+- Firmware: Disk Health shows the drive's firmware and asks fwupd if there's a newer one. DiskAnvil never installs firmware itself
 - Btrfs: error counts for each Btrfs partition in Disk Health, and a scrub now or every month
-- Recover Partitions: put a lost or damaged partition table back, from the copy GPT keeps at the end of the drive, from a layout DiskForge saw on that drive before (it keeps the last 10), or by scanning the drive for file systems
+- Recover Partitions: put a lost or damaged partition table back, from the copy GPT keeps at the end of the drive, from a layout DiskAnvil saw on that drive before (it keeps the last 10), or by scanning the drive for file systems
 - Inspect Partition Table: the MBR, both GPT copies and the partition list as they are on the drive, checksums checked, plus any sector in hex. Only reads, so it works on the system disk too
 - Partition type and flags (GPT attributes, the MBR boot flag)
 - A lock on encrypted partitions in the map: click it to unlock or lock
@@ -135,7 +139,7 @@ New:
 - Switched the license to GPL-3.0-or-later
 
 ## 0.4.0
-- Renamed to DiskForge
+- Renamed to DiskForge (it was Disk Manager)
 - Help (F1), About window, Check for Updates
 - App icon, man page, AppStream metadata
 

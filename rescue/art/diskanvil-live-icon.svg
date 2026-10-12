@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <!-- The DiskAnvil Live logo: a spark coming off an anvil, with a green and a red one flying off.
+       Colours are in palette.txt. -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0d1426"/>
+      <stop offset="1" stop-color="#060a16"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="64" cy="56" r="50" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#00e5ff" stop-opacity="0.45"/>
+      <stop offset="0.5" stop-color="#00e5ff" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#00e5ff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="spark" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9ad8ff"/>
+      <stop offset="0.5" stop-color="#00e5ff"/>
+      <stop offset="1" stop-color="#1f6fff"/>
+    </linearGradient>
+    <linearGradient id="anvil" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3d86ff"/>
+      <stop offset="1" stop-color="#1f6fff"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="url(#tile)"/>
+  <rect x="5" y="5" width="118" height="118" rx="27" fill="none" stroke="#1f6fff" stroke-opacity="0.45" stroke-width="2"/>
+  <circle cx="64" cy="56" r="50" fill="url(#glow)"/>
+  <!-- the short diagonal rays, behind -->
+  <path d="M64 56 L84 36 L70 56 L84 76 L64 62 L44 76 L58 56 L44 36 Z" fill="#1f6fff" opacity="0.85"/>
+  <!-- the spark -->
+  <path d="M64 12 C67.5 42 72 51 104 56 C72 61 67.5 70 64 98 C60.5 70 56 61 24 56 C56 51 60.5 42 64 12 Z" fill="url(#spark)"/>
+  <path d="M64 34 C65.5 50 68 54 82 56 C68 58 65.5 62 64 78 C62.5 62 60 58 46 56 C60 54 62.5 50 64 34 Z" fill="#e6f1ff"/>
+  <!-- the anvil's face -->
+  <rect x="30" y="100" width="68" height="10" rx="5" fill="url(#anvil)"/>
+  <rect x="34" y="101.5" width="40" height="2.5" rx="1.25" fill="#9ad8ff" opacity="0.7"/>
+  <!-- sparks flying off -->
+  <path d="M90 34 L99 25" stroke="#2bee8a" stroke-width="2" stroke-linecap="round" opacity="0.5"/>
+  <circle cx="100.5" cy="23.5" r="4.5" fill="#2bee8a"/>
+  <path d="M37 37 L29 29" stroke="#ff3355" stroke-width="2" stroke-linecap="round" opacity="0.5"/>
+  <circle cx="27.5" cy="27.5" r="3.5" fill="#ff3355"/>
+  <circle cx="106" cy="80" r="2.2" fill="#9ad8ff"/>
+  <circle cx="21" cy="78" r="1.8" fill="#00e5ff"/>
+</svg>

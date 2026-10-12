@@ -1,0 +1,47 @@
+# DiskAnvil Live's boot animation: the logo with a glow behind it that breathes, the name under it,
+# and a thin bar that fills as the system starts. The pictures come from the SVGs next to this
+# file (make-image.sh turns them into PNGs).
+
+Window.SetBackgroundTopColor(0.024, 0.039, 0.086);     # navy, #060a16
+Window.SetBackgroundBottomColor(0.012, 0.024, 0.055);  # #03060e at the bottom
+
+logo.image = Image("logo.png");
+glow.image = Image("glow.png");
+name.image = Image("name.png");
+track.image = Image("track.png");
+fill.image = Image("fill.png");
+
+middle_x = Window.GetX() + Window.GetWidth() / 2;
+middle_y = Window.GetY() + Window.GetHeight() / 2 - 60;
+
+glow.sprite = Sprite(glow.image);
+glow.sprite.SetPosition(middle_x - glow.image.GetWidth() / 2, middle_y - glow.image.GetHeight() / 2, 0);
+logo.sprite = Sprite(logo.image);
+logo.sprite.SetPosition(middle_x - logo.image.GetWidth() / 2, middle_y - logo.image.GetHeight() / 2, 1);
+name.sprite = Sprite(name.image);
+name_y = middle_y + logo.image.GetHeight() / 2 + 28;
+name.sprite.SetPosition(middle_x - name.image.GetWidth() / 2, name_y, 1);
+
+bar_x = middle_x - track.image.GetWidth() / 2;
+bar_y = name_y + name.image.GetHeight() + 32;
+track.sprite = Sprite(track.image);
+track.sprite.SetPosition(bar_x, bar_y, 1);
+fill.sprite = Sprite();
+fill.sprite.SetPosition(bar_x, bar_y, 2);
+
+# Plymouth calls this about 50 times a second: the glow breathes in and out every two seconds.
+ticks = 0;
+fun refresh () {
+    ticks++;
+    glow.sprite.SetOpacity(0.6 + 0.4 * Math.Sin(ticks / 16));
+}
+Plymouth.SetRefreshFunction(refresh);
+
+# progress goes from 0 to 1 as the system starts.
+fun boot_progress (duration, progress) {
+    width = Math.Int(track.image.GetWidth() * progress);
+    if (width < 2)
+        width = 2;
+    fill.sprite.SetImage(fill.image.Scale(width, fill.image.GetHeight()));
+}
+Plymouth.SetBootProgressFunction(boot_progress);

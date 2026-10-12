@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: 2026 Danny S
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// DiskForge's own reader of Windows' registry files: test hives Windows made (with our own keys,
+// DiskAnvil's own reader of Windows' registry files: test hives Windows made (with our own keys,
 // tests/data/registry/make.ps1), changes written back, logs put back, and damaged hives.
 //
-// DISKFORGE_REAL_HIVES=<folder>: also a real Windows' SOFTWARE, SYSTEM and NTUSER.DAT with
+// DISKANVIL_REAL_HIVES=<folder>: also a real Windows' SOFTWARE, SYSTEM and NTUSER.DAT with
 // their logs, copied from a running Windows (they aren't in the repo: they're Microsoft's).
 
 #include "testkit.h"
@@ -257,7 +257,7 @@ void damaged()
 {
     // Damaged hives: never a crash, never stuck. ASan runs this too.
     const QByteArray clean = readAll(kData + QStringLiteral("software.hiv"));
-    const int rounds = qEnvironmentVariableIntValue("DISKFORGE_FUZZ_ROUNDS") > 0 ? qEnvironmentVariableIntValue("DISKFORGE_FUZZ_ROUNDS") : 300;
+    const int rounds = qEnvironmentVariableIntValue("DISKANVIL_FUZZ_ROUNDS") > 0 ? qEnvironmentVariableIntValue("DISKANVIL_FUZZ_ROUNDS") : 300;
     QRandomGenerator rng(20261010);
     int opened = 0;
     for (int round = 0; round < rounds; ++round) {
@@ -287,9 +287,9 @@ void damaged()
 
 void realHives()
 {
-    const QString folder = qEnvironmentVariable("DISKFORGE_REAL_HIVES");
+    const QString folder = qEnvironmentVariable("DISKANVIL_REAL_HIVES");
     if (folder.isEmpty()) {
-        out << "SKIP  registry: no real Windows hives (DISKFORGE_REAL_HIVES)" << Qt::endl;
+        out << "SKIP  registry: no real Windows hives (DISKANVIL_REAL_HIVES)" << Qt::endl;
         return;
     }
     for (const QString &name : {QStringLiteral("SOFTWARE"), QStringLiteral("SYSTEM"), QStringLiteral("NTUSER.DAT")}) {

@@ -49,9 +49,9 @@ UpdateChecker::UpdateChecker(QObject *parent)
 
 void UpdateChecker::check()
 {
-    QNetworkRequest request(QUrl(QStringLiteral("https://api.github.com/repos/DannyS124/diskforge/releases/latest")));
+    QNetworkRequest request(QUrl(QStringLiteral("https://api.github.com/repos/DannyS124/diskanvil/releases/latest")));
     request.setRawHeader("Accept", "application/vnd.github+json");
-    request.setRawHeader("User-Agent", "diskforge/" APP_VERSION); // GitHub rejects requests without one
+    request.setRawHeader("User-Agent", "diskanvil/" APP_VERSION); // GitHub rejects requests without one
     request.setTransferTimeout(15000);
 
     QNetworkReply *reply = m_network.get(request);

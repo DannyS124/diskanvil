@@ -1,5 +1,5 @@
 [Desktop Entry]
 Type=Application
 Name=Desktop
-# The home screen (diskforge-live-home.desktop) is the desktop, so pcmanfm-qt doesn't draw one.
+# The home screen (diskanvil-live-home.desktop) is the desktop, so pcmanfm-qt doesn't draw one.
 Hidden=true

@@ -145,7 +145,7 @@ QString firmware::describe(const Result &r)
         return QObject::tr("No newer firmware known (fwupd's list is from %1).")
             .arg(QLocale().toString(r.listDate.date(), QLocale::ShortFormat));
     case Result::State::Available:
-        return QObject::tr("Firmware %1 is available. DiskForge doesn't install firmware: use your software center's "
+        return QObject::tr("Firmware %1 is available. DiskAnvil doesn't install firmware: use your software center's "
                            "firmware updates, or fwupdmgr update. Back up first.").arg(r.newVersion);
     case Result::State::Error:
         return QObject::tr("fwupd: %1").arg(r.error);

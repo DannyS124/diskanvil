@@ -330,7 +330,7 @@ bool putBack(const Finding &finding, const QString &backup, QString *message)
         *message = tr("a backup of it couldn't be made, so it isn't changed");
         return false;
     }
-    const QString next = finding.file + QStringLiteral(".diskforge-new");
+    const QString next = finding.file + QStringLiteral(".diskanvil-new");
     QFile::remove(next);
     if (!QFile::copy(finding.cleanCopy, next)) {
         *message = tr("Windows' copy couldn't be put there (is the drive full?)");

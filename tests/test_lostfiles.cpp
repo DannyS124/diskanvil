@@ -1076,8 +1076,8 @@ void fileSystemFuzz()
 {
     const QString data = QStringLiteral(SOURCE_DIR "/tests/data/lostfs/");
     QRandomGenerator rnd(20261010);
-    // DISKFORGE_FUZZ_ROUNDS=1000 for a longer run by hand.
-    const int rounds = qEnvironmentVariableIsSet("DISKFORGE_FUZZ_ROUNDS") ? qEnvironmentVariableIntValue("DISKFORGE_FUZZ_ROUNDS") : 60;
+    // DISKANVIL_FUZZ_ROUNDS=1000 for a longer run by hand.
+    const int rounds = qEnvironmentVariableIsSet("DISKANVIL_FUZZ_ROUNDS") ? qEnvironmentVariableIntValue("DISKANVIL_FUZZ_ROUNDS") : 60;
     int runs = 0;
     for (const QString &name : {QStringLiteral("fat12"), QStringLiteral("fat32"), QStringLiteral("exfat"), QStringLiteral("ntfs")}) {
         const QByteArray clean = unpack(data + name + QStringLiteral(".img.zst"));
@@ -1136,14 +1136,14 @@ int scanImage(const QString &path)
     QVector<lost::Found> found = quickScan(source, &volumes);
     for (const lost::Volume &v : std::as_const(volumes))
         out << v.type << " " << v.label << " at " << v.where.start << ": " << v.files << " files, " << v.deleted << " deleted" << Qt::endl;
-    // DISKFORGE_SCAN_DEEP=1: the files found by their contents too.
-    if (qEnvironmentVariableIsSet("DISKFORGE_SCAN_DEEP")) {
+    // DISKANVIL_SCAN_DEEP=1: the files found by their contents too.
+    if (qEnvironmentVariableIsSet("DISKANVIL_SCAN_DEEP")) {
         lost::DeepScan deep(source);
         QObject::connect(&deep, &lost::DeepScan::found, [&found](const QVector<lost::Found> &batch) { found += batch; });
         deep.run();
     }
-    // DISKFORGE_SCAN_PREVIEWS=1: what the preview makes of each one (here, not in the sandbox).
-    const bool previews = qEnvironmentVariableIsSet("DISKFORGE_SCAN_PREVIEWS");
+    // DISKANVIL_SCAN_PREVIEWS=1: what the preview makes of each one (here, not in the sandbox).
+    const bool previews = qEnvironmentVariableIsSet("DISKANVIL_SCAN_PREVIEWS");
     for (const lost::Found &f : found) {
         out << (f.deleted ? "deleted " : "        ") << f.folder << "/" << f.name << "  " << f.size << " bytes, condition "
             << int(f.condition) << (f.checked ? " checked" : "") << (f.nameGuessed ? " name-guessed" : "")
@@ -1340,7 +1340,7 @@ void shadowCopyFuzz()
         }
     }
     QRandomGenerator rnd(20261011);
-    const int rounds = qEnvironmentVariableIsSet("DISKFORGE_FUZZ_ROUNDS") ? qEnvironmentVariableIntValue("DISKFORGE_FUZZ_ROUNDS") : 40;
+    const int rounds = qEnvironmentVariableIsSet("DISKANVIL_FUZZ_ROUNDS") ? qEnvironmentVariableIntValue("DISKANVIL_FUZZ_ROUNDS") : 40;
     int runs = 0;
     for (int round = 0; round < rounds; ++round) {
         SparseImage broken = clean;
@@ -1461,7 +1461,7 @@ void virtualDiskFuzz()
     for (const QString &name : QDir(data).entryList({QStringLiteral("*.zst")}, QDir::Files))
         unpackSparse(data + name, dir.filePath(name.chopped(4)));
     QRandomGenerator rnd(20261012);
-    const int rounds = qEnvironmentVariableIsSet("DISKFORGE_FUZZ_ROUNDS") ? qEnvironmentVariableIntValue("DISKFORGE_FUZZ_ROUNDS") / 10 + 1 : 4;
+    const int rounds = qEnvironmentVariableIsSet("DISKANVIL_FUZZ_ROUNDS") ? qEnvironmentVariableIntValue("DISKANVIL_FUZZ_ROUNDS") / 10 + 1 : 4;
     int runs = 0;
     const QStringList files = {QStringLiteral("dynamic.vdi"), QStringLiteral("dynamic.vhd"), QStringLiteral("fixed.vhd"), QStringLiteral("dynamic.vhdx"),
                                QStringLiteral("sparse.vmdk"), QStringLiteral("stream.vmdk"), QStringLiteral("split-s001.vmdk"), QStringLiteral("plain.qcow2"),
@@ -1536,8 +1536,8 @@ int shadowImage(const QString &path)
             out << "file " << f.folder.section(QLatin1Char('/'), 1) << (f.folder.contains(QLatin1Char('/')) ? "/" : "") << f.name << " "
                 << QCryptographicHash::hash(reader.head(qint64(f.size)), QCryptographicHash::Sha256).toHex() << Qt::endl;
         }
-        // DISKFORGE_SHADOW_BLOCKS=1:106,2:10: those MiBs of those copies, 16 KiB at a time.
-        for (const QString &want : qEnvironmentVariable("DISKFORGE_SHADOW_BLOCKS").split(QLatin1Char(','), Qt::SkipEmptyParts)) {
+        // DISKANVIL_SHADOW_BLOCKS=1:106,2:10: those MiBs of those copies, 16 KiB at a time.
+        for (const QString &want : qEnvironmentVariable("DISKANVIL_SHADOW_BLOCKS").split(QLatin1Char(','), Qt::SkipEmptyParts)) {
             if (want.section(QLatin1Char(':'), 0, 0).toInt() != i + 1)
                 continue;
             const quint64 mib = want.section(QLatin1Char(':'), 1).toULongLong();
@@ -2593,8 +2593,8 @@ Repaired repaired(const char *id, const QByteArray &broken, const QByteArray &re
     QFile o(out);
     if (o.open(QIODevice::ReadOnly))
         got.data = o.readAll();
-    if (keep && qEnvironmentVariableIsSet("DISKFORGE_REPAIR_OUT") && !got.data.isEmpty()) { // to check by hand (ffprobe, pdfinfo...)
-        QFile keep(qEnvironmentVariable("DISKFORGE_REPAIR_OUT") + QStringLiteral("/repaired-") + QString::fromLatin1(id) + QLatin1Char('-')
+    if (keep && qEnvironmentVariableIsSet("DISKANVIL_REPAIR_OUT") && !got.data.isEmpty()) { // to check by hand (ffprobe, pdfinfo...)
+        QFile keep(qEnvironmentVariable("DISKANVIL_REPAIR_OUT") + QStringLiteral("/repaired-") + QString::fromLatin1(id) + QLatin1Char('-')
                    + QString::number(qHash(broken), 16) + QLatin1Char('.') + QString::fromLatin1(id));
         if (keep.open(QIODevice::WriteOnly))
             keep.write(got.data);

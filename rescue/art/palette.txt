@@ -1,7 +1,7 @@
-DiskForge Live colors. Everything on the stick uses these: the boot menu, the boot animation, the
-desktop, the icons and the DiskForge Live theme inside DiskForge.
+DiskAnvil Live colors. Everything on the stick uses these: the boot menu, the boot animation, the
+desktop, the icons and the DiskAnvil Live theme inside DiskAnvil.
 
-neon blue   #00E5FF   highlights, the selected thing, the spark itself, "Forge" in the name
+neon blue   #00E5FF   highlights, the selected thing, the spark itself, "Anvil" in the name
 blue        #1F6FFF   buttons, panels, the anvil
 baby blue   #9AD8FF   secondary text, line icons, "Disk" in the name
 red         #FF3355   anything that erases or is broken

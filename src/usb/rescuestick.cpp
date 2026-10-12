@@ -20,8 +20,10 @@ namespace {
 
 constexpr quint64 kMaxSmallFile = 4 * 1024 * 1024; // sha256sum.txt and the info file
 
-// Sticks and images made before the rename to DiskForge Live have the old name. Both work.
-const QStringList kInfoPaths = {QStringLiteral(".disk/diskforge-live"), QStringLiteral(".disk/bluespark"), QStringLiteral(".disk/diskforge-rescue")};
+// Sticks and images made before the renames (DiskForge Rescue, Bluespark, DiskForge Live) have
+// the old names. All of them work.
+const QStringList kInfoPaths = {QStringLiteral(".disk/diskanvil-live"), QStringLiteral(".disk/diskforge-live"), QStringLiteral(".disk/bluespark"),
+                                QStringLiteral(".disk/diskforge-rescue")};
 const QString kSumsPath = QStringLiteral("sha256sum.txt");
 
 QByteArray readEntry(int fd, const isofs::Entry &entry)
@@ -34,7 +36,7 @@ QByteArray readEntry(int fd, const isofs::Entry &entry)
 
 } // namespace
 
-QString rescue::rescueConfPath = QStringLiteral("/etc/diskforge-live.conf");
+QString rescue::rescueConfPath = QStringLiteral("/etc/diskanvil-live.conf");
 
 bool rescue::runningInRescue()
 {
@@ -42,7 +44,7 @@ bool rescue::runningInRescue()
 }
 
 QString rescue::bootOptionsPath = QStringLiteral("/proc/cmdline");
-QString rescue::rescanHelperPath = QStringLiteral("/usr/local/bin/diskforge-live-rescan");
+QString rescue::rescanHelperPath = QStringLiteral("/usr/local/bin/diskanvil-live-rescan");
 
 bool rescue::canRescanDrives()
 {
@@ -64,7 +66,7 @@ void rescue::rescanDrives(const QStringList &args, QObject *context, const std::
         if (error == QProcess::FailedToStart)
             finish(false);
     });
-    qCInfo(lcOps).noquote() << "diskforge-live-rescan" << args.join(QLatin1Char(' '));
+    qCInfo(lcOps).noquote() << "diskanvil-live-rescan" << args.join(QLatin1Char(' '));
     process->start(QStringLiteral("sudo"), QStringList{QStringLiteral("-n"), rescanHelperPath} + args);
 }
 
@@ -78,7 +80,7 @@ bool rescue::runningFromStick()
 
 QString rescue::notInRescueReason()
 {
-    return QObject::tr("DiskForge Live starts fresh from the stick every time, so this would only change the copy in memory.");
+    return QObject::tr("DiskAnvil Live starts fresh from the stick every time, so this would only change the copy in memory.");
 }
 
 QString rescue::runningBuildId()
@@ -98,7 +100,7 @@ rescue::Info rescue::parseInfo(const QByteArray &text)
     Info info;
     const QList<QByteArray> lines = text.split('\n');
     const QByteArray header = lines.value(0).trimmed();
-    if (header != "DiskForge Live" && header != "Bluespark" && header != "DiskForge Rescue")
+    if (header != "DiskAnvil Live" && header != "DiskForge Live" && header != "Bluespark" && header != "DiskForge Rescue")
         return info;
     for (const QByteArray &line : lines) {
         const qsizetype eq = line.indexOf('=');
@@ -141,12 +143,12 @@ QHash<QString, QByteArray> rescue::parseSums(const QByteArray &text)
 rescue::Image rescue::inspect(const QString &isoPath)
 {
     Image image;
-    // A running rescue stick's own folder (copying the stick DiskForge runs from).
+    // A running rescue stick's own folder (copying the stick DiskAnvil runs from).
     if (QFileInfo(isoPath).isDir()) {
         image.info = stickInfo(isoPath);
         QFile sums(isoPath + QLatin1Char('/') + kSumsPath);
         if (!image.info.valid() || !sums.open(QIODevice::ReadOnly)) {
-            image.error = QObject::tr("This folder doesn't hold DiskForge Live.");
+            image.error = QObject::tr("This folder doesn't hold DiskAnvil Live.");
             return image;
         }
         const QHash<QString, QByteArray> listed = parseSums(sums.read(kMaxSmallFile));
@@ -173,7 +175,7 @@ rescue::Image rescue::inspect(const QString &isoPath)
         image.info = parseInfo(readEntry(fd, *info));
     ::close(fd);
     if (!image.info.valid() || !sums) {
-        image.error = QObject::tr("This isn't a DiskForge Live image. For other ISOs, use Write Image to USB.");
+        image.error = QObject::tr("This isn't a DiskAnvil Live image. For other ISOs, use Write Image to USB.");
         return image;
     }
     for (const isofs::Entry &e : image.listing.entries) {
@@ -213,7 +215,7 @@ void rescue::StickWriter::cancel()
 
 void rescue::StickWriter::finish(bool ok, const QString &message)
 {
-    qCInfo(lcOps).noquote() << "Make a DiskForge Live USB" << (ok ? "finished:" : "failed:") << message;
+    qCInfo(lcOps).noquote() << "Make a DiskAnvil Live USB" << (ok ? "finished:" : "failed:") << message;
     emit finished(ok, message);
 }
 
@@ -241,7 +243,7 @@ void rescue::StickWriter::run()
     };
     const QHash<QString, QByteArray> sums = parseSums(readSmall(find(kSumsPath)));
     if (sums.isEmpty() || (!find(kInfoPaths[0]) && !find(kInfoPaths[1])))
-        return finish(false, tr("This isn't a DiskForge Live image."));
+        return finish(false, tr("This isn't a DiskAnvil Live image."));
     for (auto it = sums.cbegin(); it != sums.cend(); ++it) {
         if (!find(it.key()))
             return finish(false, tr("The image is damaged: %1 is missing. Download it again.").arg(it.key()));
@@ -272,7 +274,7 @@ void rescue::StickWriter::run()
         ok = copied;
         message = text;
     });
-    qCInfo(lcOps).noquote() << "Make a DiskForge Live USB: copying from" << m_source << "to" << m_root;
+    qCInfo(lcOps).noquote() << "Make a DiskAnvil Live USB: copying from" << m_source << "to" << m_root;
     m_copier = &copier;
     if (m_cancel)
         copier.cancel();
@@ -285,7 +287,7 @@ void rescue::StickWriter::run()
     QDir(m_root).mkpath(QStringLiteral("logs"));
     QFile note(m_root + QStringLiteral("/logs/README.txt"));
     if (note.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        note.write("DiskForge Live keeps its notes here: one folder for each time this stick started a PC,\n"
+        note.write("DiskAnvil Live keeps its notes here: one folder for each time this stick started a PC,\n"
                    "named by the date and the PC's model. summary.txt in each one is the place to start.\n");
         note.close();
     }

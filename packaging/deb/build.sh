@@ -31,7 +31,7 @@ cmake --build /build >>/build.log 2>&1 || { grep -E "error" /build.log | head -3
 echo "build OK, $(grep -c 'warning:' /build.log) warnings"
 failed=0
 for suite in addons gpt copy usage backup rescuemap catalog fuzz health jobs recover rescueusb stickcheck images isomode windows lostfiles viruses registry startup boot newids fat32; do
-    if QT_QPA_PLATFORM=offscreen /build/diskforge-selftest --$suite >/tmp/$suite.log 2>&1; then
+    if QT_QPA_PLATFORM=offscreen /build/diskanvil-selftest --$suite >/tmp/$suite.log 2>&1; then
         echo "  $suite: passed"
     else
         echo "  $suite: FAILED"; grep -E "^FAIL" /tmp/$suite.log | head -5; failed=1

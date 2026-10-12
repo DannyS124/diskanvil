@@ -63,8 +63,9 @@ private:
     void openClosedSets();
     QStringList m_closedNoticeKey;
     QAction *m_openSets = nullptr;
-    // DiskForge Live's write protection (writeblock.h): every drive read-only but its own stick.
+    // DiskAnvil Live's write protection (writeblock.h): every drive read-only but its own stick.
     QAction *m_writeBlock = nullptr;
+    QAction *m_remoteHelp = nullptr;
     void setWriteBlock(const QStringList &args);
     void updateWriteBlockNotice();
     QString m_writeBlockKey;

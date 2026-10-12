@@ -12,11 +12,12 @@
 #include <atomic>
 #include <functional>
 
-// DiskForge Live images (the ISO rescue/build.sh makes) and the USB sticks made from them.
+// DiskAnvil Live images (the ISO rescue/build.sh makes) and the USB sticks made from them.
 namespace rescue {
 
-// /.disk/diskforge-live (/.disk/diskforge-rescue before the rename), on the image and on a stick:
-//   DiskForge Live
+// /.disk/diskanvil-live (/.disk/diskforge-live, /.disk/bluespark or /.disk/diskforge-rescue before
+// the renames), on the image and on a stick:
+//   DiskAnvil Live
 //   version=0.5.0
 //   built=2026-10-09
 //   id=<build id>
@@ -36,11 +37,11 @@ struct Image {
     isofs::Listing listing;
     Info info;
     quint64 bytes = 0; // the files that go onto the stick
-    QString error;     // set when it isn't a DiskForge Live image (or can't be read)
+    QString error;     // set when it isn't a DiskAnvil Live image (or can't be read)
 };
 Image inspect(const QString &isoPath);
 
-// Whether DiskForge itself is running from DiskForge Live. Everything works the same there,
+// Whether DiskAnvil itself is running from DiskAnvil Live. Everything works the same there,
 // except what changes the running system itself (mounting at startup, cleaning it up, its
 // snapshots and schedules): that system starts fresh from the stick every time.
 bool runningInRescue();
@@ -54,21 +55,21 @@ QString runningBuildId();
 extern QString rescueConfPath;
 extern QString bootOptionsPath;
 
-// On DiskForge Live: diskforge-live-rescan, through sudo. "scan" asks the disk controllers to
+// On DiskAnvil Live: diskanvil-live-rescan, through sudo. "scan" asks the disk controllers to
 // look for drives again (for a drive plugged in while the PC is on), "detach sdX" lets go of a
-// drive before it's unplugged. Not on a PC: there DiskForge doesn't run anything as root.
+// drive before it's unplugged. Not on a PC: there DiskAnvil doesn't run anything as root.
 bool canRescanDrives();
 void rescanDrives(const QStringList &args, QObject *context, const std::function<void(bool ok)> &done = {});
 extern QString rescanHelperPath;
 
-// A mounted stick (or any folder) with DiskForge Live on it: its info, and how many boots
+// A mounted stick (or any folder) with DiskAnvil Live on it: its info, and how many boots
 // have left logs there.
 Info stickInfo(const QString &root);
 int logFolders(const QString &root);
 
 // Copies a rescue image's files onto a mounted, empty FAT32 stick, with filecopy: each file
 // is checked against the image's sha256sum.txt while it's copied, then read back from the
-// stick and checked again. The source is the ISO file, or (from inside DiskForge Live) the
+// stick and checked again. The source is the ISO file, or (from inside DiskAnvil Live) the
 // folder of a running rescue stick. Runs in a worker thread.
 class StickWriter : public QObject
 {
@@ -102,7 +103,7 @@ private:
 // Makes a stick start old BIOS PCs too, the way grub-install does it: GRUB's boot code in the
 // first 440 bytes of the first sector (the disk's ID and partition table stay), and its core
 // image right after, in the space before the first partition. `fd` is the whole stick,
-// writable, with an MBR partition table and 512-byte sectors (what Make a DiskForge Live USB makes).
+// writable, with an MBR partition table and 512-byte sectors (what Make a DiskAnvil Live USB makes).
 bool writeBiosBoot(int fd, const QByteArray &bootImg, const QByteArray &coreImg, QString *error);
 
 } // namespace rescue

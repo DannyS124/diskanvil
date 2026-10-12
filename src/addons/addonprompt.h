@@ -17,5 +17,5 @@ bool askRunAddon(QWidget *parent, const Addon &addon, const AddonAction &action,
 // What an action can do (admin power, a shell, the network...) and where it's offered, as HTML.
 QString addonNotes(const AddonAction &action);
 QString addonNotes(const AddonAction &action, const AddonRisks &risks);
-// The warning for an add-on that got into the folder without going through DiskForge, as HTML.
+// The warning for an add-on that got into the folder without going through DiskAnvil, as HTML.
 QString outsideNote();

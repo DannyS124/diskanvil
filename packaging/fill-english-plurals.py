@@ -2,13 +2,13 @@
 # SPDX-FileCopyrightText: 2026 Danny S
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# Fills the English plural forms in i18n/diskforge_en.ts: "%n sector(s)" becomes
+# Fills the English plural forms in i18n/diskanvil_en.ts: "%n sector(s)" becomes
 # "%n sector" / "%n sectors". Run after `cmake --build build --target update_translations`.
 import html
 import re
 import sys
 
-path = sys.argv[1] if len(sys.argv) > 1 else "i18n/diskforge_en.ts"
+path = sys.argv[1] if len(sys.argv) > 1 else "i18n/diskanvil_en.ts"
 text = open(path, encoding="utf-8").read()
 
 def fill(match):

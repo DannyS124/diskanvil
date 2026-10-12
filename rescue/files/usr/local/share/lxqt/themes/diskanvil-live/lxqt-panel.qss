@@ -1,0 +1,262 @@
+/*
+ * DiskAnvil Live's taskbar. Colours from rescue/art/palette.txt: navy panel, blue when you point at
+ * something, neon blue for what's active.
+ */
+
+LXQtPanel #BackgroundWidget {
+    background: #0d1426;
+    border-top: 1px solid #1a2a4a;
+}
+
+QToolTip {
+    color: #e6f1ff;
+    background: #0d1426;
+    border: 1px solid #1f6fff;
+    border-radius: 4px;
+    padding: 4px 6px;
+}
+
+Plugin,
+LXQtPanelPlugin {
+    padding: 0;
+    spacing: 4px;
+    qproperty-moveMarkerColor: #00e5ff;
+}
+
+Plugin > QWidget,
+Plugin > QWidget > QWidget {
+    color: #e6f1ff;
+}
+
+Plugin > QToolButton,
+Plugin > QWidget > QToolButton,
+Plugin > QWidget > QToolButton > QWidget > QToolButton,
+LXQtPanelPlugin > QToolButton {
+    margin: 2px 1px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: #e6f1ff;
+    qproperty-iconSize: 24px;
+}
+
+Plugin > QToolButton:hover,
+Plugin > QWidget > QToolButton:hover,
+LXQtPanelPlugin > QToolButton:hover {
+    background: rgba(31, 111, 255, 30%);
+    border: 1px solid rgba(31, 111, 255, 60%);
+}
+
+Plugin > QToolButton:pressed,
+Plugin > QWidget > QToolButton:pressed,
+LXQtPanelPlugin > QToolButton:pressed {
+    background: rgba(0, 229, 255, 30%);
+}
+
+/* The start button: the DiskAnvil Live logo, a little bigger than the rest. */
+#FancyMenu,
+#MainMenu {
+    qproperty-icon: url(diskanvil-live.svg);
+    qproperty-iconSize: 30px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    padding: 2px;
+    margin: 2px 4px;
+}
+
+#FancyMenu:hover,
+#MainMenu:hover {
+    background: rgba(31, 111, 255, 30%);
+}
+
+/* Windows on the taskbar: just their icons, with a line under the one in front. */
+#TaskBar QToolButton {
+    margin: 2px 1px;
+    padding: 0 4px;
+    border: none;
+    border-bottom: 3px solid transparent;
+    border-radius: 6px;
+    color: #e6f1ff;
+}
+
+#TaskBar QToolButton:hover {
+    background: rgba(31, 111, 255, 30%);
+}
+
+#TaskBar QToolButton:checked {
+    background: rgba(31, 111, 255, 22%);
+    border-bottom: 3px solid #00e5ff;
+}
+
+#TaskBar QToolButton[urgent="true"] {
+    background: rgba(255, 51, 85, 35%);
+    border-bottom: 3px solid #ff3355;
+}
+
+#TaskBar LXQtGroupPopup {
+    background: #0d1426;
+    border: 1px solid #1a2a4a;
+    border-radius: 6px;
+}
+
+#QuickLaunch QToolButton {
+    margin: 2px 1px;
+}
+
+#QuickLaunchPlaceHolder {
+    color: #7f93b5;
+}
+
+#Spacer {
+    background: transparent;
+}
+
+/* The clock, at the right like Windows 11: time on top, date under it. */
+#WorldClock,
+#WorldClockContent {
+    color: #e6f1ff;
+    margin: 0 6px;
+}
+
+#Clock #TimeLabel,
+#Clock #DateLabel {
+    color: #e6f1ff;
+}
+
+#Tray,
+#LXQtMountPlugin {
+    margin: 0 2px;
+}
+
+/* Start menu */
+LXQtFancyMenuWindow,
+QMenu {
+    background: #0d1426;
+    color: #e6f1ff;
+    border: 1px solid #1a2a4a;
+    border-radius: 8px;
+}
+
+QMenu::item {
+    padding: 6px 24px 6px 12px;
+    border-radius: 4px;
+    margin: 1px 4px;
+}
+
+QMenu::item:selected {
+    background: #1f6fff;
+    color: #ffffff;
+}
+
+QMenu::item:disabled {
+    color: #4d5f80;
+}
+
+QMenu::separator {
+    height: 1px;
+    background: #1a2a4a;
+    margin: 4px 8px;
+}
+
+#FancyMenu QLineEdit,
+#MainMenu QLineEdit {
+    color: #e6f1ff;
+    background: #060a16;
+    border: 1px solid #1a2a4a;
+    border-radius: 6px;
+    padding: 6px 8px;
+    margin: 6px;
+    selection-background-color: #1f6fff;
+}
+
+#FancyMenu QLineEdit:focus,
+#MainMenu QLineEdit:focus {
+    border: 1px solid #00e5ff;
+}
+
+#FancyMenu QListView,
+#FancyMenu #AppView,
+#FancyMenu QAbstractScrollArea {
+    background: transparent;
+    color: #e6f1ff;
+    border: none;
+    selection-background-color: #1f6fff;
+    selection-color: #ffffff;
+    outline: none;
+}
+
+#FancyMenu QListView::item {
+    padding: 4px;
+    border-radius: 4px;
+}
+
+#FancyMenu QListView::item:hover {
+    background: rgba(31, 111, 255, 30%);
+}
+
+#FancyMenu QListView::item:selected {
+    background: #1f6fff;
+    color: #ffffff;
+}
+
+#FancyMenu QScrollBar:vertical {
+    background: transparent;
+    width: 8px;
+}
+
+#FancyMenu QScrollBar::handle:vertical {
+    background: #1a2a4a;
+    border-radius: 4px;
+    min-height: 24px;
+}
+
+#FancyMenu QScrollBar::add-line,
+#FancyMenu QScrollBar::sub-line {
+    height: 0;
+}
+
+/* The disk pop-up (USB sticks plugged in). */
+#LXQtMountPopup {
+    background: #0d1426;
+    border: 1px solid #1a2a4a;
+    border-radius: 8px;
+}
+
+#LXQtMountPopup #NoDiskLabel {
+    color: #7f93b5;
+    padding: 8px;
+}
+
+#LXQtMountPopup #DiskButton,
+#LXQtMountPopup #EjectButton {
+    color: #e6f1ff;
+    border: none;
+    border-radius: 4px;
+    padding: 4px;
+}
+
+#LXQtMountPopup #DiskButton:hover,
+#LXQtMountPopup #EjectButton:hover {
+    background: #1f6fff;
+}
+
+/* The calendar under the clock. */
+QCalendarWidget QWidget {
+    color: #e6f1ff;
+    background: #0d1426;
+    alternate-background-color: #0d1426;
+}
+
+QCalendarWidget QAbstractItemView {
+    selection-background-color: #1f6fff;
+    selection-color: #ffffff;
+}
+
+QCalendarWidget #qt_calendar_navigationbar {
+    background: #060a16;
+}
+
+QCalendarWidget #qt_calendar_monthbutton,
+QCalendarWidget #qt_calendar_yearbutton {
+    color: #e6f1ff;
+}

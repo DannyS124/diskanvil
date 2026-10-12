@@ -4,7 +4,7 @@
 #pragma once
 
 // Recover Partitions: put a partition table back from the drive's own backup copy or from a
-// layout DiskForge remembered. Only the table is written; what's in the partitions isn't
+// layout DiskAnvil remembered. Only the table is written; what's in the partitions isn't
 // touched. The table that's there now is remembered first, so this can be undone too.
 
 #include "partrecover.h"

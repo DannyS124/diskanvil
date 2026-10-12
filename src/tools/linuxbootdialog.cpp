@@ -81,7 +81,7 @@ LinuxBootDialog::LinuxBootDialog(UDisks *udisks, QWidget *parent)
     QString intro = tr("For a Linux that doesn't start any more because its boot loader is gone or broken: after Windows "
                        "overwrote it, a firmware reset dropped its entry, or an update was cut short. Its own tools put it back.");
     if (!canRun())
-        intro += QStringLiteral("<br><br>") + redText(tr("A Linux's boot is repaired from outside it: start this PC from DiskForge Live "
+        intro += QStringLiteral("<br><br>") + redText(tr("A Linux's boot is repaired from outside it: start this PC from DiskAnvil Live "
                                                           "(this window can still look at what's here)."));
     layout->addWidget(wrappingLabel(intro));
     layout->addWidget(m_list, 1);
@@ -192,7 +192,7 @@ void LinuxBootDialog::showInstall(int row)
         text += steps.join(QStringLiteral("<br>"));
         if (uefi && in.espDevice.isEmpty())
             text += QStringLiteral("<br>") + redText(tr("This PC started with UEFI, but this Linux has no EFI partition in its fstab: it was "
-                                                        "installed the old BIOS way. Start DiskForge Live the same way (BIOS) to repair it."));
+                                                        "installed the old BIOS way. Start DiskAnvil Live the same way (BIOS) to repair it."));
     }
     m_plan->setText(text);
     m_repair->setEnabled(canRun() && in.problems.isEmpty() && !(uefi && in.espDevice.isEmpty()));
@@ -228,14 +228,14 @@ void LinuxBootDialog::repair()
         connect(m_run, &QProcess::readyRead, this, [this] { m_output->appendPlainText(QString::fromLocal8Bit(m_run->readAll()).trimmed()); });
         connect(m_run, &QProcess::finished, this, [this, in](int code, QProcess::ExitStatus status) {
             const QString all = m_output->toPlainText();
-            const bool ok = status == QProcess::NormalExit && code == 0 && all.contains(QLatin1String("DISKFORGE-REPAIR-DONE"));
+            const bool ok = status == QProcess::NormalExit && code == 0 && all.contains(QLatin1String("DISKANVIL-REPAIR-DONE"));
             qCInfo(lcOps).noquote() << "Repair Linux boot of" << in.name << (ok ? "done" : "failed") << all.right(2000);
             m_run->deleteLater();
             m_run = nullptr;
             m_list->setEnabled(true);
             m_udisks->refresh();
             m_output->appendPlainText(QString());
-            m_output->appendPlainText(ok ? tr("Done. Take DiskForge Live out and restart: %1 should start again.").arg(in.name)
+            m_output->appendPlainText(ok ? tr("Done. Take DiskAnvil Live out and restart: %1 should start again.").arg(in.name)
                                          : tr("It didn't finish: what its tools said is above. Nothing else was changed."));
         });
         const QStringList command = rescue::runningInRescue() ? QStringList{QStringLiteral("sudo"), QStringLiteral("-n"), QStringLiteral("bash"), QStringLiteral("-c"), script}

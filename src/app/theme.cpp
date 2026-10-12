@@ -17,7 +17,7 @@
 namespace {
 
 // Built-in themes; their names are translated here, not taken from the files.
-const QStringList kBuiltIn = {QStringLiteral("classic"), QStringLiteral("deadshadow"), QStringLiteral("diskforge-live"), QStringLiteral("high-contrast")};
+const QStringList kBuiltIn = {QStringLiteral("classic"), QStringLiteral("deadshadow"), QStringLiteral("diskanvil-live"), QStringLiteral("high-contrast")};
 
 QString builtInName(const QString &id)
 {
@@ -25,8 +25,8 @@ QString builtInName(const QString &id)
         return QCoreApplication::translate("theme", "Classic");
     if (id == QLatin1String("deadshadow"))
         return QCoreApplication::translate("theme", "Deadshadow");
-    if (id == QLatin1String("diskforge-live"))
-        return QCoreApplication::translate("theme", "DiskForge Live");
+    if (id == QLatin1String("diskanvil-live"))
+        return QCoreApplication::translate("theme", "DiskAnvil Live");
     if (id == QLatin1String("high-contrast"))
         return QCoreApplication::translate("theme", "High Contrast");
     return id;
@@ -34,7 +34,7 @@ QString builtInName(const QString &id)
 
 QSettings appSettings()
 {
-    return QSettings(QStringLiteral("diskforge"), QStringLiteral("diskforge"));
+    return QSettings(QStringLiteral("diskanvil"), QStringLiteral("diskanvil"));
 }
 
 double luminance(const QColor &c)
@@ -170,7 +170,7 @@ QVector<Theme::Choice> Theme::choices(const Addons &addons)
         Choice c{a.id, a.name, true, {}};
         if (a.outside) {
             c.usable = false;
-            c.reason = QCoreApplication::translate("theme", "Added outside DiskForge: press I Added It in Tools → Add-ons to use it");
+            c.reason = QCoreApplication::translate("theme", "Added outside DiskAnvil: press I Added It in Tools → Add-ons to use it");
         }
         out.push_back(c);
     }
@@ -217,8 +217,9 @@ void Theme::use(const QString &id, const Addons &addons)
 void Theme::restore(const Addons &addons)
 {
     QString id = appSettings().value(QStringLiteral("theme"), QStringLiteral("system")).toString();
-    if (id == QLatin1String("bluespark")) // its name before DiskForge Live
-        id = QStringLiteral("diskforge-live");
+    // Its names before: Bluespark, then DiskForge Live.
+    if (id == QLatin1String("bluespark") || id == QLatin1String("diskforge-live"))
+        id = QStringLiteral("diskanvil-live");
     use(id, addons);
 }
 
@@ -344,9 +345,9 @@ void Theme::apply(const AddonTheme &raw)
         QApplication::setPalette(QPalette());
     }
 #ifdef Q_OS_WIN
-    // Windows has no icon theme to borrow from: DiskForge's own, dark or light like the windows.
-    QIcon::setThemeName(QApplication::palette().color(QPalette::Window).lightness() < 128 ? QStringLiteral("DiskForge-Dark")
-                                                                                         : QStringLiteral("DiskForge-Light"));
+    // Windows has no icon theme to borrow from: DiskAnvil's own, dark or light like the windows.
+    QIcon::setThemeName(QApplication::palette().color(QPalette::Window).lightness() < 128 ? QStringLiteral("DiskAnvil-Dark")
+                                                                                         : QStringLiteral("DiskAnvil-Light"));
 #endif
     emit changed();
 }

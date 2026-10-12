@@ -44,7 +44,7 @@ Plan plan(const Disk &source, const Disk &target)
         return p;
     }
     if (target.isSystem) {
-        p.error = QObject::tr("%1 runs this system, so DiskForge won't write over it.").arg(shortDevice(target.device));
+        p.error = QObject::tr("%1 runs this system, so DiskAnvil won't write over it.").arg(shortDevice(target.device));
         return p;
     }
     if (target.readOnly) {

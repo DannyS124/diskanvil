@@ -1,0 +1,10 @@
+#!/bin/sh
+# Puts this build's ID in the initrd. live-boot only starts from a stick that has the same ID
+# in /.disk/live-uuid-amd64, so a second live stick in the PC can't get mixed up with ours.
+case "$1" in
+prereqs) exit 0 ;;
+esac
+. /usr/share/initramfs-tools/hook-functions
+. /etc/diskanvil-live.conf
+mkdir -p "$DESTDIR/conf"
+echo "$BUILD_ID" > "$DESTDIR/conf/uuid.conf"

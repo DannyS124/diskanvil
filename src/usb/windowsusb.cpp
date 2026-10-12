@@ -481,7 +481,7 @@ QByteArray windowsusb::unattendXml(const Options &o, const QString &archIn)
     x.setAutoFormatting(true);
     x.setAutoFormattingIndent(2);
     x.writeStartDocument();
-    x.writeComment(QStringLiteral(" Made by DiskForge's Make a Windows USB. Windows Setup reads it from the top of the stick. "));
+    x.writeComment(QStringLiteral(" Made by DiskAnvil's Make a Windows USB. Windows Setup reads it from the top of the stick. "));
     x.writeStartElement(QStringLiteral("unattend"));
     x.writeDefaultNamespace(QStringLiteral("urn:schemas-microsoft-com:unattend"));
     x.writeNamespace(QStringLiteral("http://schemas.microsoft.com/WMIConfig/2002/State"), QStringLiteral("wcm"));

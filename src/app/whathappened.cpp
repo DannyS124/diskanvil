@@ -170,7 +170,7 @@ void WhatHappenedDialog::showAdvice()
                                            {QStringLiteral("rescue-copy"), tr("Make a Rescue Copy")},
                                            {QStringLiteral("health"), tr("Disk Health")},
                                            {QStringLiteral("recover-partitions"), tr("Recover Partitions")},
-                                           {QStringLiteral("rescue-usb"), tr("Make a DiskForge Live Stick")},
+                                           {QStringLiteral("rescue-usb"), tr("Make a DiskAnvil Live Stick")},
                                            {QStringLiteral("virus-scan"), tr("Scan for Viruses")},
                                            {QStringLiteral("drivers"), tr("Windows Drivers and Services")},
                                            {QStringLiteral("save-files"), tr("Save My Files")},

@@ -202,7 +202,7 @@ bool recover::fromJson(const QJsonObject &o, Layout *l)
 
 QString recover::folder()
 {
-    return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/diskforge/layouts");
+    return QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/diskanvil/layouts");
 }
 
 QVector<recover::Layout> recover::saved(const QString &driveKey)

@@ -6,7 +6,7 @@
 // "What happened?": advice for someone who's lost files, from what happened and what kind of
 // drive it is. Honest odds (an SSD that trims erases deleted files within minutes; a hard drive
 // or memory card keeps them until they're written over), what not to do (format, repair, keep
-// using it), and which of DiskForge's tools to use, in order.
+// using it), and which of DiskAnvil's tools to use, in order.
 
 #include "udisks.h"
 

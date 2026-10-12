@@ -113,7 +113,7 @@ bool RescueMap::save(const QString &path, QString *error) const
         return false;
     }
     QTextStream out(&f);
-    out << "# Mapfile. Created by DiskForge " APP_VERSION " (GNU ddrescue format)\n"
+    out << "# Mapfile. Created by DiskAnvil " APP_VERSION " (GNU ddrescue format)\n"
         << "# Current time: " << QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")) << "\n";
     if (done())
         out << "# Finished\n";

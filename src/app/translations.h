@@ -3,6 +3,6 @@
 
 #pragma once
 
-// Installs Qt's own and DiskForge's translations for the user's language (English
+// Installs Qt's own and DiskAnvil's translations for the user's language (English
 // included: it supplies the plural forms, "1 sector" / "2 sectors").
 void installTranslations();

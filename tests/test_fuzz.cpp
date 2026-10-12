@@ -1,15 +1,15 @@
 // SPDX-FileCopyrightText: 2026 Danny S
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Crash tests. Everything DiskForge reads that someone else could have made (add-ons, the
+// Crash tests. Everything DiskAnvil reads that someone else could have made (add-ons, the
 // online list and its signature, backup descriptions, rescue maps, partition tables,
 // GitHub's update answer, mount tables, drive names) gets thousands of damaged versions of
 // a good file. Nothing may crash or hang, and nothing broken may come out looking valid.
 // release.sh also runs this in a build with AddressSanitizer, which catches memory errors
 // that don't crash.
 //
-//   DISKFORGE_FUZZ_SEED=n    repeat a run (the seed is printed)
-//   DISKFORGE_FUZZ_ROUNDS=n  rounds per kind of file (default 3000)
+//   DISKANVIL_FUZZ_SEED=n    repeat a run (the seed is printed)
+//   DISKANVIL_FUZZ_ROUNDS=n  rounds per kind of file (default 3000)
 
 #include "testkit.h"
 
@@ -114,7 +114,7 @@ QByteArray mutate(QByteArray data)
 int rounds()
 {
     bool ok = false;
-    const int n = qEnvironmentVariableIntValue("DISKFORGE_FUZZ_ROUNDS", &ok);
+    const int n = qEnvironmentVariableIntValue("DISKANVIL_FUZZ_ROUNDS", &ok);
     return ok && n > 0 ? n : 3000;
 }
 
@@ -195,8 +195,8 @@ void addonFiles(const QString &tmp)
 
 QByteArray catalogSeed()
 {
-    const QString url = QStringLiteral("https://raw.githubusercontent.com/DannyS124/diskforge-addons/0123456789abcdef0123456789abcdef01234567/addons/a/addon.json");
-    return QStringLiteral(R"({"format":"diskforge-addon-catalog","version":1,"addons":[
+    const QString url = QStringLiteral("https://raw.githubusercontent.com/DannyS124/diskanvil-addons/0123456789abcdef0123456789abcdef01234567/addons/a/addon.json");
+    return QStringLiteral(R"({"format":"diskanvil-addon-catalog","version":1,"addons":[
         {"id":"a","name":"A","version":"1.0","author":"x","description":"d","url":"%1","sha256":"%2"},
         {"id":"b-2","name":"B","version":"2","url":"%1","sha256":"%2"}]})")
         .arg(url, QString(64, QLatin1Char('a')))
@@ -244,20 +244,20 @@ void signatures(const QString &tmp)
     const QByteArray data = catalogSeed();
     writeFile(tmp + QStringLiteral("/list"), data);
     sh(QStringLiteral("ssh-keygen"), {QStringLiteral("-Y"), QStringLiteral("sign"), QStringLiteral("-f"), key, QStringLiteral("-n"),
-                                      QStringLiteral("diskforge-addons"), tmp + QStringLiteral("/list")});
+                                      QStringLiteral("diskanvil-addons"), tmp + QStringLiteral("/list")});
     const QByteArray sig = readFile(tmp + QStringLiteral("/list.sig"));
     QString error;
-    report(signature::verify(data, sig, QStringLiteral("diskforge-addons"), keys, &error), QStringLiteral("the untouched signature checks out"), error);
+    report(signature::verify(data, sig, QStringLiteral("diskanvil-addons"), keys, &error), QStringLiteral("the untouched signature checks out"), error);
 
     const QByteArray payload = signaturePayload(sig);
     int forged = 0;
     for (int i = 0; i < rounds(); ++i) {
         const QByteArray damaged = mutate(sig);
         // Only a change that leaves the signed bytes the same (spacing, say) may still pass.
-        if (signature::verify(data, damaged, QStringLiteral("diskforge-addons"), keys, nullptr) && signaturePayload(damaged) != payload)
+        if (signature::verify(data, damaged, QStringLiteral("diskanvil-addons"), keys, nullptr) && signaturePayload(damaged) != payload)
             ++forged;
         const QByteArray changed = mutate(data);
-        if (changed != data && signature::verify(changed, sig, QStringLiteral("diskforge-addons"), keys, nullptr))
+        if (changed != data && signature::verify(changed, sig, QStringLiteral("diskanvil-addons"), keys, nullptr))
             ++forged;
     }
     report(forged == 0, QStringLiteral("%1 damaged signatures and lists: none passes").arg(rounds()), QString::number(forged));
@@ -265,8 +265,8 @@ void signatures(const QString &tmp)
 
 void updateAnswers()
 {
-    const QByteArray seed = R"({"url":"https://api.github.com/repos/DannyS124/diskforge/releases/1","html_url":"https://github.com/DannyS124/diskforge/releases/tag/v0.5.0",
-        "tag_name":"v0.5.0","name":"DiskForge 0.5.0","draft":false,"prerelease":false,"assets":[{"name":"diskforge-0.5.0.tar.gz","size":123}],
+    const QByteArray seed = R"({"url":"https://api.github.com/repos/DannyS124/diskanvil/releases/1","html_url":"https://github.com/DannyS124/diskanvil/releases/tag/v0.5.0",
+        "tag_name":"v0.5.0","name":"DiskAnvil 0.5.0","draft":false,"prerelease":false,"assets":[{"name":"diskanvil-0.5.0.tar.gz","size":123}],
         "body":"notes"})";
     static const QRegularExpression version(QStringLiteral("^\\d{1,4}(\\.\\d{1,4}){1,3}$"));
     QStringList bad;
@@ -285,9 +285,9 @@ void updateAnswers()
 
 void backupDescriptions(const QString &tmp)
 {
-    const QByteArray seed = R"({"format":"diskforge-backup","version":1,"kind":"disk","device":"/dev/sdb","model":"Stick","serial":"123",
+    const QByteArray seed = R"({"format":"diskanvil-backup","version":1,"kind":"disk","device":"/dev/sdb","model":"Stick","serial":"123",
         "label":"","filesystem":"","table":"gpt","size":"1048576","sectorSize":512,"sha256":"00","fileSha256":"11",
-        "app":"DiskForge 0.5.0","created":"2026-10-08T12:00:00Z"})";
+        "app":"DiskAnvil 0.5.0","created":"2026-10-08T12:00:00Z"})";
     const QString image = tmp + QStringLiteral("/backup.img.zst");
     // A zstd frame header that records its size, then junk; describe() only reads the header.
     QByteArray frame = QByteArray::fromHex("28b52ffd2400010000");
@@ -305,7 +305,7 @@ void backupDescriptions(const QString &tmp)
         writeFile(image, mutate(frame));
         imagebackup::describe(image);
     }
-    const BackupInfo hidden = BackupInfo::fromJson(QJsonDocument::fromJson(R"({"format":"diskforge-backup","version":1,"size":"5",
+    const BackupInfo hidden = BackupInfo::fromJson(QJsonDocument::fromJson(R"({"format":"diskanvil-backup","version":1,"size":"5",
         "model":"Stick\u202e\u200bX"})").object());
     report(hidden.model == QLatin1String("StickX"), QStringLiteral("damaged backup descriptions: no crash, and hidden characters in names are dropped"),
            hidden.model);
@@ -314,7 +314,7 @@ void backupDescriptions(const QString &tmp)
 void rescueMaps(const QString &tmp)
 {
     const quint64 size = 0x1000000;
-    const QByteArray seed = "# Mapfile. Created by DiskForge\n# current_pos  current_status  current_pass\n0x00100000     ?               1\n"
+    const QByteArray seed = "# Mapfile. Created by DiskAnvil\n# current_pos  current_status  current_pass\n0x00100000     ?               1\n"
                             "#      pos        size  status\n0x00000000  0x00100000  +\n0x00100000  0x00010000  -\n"
                             "0x00110000  0x00010000  *\n0x00120000  0x00EE0000  ?\n";
     const QString file = tmp + QStringLiteral("/rescue.map");
@@ -786,7 +786,7 @@ void driveNames()
             const char32_t c = pieces[qsizetype(rng.bounded(quint32(pieces.size())))];
             name += QString::fromUcs4(&c, 1);
         }
-        // What UDisks gives DiskForge is cleaned first; check the add-on rules on raw names too.
+        // What UDisks gives DiskAnvil is cleaned first; check the add-on rules on raw names too.
         const QString label = rng.bounded(2) ? cleanName(name) : name;
         if (hasHiddenCharacters(cleanName(name)) || cleanName(cleanName(name)) != cleanName(name))
             bad << QStringLiteral("cleanName");
@@ -891,10 +891,10 @@ void fuzzTests()
 {
     bool given = false;
     // Unsigned: half the seeds it prints are above INT_MAX, and those have to replay too.
-    const quint32 seed = qEnvironmentVariable("DISKFORGE_FUZZ_SEED").toUInt(&given);
+    const quint32 seed = qEnvironmentVariable("DISKANVIL_FUZZ_SEED").toUInt(&given);
     const quint32 used = given ? seed : QRandomGenerator::system()->generate();
     rng.seed(used);
-    out << "seed " << used << " (DISKFORGE_FUZZ_SEED=" << used << " repeats this run)" << Qt::endl;
+    out << "seed " << used << " (DISKANVIL_FUZZ_SEED=" << used << " repeats this run)" << Qt::endl;
 
     QTemporaryDir tmp;
     QElapsedTimer timer;

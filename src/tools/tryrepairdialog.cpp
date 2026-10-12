@@ -72,7 +72,7 @@ TryRepairDialog::TryRepairDialog(const QString &device, const QString &fsType, c
         m_status->setText(tr("Repairing the stand-in…"));
         // Room for the repair's changes: what it writes, kept in memory, up to 2 GB.
         run(tryrepair::startScript(m_device, m_fsType, 2ull * 1024 * 1024 * 1024), [this](const QString &out) {
-            m_started = out.contains(QLatin1String("DISKFORGE-TRY-READY"));
+            m_started = out.contains(QLatin1String("DISKANVIL-TRY-READY"));
             if (!m_started) {
                 m_status->setText(redText(tr("The stand-in couldn't be made: what was said is above. The drive wasn't touched.")));
                 return;
@@ -85,7 +85,7 @@ TryRepairDialog::TryRepairDialog(const QString &device, const QString &fsType, c
     });
     connect(m_look, &QPushButton::clicked, this, [this] {
         run(tryrepair::lookScript(m_fsType), [this](const QString &out) {
-            if (out.contains(QLatin1String("DISKFORGE-TRY-MOUNTED")))
+            if (out.contains(QLatin1String("DISKANVIL-TRY-MOUNTED")))
                 QDesktopServices::openUrl(QUrl::fromLocalFile(QLatin1String(tryrepair::kMount)));
             else
                 m_status->setText(redText(tr("The result couldn't be mounted to look at: the repair may have left it unreadable. "

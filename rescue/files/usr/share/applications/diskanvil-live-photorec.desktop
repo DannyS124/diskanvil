@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Recover Files
+GenericName=PhotoRec
+Comment=Get deleted files back, or files from a formatted drive
+Exec=qterminal -e sudo photorec
+Icon=diskanvil-live-recover
+Categories=System;

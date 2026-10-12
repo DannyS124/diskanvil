@@ -42,7 +42,7 @@ struct Entry {
 struct Header {
     quint64 lba = 0;
     bool present = false;     // "EFI PART" is there
-    bool sizeOk = false;      // a header size DiskForge can check
+    bool sizeOk = false;      // a header size DiskAnvil can check
     bool headerCrcOk = false;
     quint32 revision = 0;
     quint32 headerSize = 0;
@@ -98,7 +98,7 @@ QString guidText(const char *p); // the mixed-endian GPT form
 QString hexDump(const QByteArray &data, quint64 firstOffset);
 
 // --- Writing a table back (Recover Partitions) ---------------------------------------
-// Both work on the fd DiskForge already holds, with exact sector positions. They write the
+// Both work on the fd DiskAnvil already holds, with exact sector positions. They write the
 // backup first, so a write cut off halfway still leaves one good copy.
 
 bool guidBytes(const QString &text, char *out); // the mixed-endian GPT form; false if malformed

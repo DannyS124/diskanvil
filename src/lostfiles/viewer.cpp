@@ -48,10 +48,10 @@
 #include <QVBoxLayout>
 #include <QWheelEvent>
 
-#ifdef DISKFORGE_PDF
+#ifdef DISKANVIL_PDF
 #include <poppler-qt6.h>
 #endif
-#ifdef DISKFORGE_MEDIA
+#ifdef DISKANVIL_MEDIA
 #include <QAudioOutput>
 #include <QMediaPlayer>
 #include <QVideoWidget>
@@ -431,7 +431,7 @@ public:
     bool load(const QString &path, QString *why)
     {
         clear();
-#ifdef DISKFORGE_PDF
+#ifdef DISKANVIL_PDF
         m_document = Poppler::Document::load(path);
         if (!m_document) {
             *why = viewer::tr("This PDF can't be shown: it may be damaged.");
@@ -460,7 +460,7 @@ public:
         return !m_pages.isEmpty();
 #else
         Q_UNUSED(path)
-        *why = viewer::tr("PDF pages can't be shown: this DiskForge was built without poppler.");
+        *why = viewer::tr("PDF pages can't be shown: this DiskAnvil was built without poppler.");
         return false;
 #endif
     }
@@ -470,7 +470,7 @@ public:
         for (QLabel *page : std::as_const(m_pages))
             delete page;
         m_pages.clear();
-#ifdef DISKFORGE_PDF
+#ifdef DISKANVIL_PDF
         m_document.reset();
 #endif
     }
@@ -492,7 +492,7 @@ private:
     // Points to pixels: 1.0 is the page's printed size on a 96-dpi screen.
     double currentZoom() const
     {
-#ifdef DISKFORGE_PDF
+#ifdef DISKANVIL_PDF
         if (m_zoom > 0 || !m_document || m_document->numPages() == 0)
             return m_zoom > 0 ? m_zoom : 1.0;
         std::unique_ptr<Poppler::Page> first(m_document->page(0));
@@ -511,7 +511,7 @@ private:
 
     void relayout()
     {
-#ifdef DISKFORGE_PDF
+#ifdef DISKANVIL_PDF
         if (!m_document)
             return;
         const double zoom = currentZoom();
@@ -528,7 +528,7 @@ private:
 
     void drawVisible()
     {
-#ifdef DISKFORGE_PDF
+#ifdef DISKANVIL_PDF
         if (!m_document)
             return;
         const double zoom = currentZoom();
@@ -565,7 +565,7 @@ private:
     QVector<QLabel *> m_pages;
     double m_zoom = 0; // 0: fitted to the width
     QTimer m_draw;
-#ifdef DISKFORGE_PDF
+#ifdef DISKANVIL_PDF
     std::unique_ptr<Poppler::Document> m_document;
 #endif
 };
@@ -590,7 +590,7 @@ public:
         m_message->setWordWrap(true);
         m_message->setAlignment(Qt::AlignCenter);
         m_message->hide();
-#ifdef DISKFORGE_MEDIA
+#ifdef DISKANVIL_MEDIA
         m_player = new QMediaPlayer(this);
         m_audio = new QAudioOutput(this);
         m_video = new QVideoWidget;
@@ -622,7 +622,7 @@ public:
         QObject::connect(m_play, &QToolButton::clicked, this, [this] { playPause(); });
         QObject::connect(m_volume, &QSlider::valueChanged, this, [this](int v) { m_audio->setVolume(v / 100.0f); });
 #else
-        m_message->setText(viewer::tr("Films and songs can't be played here: this DiskForge was built without Qt Multimedia. What's known about it is "
+        m_message->setText(viewer::tr("Films and songs can't be played here: this DiskAnvil was built without Qt Multimedia. What's known about it is "
                               "on the right."));
         m_message->show();
         m_play->setEnabled(false);
@@ -665,7 +665,7 @@ public:
                                               : QPixmap::fromImage(cover.scaled(480, 480, Qt::KeepAspectRatio, Qt::SmoothTransformation)));
             m_screen->setCurrentWidget(m_cover);
         }
-#ifdef DISKFORGE_MEDIA
+#ifdef DISKANVIL_MEDIA
         if (film)
             m_screen->setCurrentWidget(m_video);
         m_player->setSource(QUrl::fromLocalFile(path));
@@ -680,7 +680,7 @@ public:
 
     void stop()
     {
-#ifdef DISKFORGE_MEDIA
+#ifdef DISKANVIL_MEDIA
         m_player->stop();
         m_player->setSource(QUrl());
 #endif
@@ -688,7 +688,7 @@ public:
 
     void playPause()
     {
-#ifdef DISKFORGE_MEDIA
+#ifdef DISKANVIL_MEDIA
         if (m_player->playbackState() == QMediaPlayer::PlayingState)
             m_player->pause();
         else
@@ -698,7 +698,7 @@ public:
 
     bool playing() const
     {
-#ifdef DISKFORGE_MEDIA
+#ifdef DISKANVIL_MEDIA
         return m_player->playbackState() == QMediaPlayer::PlayingState;
 #else
         return false;
@@ -708,7 +708,7 @@ public:
     QString problem() const { return m_message->isVisible() ? m_message->text() : QString(); }
 
 private:
-#ifdef DISKFORGE_MEDIA
+#ifdef DISKANVIL_MEDIA
     void showState()
     {
         const bool playing = m_player->playbackState() == QMediaPlayer::PlayingState;

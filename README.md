@@ -1,7 +1,7 @@
 <p align="center">
-  <img src="data/io.github.DannyS124.DiskForge.svg" width="96" alt="DiskForge">
+  <img src="data/io.github.DannyS124.DiskAnvil.svg" width="96" alt="DiskAnvil">
 </p>
-<h1 align="center">DiskForge</h1>
+<h1 align="center">DiskAnvil</h1>
 <p align="center">A disk manager for Linux and Windows that looks and works like Windows Disk Management,<br>plus a rescue USB stick that can start any PC and fix its drives.</p>
 
 I've been on Arch for a while and wanted something simple for managing drives without going to the terminal, so I
@@ -9,7 +9,9 @@ made this. It does the everyday stuff, but also the things you need when a drive
 are gone. It never runs as root: changes go through udisks2 with the normal password prompt, and the drive your
 system runs from is locked so you can't format it by accident. It runs on Windows too ([see below](#windows)).
 
-![DiskForge](docs/screenshot.png)
+It was called DiskForge up to 0.5.1. Same program, new name: settings move over by themselves.
+
+![DiskAnvil](docs/screenshot.png)
 
 ## What it does
 
@@ -38,13 +40,13 @@ What each file system supports:
 - <img src="docs/icons/badsectors.svg" width="22" height="22" align="top" alt="">&nbsp; **Scan for Bad Sectors**: reads every sector and draws a map (fine, slow, unreadable). Repair rewrites the unreadable blocks so the drive swaps in spare ones, and keeps everything around them
 - <img src="docs/icons/firmware.svg" width="22" height="22" align="top" alt="">&nbsp; **Firmware and self-tests**: runs the drive's own self-tests (short, long, and conveyance on hard drives), lists the last ones, turns SMART on if it's off, and checks for firmware updates through fwupd
 - <img src="docs/icons/benchmark.svg" width="22" height="22" align="top" alt="">&nbsp; **Benchmark**: read speed on any drive, plus an optional write test with a temporary file
-- <img src="docs/icons/settings.svg" width="22" height="22" align="top" alt="">&nbsp; **Drive settings**: power saving, the write cache and read-ahead for every SATA drive, SSDs too, plus spin-down, seek noise and Sleep Now for hard drives. DiskForge Live also finds a hidden area (HPA) at the end of a drive and can give that space back
+- <img src="docs/icons/settings.svg" width="22" height="22" align="top" alt="">&nbsp; **Drive settings**: power saving, the write cache and read-ahead for every SATA drive, SSDs too, plus spin-down, seek noise and Sleep Now for hard drives. DiskAnvil Live also finds a hidden area (HPA) at the end of a drive and can give that space back
 
 ### <img src="docs/icons/partitions.svg" width="28" height="28" align="top" alt="">&nbsp; Repair and rescue
 
 - <img src="docs/icons/findfiles.svg" width="22" height="22" align="top" alt="">&nbsp; **Find Lost Files**: gets deleted files back with their names and folders from FAT, exFAT and NTFS (the Recycle Bin too), from Windows' earlier versions of a drive, and by what's inside them when a drive was formatted or won't open. It reads virtual machines' disks, previews pictures, PDFs, documents, music and films, says if each file looks complete, and only ever reads the drive it looks through
 - <img src="docs/icons/virus.svg" width="22" height="22" align="top" alt="">&nbsp; **Scan for Viruses**: ClamAV (or Microsoft Defender on Windows) on a drive or folder, plus everything that starts with Windows, its boot files and Secure Boot. It finds files dressed up as others (`invoice.pdf.exe`), switches startup entries off with a backup, and deletes nothing until you've seen the list
-- <img src="docs/icons/partitions.svg" width="22" height="22" align="top" alt="">&nbsp; **Recover Partitions**: puts a lost partition table back from GPT's backup copy, from a layout DiskForge saw before (it keeps the last 10), or by scanning the drive. It remembers the old table, so you can undo it
+- <img src="docs/icons/partitions.svg" width="22" height="22" align="top" alt="">&nbsp; **Recover Partitions**: puts a lost partition table back from GPT's backup copy, from a layout DiskAnvil saw before (it keeps the last 10), or by scanning the drive. It remembers the old table, so you can undo it
 - <img src="docs/icons/rescuecopy.svg" width="22" height="22" align="top" alt="">&nbsp; **Rescue Copy**: copies a failing drive to an image file or another drive, easy parts first. It can stop and carry on later, its map file works with GNU ddrescue, and it can go easy on a hot or struggling drive
 - <img src="docs/icons/repair.svg" width="22" height="22" align="top" alt="">&nbsp; **Check and Repair**: runs the file system's own checker (see the table above)
 - <img src="docs/icons/inspect.svg" width="22" height="22" align="top" alt="">&nbsp; **Inspect Partition Table**: shows the MBR, both GPT copies with their checksums, and any sector in hex. Read-only, so it works on the system drive too
@@ -68,7 +70,7 @@ files that FAT, exFAT or NTFS still remember come back with their real names and
 - <img src="docs/icons/writeimage.svg" width="22" height="22" align="top" alt="">&nbsp; **Write Image to USB**: .iso and .img files, also compressed (.xz, .gz, .bz2, .lzma, .zst, .zip), checked after writing against an MD5, SHA-1, SHA-256 or SHA-512 checksum or a SHA256SUMS file. It can also copy a Linux ISO's files so the stick stays usable, with persistence for Ubuntu and Debian live sticks
 - <img src="docs/icons/windows.svg" width="22" height="22" align="top" alt="">&nbsp; **Make a Windows USB**: a Windows 10 or 11 install stick that starts with Secure Boot on. Windows 11 options: skip the TPM, Secure Boot and RAM check, no Microsoft account, a local account, skip the privacy questions, no automatic BitLocker
 - <img src="docs/icons/checkstick.svg" width="22" height="22" align="top" alt="">&nbsp; **Check a USB Stick**: finds bad spots and fake sticks that claim more space than they have, says how much a fake one really holds, and can make it safe to use
-- <img src="docs/icons/livestick.svg" width="22" height="22" align="top" alt="">&nbsp; **Make a DiskForge Live USB**: puts the rescue system on a stick as normal files and makes it start UEFI and old BIOS PCs (more below)
+- <img src="docs/icons/livestick.svg" width="22" height="22" align="top" alt="">&nbsp; **Make a DiskAnvil Live USB**: puts the rescue system on a stick as normal files and makes it start UEFI and old BIOS PCs (more below)
 
 ### <img src="docs/icons/backup.svg" width="28" height="28" align="top" alt="">&nbsp; Backups, cleanup and erasing
 
@@ -85,7 +87,7 @@ files that FAT, exFAT or NTFS still remember come back with their real names and
 ### <img src="docs/icons/addons.svg" width="28" height="28" align="top" alt="">&nbsp; Extras
 
 - <img src="docs/icons/addons.svg" width="22" height="22" align="top" alt="">&nbsp; **Add-ons**: your own actions in the menus, from a JSON file or the Add-on Maker, plus a signed online list to install them from. Look-only ones run in a read-only sandbox ([docs/ADDONS.md](docs/ADDONS.md))
-- <img src="docs/icons/themes.svg" width="22" height="22" align="top" alt="">&nbsp; **Themes**: System, Classic, Deadshadow, High Contrast and DiskForge Live, or make your own
+- <img src="docs/icons/themes.svg" width="22" height="22" align="top" alt="">&nbsp; **Themes**: System, Classic, Deadshadow, High Contrast and DiskAnvil Live, or make your own
 - <img src="docs/icons/raid.svg" width="22" height="22" align="top" alt="">&nbsp; **RAID and LVM**: software RAID arrays with their status and a check button, and LVM volume groups
 
 ## Getting it
@@ -93,20 +95,20 @@ files that FAT, exFAT or NTFS still remember come back with their real names and
 ### Arch
 This installs the latest release:
 ```
-git clone https://github.com/DannyS124/diskforge.git
-cd diskforge/packaging/arch
+git clone https://github.com/DannyS124/diskanvil.git
+cd diskanvil/packaging/arch
 makepkg -si
 ```
 The PKGBUILD checks the release's sha256 and won't build if it doesn't match.
 
 ### Other distros
-Every release has an AppImage and a Flatpak on the [Releases page](https://github.com/DannyS124/diskforge/releases).
+Every release has an AppImage and a Flatpak on the [Releases page](https://github.com/DannyS124/diskanvil/releases).
 For Debian and Ubuntu, `packaging/deb/build.sh` builds a .deb (it needs podman and builds in a Debian container).
 They're not on Flathub, because a disk manager needs more access than Flathub allows. In the Flatpak, Disk Usage
 only sees your home folder and mounted drives, and add-ons need one extra permission (see Help → Problems).
 
 ### Extra packages for some features
-DiskForge never installs anything by itself. If a feature needs something, it tells you which package. These are
+DiskAnvil never installs anything by itself. If a feature needs something, it tells you which package. These are
 the ones it can use (Arch names):
 
 | For | Install |
@@ -122,43 +124,43 @@ the ones it can use (Arch names):
 | More picture kinds in previews (WebP, TIFF...), and a frame from films | `qt6-imageformats`, `ffmpeg` |
 
 ### Windows
-DiskForge runs on Windows too: 64-bit Windows 10 or 11 (I test it on 11). Each release has two downloads for it:
+DiskAnvil runs on Windows too: 64-bit Windows 10 or 11 (I test it on 11). Each release has two downloads for it:
 
-- `DiskForge-<version>.msi` installs it like any other program, into Program Files with a Start menu entry, plus a
+- `DiskAnvil-<version>.msi` installs it like any other program, into Program Files with a Start menu entry, plus a
   desktop shortcut if you leave that box ticked. Settings → Apps removes it again, and a newer .msi replaces an
   older one.
-- `DiskForge-<version>-windows.zip` runs without installing: unpack it anywhere and start `diskforge.exe`.
+- `DiskAnvil-<version>-windows.zip` runs without installing: unpack it anywhere and start `diskanvil.exe`.
 
 The installer isn't signed yet, so Windows warns you about it: SmartScreen says "Windows protected your PC" (click
-More info, then Run anyway), and the admin prompt says the publisher is unknown. DiskForge asks for admin rights
+More info, then Run anyway), and the admin prompt says the publisher is unknown. DiskAnvil asks for admin rights
 every time it starts, because Windows only lets admins work with drives directly.
 
 Most of it works the same as on Linux. What's different:
 
 - Left out, because they're Linux things: LUKS encryption, LVM and RAID, Btrfs snapshots, mount at startup, add-ons,
   Quick Fixes, the drive settings and the firmware check
-- Formatting as ext4, Btrfs or XFS, and a drive's own Secure Erase, can't be done from a running Windows: DiskForge
-  says so and points you to DiskForge Live (or Wipe Disk)
+- Formatting as ext4, Btrfs or XFS, and a drive's own Secure Erase, can't be done from a running Windows: DiskAnvil
+  says so and points you to DiskAnvil Live (or Wipe Disk)
 - Only on Windows: Change BitLocker Password, Optimize Drives with Windows' own weekly task, and Disk Cleanup of
   Windows' temporary files, the Recycle Bin, error reports and update files
-- Windows won't format FAT32 over 32 GB, so DiskForge does it with its own formatter
+- Windows won't format FAT32 over 32 GB, so DiskAnvil does it with its own formatter
 - Scan for Viruses uses Microsoft Defender when ClamAV isn't installed
 
-## <img src="rescue/art/diskforge-live-icon.svg" width="32" height="32" align="top" alt="">&nbsp; DiskForge Live
+## <img src="rescue/art/diskanvil-live-icon.svg" width="32" height="32" align="top" alt="">&nbsp; DiskAnvil Live
 
-![DiskForge Live's home screen](docs/diskforge-live.png)
+![DiskAnvil Live's home screen](docs/diskanvil-live.png)
 
-DiskForge Live is a small Linux system on a USB stick, with DiskForge and a few other repair tools on it. It starts
+DiskAnvil Live is a small Linux system on a USB stick, with DiskAnvil and a few other repair tools on it. It starts
 any PC, new or old, even one whose own system won't start, and it opens on the screen above. To make one:
 
-1. Download `diskforge-live-<version>.iso` from the [Releases page](https://github.com/DannyS124/diskforge/releases).
-2. In DiskForge, go to File → Make a DiskForge Live USB, pick the ISO and the stick, and type the stick's name to
+1. Download `diskanvil-live-<version>.iso` from the [Releases page](https://github.com/DannyS124/diskanvil/releases).
+2. In DiskAnvil, go to File → Make a DiskAnvil Live USB, pick the ISO and the stick, and type the stick's name to
    confirm.
 3. Plug the stick into the PC you want to fix, turn it on and press its boot menu key (usually F12, F11, F9 or Esc),
    then pick the stick.
 
 Made this way, the stick still works for files and keeps logs of every start. Rufus, balenaEtcher or dd work too,
-but then the stick is read-only. More in [docs/DISKFORGE-LIVE.md](docs/DISKFORGE-LIVE.md).
+but then the stick is read-only. More in [docs/DISKANVIL-LIVE.md](docs/DISKANVIL-LIVE.md).
 
 ## How do I...
 
@@ -173,7 +175,7 @@ and one new partition.
 **Erase a drive for good?** Wipe Disk is enough for a hard drive. For an SSD use Secure Erase, which has its own guide
 with pictures: [docs/SECURE-ERASE.md](docs/SECURE-ERASE.md).
 
-**Check a Windows PC for viruses?** Start it from DiskForge Live and use Scan for Viruses. Windows isn't running then,
+**Check a Windows PC for viruses?** Start it from DiskAnvil Live and use Scan for Viruses. Windows isn't running then,
 so nothing on it can hide, and it also goes through what starts with Windows and its boot files.
 
 **Save what's left on a dying drive?** Rescue Copy it to an image file or another drive, then open the copy and work
@@ -190,14 +192,14 @@ on tiling window managers you have to start one yourself (polkit-kde-agent, polk
 
 **A drive is missing.** Press F5. Empty card readers are hidden on purpose.
 
-**Something else.** Open an issue. If it's about a specific drive, paste the output of `diskforge --dump`. If it went
-wrong while DiskForge was doing something, run `diskforge --log ~/diskforge.log`, do it again and attach the log. It
-lists what DiskForge asked the system to do and what came back, never passwords.
+**Something else.** Open an issue. If it's about a specific drive, paste the output of `diskanvil --dump`. If it went
+wrong while DiskAnvil was doing something, run `diskanvil --log ~/diskanvil.log`, do it again and attach the log. It
+lists what DiskAnvil asked the system to do and what came back, never passwords.
 
 ## Updating
 Help → Check for Updates tells you when there's a new version. You don't need to uninstall anything first:
 ```
-cd diskforge && git pull
+cd diskanvil && git pull
 cd packaging/arch && makepkg -si
 ```
 On Windows, run the new .msi: it replaces the old version and keeps your settings.
@@ -209,16 +211,16 @@ poppler-qt6 for PDF pages in Find Lost Files' previews (it builds without it). O
 ```
 cmake -S . -B build
 cmake --build build
-./build/diskforge
+./build/diskanvil
 ```
-`sudo ./build/diskforge-selftest` runs every operation on a throwaway disk image, so you can test changes without
+`sudo ./build/diskanvil-selftest` runs every operation on a throwaway disk image, so you can test changes without
 touching a real drive. `packaging/release.sh` lists the other test suites.
 
 The Windows version is built on Linux too: `packaging/windows/build.sh` cross-compiles it with MinGW-w64, using Qt
 and the other libraries from MSYS2, and makes the installer with msitools when it's there.
 
 ## Support
-DiskForge is free and it's staying free. If it got your files back or saved you a trip to the computer shop and you
+DiskAnvil is free and it's staying free. If it got your files back or saved you a trip to the computer shop and you
 want to say thanks, you can buy me a coffee on Ko-fi. It helps me keep working on it.
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/K0C528JI83)

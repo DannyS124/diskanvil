@@ -1,11 +1,11 @@
 name: Feature request
-description: An idea for something DiskForge should do
+description: An idea for something DiskAnvil should do
 labels: [enhancement]
 body:
   - type: textarea
     id: idea
     attributes:
-      label: What would you like DiskForge to do?
+      label: What would you like DiskAnvil to do?
     validations:
       required: true
   - type: textarea

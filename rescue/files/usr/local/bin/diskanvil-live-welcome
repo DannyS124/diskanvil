@@ -1,0 +1,21 @@
+#!/bin/bash
+# What's on the text console: the boot menu's "text mode", or when the desktop won't start.
+. /etc/diskanvil-live.conf
+[ "${1:-}" = --short ] || cat <<TEXT
+
+DiskAnvil Live $VERSION, text mode
+
+TEXT
+cat <<'TEXT'
+Some things that work from here (sudo doesn't ask for a password):
+  sudo photorec               get deleted files back
+  sudo testdisk               find lost partitions, fix boot sectors
+  sudo smartctl -a /dev/sda   a drive's health
+  sudo ddrescue -h            copy a failing drive
+  lsblk                       list the drives
+  nmtui                       connect to Wi-Fi
+  diskanvil-live-logs         save the logs to the stick
+  startx                      try the desktop anyway
+  reboot, poweroff
+
+TEXT

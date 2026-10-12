@@ -53,7 +53,7 @@ CertificateDialog::CertificateDialog(UDisks *udisks, const erasure::Record &reco
     m_summary->setObjectName(QStringLiteral("summary"));
     m_by->setObjectName(QStringLiteral("by"));
     m_for->setObjectName(QStringLiteral("for"));
-    m_by->setText(QSettings(QStringLiteral("diskforge"), QStringLiteral("diskforge")).value(QStringLiteral("certificates/by")).toString());
+    m_by->setText(QSettings(QStringLiteral("diskanvil"), QStringLiteral("diskanvil")).value(QStringLiteral("certificates/by")).toString());
     m_notes->setMaximumHeight(70);
     m_check->setObjectName(QStringLiteral("check"));
     m_check->setToolTip(tr("Reads it back in a hundred places, the very start and end too, to see they're all zeros"));
@@ -62,7 +62,7 @@ CertificateDialog::CertificateDialog(UDisks *udisks, const erasure::Record &reco
     auto *save = new QPushButton(tr("Save as PDF…"));
     save->setObjectName(QStringLiteral("save"));
     connect(save, &QPushButton::clicked, this, [this] {
-        QSettings(QStringLiteral("diskforge"), QStringLiteral("diskforge")).setValue(QStringLiteral("certificates/by"), m_by->text().trimmed());
+        QSettings(QStringLiteral("diskanvil"), QStringLiteral("diskanvil")).setValue(QStringLiteral("certificates/by"), m_by->text().trimmed());
         const QString name = tr("Erasure %1 %2.pdf").arg(m_record.serial.isEmpty() ? m_record.model : m_record.serial, m_record.finished.toString(QStringLiteral("yyyy-MM-dd")));
         if (pdfreport::saveAs(this, html(), name, windowTitle()))
             accept();

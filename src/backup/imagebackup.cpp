@@ -36,7 +36,7 @@ QString hex(const QByteArray &hash)
 QJsonObject BackupInfo::toJson() const
 {
     return {
-        {QStringLiteral("format"), QStringLiteral("diskforge-backup")},
+        {QStringLiteral("format"), QStringLiteral("diskanvil-backup")},
         {QStringLiteral("version"), kFormatVersion},
         {QStringLiteral("kind"), kind},
         {QStringLiteral("device"), device},
@@ -57,12 +57,12 @@ QJsonObject BackupInfo::toJson() const
 BackupInfo BackupInfo::fromJson(const QJsonObject &j)
 {
     BackupInfo i;
-    if (j.value(QStringLiteral("format")).toString() != QLatin1String("diskforge-backup")) {
-        i.error = QObject::tr("Not a DiskForge backup description");
+    if (j.value(QStringLiteral("format")).toString() != QLatin1String("diskanvil-backup")) {
+        i.error = QObject::tr("Not a DiskAnvil backup description");
         return i;
     }
     if (j.value(QStringLiteral("version")).toInt() > kFormatVersion) {
-        i.error = QObject::tr("Made by a newer DiskForge; update to restore it");
+        i.error = QObject::tr("Made by a newer DiskAnvil; update to restore it");
         return i;
     }
     // The file could come from anywhere, so the names in it are cleaned like a drive's.
@@ -144,7 +144,7 @@ BackupInfo infoFor(const Disk &disk, const Volume *volume)
     i.tableType = volume ? QString() : disk.tableType;
     i.size = volume ? volume->size : disk.size;
     i.sectorSize = disk.sectorSize;
-    i.app = QStringLiteral("DiskForge " APP_VERSION);
+    i.app = QStringLiteral("DiskAnvil " APP_VERSION);
     i.created = QDateTime::currentDateTimeUtc();
     return i;
 }

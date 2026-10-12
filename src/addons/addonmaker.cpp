@@ -436,7 +436,7 @@ AddonMaker::AddonMaker(Addons *addons, const Addon *existing, Tester tester, QWi
     // "How it runs".
     m_output->addItem(tr("Just start it (no output shown)"), QStringLiteral("none"));
     m_output->addItem(tr("In a terminal window"), QStringLiteral("terminal"));
-    m_output->addItem(tr("In a DiskForge window"), QStringLiteral("window"));
+    m_output->addItem(tr("In a DiskAnvil window"), QStringLiteral("window"));
     m_confirm->setPlaceholderText(tr("Optional question before it runs, like: Copy everything on {label}?"));
     auto *how = new QWidget;
     auto *howForm = new QFormLayout(how);
@@ -758,7 +758,7 @@ void AddonMaker::save()
         return;
     }
     if (m_keepOutsideFlag)
-        warnPlain(this, windowTitle(), tr("Saved. It's still marked as added outside DiskForge until you press I Added It in the Add-ons window."));
+        warnPlain(this, windowTitle(), tr("Saved. It's still marked as added outside DiskAnvil until you press I Added It in the Add-ons window."));
     m_addons->load();
     accept();
 }

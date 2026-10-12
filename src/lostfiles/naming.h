@@ -8,7 +8,7 @@
 // and title, a film's title or recording date, a document's title (or its first words), an
 // email's subject. And the date the file carries, for putting found files in date order.
 //
-// This runs in DiskForge itself, not in the preview helper, so it only uses our own readers
+// This runs in DiskAnvil itself, not in the preview helper, so it only uses our own readers
 // (EXIF, the media headers, compound files, emails, and a PDF's or Office file's own summary),
 // which are written for damaged and hostile files and fuzzed; never another program's decoders.
 

@@ -26,7 +26,7 @@ class QTreeWidget;
 class UDisks;
 
 // Scan for Viruses: pick a drive (Windows' first) or a folder, scan it against the antivirus's
-// list, and delete what's found if you want to. On DiskForge Live that's a Windows that isn't
+// list, and delete what's found if you want to. On DiskAnvil Live that's a Windows that isn't
 // running, so nothing it does can hide; on a PC, its other drives. Drives are mounted read-only
 // for the scan, and only made writable again to delete what was ticked.
 class VirusDialog : public QDialog

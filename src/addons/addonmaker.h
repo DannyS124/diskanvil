@@ -4,7 +4,7 @@
 #pragma once
 
 // Make or edit an add-on in a window instead of writing JSON. What it saves is checked with
-// the same parser everything else uses, so it can't save something DiskForge would refuse.
+// the same parser everything else uses, so it can't save something DiskAnvil would refuse.
 
 #include "addons.h"
 

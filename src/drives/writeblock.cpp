@@ -18,13 +18,13 @@ namespace {
 
 QString state()
 {
-    const QString test = qEnvironmentVariable("DISKFORGE_WRITEBLOCK_STATE");
-    return test.isEmpty() ? QStringLiteral("/run/diskforge-live") : test;
+    const QString test = qEnvironmentVariable("DISKANVIL_WRITEBLOCK_STATE");
+    return test.isEmpty() ? QStringLiteral("/run/diskanvil-live") : test;
 }
 
 QString helper()
 {
-    return helperForTest.isEmpty() ? QStringLiteral("/usr/local/bin/diskforge-live-writeblock") : helperForTest;
+    return helperForTest.isEmpty() ? QStringLiteral("/usr/local/bin/diskanvil-live-writeblock") : helperForTest;
 }
 
 } // namespace
@@ -58,7 +58,7 @@ QStringList command(const QStringList &args)
 #endif
         c << QStringLiteral("sudo") << QStringLiteral("-n");
     c << QStringLiteral("env");
-    for (const char *name : {"DISKFORGE_WRITEBLOCK_STATE", "DISKFORGE_WRITEBLOCK_ONLY"}) {
+    for (const char *name : {"DISKANVIL_WRITEBLOCK_STATE", "DISKANVIL_WRITEBLOCK_ONLY"}) {
         if (qEnvironmentVariableIsSet(name))
             c << QString::fromLatin1(name) + QLatin1Char('=') + qEnvironmentVariable(name);
     }

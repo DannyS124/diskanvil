@@ -33,7 +33,7 @@ QStringList HomeWindow::applicationDirs;
 
 namespace {
 
-// DiskForge Live's colours (rescue/art/palette.txt), for the desktop.
+// DiskAnvil Live's colours (rescue/art/palette.txt), for the desktop.
 QColor liveColor(const char *role)
 {
     static const QHash<QByteArray, QColor> colours = {
@@ -144,8 +144,8 @@ HomeWindow::HomeWindow(UDisks *udisks, Mode mode, QWidget *parent)
             // The taskbar claims its strip after we're up: keep the bottom row above it.
             connect(screen, &QScreen::availableGeometryChanged, this, [this] { resizeEvent(nullptr); });
         }
-        m_wallpaper.load(QStringLiteral("/usr/local/share/diskforge-live/wallpaper.png"));
-        setWindowTitle(QStringLiteral("DiskForge Live"));
+        m_wallpaper.load(QStringLiteral("/usr/local/share/diskanvil-live/wallpaper.png"));
+        setWindowTitle(QStringLiteral("DiskAnvil Live"));
     } else {
         setWindowTitle(tr("Quick Fixes"));
         resize(1040, 640);
@@ -160,7 +160,7 @@ HomeWindow::HomeWindow(UDisks *udisks, Mode mode, QWidget *parent)
     header->setSpacing(18);
     if (desktop) {
         auto *logo = new QLabel;
-        logo->setPixmap(QIcon::fromTheme(QStringLiteral("diskforge-live"), QIcon(QStringLiteral("/usr/local/share/diskforge-live/diskforge-live-icon.svg")))
+        logo->setPixmap(QIcon::fromTheme(QStringLiteral("diskanvil-live"), QIcon(QStringLiteral("/usr/local/share/diskanvil-live/diskanvil-live-icon.svg")))
                             .pixmap(72, 72));
         header->addWidget(logo);
     }
@@ -172,7 +172,7 @@ HomeWindow::HomeWindow(UDisks *udisks, Mode mode, QWidget *parent)
     nameFont.setBold(true);
     name->setFont(nameFont);
     name->setTextFormat(Qt::RichText);
-    name->setText(desktop ? QStringLiteral("<span style=\"color:#9ad8ff\">Disk</span><span style=\"color:#00e5ff\">Forge</span><span style=\"color:#2bee8a\">&nbsp;Live</span>")
+    name->setText(desktop ? QStringLiteral("<span style=\"color:#9ad8ff\">Disk</span><span style=\"color:#00e5ff\">Anvil</span><span style=\"color:#2bee8a\">&nbsp;Live</span>")
                           : tr("Quick Fixes").toHtmlEscaped());
     auto *tagline = new QLabel(desktop ? tr("Rescue · Recover · Repair") : tr("The usual jobs, one click each."));
     tagline->setObjectName(QStringLiteral("tagline"));
@@ -278,36 +278,36 @@ QVector<HomeWindow::Tile> HomeWindow::allTiles() const
         return tiles.last();
     };
     if (desktop)
-        add(QStringLiteral("drives"), QStringLiteral("diskforge-live-drives"), QStringLiteral("drive-harddisk"), tr("Drives and Partitions"),
+        add(QStringLiteral("drives"), QStringLiteral("diskanvil-live-drives"), QStringLiteral("drive-harddisk"), tr("Drives and Partitions"),
             tr("Every drive in the PC: health, partitions, backups and more"))
             .mainWindow = true;
-    add(QStringLiteral("whathappened"), QStringLiteral("diskforge-live-whathappened"), QStringLiteral("help-hint"), tr("What Happened?"),
+    add(QStringLiteral("whathappened"), QStringLiteral("diskanvil-live-whathappened"), QStringLiteral("help-hint"), tr("What Happened?"),
         tr("Lost files? Start here: the odds, what not to do, and what to do"))
         .tool = QStringLiteral("what-happened");
-    add(QStringLiteral("savefiles"), QStringLiteral("diskforge-live-savefiles"), QStringLiteral("document-save"), tr("Save My Files"),
+    add(QStringLiteral("savefiles"), QStringLiteral("diskanvil-live-savefiles"), QStringLiteral("document-save"), tr("Save My Files"),
         tr("People's folders and bookmarks, off a PC that won't start"))
         .tool = QStringLiteral("save-files");
-    add(QStringLiteral("recover"), QStringLiteral("diskforge-live-recover"), QStringLiteral("edit-find"), tr("Get Files Back"),
+    add(QStringLiteral("recover"), QStringLiteral("diskanvil-live-recover"), QStringLiteral("edit-find"), tr("Get Files Back"),
         tr("Deleted files, or files from a formatted or damaged drive"))
         .tool = QStringLiteral("lost-files");
-    add(QStringLiteral("viruses"), QStringLiteral("diskforge-live-virus"), QStringLiteral("security-high"), tr("Scan for Viruses"),
+    add(QStringLiteral("viruses"), QStringLiteral("diskanvil-live-virus"), QStringLiteral("security-high"), tr("Scan for Viruses"),
         desktop ? tr("Windows' drive, while Windows can't hide anything") : tr("Known malware on a drive or in a folder"))
         .tool = QStringLiteral("virus-scan");
-    add(QStringLiteral("testdisk"), QStringLiteral("diskforge-live-testdisk"), QStringLiteral("drive-harddisk"), tr("Find Lost Partitions"),
+    add(QStringLiteral("testdisk"), QStringLiteral("diskanvil-live-testdisk"), QStringLiteral("drive-harddisk"), tr("Find Lost Partitions"),
         tr("Partitions that disappeared, and boot sectors (TestDisk)"))
-        .desktopId = QStringLiteral("diskforge-live-testdisk");
-    add(QStringLiteral("writeimage"), QStringLiteral("diskforge-live-writeimage"), QStringLiteral("media-flash"), tr("Write an Image to USB"),
+        .desktopId = QStringLiteral("diskanvil-live-testdisk");
+    add(QStringLiteral("writeimage"), QStringLiteral("diskanvil-live-writeimage"), QStringLiteral("media-flash"), tr("Write an Image to USB"),
         tr("Linux, Raspberry Pi and other images, packed or not"))
         .tool = QStringLiteral("write-image");
-    add(QStringLiteral("windowsusb"), QStringLiteral("diskforge-live-windowsusb"), QStringLiteral("media-flash"), tr("Make a Windows USB"),
+    add(QStringLiteral("windowsusb"), QStringLiteral("diskanvil-live-windowsusb"), QStringLiteral("media-flash"), tr("Make a Windows USB"),
         tr("A stick that installs Windows 10 or 11"))
         .tool = QStringLiteral("windows-usb");
-    add(QStringLiteral("checkstick"), QStringLiteral("diskforge-live-checkstick"), QStringLiteral("drive-removable-media-usb"), tr("Check a USB Stick"),
+    add(QStringLiteral("checkstick"), QStringLiteral("diskanvil-live-checkstick"), QStringLiteral("drive-removable-media-usb"), tr("Check a USB Stick"),
         tr("Bad spots, and sticks that are smaller than they say"))
         .tool = QStringLiteral("check-stick");
-    add(QStringLiteral("copystick"), QStringLiteral("diskforge-live-copystick"), QStringLiteral("media-flash"),
-        stick ? tr("Copy This Stick") : tr("Make a DiskForge Live USB"),
-        stick ? tr("Another DiskForge Live stick, made from this one") : tr("A rescue stick that starts any PC"))
+    add(QStringLiteral("copystick"), QStringLiteral("diskanvil-live-copystick"), QStringLiteral("media-flash"),
+        stick ? tr("Copy This Stick") : tr("Make a DiskAnvil Live USB"),
+        stick ? tr("Another DiskAnvil Live stick, made from this one") : tr("A rescue stick that starts any PC"))
         .tool = QStringLiteral("rescue-usb");
 
     if (desktop) {
@@ -322,15 +322,17 @@ QVector<HomeWindow::Tile> HomeWindow::allTiles() const
             .desktopId = QStringLiteral("qps");
         add(QStringLiteral("editor"), QStringLiteral("accessories-text-editor"), QStringLiteral("accessories-text-editor"), tr("Text Editor"), {})
             .desktopId = QStringLiteral("featherpad");
-        add(QStringLiteral("logs"), QStringLiteral("diskforge-live-logs"), QStringLiteral("text-x-log"), tr("Save Logs"), {}).desktopId =
-            QStringLiteral("diskforge-live-logs");
-        add(QStringLiteral("readme"), QStringLiteral("diskforge-live-readme"), QStringLiteral("help-about"), tr("Read Me"), {}).desktopId =
-            QStringLiteral("diskforge-live-readme");
+        add(QStringLiteral("help"), QStringLiteral("preferences-desktop-remote-desktop"), QStringLiteral("network-connect"), tr("Let Someone Help"), {})
+            .tool = QStringLiteral("remote-help");
+        add(QStringLiteral("logs"), QStringLiteral("diskanvil-live-logs"), QStringLiteral("text-x-log"), tr("Save Logs"), {}).desktopId =
+            QStringLiteral("diskanvil-live-logs");
+        add(QStringLiteral("readme"), QStringLiteral("diskanvil-live-readme"), QStringLiteral("help-about"), tr("Read Me"), {}).desktopId =
+            QStringLiteral("diskanvil-live-readme");
         // Only UEFI can be asked to open its setup at the next start.
         if (secureBoot() != SecureBoot::Bios) {
-            Tile &firmware = add(QStringLiteral("firmware"), QStringLiteral("diskforge-live-firmware"), QStringLiteral("system-reboot"),
+            Tile &firmware = add(QStringLiteral("firmware"), QStringLiteral("diskanvil-live-firmware"), QStringLiteral("system-reboot"),
                                  tr("Firmware Settings"), tr("Restart into the PC's UEFI setup (Secure Boot, boot order...)"));
-            firmware.desktopId = QStringLiteral("diskforge-live-firmware");
+            firmware.desktopId = QStringLiteral("diskanvil-live-firmware");
             firmware.confirm = true;
         }
     }
@@ -349,7 +351,7 @@ QColor HomeWindow::color(const char *role) const
 {
     if (m_mode == Mode::Desktop)
         return liveColor(role);
-    // As a window it follows DiskForge's theme.
+    // As a window it follows DiskAnvil's theme.
     const QPalette pal = QGuiApplication::palette();
     const QByteArray name(role);
     if (name == "background")

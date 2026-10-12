@@ -10,7 +10,7 @@
 #include <cstdio>
 
 // Off (warnings only) until start() turns it on.
-Q_LOGGING_CATEGORY(lcOps, "diskforge.ops", QtWarningMsg)
+Q_LOGGING_CATEGORY(lcOps, "diskanvil.ops", QtWarningMsg)
 
 namespace {
 
@@ -44,8 +44,8 @@ void handler(QtMsgType type, const QMessageLogContext &context, const QString &m
             file->flush(); // it's for when things go wrong, crashes included
         }
     }
-    // DiskForge's own notes only go to the file; everything else also goes where it always did.
-    const bool ours = context.category && qstrcmp(context.category, "diskforge.ops") == 0 && type < QtWarningMsg;
+    // DiskAnvil's own notes only go to the file; everything else also goes where it always did.
+    const bool ours = context.category && qstrcmp(context.category, "diskanvil.ops") == 0 && type < QtWarningMsg;
     if (previous && !ours)
         previous(type, context, message);
 }

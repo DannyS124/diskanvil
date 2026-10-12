@@ -774,7 +774,7 @@ void HealthDialog::checkFarm()
     command[0] = QFileInfo::exists(program) ? program : QStringLiteral("smartctl");
 #else
     const QString device = disk->device;
-    // smartctl talks to the drive itself, which takes admin rights: DiskForge Live has them.
+    // smartctl talks to the drive itself, which takes admin rights: DiskAnvil Live has them.
     QStringList command = farm::command(device);
     if (rescue::runningInRescue())
         command = QStringList{QStringLiteral("sudo"), QStringLiteral("-n")} + command;
@@ -797,7 +797,7 @@ void HealthDialog::checkFarm()
 #ifndef Q_OS_WIN
             if (!r.read && !rescue::runningInRescue())
                 m_farmText += QLatin1Char(' ') + tr("smartctl needs admin rights for this: in a terminal, run  sudo smartctl -l farm %1  (or "
-                                                     "use DiskForge Live).")
+                                                     "use DiskAnvil Live).")
                                                       .arg(device);
 #endif
         }
@@ -832,7 +832,7 @@ void HealthDialog::reload()
         explain = QStringLiteral("<p>%1</p>").arg(tr("No problems reported.").toHtmlEscaped());
     if (h.usbNoData)
         explain = QStringLiteral("<p>%1</p>").arg(tr("This USB adapter doesn't pass the drive's health data through. Connected "
-                                                     "directly (SATA or NVMe), DiskForge can read it.").toHtmlEscaped());
+                                                     "directly (SATA or NVMe), DiskAnvil can read it.").toHtmlEscaped());
     m_explain->setText(explain);
     m_explain->setVisible(!explain.isEmpty());
 
@@ -878,7 +878,7 @@ void HealthDialog::reload()
     if (!facts.isEmpty())
         row(tr("About this model:"), facts.join(QLatin1Char('\n')));
     row(tr("Self-test:"), selftestText(h));
-    // The ones DiskForge saw finish, newest first.
+    // The ones DiskAnvil saw finish, newest first.
     QStringList earlier;
     for (const health::SelftestRecord &r : health::selftestHistory(h.key).mid(0, 5))
         earlier << tr("%1, %2: %3").arg(QLocale().toString(r.finished.toLocalTime(), QLocale::ShortFormat), health::selftestKind(r.kind),
@@ -1596,7 +1596,7 @@ void WriteImageDialog::updateState()
         note = tr("This one doesn't keep changes between starts.");
 #ifdef Q_OS_WIN
     else if (copy)
-        note = tr("Keeping changes between starts needs an ext4 partition, which Windows can't make; DiskForge Live can.");
+        note = tr("Keeping changes between starts needs an ext4 partition, which Windows can't make; DiskAnvil Live can.");
 #endif
     else if (copy && !canPersist)
         note = tr("There's no room on this stick to keep changes between starts.");
@@ -1649,7 +1649,7 @@ void WriteImageDialog::reject()
 {
     if (m_isoCopy) {
         if (!m_isoCopy->canCancel()) {
-            QMessageBox::information(this, windowTitle(), tr("One moment: DiskForge is in the middle of setting up the stick."));
+            QMessageBox::information(this, windowTitle(), tr("One moment: DiskAnvil is in the middle of setting up the stick."));
             return;
         }
         const auto answer = QMessageBox::warning(this, windowTitle(), tr("Stop? The stick won't be usable until it's done again."),
@@ -1935,7 +1935,7 @@ void BadSectorsDialog::showFound()
     m_repair->setVisible(any);
     if (any && m_disk.isSystem)
         m_repairNote->setText(m_repairNote->text() + QStringLiteral("\n\n")
-                              + tr("This is your system drive, so DiskForge won't write to it. Repair it from a live USB instead."));
+                              + tr("This is your system drive, so DiskAnvil won't write to it. Repair it from a live USB instead."));
 }
 
 void BadSectorsDialog::startScan()

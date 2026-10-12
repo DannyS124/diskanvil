@@ -5,7 +5,7 @@
 // signs itself (a throwaway certificate authority made here with OpenSSL), Secure Boot's lists
 // and boot entries from a folder of made-up UEFI variables, and the EFI partition check.
 //
-// DISKFORGE_REAL_EFI=<folder>: also a real EFI partition, mounted there (read-only).
+// DISKANVIL_REAL_EFI=<folder>: also a real EFI partition, mounted there (read-only).
 
 #include "testkit.h"
 
@@ -33,9 +33,9 @@ void putFile(const QString &path, const QByteArray &data)
 
 void realEfi()
 {
-    const QString esp = qEnvironmentVariable("DISKFORGE_REAL_EFI");
+    const QString esp = qEnvironmentVariable("DISKANVIL_REAL_EFI");
     if (esp.isEmpty()) {
-        out << "SKIP  boot: no real EFI partition (DISKFORGE_REAL_EFI)" << Qt::endl;
+        out << "SKIP  boot: no real EFI partition (DISKANVIL_REAL_EFI)" << Qt::endl;
         return;
     }
     // Against this PC's own Secure Boot lists, when it has them.
@@ -55,8 +55,8 @@ void realEfi()
 void bootTests()
 {
     QTemporaryDir dir;
-    const Signer root = makeCertificate("DiskForge Test Root", nullptr, true);
-    const Signer windows = makeCertificate("Microsoft Windows (DiskForge test)", &root, false);
+    const Signer root = makeCertificate("DiskAnvil Test Root", nullptr, true);
+    const Signer windows = makeCertificate("Microsoft Windows (DiskAnvil test)", &root, false);
     const Signer stranger = makeCertificate("Someone Else", nullptr, false);
     const QVector<QByteArray> db{derOf(root.cert)};
 
@@ -67,8 +67,8 @@ void bootTests()
            QStringLiteral("boot: an unsigned program, and its Authenticode hash"));
     const QByteArray signed_ = sign(makeProgram("a signed boot program"), windows, {windows.cert, root.cert});
     r = authenticode::check(signed_, db);
-    report(r.state == authenticode::Result::State::Signed && r.trusted && r.signer == QLatin1String("Microsoft Windows (DiskForge test)")
-               && r.issuer == QLatin1String("DiskForge Test Root") && r.trustedBy == QLatin1String("DiskForge Test Root") && r.certificates.size() == 2,
+    report(r.state == authenticode::Result::State::Signed && r.trusted && r.signer == QLatin1String("Microsoft Windows (DiskAnvil test)")
+               && r.issuer == QLatin1String("DiskAnvil Test Root") && r.trustedBy == QLatin1String("DiskAnvil Test Root") && r.certificates.size() == 2,
            QStringLiteral("boot: a signed program, trusted through the certificate that issued its signer"),
            QStringLiteral("%1 / %2 / %3").arg(int(r.state)).arg(r.signer, r.trustedBy));
     r = authenticode::check(signed_, {});
@@ -89,7 +89,7 @@ void bootTests()
            QStringLiteral("boot: signed by a stranger"));
     report(authenticode::check("MZ, but nothing else", db).state == authenticode::Result::State::NotProgram, QStringLiteral("boot: not a program"));
     QRandomGenerator rng(1010);
-    const int rounds = qEnvironmentVariableIntValue("DISKFORGE_FUZZ_ROUNDS") > 0 ? qEnvironmentVariableIntValue("DISKFORGE_FUZZ_ROUNDS") : 500;
+    const int rounds = qEnvironmentVariableIntValue("DISKANVIL_FUZZ_ROUNDS") > 0 ? qEnvironmentVariableIntValue("DISKANVIL_FUZZ_ROUNDS") : 500;
     for (int round = 0; round < rounds; ++round) {
         QByteArray bytes = signed_;
         for (int i = 0, flips = 1 + int(rng.bounded(8)); i < flips; ++i) {
@@ -200,8 +200,8 @@ void bootTests()
     lookalike.replace(0x163, 52, QByteArray("Invalid partition table\0Missing operating system\0\0\0", 52));
     report(boot::checkFirstSector(lookalike, false).severity == 1 && boot::checkFirstSector(lookalike, false).verdict.contains(QLatin1String("not Windows' code")),
            QStringLiteral("boot: Windows' messages around someone else's code"));
-    // DISKFORGE_REAL_MBR=<file>: a disk (image) whose first sector Windows wrote.
-    if (const QString mbr = qEnvironmentVariable("DISKFORGE_REAL_MBR"); !mbr.isEmpty()) {
+    // DISKANVIL_REAL_MBR=<file>: a disk (image) whose first sector Windows wrote.
+    if (const QString mbr = qEnvironmentVariable("DISKANVIL_REAL_MBR"); !mbr.isEmpty()) {
         QFile f(mbr);
         const QByteArray first = f.open(QIODevice::ReadOnly) ? f.read(512) : QByteArray();
         report(boot::checkFirstSector(first, false).verdict == QLatin1String("Windows' boot code"), QStringLiteral("boot: a first sector Windows wrote"),

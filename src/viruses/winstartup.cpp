@@ -1014,15 +1014,15 @@ QVector<Change> switchOff(const QVector<Entry> &entries, const QString &backup)
         changes << c;
     }
     // How to put it back.
-    QFile note(backup + QStringLiteral("/What DiskForge changed.txt"));
+    QFile note(backup + QStringLiteral("/What DiskAnvil changed.txt"));
     if (note.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        QStringList lines{QStringLiteral("DiskForge switched off these things that started with Windows, on %1:")
+        QStringList lines{QStringLiteral("DiskAnvil switched off these things that started with Windows, on %1:")
                               .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm"))),
                           QString()};
         lines << done << QString();
         if (!copies.isEmpty()) {
             lines << QStringLiteral("The registry files changed are here as they were before:") << copies
-                  << QStringLiteral("To undo everything, copy them back where they were, while that Windows isn't running (from DiskForge Live).")
+                  << QStringLiteral("To undo everything, copy them back where they were, while that Windows isn't running (from DiskAnvil Live).")
                   << QString();
         }
         if (moved)

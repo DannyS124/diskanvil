@@ -44,5 +44,5 @@ terminal-height: "60%"
     align = "center"
     font = "DejaVu Sans Regular 14"
     color = "#4d5f80"
-    text = "DiskForge Live @VERSION@, built @BUILT@      Arrow keys to choose, Enter to start, e to edit"
+    text = "DiskAnvil Live @VERSION@, built @BUILT@      Arrow keys to choose, Enter to start, e to edit"
 }

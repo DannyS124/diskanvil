@@ -1,7 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Check a USB Stick
-Comment=Find bad spots and fake sticks
-Exec=diskforge --open check-stick
-Icon=diskforge-live-checkstick
-Categories=System;

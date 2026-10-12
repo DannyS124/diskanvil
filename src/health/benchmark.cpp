@@ -86,7 +86,7 @@ void Benchmark::run()
     r.accessMs = accessTotal / kAccessSamples;
 
     if (!m_writeDir.isEmpty()) {
-        QTemporaryFile file(m_writeDir + QStringLiteral("/.diskforge-benchmark-XXXXXX"));
+        QTemporaryFile file(m_writeDir + QStringLiteral("/.diskanvil-benchmark-XXXXXX"));
         if (!file.open())
             return emit finished(false, r, tr("Couldn't create a test file: %1").arg(file.errorString()));
         QByteArray data(qint64(4 * 1024 * 1024), Qt::Uninitialized);

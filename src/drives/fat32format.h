@@ -3,7 +3,7 @@
 
 #pragma once
 
-// DiskForge's own FAT32 formatter, from Microsoft's published FAT specification. Windows only
+// DiskAnvil's own FAT32 formatter, from Microsoft's published FAT specification. Windows only
 // makes FAT32 up to 32 GB, but a UEFI boot stick (or an old camera) needs FAT32 whatever the
 // size; this makes it on any volume from 33 MB to 2 TB, on Linux and on Windows alike. FAT16
 // too, for memory cards of 2 GB and less (sdcard.h).

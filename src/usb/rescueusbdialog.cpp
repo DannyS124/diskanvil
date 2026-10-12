@@ -38,12 +38,12 @@
 
 namespace {
 
-const QString kLabel = QStringLiteral("DISKFORGE");
-const QString kFilesLabel = QStringLiteral("DF-FILES");
+const QString kLabel = QStringLiteral("DISKANVIL");
+const QString kFilesLabel = QStringLiteral("ANVIL-FILES");
 const QString kPersistence = QStringLiteral("persistence"); // the label live-boot looks for
 constexpr quint64 GiB = 1024ull * 1024 * 1024;
-// Sticks made while it was still called DiskForge Rescue, then Bluespark.
-const QStringList kOldLabels = {QStringLiteral("DFRESCUE"), QStringLiteral("BLUESPARK")};
+// Sticks made while it was still called DiskForge Rescue, then Bluespark, then DiskForge Live.
+const QStringList kOldLabels = {QStringLiteral("DFRESCUE"), QStringLiteral("BLUESPARK"), QStringLiteral("DISKFORGE")};
 constexpr quint64 kRoomForLogs = 64 * 1024 * 1024;
 
 } // namespace
@@ -53,7 +53,7 @@ std::function<int(const QString &)> RescueUsbDialog::openStickForTest;
 
 QString RescueUsbDialog::findImage()
 {
-    // Inside DiskForge Live: the stick it's running from, the same build there's no ISO of.
+    // Inside DiskAnvil Live: the stick it's running from, the same build there's no ISO of.
     // After Copy to Memory it's not at /run/live/medium, but it can be mounted like any stick.
     if (rescue::runningInRescue()) {
         const QString running = QStringLiteral("/run/live/medium");
@@ -65,12 +65,13 @@ QString RescueUsbDialog::findImage()
                 return mount.rootPath();
         }
     }
-    // Downloads first; the build folder's rescue/out too, for running DiskForge from the source tree.
+    // Downloads first; the build folder's rescue/out too, for running DiskAnvil from the source tree.
     QStringList folders = {QStandardPaths::writableLocation(QStandardPaths::DownloadLocation), QDir::homePath(),
                            QCoreApplication::applicationDirPath() + QStringLiteral("/../rescue/out")};
     QFileInfo newest;
     for (const QString &folder : folders) {
-        const QFileInfoList found = QDir(folder).entryInfoList({QStringLiteral("diskforge-live-*.iso"), QStringLiteral("bluespark-*.iso"), QStringLiteral("diskforge-rescue-*.iso")}, QDir::Files, QDir::Time);
+        const QFileInfoList found = QDir(folder).entryInfoList({QStringLiteral("diskanvil-live-*.iso"), QStringLiteral("diskforge-live-*.iso"), QStringLiteral("bluespark-*.iso"),
+                                                                           QStringLiteral("diskforge-rescue-*.iso")}, QDir::Files, QDir::Time);
         if (!found.isEmpty() && (!newest.exists() || found.first().lastModified() > newest.lastModified()))
             newest = found.first();
     }
@@ -91,12 +92,12 @@ RescueUsbDialog::RescueUsbDialog(UDisks *udisks, const QString &preferredDisk, Q
     , m_keep(new QCheckBox(tr("Keep my changes between starts (settings, downloads, programs added):")))
     , m_keepSize(new QSpinBox)
     , m_files(new QCheckBox(tr("A drive for my files on the rest of the stick (exFAT: Windows, Macs and Linux read it)")))
-    , m_update(new QCheckBox(tr("Only update DiskForge Live: the kept changes and the files drive stay as they are")))
+    , m_update(new QCheckBox(tr("Only update DiskAnvil Live: the kept changes and the files drive stay as they are")))
     , m_progress(new QProgressBar)
     , m_phase(new QLabel)
     , m_meter(m_progress, m_phase)
 {
-    setWindowTitle(tr("Make a DiskForge Live USB"));
+    setWindowTitle(tr("Make a DiskAnvil Live USB"));
     m_image->setObjectName(QStringLiteral("image"));
     m_imageInfo->setObjectName(QStringLiteral("imageInfo"));
     m_stickInfo->setObjectName(QStringLiteral("stickInfo"));
@@ -109,15 +110,15 @@ RescueUsbDialog::RescueUsbDialog(UDisks *udisks, const QString &preferredDisk, Q
     connect(browse, &QPushButton::clicked, this, [this] {
         const QString start = m_image->text().isEmpty() ? QStandardPaths::writableLocation(QStandardPaths::DownloadLocation)
                                                         : QFileInfo(m_image->text()).path();
-        const QString file = QFileDialog::getOpenFileName(this, tr("Choose the DiskForge Live Image"), start,
-                                                          tr("DiskForge Live (diskforge-live-*.iso bluespark-*.iso diskforge-rescue-*.iso);;ISO images (*.iso)"));
+        const QString file = QFileDialog::getOpenFileName(this, tr("Choose the DiskAnvil Live Image"), start,
+                                                          tr("DiskAnvil Live (diskanvil-live-*.iso diskforge-live-*.iso bluespark-*.iso diskforge-rescue-*.iso);;ISO images (*.iso)"));
         if (!file.isEmpty())
             m_image->setText(file);
     });
     auto *imageRow = new QHBoxLayout;
     imageRow->addWidget(m_image, 1);
     imageRow->addWidget(browse);
-    m_image->setPlaceholderText(QStringLiteral("diskforge-live-%1.iso").arg(QStringLiteral(APP_VERSION)));
+    m_image->setPlaceholderText(QStringLiteral("diskanvil-live-%1.iso").arg(QStringLiteral(APP_VERSION)));
     m_imageInfo->setWordWrap(true);
     m_imageInfo->setTextFormat(Qt::RichText);
     auto *stickRow = new QHBoxLayout;
@@ -132,13 +133,13 @@ RescueUsbDialog::RescueUsbDialog(UDisks *udisks, const QString &preferredDisk, Q
     m_progress->setVisible(false);
 
     auto *form = new QFormLayout;
-    form->addRow(tr("DiskForge Live image:"), imageRow);
+    form->addRow(tr("DiskAnvil Live image:"), imageRow);
     form->addRow(QString(), m_imageInfo);
     form->addRow(tr("USB stick:"), m_targets);
     form->addRow(QString(), stickRow);
 
     auto *layout = new QVBoxLayout(this);
-    layout->addWidget(wrappingLabel(tr("DiskForge Live starts any PC from a USB stick, with DiskForge and other repair tools, "
+    layout->addWidget(wrappingLabel(tr("DiskAnvil Live starts any PC from a USB stick, with DiskAnvil and other repair tools, "
                                        "even when the PC's own system won't start. The stick stays readable on any PC, and "
                                        "the rescue system keeps its logs on it.")));
     layout->addLayout(form);
@@ -154,10 +155,10 @@ RescueUsbDialog::RescueUsbDialog(UDisks *udisks, const QString &preferredDisk, Q
     m_keepSize->setRange(1, 256);
     m_keepSize->setValue(4);
     m_keepSize->setSuffix(tr(" GB"));
-    m_keep->setToolTip(tr("A partition the stick keeps what changes in: the boot menu then offers \"Start DiskForge Live, keeping my "
+    m_keep->setToolTip(tr("A partition the stick keeps what changes in: the boot menu then offers \"Start DiskAnvil Live, keeping my "
                           "changes\" first."));
     m_files->setToolTip(tr("A partition for Rescue Copies and the files saved from a PC, readable on any computer"));
-    m_update->setToolTip(tr("Replaces DiskForge Live with this version on its own partition, and leaves the others alone"));
+    m_update->setToolTip(tr("Replaces DiskAnvil Live with this version on its own partition, and leaves the others alone"));
     auto *keepRow = new QHBoxLayout;
     keepRow->addWidget(m_keep);
     keepRow->addWidget(m_keepSize);
@@ -173,7 +174,7 @@ RescueUsbDialog::RescueUsbDialog(UDisks *udisks, const QString &preferredDisk, Q
     layout->addWidget(m_phase);
     layout->addWidget(m_progress);
     auto *box = new QDialogButtonBox(QDialogButtonBox::Close);
-    m_make = box->addButton(tr("Make the DiskForge Live USB"), QDialogButtonBox::ActionRole);
+    m_make = box->addButton(tr("Make the DiskAnvil Live USB"), QDialogButtonBox::ActionRole);
     m_make->setAutoDefault(false);
     box->button(QDialogButtonBox::Close)->setDefault(true);
     connect(m_make, &QPushButton::clicked, this, &RescueUsbDialog::start);
@@ -275,8 +276,8 @@ void RescueUsbDialog::inspectImage()
     m_inspected = rescue::Image();
     if (path.isEmpty()) {
         m_inspected.error = rescue::runningInRescue()
-            ? tr("After Copy to Memory the rescue stick isn't mounted: mount its %1 partition and it shows up here. Or choose the DiskForge Live ISO.").arg(kLabel)
-            : tr("Choose the DiskForge Live ISO. It's on the DiskForge releases page on GitHub.");
+            ? tr("After Copy to Memory the rescue stick isn't mounted: mount its %1 partition and it shows up here. Or choose the DiskAnvil Live ISO.").arg(kLabel)
+            : tr("Choose the DiskAnvil Live ISO. It's on the DiskAnvil releases page on GitHub.");
         m_imageInfo->setText(m_inspected.error.toHtmlEscaped());
         return;
     }
@@ -291,8 +292,8 @@ void RescueUsbDialog::inspectImage()
         m_imageInfo->setText(redText(m_inspected.error));
         return;
     }
-    const QString what = QFileInfo(path).isDir() ? tr("A copy of the rescue stick DiskForge is running from: DiskForge Live %1, built %2 (%3)")
-                                                 : tr("DiskForge Live %1, built %2 (%3)");
+    const QString what = QFileInfo(path).isDir() ? tr("A copy of the rescue stick DiskAnvil is running from: DiskAnvil Live %1, built %2 (%3)")
+                                                 : tr("DiskAnvil Live %1, built %2 (%3)");
     m_imageInfo->setText(what.arg(m_inspected.info.version, m_inspected.info.built, formatSize(m_inspected.bytes)).toHtmlEscaped());
 }
 
@@ -307,16 +308,16 @@ void RescueUsbDialog::updateState()
         const QString root = existing->mounts().first();
         const rescue::Info info = rescue::stickInfo(root);
         const int boots = rescue::logFolders(root);
-        QString text = tr("This stick looks like a DiskForge Live stick.");
+        QString text = tr("This stick looks like a DiskAnvil Live stick.");
         if (info.valid() && boots == 0)
-            text = tr("This stick has DiskForge Live %1 on it, with no logs yet.").arg(info.version);
+            text = tr("This stick has DiskAnvil Live %1 on it, with no logs yet.").arg(info.version);
         else if (info.valid() && boots == 1)
-            text = tr("This stick has DiskForge Live %1 on it, with logs from one start.").arg(info.version);
+            text = tr("This stick has DiskAnvil Live %1 on it, with logs from one start.").arg(info.version);
         else if (info.valid())
-            text = tr("This stick has DiskForge Live %1 on it, with logs from %2 starts.").arg(info.version).arg(boots);
+            text = tr("This stick has DiskAnvil Live %1 on it, with logs from %2 starts.").arg(info.version).arg(boots);
         m_stickInfo->setText(text);
     } else {
-        m_stickInfo->setText(existing ? tr("This stick has DiskForge Live on it. Open Logs shows what it saved.") : QString());
+        m_stickInfo->setText(existing ? tr("This stick has DiskAnvil Live on it. Open Logs shows what it saved.") : QString());
     }
     m_stickInfo->setVisible(existing != nullptr);
 
@@ -339,13 +340,13 @@ void RescueUsbDialog::updateState()
         warning = redText(tr("The ISO is on this stick. Pick another stick, or copy the ISO somewhere else first."));
         ok = false;
     } else if (d && m_inspected.error.isEmpty() && m_update->isVisibleTo(this) && m_update->isChecked()) {
-        // An update: only DiskForge Live's own partition is written.
+        // An update: only DiskAnvil Live's own partition is written.
         const Volume *system = rescueVolume(*d);
         if (system && system->size < m_inspected.bytes + kRoomForLogs) {
-            warning = redText(tr("DiskForge Live's partition on this stick is too small for this version: make the stick again."));
+            warning = redText(tr("DiskAnvil Live's partition on this stick is too small for this version: make the stick again."));
             ok = false;
         } else {
-            warning = tr("DiskForge Live on %1 is replaced with this version; the kept changes and the files drive stay. Its logs stay "
+            warning = tr("DiskAnvil Live on %1 is replaced with this version; the kept changes and the files drive stay. Its logs stay "
                          "too.")
                           .arg(diskTitle(*d).toHtmlEscaped());
         }
@@ -354,7 +355,7 @@ void RescueUsbDialog::updateState()
                                    ? systemSize() + (m_keep->isChecked() ? quint64(m_keepSize->value()) * GiB : 0) + (m_files->isChecked() ? GiB : 0)
                                    : m_inspected.bytes + kRoomForLogs;
         if (d->size < needed) {
-            warning = redText(tr("This stick is too small: DiskForge Live needs at least %1.").arg(formatSize(needed)));
+            warning = redText(tr("This stick is too small: DiskAnvil Live needs at least %1.").arg(formatSize(needed)));
             ok = false;
         } else {
             warning = redText(tr("Everything on %1 will be erased.").arg(diskTitle(*d)));
@@ -376,7 +377,7 @@ void RescueUsbDialog::updateState()
     // Kept changes live in a Linux file system (ext4), which Windows can't make.
     m_keep->setEnabled(false);
     m_keep->setChecked(false);
-    m_keep->setToolTip(tr("Windows can't make the Linux file system that keeps the changes: make the stick from DiskForge Live (or "
+    m_keep->setToolTip(tr("Windows can't make the Linux file system that keeps the changes: make the stick from DiskAnvil Live (or "
                           "Linux) to have it"));
 #else
     m_keep->setEnabled(!(canUpdate && m_update->isChecked()));
@@ -432,11 +433,11 @@ void RescueUsbDialog::reject()
 {
     if (m_running) {
         if (!m_writer) {
-            QMessageBox::information(this, windowTitle(), tr("One moment: DiskForge is in the middle of setting up the stick."));
+            QMessageBox::information(this, windowTitle(), tr("One moment: DiskAnvil is in the middle of setting up the stick."));
             return;
         }
         const auto answer = QMessageBox::warning(this, windowTitle(),
-                                                 tr("Stop making the DiskForge Live USB? The stick won't start anything until it's made again."),
+                                                 tr("Stop making the DiskAnvil Live USB? The stick won't start anything until it's made again."),
                                                  QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
         if (answer == QMessageBox::Yes && m_writer)
             m_writer->cancel(); // finish() runs when the copy stops
@@ -460,12 +461,12 @@ void RescueUsbDialog::start()
     m_biosCore.clear();
     m_progress->setRange(0, 0);
     m_progress->setVisible(true);
-    qCInfo(lcOps).noquote() << "Make a DiskForge Live USB on" << d->device << d->model << "from" << m_inspectedPath
+    qCInfo(lcOps).noquote() << "Make a DiskAnvil Live USB on" << d->device << d->model << "from" << m_inspectedPath
                             << "version" << m_inspected.info.version << "build" << m_inspected.info.id;
 
     if (m_update->isVisibleTo(this) && m_update->isChecked())
         return update();
-    // DiskForge Live's FAT32 partition, marked bootable: some PCs only offer a USB stick in their
+    // DiskAnvil Live's FAT32 partition, marked bootable: some PCs only offer a USB stick in their
     // boot menu then. The whole stick, or room for it, then the kept changes and the files drive.
     QVector<UsbPrep::Partition> parts;
     const bool keep = m_keep->isChecked(), files = m_files->isChecked();
@@ -508,12 +509,12 @@ void RescueUsbDialog::update()
     const Disk *d = target();
     const Volume *system = d ? rescueVolume(*d) : nullptr;
     if (!system)
-        return finish(false, tr("DiskForge Live's partition isn't on the stick any more."));
-    qCInfo(lcOps).noquote() << "Updating DiskForge Live on" << d->device << "only its own partition";
+        return finish(false, tr("DiskAnvil Live's partition isn't on the stick any more."));
+    qCInfo(lcOps).noquote() << "Updating DiskAnvil Live on" << d->device << "only its own partition";
     const QString path = system->objectPath;
     const auto copyInto = [this](const QString &root) {
         // What's there goes, but for the logs and the virus list kept on it.
-        const QStringList kept = {QStringLiteral("logs"), QStringLiteral("diskforge-live")};
+        const QStringList kept = {QStringLiteral("logs"), QStringLiteral("diskanvil-live"), QStringLiteral("diskforge-live")};
         for (const QFileInfo &f : QDir(root).entryInfoList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System)) {
             if (kept.contains(f.fileName(), Qt::CaseInsensitive))
                 continue;
@@ -526,7 +527,7 @@ void RescueUsbDialog::update()
     };
     if (!system->mounts().isEmpty())
         return copyInto(system->mounts().first());
-    m_phase->setText(tr("Mounting DiskForge Live's partition…"));
+    m_phase->setText(tr("Mounting DiskAnvil Live's partition…"));
     auto mounted = std::make_shared<QMetaObject::Connection>();
     auto failed = std::make_shared<QMetaObject::Connection>();
     *mounted = connect(m_udisks, &UDisks::changed, this, [this, path, copyInto, mounted, failed] {
@@ -585,7 +586,7 @@ void RescueUsbDialog::copyFiles(const QString &mountPoint)
 
 QString RescueUsbDialog::readyText(bool bios) const
 {
-    return tr("The DiskForge Live USB is ready.\n\n"
+    return tr("The DiskAnvil Live USB is ready.\n\n"
               "To use it, plug it into the PC that needs fixing and turn the PC on while pressing its boot menu key (usually "
               "F12, F11, F9 or Esc), then pick the USB stick. %1\n\n"
               "Every start leaves its logs in the logs folder on the stick.")
@@ -601,7 +602,7 @@ void RescueUsbDialog::writeBiosBoot()
         const bool ok = fd >= 0 && rescue::writeBiosBoot(fd, boot, core, &error);
         if (fd >= 0)
             blockio::close(fd);
-        qCInfo(lcOps).noquote() << "Make a DiskForge Live USB: boot code for BIOS PCs" << (ok ? "written" : "not written: " + error);
+        qCInfo(lcOps).noquote() << "Make a DiskAnvil Live USB: boot code for BIOS PCs" << (ok ? "written" : "not written: " + error);
         finish(true, ok ? readyText(true)
                         : readyText(false) + QStringLiteral("\n\n") + tr("Old BIOS-only PCs won't start from it: %1. Making it again "
                                                                          "adds that.").arg(error));
@@ -619,7 +620,7 @@ void RescueUsbDialog::finish(bool ok, const QString &message, bool alreadyShown)
     }
     m_running = false;
     if (!ok)
-        qCInfo(lcOps).noquote() << "Make a DiskForge Live USB failed:" << message;
+        qCInfo(lcOps).noquote() << "Make a DiskAnvil Live USB failed:" << message;
     m_progress->setVisible(false);
     m_udisks->refresh();
     if (ok) {

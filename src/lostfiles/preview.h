@@ -7,7 +7,7 @@
 // a film's first frame) and its words (a document's text, what an archive holds, a song's or
 // film's details).
 //
-// They're made in a helper process, `diskforge --preview-helper`, never in DiskForge itself:
+// They're made in a helper process, `diskanvil --preview-helper`, never in DiskAnvil itself:
 // what's decoded is whatever a damaged drive holds, with other people's decoders. The helper is
 // only ever given the one file's bytes, never the drive. On Linux it runs in a bubblewrap
 // sandbox when bwrap is there (no network, no home folder, nothing it can write to but its own

@@ -34,8 +34,8 @@ jobs:
           ref: ${{ inputs.tag || github.ref }}
       - uses: flathub-infra/flatpak-github-actions/flatpak-builder@933e9e8ca36e85046ebca8e211f0785c6becac40 # master, 2025-04-24
         with:
-          bundle: DiskForge-x86_64.flatpak
-          manifest-path: packaging/flatpak/io.github.DannyS124.DiskForge.yml
+          bundle: DiskAnvil-x86_64.flatpak
+          manifest-path: packaging/flatpak/io.github.DannyS124.DiskAnvil.yml
           cache-key: flatpak-builder-${{ github.sha }}
 
   appimage:
@@ -55,7 +55,7 @@ jobs:
           sudo apt-get install -y libzstd-dev libssl-dev libblkid-dev libarchive-dev zlib1g-dev pkg-config ninja-build desktop-file-utils \
             libfreetype-dev libfontconfig1-dev libjpeg-dev libpng-dev libopenjp2-7-dev liblcms2-dev
           # Ubuntu 22.04 has no poppler for Qt 6, so it's built here, for the PDF pages in Find Lost
-          # Files' previews: the version DiskForge Live has. The hash is of the release tarball, whose
+          # Files' previews: the version DiskAnvil Live has. The hash is of the release tarball, whose
           # signature (Albert Astals Cid, CA262C6C83DE4D2FB28A332A3A6A4DB839EAA6D7) was checked.
           wget -q https://poppler.freedesktop.org/poppler-25.03.0.tar.xz
           echo '97da4ff88517a6bbd729529f195f85c8d7a0c3bb4a3d57cb0c685cbb052fe837  poppler-25.03.0.tar.xz' | sha256sum -c
@@ -67,15 +67,15 @@ jobs:
           cmake --build poppler-build
           sudo cmake --install poppler-build
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr \
-            -DDISKFORGE_SELFTEST=OFF -DDISKFORGE_SYSTEMD_UNIT=OFF
+            -DDISKANVIL_SELFTEST=OFF -DDISKANVIL_SYSTEMD_UNIT=OFF
           cmake --build build
           DESTDIR="$PWD/AppDir" cmake --install build
           # linuxdeploy wants a bare program name in Exec
-          sed -i 's|^Exec=.*|Exec=diskforge|' AppDir/usr/share/applications/io.github.DannyS124.DiskForge.desktop
+          sed -i 's|^Exec=.*|Exec=diskanvil|' AppDir/usr/share/applications/io.github.DannyS124.DiskAnvil.desktop
       - name: Package
         env:
-          OUTPUT: DiskForge-x86_64.AppImage
-          LDAI_OUTPUT: DiskForge-x86_64.AppImage
+          OUTPUT: DiskAnvil-x86_64.AppImage
+          LDAI_OUTPUT: DiskAnvil-x86_64.AppImage
           EXTRA_QT_MODULES: svg
           EXTRA_PLATFORM_PLUGINS: libqoffscreen.so # for running it without a screen, like the check below
         run: |
@@ -89,18 +89,18 @@ jobs:
           export QMAKE="$(command -v qmake6 || command -v qmake)"
           export APPIMAGE_EXTRACT_AND_RUN=1
           ./linuxdeploy-x86_64.AppImage --appdir AppDir --plugin qt --output appimage \
-            -d AppDir/usr/share/applications/io.github.DannyS124.DiskForge.desktop \
-            -i AppDir/usr/share/icons/hicolor/scalable/apps/io.github.DannyS124.DiskForge.svg
+            -d AppDir/usr/share/applications/io.github.DannyS124.DiskAnvil.desktop \
+            -i AppDir/usr/share/icons/hicolor/scalable/apps/io.github.DannyS124.DiskAnvil.svg
       - name: Check it starts
         run: |
-          [ "$(QT_QPA_PLATFORM=offscreen APPIMAGE_EXTRACT_AND_RUN=1 ./DiskForge-x86_64.AppImage --version)" = "diskforge $(sed -n 's/^    VERSION //p' CMakeLists.txt)" ]
+          [ "$(QT_QPA_PLATFORM=offscreen APPIMAGE_EXTRACT_AND_RUN=1 ./DiskAnvil-x86_64.AppImage --version)" = "diskanvil $(sed -n 's/^    VERSION //p' CMakeLists.txt)" ]
           # and that it has what the other builds have: PDF pages and the extra picture kinds
-          ./DiskForge-x86_64.AppImage --appimage-extract >/dev/null
+          ./DiskAnvil-x86_64.AppImage --appimage-extract >/dev/null
           ls squashfs-root/usr/lib/libpoppler-qt6.so.* squashfs-root/usr/plugins/imageformats/libqwebp.so
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: DiskForge-x86_64.AppImage
-          path: DiskForge-x86_64.AppImage
+          name: DiskAnvil-x86_64.AppImage
+          path: DiskAnvil-x86_64.AppImage
 
   attach:
     if: github.event_name == 'release' || inputs.tag != ''
@@ -118,6 +118,6 @@ jobs:
           TAG: ${{ github.event.release.tag_name || inputs.tag }}
         run: |
           ls -l
-          sha256sum DiskForge-x86_64.flatpak DiskForge-x86_64.AppImage > SHA256SUMS-bundles
+          sha256sum DiskAnvil-x86_64.flatpak DiskAnvil-x86_64.AppImage > SHA256SUMS-bundles
           gh release upload "$TAG" -R "${{ github.repository }}" --clobber \
-            DiskForge-x86_64.flatpak DiskForge-x86_64.AppImage SHA256SUMS-bundles
+            DiskAnvil-x86_64.flatpak DiskAnvil-x86_64.AppImage SHA256SUMS-bundles

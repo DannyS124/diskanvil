@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Danny S
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// The Linux services DiskForge talks to (systemd, snapper, fwupd) and libblkid don't exist on
+// The Linux services DiskAnvil talks to (systemd, snapper, fwupd) and libblkid don't exist on
 // Windows. These stand in for them so the windows that mention them still build; the menu
 // entries that would use them are hidden on Windows.
 
@@ -16,7 +16,7 @@ namespace {
 
 QString notOnWindows()
 {
-    return QCoreApplication::translate("Windows", "This needs Linux. It works in DiskForge Live.");
+    return QCoreApplication::translate("Windows", "This needs Linux. It works in DiskAnvil Live.");
 }
 
 } // namespace

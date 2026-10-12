@@ -15,7 +15,7 @@
 #include <QVector>
 
 // Something an add-on asks for: before an action runs ("ask"), or once in the Add-ons
-// window ("settings"). DiskForge draws the form; the add-on only describes it.
+// window ("settings"). DiskAnvil draws the form; the add-on only describes it.
 struct AddonField {
     enum class Type { Text, Number, Choice, Check, Folder, File };
     QString id;
@@ -46,7 +46,7 @@ struct AddonAction {
     QStringList when; // conditions, all must hold
     QStringList command;
     bool terminal = false; // output in a terminal window
-    bool window = false;   // output in a DiskForge window
+    bool window = false;   // output in a DiskAnvil window
     QString confirm;
     bool systemDisks = false; // also offered on the system disk, if it's look-only too
     bool lookOnly = false; // runs in a read-only sandbox: no changing files, no network
@@ -76,8 +76,8 @@ struct Addon {
     QString error; // set if the manifest is broken; such add-ons have no actions
     bool enabled = true;
     QByteArray fileHash; // SHA-256 of addon.json; trust is tied to it
-    bool systemWide = false; // installed by a package, in /usr/share/diskforge/addons
-    // In your add-on folder, but not put there by DiskForge (or changed since).
+    bool systemWide = false; // installed by a package, in /usr/share/diskanvil/addons
+    // In your add-on folder, but not put there by DiskAnvil (or changed since).
     bool outside = false;
     QVector<AddonField> settings; // set once in the Add-ons window
     AddonTheme theme;
@@ -104,8 +104,8 @@ public:
     static QString catalogSignatureUrl();
     // The keys that may sign the catalog ("ssh-ed25519 AAAA..."), and the signature namespace.
     static QStringList catalogKeys();
-    static constexpr const char *kCatalogNamespace = "diskforge-addons";
-    // https://raw.githubusercontent.com/DannyS124/diskforge-addons/<40-hex commit>/...
+    static constexpr const char *kCatalogNamespace = "diskanvil-addons";
+    // https://raw.githubusercontent.com/DannyS124/diskanvil-addons/<40-hex commit>/...
     static bool isPinnedUrl(const QString &url);
     // Checks the signature first; the list is only read if it's signed by one of `keys`.
     static QVector<CatalogEntry> parseSignedCatalog(const QByteArray &json, const QByteArray &signature,
@@ -114,8 +114,8 @@ public:
     // Checks size, checksum and id, then saves it into the user's add-on folder.
     static bool installVerified(const QByteArray &data, const CatalogEntry &entry, QString *error);
 
-    static QString userDir(); // ~/.local/share/diskforge/addons
-    static QString systemDir(); // /usr/share/diskforge/addons
+    static QString userDir(); // ~/.local/share/diskanvil/addons
+    static QString systemDir(); // /usr/share/diskanvil/addons
     static QStringList searchDirs();
     static Addon parse(const QString &file);
     static Addon parseData(const QByteArray &json, const QString &file);

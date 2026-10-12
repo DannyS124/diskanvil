@@ -8,7 +8,7 @@
 
 // Lists the files in an ISO image (ISO 9660 with Joliet names, which xorriso and the other
 // common ISO makers write) straight from the image file, so nothing gets mounted. Make a
-// DiskForge Live USB uses it to copy the DiskForge Live ISO onto a FAT32 stick.
+// DiskAnvil Live USB uses it to copy the DiskAnvil Live ISO onto a FAT32 stick.
 //
 // Images come from anywhere, so everything read is checked: extents stay inside the image,
 // names can't climb out of the folder ("..", "/"), and folders can't loop or nest forever.

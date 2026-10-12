@@ -1,9 +1,0 @@
-[Unit]
-Description=Save the DiskForge Live logs to the stick (every few minutes)
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/diskforge-live-logs --quiet
-TimeoutSec=90
-# 2: no stick to write to (started from the ISO). The logs stay in /run/diskforge-live.
-SuccessExitStatus=2

@@ -146,7 +146,7 @@ QString escaped(const QString &text)
 
 QString htmlStart()
 {
-    return QStringLiteral("<!DOCTYPE NETSCAPE-Bookmark-file-1>\n<!-- Saved by DiskForge's Save My Files. Import it in any browser. -->\n"
+    return QStringLiteral("<!DOCTYPE NETSCAPE-Bookmark-file-1>\n<!-- Saved by DiskAnvil's Save My Files. Import it in any browser. -->\n"
                           "<META HTTP-EQUIV=\"Content-Type\" CONTENT=\"text/html; charset=UTF-8\">\n<TITLE>Bookmarks</TITLE>\n<H1>Bookmarks</H1>\n<DL><p>\n");
 }
 
@@ -409,7 +409,7 @@ void Saver::run()
     // What was saved, in a note next to it.
     QFile note(r.folder + QStringLiteral("/What was saved.txt"));
     if (note.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        QStringList lines{tr("Saved by DiskForge's Save My Files, %1.").arg(QDateTime::currentDateTime().toString(Qt::TextDate)), QString()};
+        QStringList lines{tr("Saved by DiskAnvil's Save My Files, %1.").arg(QDateTime::currentDateTime().toString(Qt::TextDate)), QString()};
         for (const Folder &f : std::as_const(m_folders))
             lines << tr("%1's %2, from %3").arg(f.user, f.name, QDir::toNativeSeparators(f.path));
         lines << QString() << tr("%n file(s) copied.", nullptr, r.files);

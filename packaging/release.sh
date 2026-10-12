@@ -9,12 +9,12 @@
 #   packaging/release.sh --pull 0.4.3      a bad release got out: delete it, PKGBUILD goes back to the previous one
 #   packaging/release.sh --aur 0.4.3       push the current PKGBUILD to the AUR (after a packaging-only fix)
 #
-# The AUR repo is expected at ../diskforge-aur (git clone ssh://aur@aur.archlinux.org/diskforge.git).
+# The AUR repo is expected at ../diskanvil-aur (git clone ssh://aur@aur.archlinux.org/diskanvil.git).
 #
 # Never reuse a version number once it's been on GitHub.
 set -euo pipefail
 
-repo=DannyS124/diskforge
+repo=DannyS124/diskanvil
 root="$(cd "$(dirname "$0")/.." && pwd)"
 pkgbuild="$root/packaging/arch/PKGBUILD"
 cd "$root"
@@ -23,13 +23,13 @@ die() { echo "error: $*" >&2; exit 1; }
 pkgver_of() { sed -n 's/^pkgver=//p' "$1"; }
 on_github() { git ls-remote --exit-code --tags origin "refs/tags/v$1" >/dev/null 2>&1; }
 release_hash() { gh release download "$1" -R "$repo" -p SHA256SUMS -O - | cut -d' ' -f1; }
-aur="$(dirname "$root")/diskforge-aur"
+aur="$(dirname "$root")/diskanvil-aur"
 sync_aur() { # message
     [[ -d "$aur/.git" ]] || { echo "(no AUR clone at $aur, skipping the AUR)"; return 0; }
     cp "$pkgbuild" "$aur/PKGBUILD"
     (cd "$aur" && makepkg --printsrcinfo > .SRCINFO && git add PKGBUILD .SRCINFO \
         && { git diff --cached --quiet || { git commit -qm "$1" && git push -q origin master; }; })
-    echo "==> AUR updated: https://aur.archlinux.org/packages/diskforge"
+    echo "==> AUR updated: https://aur.archlinux.org/packages/diskanvil"
 }
 set_pkgbuild() { # file version hash
     sed -i "s/^pkgver=.*/pkgver=$2/; s/^pkgrel=.*/pkgrel=1/; s/^sha256sums=.*/sha256sums=('$3')/" "$1"
@@ -39,11 +39,11 @@ cmd="${1:-}"
 v="${2:-}"
 [[ -n "$v" ]] || die "usage: release.sh --stage|--publish|--pull|--aur <version>"
 stage="$root/packaging/staging/$v"
-rescue_iso="diskforge-live-$v.iso"
-win_msi="DiskForge-$v.msi"
-win_zip="DiskForge-$v-windows.zip"
-tarball="diskforge-$v.tar.gz"
-pkg="diskforge-$v-1-$(uname -m).pkg.tar.zst"
+rescue_iso="diskanvil-live-$v.iso"
+win_msi="DiskAnvil-$v.msi"
+win_zip="DiskAnvil-$v-windows.zip"
+tarball="diskanvil-$v.tar.gz"
+pkg="diskanvil-$v-1-$(uname -m).pkg.tar.zst"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
@@ -51,14 +51,14 @@ case "$cmd" in
 --stage)
     [[ -z "$(git status --porcelain)" ]] || die "commit or stash your changes first"
     grep -q "VERSION $v\$" CMakeLists.txt || die "set VERSION $v in CMakeLists.txt first"
-    grep -q "release version=\"$v\"" data/io.github.DannyS124.DiskForge.metainfo.xml.in || die "add a <release version=\"$v\"> to the metainfo first"
+    grep -q "release version=\"$v\"" data/io.github.DannyS124.DiskAnvil.metainfo.xml.in || die "add a <release version=\"$v\"> to the metainfo first"
     grep -q "^## $v\$" CHANGELOG.md || die "add a '## $v' section to CHANGELOG.md first"
     ! on_github "$v" || die "v$v is already on GitHub, use a new version"
 
-    # DiskForge never takes orders from other programs: no sockets, no D-Bus service of its
+    # DiskAnvil never takes orders from other programs: no sockets, no D-Bus service of its
     # own, nothing listening. Keep it that way.
     if grep -rnE 'QLocalServer|QTcpServer|QUdpSocket|QWebSocketServer|QSctpServer|registerService|registerObject|QDBusAbstractAdaptor|\blisten\(' src; then
-        die "something in src/ listens for other programs (above); DiskForge mustn't"
+        die "something in src/ listens for other programs (above); DiskAnvil mustn't"
     fi
     # Invisible characters (zero-width, text direction) can make code read differently than it runs.
     # A byte order mark is fine as a file's very first character (Windows PowerShell needs it to
@@ -73,7 +73,7 @@ case "$cmd" in
     cmake --build build -j"$(nproc)" >/dev/null
     # New or changed strings must be in the translation template before a release.
     cmake --build build --target update_translations >/dev/null 2>&1
-    python3 -I packaging/fill-english-plurals.py i18n/diskforge_en.ts
+    python3 -I packaging/fill-english-plurals.py i18n/diskanvil_en.ts
     git diff --quiet -- i18n || die "translations are out of date: commit the changes in i18n/ and stage again"
     logs="$root/packaging/staging/test-logs"
     mkdir -p "$logs"
@@ -89,31 +89,31 @@ case "$cmd" in
     }
     # As you: the system-disk guard and everything that works on plain files.
     for suite in guard addons gpt copy usage backup rescuemap cleanup catalog fuzz health jobs recover rescueusb stickcheck images isomode windows lostfiles viruses registry startup boot newids fat32; do
-        run_tests $suite ./build/diskforge-selftest --$suite
+        run_tests $suite ./build/diskanvil-selftest --$suite
     done
-    run_tests window-user env QT_QPA_PLATFORM=offscreen ./build/diskforge-uitest --user
+    run_tests window-user env QT_QPA_PLATFORM=offscreen ./build/diskanvil-uitest --user
     # As root: test devices made with losetup and dmsetup.
-    run_tests disks sudo ./build/diskforge-selftest
+    run_tests disks sudo ./build/diskanvil-selftest
     for suite in badsectors blockmap rescue clone btrfs optimize stop raid lvm; do
-        run_tests $suite sudo ./build/diskforge-selftest --$suite
+        run_tests $suite sudo ./build/diskanvil-selftest --$suite
     done
-    run_tests window sudo env QT_QPA_PLATFORM=offscreen ./build/diskforge-uitest
-    run_tests window-newids sudo env QT_QPA_PLATFORM=offscreen ./build/diskforge-uitest --user --only=newids
+    run_tests window sudo env QT_QPA_PLATFORM=offscreen ./build/diskanvil-uitest
+    run_tests window-newids sudo env QT_QPA_PLATFORM=offscreen ./build/diskanvil-uitest --user --only=newids
     # The file-based suites again with AddressSanitizer and UBSan, which catch memory errors
     # that don't crash. Last, because building it takes a while and sudo's login runs out.
-    cmake -S . -B build-asan -DDISKFORGE_SANITIZE=ON -DCMAKE_BUILD_TYPE=Debug >/dev/null
-    cmake --build build-asan -j"$(nproc)" --target diskforge-selftest >/dev/null
+    cmake -S . -B build-asan -DDISKANVIL_SANITIZE=ON -DCMAKE_BUILD_TYPE=Debug >/dev/null
+    cmake --build build-asan -j"$(nproc)" --target diskanvil-selftest >/dev/null
     for suite in addons gpt copy usage backup rescuemap catalog fuzz health jobs recover rescueusb stickcheck images isomode windows lostfiles viruses registry startup boot newids fat32; do
-        run_tests asan-$suite env ASAN_OPTIONS=detect_leaks=0 ./build-asan/diskforge-selftest --$suite
+        run_tests asan-$suite env ASAN_OPTIONS=detect_leaks=0 ./build-asan/diskanvil-selftest --$suite
     done
 
     # Local tag only. Restaging after a fix moves it to the new commit.
     git tag -d "v$v" >/dev/null 2>&1 || true
-    git tag -s "v$v" -m "DiskForge $v"
+    git tag -s "v$v" -m "DiskAnvil $v"
 
     rm -rf "$stage"
     mkdir -p "$stage"
-    git archive --format=tar.gz --prefix="diskforge-$v/" -o "$stage/$tarball" "v$v"
+    git archive --format=tar.gz --prefix="diskanvil-$v/" -o "$stage/$tarball" "v$v"
     (cd "$stage" && sha256sum "$tarball" > SHA256SUMS)
     hash=$(cut -d' ' -f1 "$stage/SHA256SUMS")
     cp "$pkgbuild" "$stage/PKGBUILD"
@@ -138,30 +138,30 @@ case "$cmd" in
     echo "==> checking the package"
     mkdir "$tmp/root"
     bsdtar -xf "$stage/$pkg" -C "$tmp/root"
-    [[ "$(QT_QPA_PLATFORM=offscreen "$tmp/root/usr/bin/diskforge" --version)" == "diskforge $v" ]] || die "packaged program doesn't report $v"
-    QT_QPA_PLATFORM=offscreen "$tmp/root/usr/bin/diskforge" --dump >/dev/null || die "packaged program can't read the disks"
+    [[ "$(QT_QPA_PLATFORM=offscreen "$tmp/root/usr/bin/diskanvil" --version)" == "diskanvil $v" ]] || die "packaged program doesn't report $v"
+    QT_QPA_PLATFORM=offscreen "$tmp/root/usr/bin/diskanvil" --dump >/dev/null || die "packaged program can't read the disks"
     desktop-file-validate "$tmp/root/usr/share/applications/"*.desktop
     appstreamcli validate --no-net "$tmp/root/usr/share/metainfo/"*.xml >/dev/null || die "metainfo doesn't validate"
-    for f in usr/share/icons/hicolor/scalable/apps usr/share/man/man1/diskforge.1.gz \
-             usr/lib/systemd/system/diskforge-journal-vacuum.service usr/lib/systemd/system/diskforge-paccache-uninstalled.service; do
+    for f in usr/share/icons/hicolor/scalable/apps usr/share/man/man1/diskanvil.1.gz \
+             usr/lib/systemd/system/diskanvil-journal-vacuum.service usr/lib/systemd/system/diskanvil-paccache-uninstalled.service; do
         [[ -e "$tmp/root/$f" ]] || die "package is missing $f"
     done
 
-    # DiskForge Live, from the same source, so the stick always has the same DiskForge.
-    echo "==> building DiskForge Live $v (podman, takes a while)"
-    command -v podman >/dev/null || die "podman is needed to build DiskForge Live"
-    rescue/build.sh >"$logs/rescue.log" 2>&1 || { tail -20 "$logs/rescue.log"; die "DiskForge Live didn't build (full log: $logs/rescue.log)"; }
-    iso=$(ls -t rescue/out/diskforge-live-"$v"-*.iso 2>/dev/null | head -1)
-    [[ -n "$iso" ]] || die "the DiskForge Live build made no ISO for $v"
+    # DiskAnvil Live, from the same source, so the stick always has the same DiskAnvil.
+    echo "==> building DiskAnvil Live $v (podman, takes a while)"
+    command -v podman >/dev/null || die "podman is needed to build DiskAnvil Live"
+    rescue/build.sh >"$logs/rescue.log" 2>&1 || { tail -20 "$logs/rescue.log"; die "DiskAnvil Live didn't build (full log: $logs/rescue.log)"; }
+    iso=$(ls -t rescue/out/diskanvil-live-"$v"-*.iso 2>/dev/null | head -1)
+    [[ -n "$iso" ]] || die "the DiskAnvil Live build made no ISO for $v"
     cp "$iso" "$stage/$rescue_iso"
     (cd "$stage" && sha256sum "$rescue_iso" > "$rescue_iso.sha256")
 
     # The Windows version, from the same source: its installer, and a zip to run it from a
     # folder. Only where its cross-compiler is set up (see packaging/windows/build.sh); point
-    # DISKFORGE_WINDOWS_WORK at the folder it downloads into.
+    # DISKANVIL_WINDOWS_WORK at the folder it downloads into.
     if command -v x86_64-w64-mingw32-g++ >/dev/null && command -v wixl >/dev/null; then
         echo "==> building the Windows version $v"
-        win_work=$(realpath -m "${DISKFORGE_WINDOWS_WORK:-$HOME/.cache/diskforge-windows}")
+        win_work=$(realpath -m "${DISKANVIL_WINDOWS_WORK:-$HOME/.cache/diskanvil-windows}")
         packaging/windows/build.sh "$win_work" >"$logs/windows.log" 2>&1 || { tail -20 "$logs/windows.log"; die "the Windows version didn't build (full log: $logs/windows.log)"; }
         cp "$win_work/$win_msi" "$win_work/$win_zip" "$stage/"
         (cd "$stage" && sha256sum "$win_msi" "$win_zip" > SHA256SUMS-windows)
@@ -178,15 +178,15 @@ On a USB stick you don't need: mount, unmount, format, new partition, resize, re
 Back Up and Restore, Clone Drive (onto another spare stick), Rescue Copy.
 Then Disk Usage, Disk Cleanup, Optimize Drives, Btrfs Snapshots, Help, About and Check for Updates.
 Add-ons: install examples/addons/folder-sizes from a file, run it on the system disk (look-only),
-run your own add-on (it should say it was added outside DiskForge), and check what the
+run your own add-on (it should say it was added outside DiskAnvil), and check what the
 run question shows. Make one with Make an Add-on and Test it; pin it to the toolbar.
 On the spare stick: Wipe Disk and Stop it halfway from the bar on top; delete a partition and
 put it back with Recover Partitions; Partition Type and Flags; Inspect Partition Table.
 Disk Health: the reasons, the firmware row, the Btrfs part; the warning bar and Dismiss.
 View > Theme (each one), a hard drive's Properties > Power, Rescue Copy's "Go easy" options.
 USB sticks: Check a USB Stick, Write Image to USB with a compressed image and with "copy the
-files" (and persistence), Make a Windows USB, and Make a DiskForge Live USB with
-packaging/staging/$v/$rescue_iso. Start a PC (or a VM) from the DiskForge Live stick, UEFI and an old
+files" (and persistence), Make a Windows USB, and Make a DiskAnvil Live USB with
+packaging/staging/$v/$rescue_iso. Start a PC (or a VM) from the DiskAnvil Live stick, UEFI and an old
 BIOS one if you have it, and look at its logs. Find Lost Files on a stick with a few deleted pictures,
 saving them onto another drive.
 Newer things: Find Lost Files on a FAT, exFAT and NTFS stick where you deleted some files and folders
@@ -214,7 +214,7 @@ EOF
     ! on_github "$v" || die "v$v is already on GitHub"
     git tag -v "v$v" >/dev/null 2>&1 || die "tag v$v is missing or not signed"
     # The staged file has to be exactly what the tag produces, so what you tested is what goes up.
-    git archive --format=tar.gz --prefix="diskforge-$v/" -o "$tmp/$tarball" "v$v"
+    git archive --format=tar.gz --prefix="diskanvil-$v/" -o "$tmp/$tarball" "v$v"
     cmp -s "$tmp/$tarball" "$stage/$tarball" || die "the staged file doesn't match tag v$v, run --stage $v again"
     hash=$(cut -d' ' -f1 "$stage/SHA256SUMS")
     windows=()
@@ -227,7 +227,7 @@ EOF
     git push -q origin "v$v"
     gh release create "v$v" "$stage/$tarball" "$stage/SHA256SUMS" "$stage/$rescue_iso" "$stage/$rescue_iso.sha256" "${windows[@]}" \
         -R "$repo" --verify-tag --latest \
-        --title "DiskForge $v" --notes "$notes
+        --title "DiskAnvil $v" --notes "$notes
 
 sha256: \`$hash\`" >/dev/null
     set_pkgbuild "$pkgbuild" "$v" "$hash"
@@ -248,7 +248,7 @@ sha256: \`$hash\`" >/dev/null
     [[ -n "$run_id" ]] || die "the bundles workflow didn't start; the release is out without them (check the Actions tab)"
     gh run watch "$run_id" -R "$repo" --exit-status >/dev/null || die "building the bundles failed; the release is out without them (gh run view $run_id -R $repo)"
     assets=$(gh release view "v$v" -R "$repo" --json assets --jq '.assets[].name')
-    for f in DiskForge-x86_64.flatpak DiskForge-x86_64.AppImage; do
+    for f in DiskAnvil-x86_64.flatpak DiskAnvil-x86_64.AppImage; do
         grep -qx "$f" <<<"$assets" || die "$f wasn't attached to the release"
     done
     echo "==> the Flatpak and AppImage are attached"

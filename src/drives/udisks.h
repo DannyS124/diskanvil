@@ -96,7 +96,7 @@ struct Health {
     QString selftestStatus;
     int selftestPercentRemaining = -1;
     quint64 updated = 0;
-    QString key;                // where DiskForge keeps what it saw and what was dismissed
+    QString key;                // where DiskAnvil keeps what it saw and what was dismissed
     QVector<HealthReason> reasons;
     int lifeLeft = -1;          // percent, SSDs that report it
     double warningTempC = -1;   // NVMe: the drive's own limits
@@ -409,7 +409,7 @@ private:
     std::shared_ptr<Windows> m_windows;
     void forgetProbes(const Disk *disk);
     QString chkdskTarget(const Volume &volume) const;
-    // Wiping, once Windows has let go of the drive: zeros written by DiskForge itself, shown as
+    // Wiping, once Windows has let go of the drive: zeros written by DiskAnvil itself, shown as
     // a job (with progress and Stop) like UDisks' own.
     void wipeOffline(const QString &path, quint64 size, int number, const QString &name, const QString &failure);
     void showWipe(const QString &id, quint64 done);

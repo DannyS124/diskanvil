@@ -746,7 +746,7 @@ void RestoreDialog::updateState()
     if (!f.disk) {
         problem = tr("The drive isn't there anymore.");
     } else if (f.disk->isSystem) {
-        problem = tr("%1 runs this system, so DiskForge won't write over it.").arg(shortDevice(f.disk->device));
+        problem = tr("%1 runs this system, so DiskAnvil won't write over it.").arg(shortDevice(f.disk->device));
     } else if (!file.isEmpty() && !QFileInfo(file).isFile()) {
         problem = tr("File not found.");
     } else if (!file.isEmpty()) {

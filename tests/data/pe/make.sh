@@ -19,7 +19,7 @@ BEGIN
   BEGIN
     BLOCK "040904B0"
     BEGIN
-      VALUE "CompanyName", "DiskForge Test Company"
+      VALUE "CompanyName", "DiskAnvil Test Company"
       VALUE "FileDescription", "Grüße driver for tests"
       VALUE "FileVersion", "3.1.4.1"
       VALUE "ProductName", "Test Product"

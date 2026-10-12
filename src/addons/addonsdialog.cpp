@@ -133,14 +133,14 @@ AddonsDialog::AddonsDialog(Addons *addons, const QList<QKeySequence> &takenShort
         m_addons->load();
         fill();
     });
-    m_accept->setToolTip(tr("This add-on is yours: stop warning that it was added from outside DiskForge"));
+    m_accept->setToolTip(tr("This add-on is yours: stop warning that it was added from outside DiskAnvil"));
     connect(m_accept, &QPushButton::clicked, this, [this] {
         const int row = currentRow();
         if (row < 0)
             return;
         const Addon a = m_addons->all()[row];
         if (!askPlain(this, windowTitle(), tr("Did you put \"%1\" in the add-on folder (or change it) yourself?\n\n"
-                                               "Only say yes if you did. DiskForge stops warning about this version of it.").arg(a.name)))
+                                               "Only say yes if you did. DiskAnvil stops warning about this version of it.").arg(a.name)))
             return;
         m_addons->accept(a.id, a.fileHash);
         fill();
@@ -214,7 +214,7 @@ void AddonsDialog::fill()
     if (m_list->topLevelItemCount() > 0)
         m_list->setCurrentItem(m_list->topLevelItem(0));
     else
-        m_details->setHtml(tr("<p>No add-ons installed.</p><p>Add-ons add actions to DiskForge's menus, like backing up a "
+        m_details->setHtml(tr("<p>No add-ons installed.</p><p>Add-ons add actions to DiskAnvil's menus, like backing up a "
                               "drive or opening it in another tool. Make one with <b>Make an Add-on</b>, get one with "
                               "<b>Get Add-ons</b>, or install a file with <b>Install from File</b>.</p><p>They live in <code>%1</code>.</p>")
                                .arg(Addons::userDir().toHtmlEscaped()));
@@ -247,7 +247,7 @@ void AddonsDialog::showDetails()
         html += outsideNote();
     for (const AddonAction &act : a.actions) {
         html += QStringLiteral("<p><b>%1</b> <small>(%2%3)</small><br><code>%4</code></p>")
-                    .arg(act.label.toHtmlEscaped(), act.appliesTo.toHtmlEscaped(), act.terminal ? tr(", in a terminal") : act.window ? tr(", in a DiskForge window") : QString(),
+                    .arg(act.label.toHtmlEscaped(), act.appliesTo.toHtmlEscaped(), act.terminal ? tr(", in a terminal") : act.window ? tr(", in a DiskAnvil window") : QString(),
                          act.command.join(QLatin1Char(' ')).toHtmlEscaped())
             + addonNotes(act);
     }
@@ -309,7 +309,7 @@ QString AddonsDialog::shortcutProblem(const QKeySequence &keys, const QString &a
     const QString shown = keys.toString(QKeySequence::NativeText);
     for (const QKeySequence &taken : m_taken) {
         if (taken.matches(keys) == QKeySequence::ExactMatch)
-            return tr("%1 is already one of DiskForge's own shortcuts.").arg(shown);
+            return tr("%1 is already one of DiskAnvil's own shortcuts.").arg(shown);
     }
     for (const Addon &a : m_addons->all()) {
         for (const AddonAction &act : a.actions) {
