@@ -33,6 +33,10 @@ const Disk *diskWithFile(UDisks &udisks, const QString &file);
 const Disk *waitForDisk(UDisks &udisks, const QString &file, const std::function<bool(const Disk &)> &check, int quietMs = 0);
 // Opens a disk or partition through UDisks and returns the fd (-1 on failure).
 int openBlockFd(UDisks &udisks, const QString &objectPath, int mode);
+// What's in the files on tests/data/wof's volume, made again (wof/files.ps1): the text most of them
+// hold, and "mixed" (bytes that don't compress, the text, then x86 calls for LZX's translation).
+QByteArray wofText();
+QByteArray wofMixed();
 
 // Suites in their own files.
 void gptTests();

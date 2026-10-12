@@ -81,16 +81,31 @@ void DriversDialog::load()
         startup::Report report = startup::find(root);
 #endif
         QVector<Row> rows;
+        wof::Reader unpacker;
         for (int i = 0; i < report.entries.size(); ++i) {
             const startup::Entry &e = report.entries.at(i);
             if (e.kind != startup::Kind::Driver && e.kind != startup::Kind::Service)
                 continue;
             Row r;
             r.entry = i;
+            constexpr qint64 kMost = 128 * 1024 * 1024;
+            QByteArray data;
             QFile file(e.file);
-            if (!e.file.isEmpty() && file.size() < 128 * 1024 * 1024 && file.open(QIODevice::ReadOnly)) {
-                const QByteArray data = file.readAll();
+            if (!e.file.isEmpty() && file.size() < kMost && file.open(QIODevice::ReadOnly)) {
+                data = file.readAll();
                 r.changed = QFileInfo(e.file).lastModified();
+            }
+            // Kept compressed by Windows, which Linux can't always read (with ntfs-3g it doesn't
+            // even open): DiskAnvil unpacks it from the drive itself.
+            const bool compressed = !e.file.isEmpty() && data.isEmpty() && wof::compressed(e.file);
+            if (compressed) {
+                QString why;
+                r.unpacked = unpacker.read(e.file, &data, &why, kMost);
+                if (!r.unpacked)
+                    qCInfo(lcOps).noquote() << "Drivers and services: couldn't unpack" << e.file << "-" << why;
+                r.changed = wof::changed(e.file);
+            }
+            if (!data.isEmpty()) {
                 const QHash<QString, QString> v = peinfo::versionStrings(data);
                 r.maker = v.value(QStringLiteral("CompanyName"));
                 r.description = v.value(QStringLiteral("FileDescription"));
@@ -104,14 +119,13 @@ void DriversDialog::load()
                 if (r.maker.isEmpty())
                     r.maker = r.signer;
             }
-            // Kept compressed by Windows, which Linux can't always read (with ntfs-3g it doesn't
-            // even open). In the Windows folder that's CompactOS, done to Windows' own files;
-            // anywhere else someone may have done it to any program.
-            if (r.maker.isEmpty() && !e.file.isEmpty() && wof::compressed(e.file)) {
+            // Compressed, and it couldn't be unpacked either. In the Windows folder that's
+            // CompactOS, done to Windows' own files; anywhere else someone may have done it to any
+            // program.
+            if (r.maker.isEmpty() && compressed && !r.unpacked) {
                 const bool inWindows = wof::inWindowsFolder(root, e.file);
                 r.maker = inWindows ? tr("Windows (kept compressed)") : tr("Can't tell (kept compressed)");
                 r.windowsOwn = inWindows;
-                r.changed = wof::changed(e.file);
             }
             rows << r;
         }
@@ -151,6 +165,8 @@ void DriversDialog::fill()
             tip << r.description;
         tip << (r.signer.isEmpty() ? tr("No signature in the file itself (Windows' own are often signed in its catalog instead)")
                                    : tr("Signed by %1").arg(r.signer));
+        if (r.unpacked)
+            tip << tr("Windows keeps it compressed, which Linux can't read: DiskAnvil unpacked it itself to look at it.");
         tip << e.command;
         for (int c = 0; c < item->columnCount(); ++c)
             item->setToolTip(c, tip.join(QLatin1Char('\n')));

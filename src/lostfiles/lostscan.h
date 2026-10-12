@@ -4,6 +4,7 @@
 #pragma once
 
 #include "lostsource.h"
+#include "unpack.h"
 #include "vshadow.h"
 
 #include <QObject>
@@ -51,6 +52,9 @@ struct Found {
     QByteArray data;            // a small file kept in the file system's own records (NTFS): its bytes
     QString note;               // anything else worth saying about it, in plain words
     std::shared_ptr<Source> from; // where its bytes are, when not on what's looked through: an earlier copy of it
+    // Windows keeps it compressed: `extents` (or `data`, for a WOF stream small enough to be in its
+    // record) are its bytes as they're kept, and this says how to unpack them. FileReader does.
+    unpack::Packing packing;
 };
 
 // A found file's bytes, read from where they are on the source.

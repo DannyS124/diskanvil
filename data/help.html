@@ -143,7 +143,8 @@ files were on, or a disk image. On FAT, exFAT and NTFS drives it first lists del
 folders, the Recycle Bin's too, and on NTFS what was deleted recently, newest first. Untick Only deleted files to see
 the rest as well. Then it looks through the whole drive for pictures, documents, videos, music and archives by what's
 inside them, so it also works on a drive that was formatted or won't open; those get made-up names. If Windows kept
-earlier versions of the drive, Look in Them brings back what has changed or gone since. Pictures show as thumbnails,
+earlier versions of the drive, Look in Them brings back what has changed or gone since. Files Windows kept compressed
+come back unpacked. Pictures show as thumbnails,
 and the preview shows PDFs, documents, archives, songs and films. Each file says whether it looks whole. Tick the ones
 you want and save them to <i>another</i> drive: saving onto the same one could overwrite what you're after. On a drive
 that's failing, make a Rescue Copy first and look in the copy instead (File → Find Lost Files in a Disk Image, which
@@ -246,11 +247,12 @@ have one; on tiling window managers you start one yourself (polkit-kde-agent, po
 <code>sudo pacman -S</code> and its name). DiskAnvil never installs anything by itself.</p>
 <p><b>"Device or resource busy":</b> something still has files open on the drive. Close it and try again.</p>
 <p><b>A drive is missing:</b> press F5. Empty card readers are hidden.</p>
-<p><b>Some of Windows' files can't be read from Linux or DiskAnvil Live:</b> on small drives (cheap laptops' eMMC
+<p><b>Some of Windows' files can't be opened from Linux or DiskAnvil Live:</b> on small drives (cheap laptops' eMMC
 especially) Windows keeps its own files compressed (CompactOS), and compact.exe or CompactGUI can do that to any
-others. Windows reads them as usual, but Linux can't. Windows Drivers and Services marks the ones in the Windows
-folder as Windows' own and says "Can't tell" for the rest, and Scan for Viruses counts them apart: Microsoft
-Defender, in Windows, checks those.</p>
+others. Windows reads them as usual; Linux only when its NTFS driver was built to (Arch's is, DiskAnvil Live's and
+ntfs-3g aren't). DiskAnvil unpacks them itself wherever it needs them: Find Lost Files, Windows Drivers and Services,
+Scan for Viruses, Save My Files and putting Windows' boot files back. For that it opens the drive read-only, which on a
+PC can ask for your password. Other programs, the file manager included, still can't open them.</p>
 <p><b>A USB stick still shows two partitions after it held an ISO:</b> a Linux ISO leaves its own layout on the stick,
 and formatting doesn't clear it. Right-click the stick, Wipe Disk, then New Partition Table and make one new partition.</p>
 <p><b>A Secure Erase got cut off and now the drive is locked:</b> during the erase the drive has the temporary

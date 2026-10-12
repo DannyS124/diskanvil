@@ -97,6 +97,8 @@ case "$cmd" in
     run_tests window-user env QT_QPA_PLATFORM=offscreen ./build/diskanvil-uitest --user
     # As root: test devices made with losetup and dmsetup.
     run_tests disks sudo ./build/diskanvil-selftest
+    # Again as root, where DiskAnvil can open the test drive itself to unpack Windows' compressed files.
+    run_tests viruses-root sudo ./build/diskanvil-selftest --viruses
     for suite in badsectors blockmap rescue clone btrfs optimize stop raid lvm; do
         run_tests $suite sudo ./build/diskanvil-selftest --$suite
     done

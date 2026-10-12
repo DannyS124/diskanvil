@@ -767,7 +767,7 @@ void fuzz()
 
 } // namespace
 
-QByteArray unpack(const QString &path)
+QByteArray unpackImage(const QString &path)
 {
     QString error;
     const std::unique_ptr<ImageSource> image = ImageSource::open(path, &error);
@@ -787,7 +787,7 @@ struct SparseImage {
     quint64 size = 0;
     QHash<quint64, QByteArray> pieces;
 
-    static SparseImage unpack(const QString &path)
+    static SparseImage unpackImage(const QString &path)
     {
         SparseImage out;
         QString error;
@@ -868,7 +868,7 @@ void fileSystems(const QString &dir)
     // ntfs-windows: made and deleted from by Windows itself (windows-job.cmd).
     for (const QString &name : {QStringLiteral("fat12"), QStringLiteral("fat16"), QStringLiteral("fat32"), QStringLiteral("exfat"), QStringLiteral("ntfs"),
                                 QStringLiteral("ntfs-windows")}) {
-        const QByteArray image = unpack(data + name + QStringLiteral(".img.zst"));
+        const QByteArray image = unpackImage(data + name + QStringLiteral(".img.zst"));
         report(!image.isEmpty(), QStringLiteral("%1: the test image unpacks").arg(name));
         auto source = lost::Source::fromMemory(image);
         QVector<lost::Volume> volumes;
@@ -951,7 +951,7 @@ void fileSystems(const QString &dir)
     // Deleted by Linux's own NTFS driver, which takes the names away: the files are still all
     // there, named after what's in them.
     {
-        auto source = lost::Source::fromMemory(unpack(data + QStringLiteral("ntfs-linux.img.zst")));
+        auto source = lost::Source::fromMemory(unpackImage(data + QStringLiteral("ntfs-linux.img.zst")));
         QSet<QByteArray> nameless;
         QStringList names;
         for (const lost::Found &f : quickScan(source)) {
@@ -974,7 +974,7 @@ void fileSystems(const QString &dir)
     // files deleted and their records taken by new files, so only the journal still has their
     // names; and a file Linux's driver deleted, taking its name away, named again from the journal.
     {
-        auto source = lost::Source::fromMemory(unpack(data + QStringLiteral("ntfs-journal.img.zst")));
+        auto source = lost::Source::fromMemory(unpackImage(data + QStringLiteral("ntfs-journal.img.zst")));
         const QVector<lost::Found> found = quickScan(source);
         int namesOnly = 0;
         for (const lost::Found &f : found)
@@ -1030,7 +1030,7 @@ void fileSystems(const QString &dir)
     }
 
     // Partition tables: the same file system inside an MBR and a GPT drive.
-    const QByteArray fat16 = unpack(data + QStringLiteral("fat16.img.zst"));
+    const QByteArray fat16 = unpackImage(data + QStringLiteral("fat16.img.zst"));
     for (const bool gpt : {false, true}) {
         QByteArray drive(qsizetype(32 * kMiB), '\0');
         const qsizetype at = kMiB;
@@ -1080,7 +1080,7 @@ void fileSystemFuzz()
     const int rounds = qEnvironmentVariableIsSet("DISKANVIL_FUZZ_ROUNDS") ? qEnvironmentVariableIntValue("DISKANVIL_FUZZ_ROUNDS") : 60;
     int runs = 0;
     for (const QString &name : {QStringLiteral("fat12"), QStringLiteral("fat32"), QStringLiteral("exfat"), QStringLiteral("ntfs")}) {
-        const QByteArray clean = unpack(data + name + QStringLiteral(".img.zst"));
+        const QByteArray clean = unpackImage(data + name + QStringLiteral(".img.zst"));
         // Where the boot sector, the tables and the folders are: the first few hundred KiB.
         const qsizetype hot = std::min<qsizetype>(clean.size(), 640 * 1024);
         for (int round = 0; round < rounds; ++round) {
@@ -1097,7 +1097,7 @@ void fileSystemFuzz()
 
     // Windows put this one's MFT 22 MB in: the flips go there, where the change journal's record is.
     {
-        const QByteArray clean = unpack(data + QStringLiteral("ntfs-journal.img.zst"));
+        const QByteArray clean = unpackImage(data + QStringLiteral("ntfs-journal.img.zst"));
         const uchar *b = reinterpret_cast<const uchar *>(clean.constData());
         const qsizetype mft = clean.size() > 0x40 ? qsizetype(qFromLittleEndian<quint64>(b + 0x30) * qFromLittleEndian<quint16>(b + 11) * b[13]) : 0;
         int journalRuns = 0;
@@ -1170,7 +1170,7 @@ int scanImage(const QString &path)
 void shadowCopies()
 {
     const QString data = QStringLiteral(SOURCE_DIR "/tests/data/lostfs/");
-    const SparseImage image = SparseImage::unpack(data + QStringLiteral("ntfs-shadow.img.zst"));
+    const SparseImage image = SparseImage::unpackImage(data + QStringLiteral("ntfs-shadow.img.zst"));
     const auto source = image.source();
     const lost::Extent where{0, source->size()};
     QFile list(data + QStringLiteral("shadow-expected.txt"));
@@ -1313,7 +1313,7 @@ void shadowCopies()
 
     // A volume with no copies has none, and says nothing's wrong.
     {
-        auto plain = lost::Source::fromMemory(unpack(data + QStringLiteral("ntfs-windows.img.zst")));
+        auto plain = lost::Source::fromMemory(unpackImage(data + QStringLiteral("ntfs-windows.img.zst")));
         QString why;
         report(vss::copies(*plain, {0, plain->size()}, &why).isEmpty() && why.isEmpty(), QStringLiteral("shadow copies: none on a volume without any"));
     }
@@ -1323,7 +1323,7 @@ void shadowCopies()
 // bitmaps. It must never crash or loop, whatever it reads.
 void shadowCopyFuzz()
 {
-    const SparseImage clean = SparseImage::unpack(QStringLiteral(SOURCE_DIR "/tests/data/lostfs/ntfs-shadow.img.zst"));
+    const SparseImage clean = SparseImage::unpackImage(QStringLiteral(SOURCE_DIR "/tests/data/lostfs/ntfs-shadow.img.zst"));
     const auto source = clean.source();
     const lost::Extent where{0, source->size()};
     // Where the records are: the header, the catalog, and from it each store's blocks.
@@ -2039,7 +2039,7 @@ QByteArray typesFile(const QString &name)
 {
     const QString path = QStringLiteral(SOURCE_DIR "/tests/data/lostfs/types/") + name;
     if (name.endsWith(QLatin1String(".zst")))
-        return unpack(path);
+        return unpackImage(path);
     QFile f(path);
     return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
 }
@@ -3090,7 +3090,7 @@ void btrfsRestore()
     QTemporaryDir dir;
     const QString image = dir.filePath(QStringLiteral("btrfs.img"));
     QFile out(image);
-    const QByteArray bytes = unpack(QStringLiteral(SOURCE_DIR "/tests/data/lostfs/btrfs.img.zst"));
+    const QByteArray bytes = unpackImage(QStringLiteral(SOURCE_DIR "/tests/data/lostfs/btrfs.img.zst"));
     if (bytes.isEmpty() || !out.open(QIODevice::WriteOnly) || out.write(bytes) != bytes.size()) {
         report(false, QStringLiteral("btrfs: unpack the test image"));
         return;
@@ -3134,6 +3134,116 @@ void btrfsRestore()
            QStringLiteral("btrfs: just the ticked deleted files are copied back, whole"), QStringLiteral("%1 %2").arg(note.size()).arg(photo.size()));
 }
 
+// Files Windows compressed, on a volume Windows made (tests/data/wof): compact.exe's four ways and
+// NTFS's own compression, two of them deleted after. Each comes back whole, unpacked by our own
+// code; and damaged packed data never takes it past what it was given.
+void windowsCompressed()
+{
+    auto source = lost::Source::fromMemory(unpackImage(QStringLiteral(SOURCE_DIR "/tests/data/wof/wof.img.zst")));
+    const QVector<lost::Found> found = quickScan(source);
+    const QByteArray text = wofText(), mixed = wofMixed();
+    using F = unpack::Format;
+    struct Want {
+        const char *path;
+        F format;
+        bool mixed;
+        bool deleted;
+    };
+    const QVector<Want> wants = {
+        {"Windows/System32/drivers/anvil.sys", F::Xpress4k, false, false}, {"Program Files/Tool/tool.exe", F::Xpress4k, false, false},
+        {"Mixed/mixed4k.bin", F::Xpress4k, true, false},                   {"Windows/System32/lzx.dll", F::Lzx, false, false},
+        {"Mixed/mixedlzx.bin", F::Lzx, true, false},                       {"Windows/System32/x8.dll", F::Xpress8k, false, false},
+        {"Windows/System32/x16.dll", F::Xpress16k, false, false},          {"Docs/notes.txt", F::Lznt1, false, false},
+        {"Docs/mixed.bin", F::Lznt1, true, false},                         {"Gone/gone.txt", F::Lznt1, false, true},
+        {"Gone/gone-lzx.dll", F::Lzx, true, true},                         {"plain.txt", F::None, false, false},
+    };
+    QStringList wrong;
+    QVector<const lost::Found *> samples; // one of each way, for the damage below
+    for (const Want &w : wants) {
+        const QString path = QStringLiteral("WOFTEST/") + QLatin1String(w.path);
+        const lost::Found *match = nullptr;
+        for (const lost::Found &f : found) {
+            if (f.folder + QLatin1Char('/') + f.name == path)
+                match = &f;
+        }
+        const QByteArray &expect = w.mixed ? mixed : text;
+        if (!match) {
+            wrong << path + QStringLiteral(" isn't listed");
+            continue;
+        }
+        const QByteArray got = lost::FileReader(source, *match).head(qint64(match->size));
+        if (match->packing.format != w.format || match->deleted != w.deleted || match->size != quint64(expect.size()) || got != expect
+            || match->condition != lost::Condition::Good || (w.format != F::None) != match->note.contains(QLatin1String("compressed")))
+            wrong << QStringLiteral("%1: format %2, %3 bytes, %4, condition %5, %6").arg(path).arg(int(match->packing.format)).arg(got.size())
+                         .arg(got == expect ? QStringLiteral("the same") : QStringLiteral("not the same")).arg(int(match->condition)).arg(match->note);
+        if (w.mixed)
+            samples << match;
+    }
+    report(wrong.isEmpty(), QStringLiteral("compressed by Windows: each way comes back whole, deleted ones too (XPRESS 4K, 8K, 16K, LZX, LZNT1)"),
+           wrong.join(QStringLiteral("; ")));
+
+    // Reading from the middle, across chunks and units, the way a preview or a save does.
+    bool middle = true;
+    for (const lost::Found *f : std::as_const(samples)) {
+        lost::FileReader reader(source, *f);
+        for (const quint64 at : {quint64(1), quint64(4095), quint64(32767), quint64(65535), quint64(70001), quint64(150000)}) {
+            QByteArray part(7000, Qt::Uninitialized);
+            reader.read(at, part.data(), part.size());
+            middle = middle && part == mixed.mid(qsizetype(at), part.size());
+        }
+    }
+    report(samples.size() == 4 && middle, QStringLiteral("compressed by Windows: any part of one reads right on its own"));
+
+    // Damaged: the packed bytes of each file, changed here and there, cut short, or random.
+    QRandomGenerator random(1234);
+    int rounds = 0;
+    for (const lost::Found *f : std::as_const(samples)) {
+        QByteArray stored;
+        for (const lost::Extent &e : f->extents) {
+            if (e.zeros())
+                continue;
+            QByteArray part(qsizetype(e.length), Qt::Uninitialized);
+            source->read(e.start, part.data(), e.length);
+            stored += part;
+        }
+        const qsizetype outSize = f->packing.format == F::Lznt1 ? f->packing.unit : unpack::chunkSize(f->packing.format);
+        QByteArray out(outSize, Qt::Uninitialized);
+        for (int round = 0; round < 1500; ++round, ++rounds) {
+            const qsizetype from = random.bounded(int(stored.size()));
+            QByteArray in = stored.mid(from, random.bounded(1, 40000));
+            for (int flips = random.bounded(1, 6); flips > 0 && !in.isEmpty(); --flips)
+                in[random.bounded(int(in.size()))] = char(random.bounded(256));
+            if (round % 50 == 0) {
+                in.resize(random.bounded(1, 3000));
+                for (char &c : in)
+                    c = char(random.bounded(256));
+            }
+            const auto *p = reinterpret_cast<const uchar *>(in.constData());
+            auto *o = reinterpret_cast<uchar *>(out.data());
+            switch (f->packing.format) {
+            case F::Lznt1:
+                unpack::lznt1(p, in.size(), o, out.size());
+                break;
+            case F::Lzx:
+                unpack::lzx(p, in.size(), o, out.size());
+                break;
+            default:
+                unpack::xpress(p, in.size(), o, out.size());
+                break;
+            }
+        }
+        // A stream that's only partly there: the file reads, with the missing part failing.
+        lost::Found cut = *f;
+        quint64 keep = 0;
+        for (const lost::Extent &e : std::as_const(cut.extents))
+            keep += e.length;
+        cut.extents = lost::slice(cut.extents, 0, keep / 2);
+        QByteArray all(qsizetype(cut.size), Qt::Uninitialized);
+        lost::FileReader(source, cut).read(0, all.data(), all.size());
+    }
+    report(rounds == 6000, QStringLiteral("compressed by Windows: damaged packed data unpacks to no more than it should"), QString::number(rounds));
+}
+
 void lostFilesTests()
 {
     previewQueue();
@@ -3162,4 +3272,5 @@ void lostFilesTests()
     ransomwareSigns();
     readThrough();
     btrfsRestore();
+    windowsCompressed();
 }

@@ -16,6 +16,7 @@
 #include "filetypes.h"
 #include "format.h"
 #include "lostraw.h"
+#include "unpack.h"
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -117,6 +118,7 @@ struct Attribute {
     quint64 startVcn = 0;
     quint64 size = 0;        // real size
     quint64 initialized = 0; // what's been written; past it reads as zeros
+    quint8 compressionUnit = 0; // NTFS compression: 2^this clusters to a unit
     bool badRuns = false;
 };
 
@@ -258,6 +260,7 @@ public:
             } else if (length >= 0x40) {
                 attr.startVcn = le64(a + 0x10);
                 const quint16 runsAt = le16(a + 0x20);
+                attr.compressionUnit = a[0x22];
                 attr.size = le64(a + 0x30);
                 attr.initialized = le64(a + 0x38);
                 if (runsAt < length)
@@ -325,6 +328,115 @@ struct Node {
     bool directory = false;
 };
 
+constexpr quint32 kWofTag = 0x80000017; // IO_REPARSE_TAG_WOF
+const QString kWofStream = QStringLiteral("WofCompressedData");
+
+// compact.exe /exe and CompactOS mark a file with a reparse point saying how they packed it:
+// WOF's own header (version 1, provider 2: a file of its own), then the file provider's (version
+// 1, the format).
+unpack::Format wofFormatOf(const Attribute &reparse)
+{
+    const QByteArray &v = reparse.value;
+    if (reparse.type != 0xC0 || v.size() < 24 || le32(bytes(v)) != kWofTag)
+        return unpack::Format::None;
+    const uchar *p = bytes(v) + 8;
+    if (le32(p) != 1 || le32(p + 4) != 2 || le32(p + 8) != 1)
+        return unpack::Format::None;
+    return unpack::wofFormat(le32(p + 12));
+}
+
+// An attribute's runs, from its pieces (in extension records, each saying where it starts).
+QVector<Run> joinRuns(QVector<Attribute> parts, bool *broken)
+{
+    std::sort(parts.begin(), parts.end(), [](const Attribute &a, const Attribute &b) { return a.startVcn < b.startVcn; });
+    QVector<Run> runs;
+    quint64 expect = 0;
+    for (const Attribute &a : std::as_const(parts)) {
+        if (a.resident || a.startVcn != expect || a.badRuns)
+            *broken = true;
+        runs += a.runs;
+        expect = a.startVcn;
+        for (const Run &r : a.runs)
+            expect = r.vcn + r.length;
+    }
+    return runs;
+}
+
+// Where a file's bytes are: in its record, in pieces on the volume, or packed by Windows.
+struct Contents {
+    quint64 size = 0;
+    QByteArray data;
+    QVector<Extent> extents;
+    QVector<Run> runs; // the clusters it has, for whether they're in use again
+    unpack::Packing packing;
+    bool broken = false;
+    bool cantUnpack = false; // compressed in a way that isn't understood
+};
+
+// From a file's unnamed $DATA pieces and, when compact.exe packed it (`wof`), its
+// WofCompressedData pieces.
+Contents contentsOf(const Ntfs &fs, QVector<Attribute> data, QVector<Attribute> stream, unpack::Format wof)
+{
+    Contents c;
+    std::sort(data.begin(), data.end(), [](const Attribute &a, const Attribute &b) { return a.startVcn < b.startVcn; });
+    if (data.isEmpty())
+        return c;
+    if (data.first().resident) {
+        c.data = data.first().value;
+        c.size = quint64(c.data.size());
+    } else {
+        c.runs = joinRuns(data, &c.broken);
+        c.size = data.first().size;
+        const quint64 initialized = std::min(data.first().initialized, c.size);
+        c.extents = fs.extentsOf(c.runs, initialized);
+        if (initialized < c.size)
+            c.extents.push_back({Extent::kZeros, c.size - initialized}); // never written: zeros
+        quint64 covered = 0;
+        for (const Extent &e : std::as_const(c.extents))
+            covered += e.length;
+        if (covered < c.size)
+            c.broken = true;
+        if (data.first().flags & 0x0001) {
+            // NTFS compression: unpacked a unit at a time, from all its clusters and holes.
+            const quint8 unit = data.first().compressionUnit;
+            if (unit > 0 && unit <= 10 && (fs.clusterSize << unit) <= 4 * 1024 * 1024) {
+                c.packing.format = unpack::Format::Lznt1;
+                c.packing.unit = quint32(fs.clusterSize << unit);
+                c.extents = fs.extentsOf(c.runs, ~quint64(0) >> 1);
+            } else {
+                c.cantUnpack = true;
+            }
+        }
+    }
+    if (wof != unpack::Format::None && !stream.isEmpty()) {
+        // compact.exe's: the file's own data is an empty hole of its size; the packed bytes
+        // are in their own stream.
+        std::sort(stream.begin(), stream.end(), [](const Attribute &a, const Attribute &b) { return a.startVcn < b.startVcn; });
+        c.packing = {};
+        c.packing.format = wof;
+        c.extents.clear();
+        c.data.clear();
+        if (stream.first().resident) {
+            c.data = stream.first().value;
+            c.packing.stored = quint64(c.data.size());
+            c.runs.clear();
+        } else {
+            c.runs = joinRuns(stream, &c.broken);
+            c.packing.stored = stream.first().size;
+            const quint64 initialized = std::min(stream.first().initialized, c.packing.stored);
+            c.extents = fs.extentsOf(c.runs, initialized);
+            if (initialized < c.packing.stored)
+                c.extents.push_back({Extent::kZeros, c.packing.stored - initialized});
+            quint64 covered = 0;
+            for (const Extent &e : std::as_const(c.extents))
+                covered += e.length;
+            if (covered < c.packing.stored)
+                c.broken = true;
+        }
+    }
+    return c;
+}
+
 struct Candidate {
     quint64 record = 0;
     quint16 sequence = 0;
@@ -335,6 +447,9 @@ struct Candidate {
     qint64 modified = 0, created = 0, changed = 0, accessed = 0;
     QVector<Attribute> data; // the unnamed $DATA, maybe in pieces across extension records
     quint16 dataFlags = 0;
+    unpack::Format wof = unpack::Format::None; // packed by compact.exe, into...
+    QVector<Attribute> wofStream;              // ...its WofCompressedData stream
+    bool wofTagged = false;                    // marked as packed by WOF, whichever way
 };
 
 constexpr quint32 kJournalDeleted = 0x200; // USN_REASON_FILE_DELETE
@@ -397,7 +512,131 @@ Binned readRecycleInfo(const QByteArray &info)
     return b;
 }
 
+// A file's bytes, from its pieces on the volume.
+class Pieces : public Layer
+{
+public:
+    Pieces(std::shared_ptr<Source> volume, QVector<Extent> extents, quint64 size)
+        : m_volume(std::move(volume))
+        , m_extents(std::move(extents))
+        , m_size(size)
+    {
+    }
+    quint64 size() const override { return m_size; }
+    bool read(quint64 offset, char *buf, quint64 len) override
+    {
+        quint64 passed = 0;
+        for (const Extent &e : std::as_const(m_extents)) {
+            if (len == 0)
+                break;
+            if (offset < passed + e.length) {
+                const quint64 inside = offset - passed, n = std::min(len, e.length - inside);
+                if (e.zeros())
+                    std::memset(buf, 0, n);
+                else if (m_volume->read(e.start + inside, buf, n) != n || m_volume->unreadable(e.start + inside, n))
+                    return false;
+                buf += n;
+                offset += n;
+                len -= n;
+            }
+            passed += e.length;
+        }
+        return len == 0;
+    }
+
+private:
+    std::shared_ptr<Source> m_volume;
+    QVector<Extent> m_extents;
+    quint64 m_size;
+};
+
 } // namespace
+
+std::shared_ptr<Source> ntfsFile(const std::shared_ptr<Source> &volume, quint64 record, const QString &name, QString *why)
+{
+    Ntfs fs(*volume, {0, volume->size()});
+    if (!fs.open()) {
+        *why = tr("DiskAnvil couldn't read the drive as NTFS.");
+        return {};
+    }
+    const Record r = record < fs.records ? fs.parse(fs.readRecords(record, 1)) : Record();
+    if (!r.valid || !r.inUse || r.base != 0 || r.directory) {
+        *why = tr("Its record in NTFS's file table isn't there.");
+        return {};
+    }
+    // An attribute list: some of its attributes are in records of their own.
+    QVector<Attribute> all = r.attributes;
+    for (const Attribute &a : r.attributes) {
+        if (a.type != 0x20)
+            continue;
+        QByteArray list = a.value;
+        if (!a.resident && !a.badRuns && a.size <= 1024 * 1024) {
+            for (const Extent &e : fs.extentsOf(a.runs, a.size))
+                list += e.zeros() ? QByteArray(qsizetype(e.length), '\0') : raw::read(*volume, e.start, e.length);
+        }
+        QSet<quint64> others;
+        const uchar *p = bytes(list);
+        for (qsizetype at = 0; at + 26 <= list.size();) {
+            const quint16 length = le16(p + at + 4);
+            if (length < 26 || at + length > list.size())
+                break;
+            const quint64 in = le64(p + at + 16) & 0x0000FFFFFFFFFFFFull;
+            if (in != record && in < fs.records && others.size() < 1024)
+                others.insert(in);
+            at += length;
+        }
+        for (const quint64 other : std::as_const(others)) {
+            const Record e = fs.parse(fs.readRecords(other, 1));
+            if (e.valid && e.inUse && e.base == record)
+                all += e.attributes;
+        }
+    }
+    // One of its names has to be the one asked for: otherwise the record is another file's now.
+    bool named = false;
+    for (const Attribute &a : std::as_const(all)) {
+        if (a.type == 0x30 && a.value.size() >= 0x42) {
+            const int length = bytes(a.value)[0x40];
+            named = named || (0x42 + length * 2 <= a.value.size() && raw::utf16le(bytes(a.value) + 0x42, length).compare(name, Qt::CaseInsensitive) == 0);
+        }
+    }
+    if (!named) {
+        *why = tr("Its record in NTFS's file table is another file's.");
+        return {};
+    }
+    QVector<Attribute> data, stream;
+    unpack::Format wof = unpack::Format::None;
+    bool wofTagged = false;
+    for (const Attribute &a : std::as_const(all)) {
+        if (a.type == 0x80 && a.name.isEmpty())
+            data << a;
+        else if (a.type == 0x80 && a.name == kWofStream)
+            stream << a;
+        else if (a.type == 0xC0) {
+            wof = wofFormatOf(a);
+            wofTagged = a.value.size() >= 4 && le32(bytes(a.value)) == kWofTag;
+        }
+    }
+    const Contents c = contentsOf(fs, data, stream, wof);
+    if (c.cantUnpack || (wofTagged && !c.packing.packed())) {
+        *why = tr("Windows compressed it in a way DiskAnvil doesn't know.");
+        return {};
+    }
+    if (c.broken) {
+        *why = tr("NTFS's list of where it is on the drive doesn't add up.");
+        return {};
+    }
+    if (c.packing.packed()) {
+        std::unique_ptr<Layer> unpacked = unpack::layer(volume, c.extents, c.data, c.packing, c.size);
+        if (!unpacked) {
+            *why = tr("Windows compressed it in a way DiskAnvil doesn't know.");
+            return {};
+        }
+        return Source::fromLayer(std::move(unpacked));
+    }
+    if (c.extents.isEmpty())
+        return Source::fromMemory(c.data);
+    return Source::fromLayer(std::make_unique<Pieces>(volume, c.extents, c.size));
+}
 
 QVector<JournalEntry> readJournal(const QByteArray &data)
 {
@@ -451,6 +690,7 @@ bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::
     QHash<quint64, Node> nodes;
     QVector<Candidate> candidates;
     QHash<quint64, QVector<Attribute>> extensionData; // $DATA pieces kept in extension records
+    QHash<quint64, QVector<Attribute>> extensionWof;  // and WofCompressedData pieces
     QHash<quint64, QByteArray> recycleInfo;           // $I files' contents, by record
     QHash<quint64, QVector<Attribute>> journalData;   // $UsnJrnl's $J stream, by record (and its extension records)
     quint64 journalRecord = 0;
@@ -482,6 +722,8 @@ bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::
                 for (const Attribute &a : r.attributes) {
                     if (a.type == 0x80 && a.name.isEmpty())
                         extensionData[r.base].push_back(a);
+                    else if (a.type == 0x80 && a.name == kWofStream)
+                        extensionWof[r.base].push_back(a);
                     else if (a.type == 0x80 && a.name == QLatin1String("$J"))
                         journalData[r.base].push_back(a);
                 }
@@ -567,6 +809,11 @@ bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::
                 if (a.type == 0x80 && a.name.isEmpty()) {
                     c.data.push_back(a);
                     c.dataFlags |= a.flags;
+                } else if (a.type == 0x80 && a.name == kWofStream) {
+                    c.wofStream.push_back(a);
+                } else if (a.type == 0xC0) {
+                    c.wof = wofFormatOf(a);
+                    c.wofTagged = a.value.size() >= 4 && le32(bytes(a.value)) == kWofTag;
                 }
             }
             // The Recycle Bin's $I files are tiny and always kept inside the record.
@@ -719,50 +966,27 @@ bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::
         f.note = note;
         f.type = filetypes::typeForName(name);
         // The data: kept in the record itself, or pieces on the drive (maybe listed across
-        // extension records, each with the part of the file it starts at).
-        QVector<Attribute> data = c.data + extensionData.value(c.record);
-        std::sort(data.begin(), data.end(), [](const Attribute &a, const Attribute &b) { return a.startVcn < b.startVcn; });
-        bool broken = false;
-        if (!data.isEmpty() && data.first().resident) {
-            f.data = data.first().value;
-            f.size = quint64(f.data.size());
-        } else if (!data.isEmpty()) {
-            QVector<Run> runs;
-            quint64 expect = 0;
-            for (const Attribute &a : std::as_const(data)) {
-                if (a.resident || a.startVcn != expect || a.badRuns)
-                    broken = true;
-                runs += a.runs;
-                expect = a.startVcn;
-                for (const Run &r : a.runs)
-                    expect = r.vcn + r.length;
-            }
-            f.size = data.first().size;
-            const quint64 initialized = std::min(data.first().initialized, f.size);
-            f.extents = fs.extentsOf(runs, initialized);
-            if (initialized < f.size)
-                f.extents.push_back({Extent::kZeros, f.size - initialized}); // never written: zeros
-            quint64 covered = 0;
-            for (const Extent &e : std::as_const(f.extents))
-                covered += e.length;
-            if (covered < f.size)
-                broken = true;
-            if (c.deleted) {
-                // Deleted, and part of its clusters in use again: written over since.
-                for (const Run &r : std::as_const(runs)) {
-                    if (r.lcn < 0)
-                        continue;
-                    bool taken = false;
-                    for (quint64 k = 0; k < std::min<quint64>(r.length, 1 << 20) && !taken; ++k)
-                        taken = fs.inUse(quint64(r.lcn) + k);
-                    if (taken) {
-                        f.condition = Condition::Overwritten;
-                        break;
-                    }
+        // extension records, each with the part of the file it starts at), maybe packed.
+        const Contents contents = contentsOf(fs, c.data + extensionData.value(c.record), c.wofStream + extensionWof.value(c.record), c.wof);
+        f.size = contents.size;
+        f.data = contents.data;
+        f.extents = contents.extents;
+        f.packing = contents.packing;
+        if (c.deleted) {
+            // Deleted, and part of its clusters in use again: written over since.
+            for (const Run &r : contents.runs) {
+                if (r.lcn < 0)
+                    continue;
+                bool taken = false;
+                for (quint64 k = 0; k < std::min<quint64>(r.length, 1 << 20) && !taken; ++k)
+                    taken = fs.inUse(quint64(r.lcn) + k);
+                if (taken) {
+                    f.condition = Condition::Overwritten;
+                    break;
                 }
             }
         }
-        if (broken && f.condition == Condition::Good)
+        if (contents.broken && f.condition == Condition::Good)
             f.condition = Condition::MaybeDamaged;
         if (name.isEmpty()) {
             // What the journal last called it (Windows counts the record's use up by one when it
@@ -782,7 +1006,8 @@ bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::
         if (name.isEmpty()) {
             // No name: one from what kind of file its start says it is.
             f.type = -1;
-            const QByteArray start = f.data.isEmpty() ? (f.extents.isEmpty() || f.extents.first().zeros()
+            const QByteArray start = f.packing.packed() ? QByteArray()
+                                   : f.data.isEmpty() ? (f.extents.isEmpty() || f.extents.first().zeros()
                                                               ? QByteArray()
                                                               : raw::read(source, f.extents.first().start, std::min<quint64>(f.extents.first().length, 4096)))
                                                        : f.data.left(4096);
@@ -795,9 +1020,16 @@ bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::
             f.note = tr("NTFS doesn't have its name or folder anymore (Linux's NTFS driver takes them away when it deletes a "
                         "file), so it's named after what's in it.");
         }
-        if (c.dataFlags & 0x0001) {
+        if (f.packing.packed()) {
+            const QString how = f.packing.format == unpack::Format::Lznt1 ? tr("with NTFS compression")
+                                                                           : tr("with compact.exe or CompactOS (%1)").arg(unpack::name(f.packing.format));
+            f.note = (f.note.isEmpty() ? QString() : f.note + QLatin1Char(' ')) + tr("Windows kept it compressed (%1): DiskAnvil unpacks it.").arg(how);
+        } else if (contents.cantUnpack || (c.wofTagged && c.wof == unpack::Format::None)) {
             f.condition = Condition::MaybeDamaged;
-            f.note = tr("Windows kept it compressed. DiskAnvil can't unpack NTFS compression yet, so it comes back as it is on the drive.");
+            f.note = tr("Windows kept it compressed in a way DiskAnvil doesn't know, so it comes back as it is on the drive.");
+        } else if (c.wof != unpack::Format::None) {
+            f.condition = Condition::MaybeDamaged;
+            f.note = tr("Windows kept it compressed, and the compressed part of it is missing.");
         } else if (c.dataFlags & 0x4000) {
             f.condition = Condition::MaybeDamaged;
             f.note = tr("Windows kept it encrypted (EFS). It comes back still encrypted: only the Windows account that encrypted it "

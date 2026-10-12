@@ -35,6 +35,7 @@ public:
         QString description;
         QString signer;
         bool windowsOwn = false;
+        bool unpacked = false; // Windows keeps it compressed, and DiskAnvil unpacked it to read it
     };
 
 private:

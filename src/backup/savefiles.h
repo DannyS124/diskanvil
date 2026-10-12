@@ -9,6 +9,8 @@
 // to another drive, going on past what can't be read and listing it at the end: the drive is
 // often failing, or the PC won't start.
 
+#include "wof.h"
+
 #include <QDateTime>
 #include <QObject>
 #include <QString>
@@ -83,6 +85,7 @@ private:
     QVector<Browser> m_browsers;
     QString m_to;
     std::atomic<bool> m_cancel{false};
+    wof::Reader m_unpacker; // for what Windows keeps compressed and Linux can't read
 };
 
 } // namespace savefiles

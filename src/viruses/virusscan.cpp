@@ -16,6 +16,8 @@
 #include <QRegularExpression>
 #include <QSet>
 #include <QStandardPaths>
+#include <QStorageInfo>
+#include <QTemporaryDir>
 #include <QTemporaryFile>
 #include <QVersionNumber>
 #include <QtEndian>
@@ -319,13 +321,18 @@ qint64 Scan::listFiles(QIODevice *list)
     const QSet<QString> mounted = mountPoints();
 #endif
     qint64 count = 0;
-    m_compressedLinks = 0;
+    m_compressed.clear();
     QSet<QString> listed;
     for (const QString &file : std::as_const(m_also)) {
-        if (list && !file.contains(QLatin1Char('\n')) && QFileInfo(file).isFile() && !listed.contains(file)) {
+        if (!list || file.contains(QLatin1Char('\n')) || listed.contains(file))
+            continue;
+        if (QFileInfo(file).isFile()) {
             listed.insert(file);
             list->write(QDir::toNativeSeparators(file).toUtf8() + '\n');
             ++count;
+        } else if (wof::compressed(file)) {
+            listed.insert(file);
+            m_compressed << file;
         }
     }
     QElapsedTimer sinceReport;
@@ -338,8 +345,9 @@ qint64 Scan::listFiles(QIODevice *list)
                                                                      QDir::Unsorted);
             for (const QFileInfo &fi : entries) {
                 const QString path = fi.filePath();
-                if (fi.isSymbolicLink() && list && (m_depth != Depth::Quick || quickScanWants(fi.fileName())) && wof::compressed(path))
-                    ++m_compressedLinks;
+                if (fi.isSymbolicLink() && list && (m_depth != Depth::Quick || quickScanWants(fi.fileName())) && !listed.contains(path)
+                    && !skipped(path) && wof::compressed(path))
+                    m_compressed << path; // ntfs-3g's way of showing them
                 if (fi.isSymbolicLink() || fi.isJunction() || skipped(path))
                     continue;
                 if (fi.isDir() && !fi.isShortcut()) {
@@ -376,7 +384,22 @@ qint64 Scan::listFiles(QIODevice *list)
     return count;
 }
 
-void Scan::runClamAv(const QString &list, qint64 total)
+void Scan::runClamAv(const QString &list, qint64 listed)
+{
+    Tally t;
+    t.total = quint64(listed) + quint64(m_compressed.size());
+    if (!clam(list, t, {}))
+        return;
+    const int notUnpacked = scanCompressed(t);
+    if (notUnpacked < 0)
+        return;
+    qCInfo(lcOps).noquote() << "Scan for Viruses: done," << t.done << "files," << t.hits << "found," << t.unreadable << "unreadable,"
+                            << notUnpacked << "kept compressed by Windows and not unpacked";
+    Q_EMIT compressedByWindows(notUnpacked);
+    Q_EMIT finished(true, int(t.done), t.unreadable, QString());
+}
+
+bool Scan::clam(const QString &list, Tally &t, const QHash<QString, QString> &unpacked)
 {
     QProcess clam;
     clam.setProcessChannelMode(QProcess::SeparateChannels);
@@ -386,12 +409,11 @@ void Scan::runClamAv(const QString &list, qint64 total)
                                   QStringLiteral("--max-filesize=500M"), QStringLiteral("--max-scansize=1000M"),
                                   QStringLiteral("--alert-encrypted=no")});
     if (!clam.waitForStarted(10000)) {
-        Q_EMIT finished(false, 0, 0, tr("Couldn't start ClamAV: %1").arg(clam.errorString()));
-        return;
+        Q_EMIT finished(false, int(t.done), t.unreadable, tr("Couldn't start ClamAV: %1").arg(clam.errorString()));
+        return false;
     }
     Q_EMIT phase(tr("Loading the virus list (this takes a while)"));
-    quint64 done = 0;
-    int hits = 0, unreadable = 0, compressed = 0;
+    bool started = false;
     QElapsedTimer sinceReport;
     sinceReport.start();
     QByteArray pending;
@@ -399,8 +421,8 @@ void Scan::runClamAv(const QString &list, qint64 total)
         if (m_cancel) {
             clam.kill();
             clam.waitForFinished(5000);
-            Q_EMIT finished(false, int(done), unreadable, tr("Stopped."));
-            return;
+            Q_EMIT finished(false, int(t.done), t.unreadable, tr("Stopped."));
+            return false;
         }
         if (clam.bytesAvailable() == 0)
             clam.waitForReadyRead(500);
@@ -413,39 +435,104 @@ void Scan::runClamAv(const QString &list, qint64 total)
             const ClamLine kind = parseClamLine(line, d);
             if (kind == ClamLine::Other)
                 continue;
-            if (done == 0)
-                Q_EMIT phase(tr("Scanning"));
-            ++done;
+            if (!started)
+                Q_EMIT phase(unpacked.isEmpty() ? tr("Scanning") : tr("Scanning the files Windows keeps compressed"));
+            started = true;
+            // An unpacked copy: by the name of the file it's a copy of.
+            const QString real = unpacked.value(d.path);
+            if (!real.isEmpty())
+                d.path = real;
+            d.path = QDir::fromNativeSeparators(d.path);
+            if (kind == ClamLine::Unreadable && unpacked.isEmpty() && wof::compressed(d.path)) {
+                // Kept compressed by Windows: unpacked and scanned after the rest.
+                m_compressed << d.path;
+                continue;
+            }
+            ++t.done;
             if (kind == ClamLine::Unreadable) {
-                if (wof::compressed(QDir::fromNativeSeparators(d.path)))
-                    ++compressed;
-                else
-                    ++unreadable;
+                ++t.unreadable;
                 qCDebug(lcOps).noquote() << "Scan for Viruses: couldn't read" << line;
             } else if (kind == ClamLine::Found) {
-                d.path = QDir::fromNativeSeparators(d.path);
-                ++hits;
+                ++t.hits;
                 qCInfo(lcOps).noquote() << "Scan for Viruses: found" << d.name << "in" << d.path;
                 Q_EMIT found(d);
             }
         }
         if (sinceReport.elapsed() > 250) {
             sinceReport.restart();
-            Q_EMIT progress(done, quint64(total));
+            Q_EMIT progress(t.done, t.total);
         }
     }
-    Q_EMIT progress(done, quint64(total));
+    Q_EMIT progress(t.done, t.total);
     // 0: nothing found, 1: something found, 2: it went wrong (a damaged list, no memory...).
     const QString errors = QString::fromUtf8(clam.readAllStandardError()).trimmed();
-    if (clam.exitStatus() != QProcess::NormalExit || (clam.exitCode() == 2 && done == 0 && total > 0)) {
-        Q_EMIT finished(false, int(done), unreadable,
+    if (clam.exitStatus() != QProcess::NormalExit || (clam.exitCode() == 2 && !started)) {
+        Q_EMIT finished(false, int(t.done), t.unreadable,
                         tr("ClamAV stopped with an error: %1").arg(errors.section(QLatin1Char('\n'), -3).simplified()));
-        return;
+        return false;
     }
-    qCInfo(lcOps).noquote() << "Scan for Viruses: done," << done << "files," << hits << "found," << unreadable << "unreadable," << compressed + m_compressedLinks
-                            << "kept compressed by Windows";
-    Q_EMIT compressedByWindows(compressed + m_compressedLinks);
-    Q_EMIT finished(true, int(done), unreadable, QString());
+    return true;
+}
+
+int Scan::scanCompressed(Tally &t)
+{
+    if (m_compressed.isEmpty() || m_cancel)
+        return m_cancel ? -1 : 0;
+    qCInfo(lcOps).noquote() << "Scan for Viruses: unpacking" << m_compressed.size() << "files Windows keeps compressed";
+    wof::Reader reader;
+    QTemporaryDir folder(QDir::tempPath() + QStringLiteral("/diskanvil-unpacked-XXXXXX"));
+    if (!folder.isValid()) {
+        qCInfo(lcOps).noquote() << "Scan for Viruses: no temporary folder to unpack them in";
+        return int(m_compressed.size());
+    }
+    int failed = 0;
+    const QStringList files = m_compressed;
+    QElapsedTimer sinceReport;
+    sinceReport.start();
+    for (qsizetype next = 0; next < files.size();) {
+        // A batch: what fits in a quarter of the room there (it's often memory), up to 512 MB.
+        const quint64 room = std::min<quint64>(512ull * 1024 * 1024, quint64(std::max<qint64>(0, QStorageInfo(folder.path()).bytesAvailable())) / 4);
+        QTemporaryFile list;
+        if (!list.open()) {
+            failed += int(files.size() - next);
+            break;
+        }
+        QHash<QString, QString> unpacked; // the copy, by the native path ClamAV says -> the file
+        quint64 used = 0;
+        for (; next < files.size() && (used < room || unpacked.isEmpty()) && unpacked.size() < 2000; ++next) {
+            if (m_cancel) {
+                Q_EMIT finished(false, int(t.done), t.unreadable, tr("Stopped."));
+                return -1;
+            }
+            if (sinceReport.elapsed() > 250) {
+                sinceReport.restart();
+                Q_EMIT phase(tr("Unpacking the files Windows keeps compressed: %1 of %2").arg(next + 1).arg(files.size()));
+            }
+            const QString &file = files[next];
+            QString why;
+            const qint64 size = reader.size(file, &why);
+            if (size > 500ll * 1024 * 1024) { // ClamAV leaves out files this big (--max-filesize) anyway
+                ++t.done;
+                continue;
+            }
+            const QString copy = folder.path() + QLatin1Char('/') + QString::number(next) + QLatin1Char('-') + QFileInfo(file).fileName();
+            if (size < 0 || !reader.copy(file, copy, &why)) {
+                ++failed;
+                qCDebug(lcOps).noquote() << "Scan for Viruses: couldn't unpack" << file << "-" << why;
+                continue;
+            }
+            used += quint64(size);
+            unpacked.insert(QDir::toNativeSeparators(copy), file);
+            list.write(QDir::toNativeSeparators(copy).toUtf8() + '\n');
+        }
+        if (unpacked.isEmpty())
+            continue;
+        if (!list.flush() || !clam(list.fileName(), t, unpacked))
+            return -1;
+        for (auto it = unpacked.cbegin(); it != unpacked.cend(); ++it)
+            QFile::remove(QDir::fromNativeSeparators(it.key()));
+    }
+    return failed;
 }
 
 void Scan::runDefender()

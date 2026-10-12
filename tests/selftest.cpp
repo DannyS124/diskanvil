@@ -32,6 +32,7 @@
 #include <QProcess>
 #include <fcntl.h>
 #include "../src/usb/imagewriter.h"
+#include "../src/viruses/wof.h"
 
 #include <QFileInfo>
 #include <QRandomGenerator>
@@ -890,6 +891,7 @@ int main(int argc, char *argv[])
 {
     QCoreApplication app(argc, argv);
     const bool root = geteuid() == 0;
+    wof::setInteractive(false); // never a password window in the middle of the tests
 
     const QStringList args = app.arguments();
     auto needsRoot = [&](const char *suite) {

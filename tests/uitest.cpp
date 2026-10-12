@@ -11,6 +11,7 @@
 
 #include "../src/drives/writeblock.h"
 #include "../src/app/oldname.h"
+#include "../src/viruses/wof.h"
 #include "../src/tools/remotehelp.h"
 #include "../src/tools/remotehelpdialog.h"
 #include "../src/usb/liveonpc.h"
@@ -6303,6 +6304,7 @@ int main(int argc, char *argv[])
         return preview::runHelper();
     }
     QApplication app(argc, argv);
+    wof::setInteractive(false); // never a password window in the middle of the tests
     // ...and as its viewer.
     if (argc == 2 && QByteArray(argv[1]) == "--viewer")
         return viewer::run();

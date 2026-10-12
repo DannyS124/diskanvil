@@ -308,8 +308,18 @@ Saver::Saver(const QVector<Folder> &folders, const QVector<Browser> &browsers, c
 
 Saver::Copied Saver::copyFile(const QString &from, const QString &to, QString *error)
 {
+    // Kept compressed by Windows, which Linux can't read: unpacked from the drive by DiskAnvil.
+    auto unpacked = [&]() -> Copied {
+        QString why;
+        if (m_unpacker.copy(from, to, &why))
+            return Copied::Done;
+        *error = tr("Windows keeps it compressed, and it couldn't be unpacked: %1").arg(why);
+        return Copied::CantRead;
+    };
     QFile in(from);
     if (!in.open(QIODevice::ReadOnly)) {
+        if (wof::compressed(from))
+            return unpacked();
         *error = tr("it couldn't be opened");
         return Copied::CantRead;
     }
@@ -323,6 +333,8 @@ Saver::Copied Saver::copyFile(const QString &from, const QString &to, QString *e
         const qint64 n = in.read(buffer.data(), buffer.size());
         if (n < 0) {
             out.remove();
+            if (wof::compressed(from))
+                return unpacked();
             *error = tr("it couldn't be read (a bad spot on the drive?)");
             return Copied::CantRead;
         }
@@ -353,9 +365,12 @@ void Saver::run()
     bool full = false;
     for (const Folder &folder : std::as_const(m_folders)) {
         const QString target = r.folder + QLatin1Char('/') + folder.user + QLatin1Char('/') + folder.name;
-        QDirIterator it(folder.path, kFiles, QDirIterator::Subdirectories);
+        QDirIterator it(folder.path, QDir::Files | QDir::Hidden | QDir::System, QDirIterator::Subdirectories);
         while (it.hasNext() && !m_cancel && !full) {
             const QString file = it.next();
+            // Links are left out, but for ntfs-3g's way of showing a file Windows keeps compressed.
+            if (it.fileInfo().isSymLink() && !wof::compressed(file))
+                continue;
             const QString relative = QDir(folder.path).relativeFilePath(file);
             const QString to = target + QLatin1Char('/') + relative;
             const QString shown = folder.user + QLatin1Char('/') + folder.name + QLatin1Char('/') + relative;

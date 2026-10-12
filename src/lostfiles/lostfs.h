@@ -10,6 +10,7 @@
 
 #include <atomic>
 #include <functional>
+#include <memory>
 
 // Find Lost Files' own readers for the file systems of USB sticks, memory cards and Windows:
 // FAT (12, 16 and 32), exFAT and NTFS (lostntfs.cpp). They list what a file system still knows about, deleted files and
@@ -49,6 +50,12 @@ struct CopyOptions {
 };
 bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::atomic<bool> &cancel, Volume *volume,
               RecordIndex *index = nullptr, const CopyOptions *copy = nullptr);
+
+// One file of an NTFS volume (`volume` is just the volume), found by its record in NTFS's file
+// table (the inode number Linux's NTFS drivers give it), as a source of its bytes: unpacked when
+// Windows keeps it compressed. `name` has to be one of its names, so a record that's gone to
+// another file isn't read as this one. Null, with `why`, when it can't be read.
+std::shared_ptr<Source> ntfsFile(const std::shared_ptr<Source> &volume, quint64 record, const QString &name, QString *why);
 
 // NTFS's change journal ($Extend\$UsnJrnl, its $J stream): what Windows did to which file,
 // with the file's name and folder at the time. It names deleted files whose own record is

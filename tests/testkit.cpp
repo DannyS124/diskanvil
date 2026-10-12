@@ -16,6 +16,9 @@
 #include <QFile>
 #include <QProcess>
 #include <QThread>
+#include <QtEndian>
+
+#include <cstring>
 
 QTextStream out(stdout);
 int failures = 0;
@@ -158,4 +161,32 @@ int openBlockFd(UDisks &udisks, const QString &objectPath, int mode)
         loop.exec();
     QObject::disconnect(conn);
     return fd;
+}
+
+QByteArray wofText()
+{
+    QStringList lines;
+    for (int i = 1; i <= 2000; ++i)
+        lines << QStringLiteral("DiskAnvil compressed file test, line %1").arg(i);
+    return lines.join(QStringLiteral("\r\n")).toUtf8();
+}
+
+QByteArray wofMixed()
+{
+    const QByteArray text = wofText();
+    QByteArray out(70000 + text.size() + 8192 * 5, '\0');
+    quint64 x = 12345;
+    for (int i = 0; i < 70000; ++i) {
+        x = (x * 1103515245 + 12345) % 2147483648ull;
+        out[i] = char(x >> 16);
+    }
+    std::memcpy(out.data() + 70000, text.constData(), size_t(text.size()));
+    qsizetype at = 70000 + text.size();
+    for (int i = 0; i < 8192; ++i) {
+        const quint32 v = quint32(0x8000 - 5 * i);
+        out[at++] = char(0xE8);
+        qToLittleEndian(v, out.data() + at);
+        at += 4;
+    }
+    return out;
 }

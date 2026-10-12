@@ -60,6 +60,14 @@ lost::FileReader::FileReader(std::shared_ptr<Source> source, const Found &file)
     , m_data(file.data)
     , m_size(file.size)
 {
+    if (file.packing.packed()) {
+        // Kept compressed: read through the unpacking. One that can't be unpacked reads as
+        // unreadable, all zeros.
+        std::unique_ptr<Layer> unpacked = unpack::layer(m_source, m_extents, m_data, file.packing, m_size);
+        m_extents = {{0, unpacked ? m_size : 0}};
+        m_source = unpacked ? Source::fromLayer(std::move(unpacked)) : Source::fromMemory(QByteArray());
+        m_data.clear();
+    }
 }
 
 qint64 lost::FileReader::read(quint64 at, char *buf, qint64 len)
@@ -507,7 +515,9 @@ QVector<lost::Found> lost::thumbnailsIn(const std::shared_ptr<Source> &source, c
         f.folder = QCoreApplication::translate("lostscan", "Small pictures Windows kept");
         f.type = filetypes::typeForName(f.name);
         f.size = t.size;
-        if (t.data.isEmpty()) {
+        if (t.data.isEmpty() && cache.packing.packed()) {
+            f.data = bytes.mid(qsizetype(t.offset), qsizetype(t.size)); // Windows keeps the cache compressed: from what was unpacked
+        } else if (t.data.isEmpty()) {
             f.extents = slice(cache.extents, t.offset, t.size);
             f.from = cache.from;
         } else {
@@ -754,7 +764,7 @@ void lost::CopyFinder::run()
 
 void lost::nameFromContents(Found &file, Source &source)
 {
-    if (file.extents.size() != 1 || file.type < 0)
+    if (file.extents.size() != 1 || file.type < 0 || file.packing.packed())
         return;
     const quint64 start = file.extents.first().start, size = file.size;
     const naming::Read read = [&source, start, size](quint64 at, qint64 len) {

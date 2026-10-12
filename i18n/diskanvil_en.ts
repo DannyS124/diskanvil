@@ -125,7 +125,7 @@
 <context>
     <name>DriversDialog</name>
     <message numerus="yes">
-        <location filename="../src/viruses/driversdialog.cpp" line="165"/>
+        <location filename="../src/viruses/driversdialog.cpp" line="181"/>
         <source>%n driver(s) and service(s)</source>
         <translation>
             <numerusform>%n driver and service</numerusform>
@@ -133,7 +133,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/viruses/driversdialog.cpp" line="165"/>
+        <location filename="../src/viruses/driversdialog.cpp" line="181"/>
         <source>%n of Windows&apos; own hidden</source>
         <translation>
             <numerusform>%n of Windows' own hidden</numerusform>
@@ -141,7 +141,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/viruses/driversdialog.cpp" line="219"/>
+        <location filename="../src/viruses/driversdialog.cpp" line="235"/>
         <source>Switched off %n. The backup, and how to undo it, is in %1.</source>
         <translation>
             <numerusform>Switched off %n. The backup, and how to undo it, is in %1.</numerusform>
@@ -721,6 +721,13 @@
     </message>
     <message numerus="yes">
         <location filename="../src/viruses/virusdialog.cpp" line="870"/>
+        <source>%n file(s) Windows keeps compressed (CompactOS or compact.exe) couldn&apos;t be unpacked to be scanned: Microsoft Defender, in Windows, checks those.</source>
+        <translation>
+            <numerusform>%n file Windows keeps compressed (CompactOS or compact.exe) couldn't be unpacked to be scanned: Microsoft Defender, in Windows, checks those.</numerusform>
+            <numerusform>%n files Windows keeps compressed (CompactOS or compact.exe) couldn't be unpacked to be scanned: Microsoft Defender, in Windows, checks those.</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
         <source>%n file(s) are kept compressed by Windows (CompactOS or compact.exe), which Linux can&apos;t read: Microsoft Defender, in Windows, checks those.</source>
         <translation>
             <numerusform>%n file are kept compressed by Windows (CompactOS or compact.exe), which Linux can't read: Microsoft Defender, in Windows, checks those.</numerusform>
@@ -906,7 +913,7 @@
 <context>
     <name>savefiles::Saver</name>
     <message numerus="yes">
-        <location filename="../src/backup/savefiles.cpp" line="415"/>
+        <location filename="../src/backup/savefiles.cpp" line="430"/>
         <source>%n file(s) copied.</source>
         <translation>
             <numerusform>%n file copied.</numerusform>

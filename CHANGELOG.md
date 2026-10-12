@@ -17,6 +17,7 @@ New:
 - Find Lost Files brings deleted files back with their names and folders from FAT, exFAT and NTFS drives, and the files in Windows' Recycle Bin under their old names. On NTFS it reads the change journal for names of files whose records were reused, and lists what was deleted recently, newest first. Files found by what's inside them still come after, as before
 - Find Lost Files looks in Windows' earlier versions of a drive (shadow copies) and brings back what has changed or gone since, in folders named after the date of each copy. DiskAnvil reads them with its own code, so this works on Linux and DiskAnvil Live too
 - Find Lost Files opens virtual machines' disks: .vdi, .vmdk, .vhd, .vhdx and .qcow2
+- Files Windows keeps compressed come back whole: Find Lost Files unpacks NTFS compression and compact.exe's (CompactOS, CompactGUI) itself, deleted files too. Where Linux can't read them (DiskAnvil Live, or with ntfs-3g), Windows Drivers and Services, Scan for Viruses, Save My Files and putting Windows' boot files back unpack them straight from the drive, read-only
 - Find Lost Files previews PDFs (their first page), Word, Excel, PowerPoint and OpenDocument files (their text), what's in archives, and songs and films (their details and cover, and a frame from a film when ffmpeg is installed). A separate program makes them, in a sandbox on Linux, so a damaged file can't take DiskAnvil down
 - Drive settings in Properties for every SATA drive on Linux, SSDs too: power saving, the write cache and read-ahead, plus when to spin down and seek noise for hard drives
 - Disk Health: the conveyance self-test for hard drives, Turn SMART On, and the last tests DiskAnvil saw finish
@@ -87,9 +88,6 @@ Fixed:
 - Saving found files closed Find Lost Files, and so did Enter. It stays open now, and marks what's been saved
 - Thumbnails scrolled away and back could stay a blank card, and big PDFs only showed as ".pdf"
 - Backups with something after their end are called that again, not damaged
-- Files Windows keeps compressed (CompactOS, compact.exe) are recognised: Windows Drivers and Services marks the ones in
-  the Windows folder as Windows' own, and Scan for Viruses says why Linux can't read them instead of counting them as
-  unreadable
 - Windows dynamic disks on MBR are found the way Linux shows them, and their volumes open read-only
 - On Windows, Make Room for Windows Recovery found no drive, and Windows Product Key and the Windows picker listed the
   running Windows twice

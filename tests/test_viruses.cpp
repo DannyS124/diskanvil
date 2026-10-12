@@ -8,6 +8,7 @@
 #include "testkit.h"
 
 #include "../src/drives/udisks.h"
+#include "../src/backup/savefiles.h"
 #include "../src/viruses/virusscan.h"
 #include "../src/viruses/wof.h"
 
@@ -258,56 +259,124 @@ void finding(const QString &dir)
 void compressedWith(const QString &root, const QString &driver, const QString &dir)
 {
     const QString name = QStringLiteral("compressed files (%1): ").arg(driver);
-    QStringList lines;
-    for (int i = 1; i <= 2000; ++i)
-        lines << QStringLiteral("DiskAnvil compressed file test, line %1").arg(i);
-    const QByteArray text = lines.join(QStringLiteral("\r\n")).toUtf8();
+    const QByteArray text = wofText(), mixed = wofMixed();
+    report(QCryptographicHash::hash(mixed, QCryptographicHash::Sha256).toHex() == "aa6615068a5b05345287dff5e0c022b15451add260808557d79f54f0f9acd239",
+           QStringLiteral("compressed files: the test's own files made again are the same as Windows' ones"));
     auto read = [](const QString &path) {
         QFile f(path);
         return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
     };
     const QString plain = root + QStringLiteral("/plain.txt");
     report(read(plain) == text && !wof::compressed(plain), name + QStringLiteral("a file Windows left as it is reads, and isn't called compressed"));
+    // compact.exe's four ways, and NTFS's own compression (which both drivers read).
+    const QVector<QPair<QString, QByteArray>> packed = {
+        {QStringLiteral("/Windows/System32/drivers/anvil.sys"), text}, {QStringLiteral("/Program Files/Tool/tool.exe"), text},
+        {QStringLiteral("/Mixed/mixed4k.bin"), mixed},                 {QStringLiteral("/Windows/System32/lzx.dll"), text},
+        {QStringLiteral("/Mixed/mixedlzx.bin"), mixed},                {QStringLiteral("/Windows/System32/x8.dll"), text},
+        {QStringLiteral("/Windows/System32/x16.dll"), text}};
     QStringList how;
-    int links = 0;
+    int notRead = 0;
     bool ok = true;
-    for (const QString &file : {QStringLiteral("/Windows/System32/drivers/anvil.sys"), QStringLiteral("/Program Files/Tool/tool.exe")}) {
+    for (const auto &[file, expect] : packed) {
         const QString path = root + file;
-        if (read(path) == text) {
+        if (read(path) == expect) {
             how << QStringLiteral("read");
             ok = ok && !wof::compressed(path);
         } else {
-            const bool link = QFileInfo(path).isSymbolicLink();
-            links += link;
-            how << (link ? QStringLiteral("a link") : QStringLiteral("can't be read"));
+            ++notRead;
+            how << (QFileInfo(path).isSymbolicLink() ? QStringLiteral("a link") : QStringLiteral("can't be read"));
             ok = ok && wof::compressed(path) && wof::changed(path).date().year() >= 2026;
         }
     }
-    report(ok, name + QStringLiteral("the ones Windows compressed are read, or known as compressed"), how.join(QStringLiteral(", ")));
+    report(ok, name + QStringLiteral("the ones compact.exe compressed are read, or known as compressed"), how.join(QStringLiteral(", ")));
+    report(read(root + QStringLiteral("/Docs/notes.txt")) == text && read(root + QStringLiteral("/Docs/mixed.bin")) == mixed,
+           name + QStringLiteral("NTFS's own compression is read by the driver"));
     report(wof::inWindowsFolder(root, root + QStringLiteral("/Windows/System32/drivers/anvil.sys"))
                && wof::inWindowsFolder(root, root + QStringLiteral("/WINDOWS/system32/x.dll"))
                && !wof::inWindowsFolder(root, root + QStringLiteral("/Program Files/Tool/tool.exe"))
                && !wof::inWindowsFolder(root, root + QStringLiteral("/Users/a/Windows/x.exe")),
            name + QStringLiteral("only the Windows folder's count as Windows' own"));
 
+    // DiskAnvil's own unpacking, from the drive: every one of them, whatever the driver can do.
+    wof::Reader reader;
+    QString why;
+    QByteArray probe;
+    const bool canOpen = reader.read(plain, &probe, &why);
+    if (!canOpen) {
+        out << "SKIP  " << name << "DiskAnvil can't open the drive itself here (" << why << ")" << Qt::endl;
+    } else {
+        QStringList wrong;
+        for (const auto &[file, expect] : packed) {
+            QByteArray got;
+            if (!reader.read(root + file, &got, &why) || got != expect)
+                wrong << file + QStringLiteral(": ") + (why.isEmpty() ? QStringLiteral("%1 bytes, not the same").arg(got.size()) : why);
+        }
+        for (const QString &file : {QStringLiteral("/Docs/notes.txt"), QStringLiteral("/Docs/mixed.bin"), QStringLiteral("/plain.txt")}) {
+            QByteArray got;
+            if (!reader.read(root + file, &got, &why) || got != (file.contains(QLatin1String("mixed")) ? mixed : text))
+                wrong << file + QStringLiteral(": ") + why;
+        }
+        report(probe == text && wrong.isEmpty(), name + QStringLiteral("DiskAnvil unpacks each of them itself (XPRESS 4K, 8K, 16K, LZX, NTFS's LZNT1)"),
+               wrong.join(QStringLiteral("; ")));
+        const QString copy = dir + QStringLiteral("/unpacked-lzx.bin");
+        QFile::remove(copy);
+        report(reader.copy(root + QStringLiteral("/Mixed/mixedlzx.bin"), copy, &why) && read(copy) == mixed
+                   && QFileInfo(copy).lastModified().date().year() >= 2026,
+               name + QStringLiteral("and copies one out whole, with its date"), why);
+        QByteArray none;
+        report(!reader.read(root + QStringLiteral("/Gone"), &none, &why) && !reader.read(QStringLiteral("/etc/hostname"), &none, &why),
+               name + QStringLiteral("a folder, or a file on another drive, isn't read as anything"), why);
+    }
+
+    // Save My Files: copied out whole, unpacked by DiskAnvil when Linux can't read them.
+    savefiles::Folder folder;
+    folder.user = QStringLiteral("test");
+    folder.name = QStringLiteral("Mixed");
+    folder.path = root + QStringLiteral("/Mixed");
+    const QString to = dir + QStringLiteral("/saved-") + driver;
+    QDir().mkpath(to);
+    savefiles::Saver saver({folder}, {}, to);
+    savefiles::Result saved;
+    QObject::connect(&saver, &savefiles::Saver::finished, [&saved](const savefiles::Result &r) { saved = r; });
+    saver.run();
+    const QString copies = saved.folder + QStringLiteral("/test/Mixed/");
+    if (canOpen || notRead == 0)
+        report(saved.files == 2 && saved.failed.isEmpty() && read(copies + QStringLiteral("mixed4k.bin")) == mixed && read(copies + QStringLiteral("mixedlzx.bin")) == mixed,
+               name + QStringLiteral("Save My Files copies them out whole"), saved.failed.join(QStringLiteral("; ")));
+    else
+        report(saved.files == 0 && saved.failed.size() == 2 && saved.failed.first().contains(QLatin1String("compressed")),
+               name + QStringLiteral("Save My Files says which it couldn't unpack"), saved.failed.join(QStringLiteral("; ")));
+
     const QString clamscan = QStandardPaths::findExecutable(QStringLiteral("clamscan"));
     if (clamscan.isEmpty()) {
         out << "SKIP  ClamAV isn't installed: compressed files aren't scanned" << Qt::endl;
         return;
     }
+    // A "virus" that's the mixed file: found in each of the three, whatever the driver can read.
     const QString db = dir + QStringLiteral("/wof-db");
-    writeFile(db + QStringLiteral("/diskanvil-test.hdb"), QCryptographicHash::hash("nothing here", QCryptographicHash::Md5).toHex() + ":12:DiskAnvil.Test.None\n");
+    writeFile(db + QStringLiteral("/diskanvil-test.hdb"),
+              QCryptographicHash::hash(mixed, QCryptographicHash::Md5).toHex() + ':' + QByteArray::number(mixed.size()) + ":DiskAnvil.Test.Mixed\n");
     virus::Engine engine;
     engine.kind = virus::Engine::Kind::ClamAV;
     engine.scanner = clamscan;
     engine.database = db;
     bool completed = false;
-    int scanned = 0, unreadable = -1, packed = -1;
-    scan(engine, {root}, virus::Depth::Everything, &completed, &scanned, nullptr, &unreadable, &packed);
-    // ntfs-3g's links aren't handed to ClamAV; ntfs3's unreadable files are, and come back unread.
-    report(completed && scanned == 3 - links && unreadable == 0 && packed == int(how.size() - how.count(QStringLiteral("read"))),
-           name + QStringLiteral("the scan counts them apart from files it couldn't read"),
-           QStringLiteral("%1 scanned, %2 unreadable, %3 compressed").arg(scanned).arg(unreadable).arg(packed));
+    int scanned = 0, unreadable = -1, left = -1;
+    const QVector<virus::Detection> found = scan(engine, {root}, virus::Depth::Everything, &completed, &scanned, nullptr, &unreadable, &left);
+    QStringList where;
+    for (const virus::Detection &d : found)
+        where << QDir(root).relativeFilePath(d.path);
+    where.sort();
+    const QStringList expect = {QStringLiteral("Docs/mixed.bin"), QStringLiteral("Mixed/mixed4k.bin"), QStringLiteral("Mixed/mixedlzx.bin")};
+    if (canOpen) {
+        report(completed && scanned == 10 && unreadable == 0 && left == 0 && where == expect,
+               name + QStringLiteral("the scan unpacks what Linux can't read, and finds what's in it under its own name"),
+               QStringLiteral("%1 scanned, %2 unreadable, %3 not unpacked, found in %4").arg(scanned).arg(unreadable).arg(left).arg(where.join(QStringLiteral(", "))));
+    } else {
+        report(completed && scanned == 10 - notRead && unreadable == 0 && left == notRead,
+               name + QStringLiteral("the scan counts what it couldn't unpack apart from files it couldn't read"),
+               QStringLiteral("%1 scanned, %2 unreadable, %3 not unpacked").arg(scanned).arg(unreadable).arg(left));
+    }
 }
 
 void compressed(const QString &dir)

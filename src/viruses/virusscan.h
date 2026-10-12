@@ -14,6 +14,7 @@
 // the day's changes.
 
 #include <QDateTime>
+#include <QHash>
 #include <QObject>
 #include <QString>
 #include <QStringList>
@@ -87,8 +88,8 @@ Q_SIGNALS:
     void progress(quint64 done, quint64 total);
     void found(const virus::Detection &detection);
     // unreadable: files the scanner couldn't open (another user's, the system's, in use)
-    // Of the files that couldn't be read, the ones Windows keeps compressed (wof.h), which Linux
-    // can't read. Before finished().
+    // Files Windows keeps compressed (wof.h), which Linux can't read and DiskAnvil couldn't
+    // unpack either (the ones it could are scanned with the rest). Before finished().
     void compressedByWindows(int count);
     void finished(bool completed, int scanned, int unreadable, const QString &problem);
 
@@ -96,7 +97,21 @@ private:
     // The files to scan into `list` (none for Defender, which walks by itself), and on the way
     // the ones dressed up as something else.
     qint64 listFiles(QIODevice *list);
-    void runClamAv(const QString &list, qint64 total);
+    void runClamAv(const QString &list, qint64 listed);
+    struct Tally {
+        quint64 done = 0;
+        quint64 total = 0;
+        int hits = 0;
+        int unreadable = 0;
+    };
+    // Runs ClamAV on the files in `list`, following what it says. `unpacked`: the files are
+    // unpacked copies, by the name ClamAV gives them, of the files to report. False when it
+    // stopped (finished() is sent).
+    bool clam(const QString &list, Tally &t, const QHash<QString, QString> &unpacked);
+    // The files Windows keeps compressed that Linux couldn't read: unpacked from the drive a batch
+    // at a time into a temporary folder, and scanned there. How many couldn't be; -1 when it
+    // stopped.
+    int scanCompressed(Tally &t);
     void runDefender();
 
     Engine m_engine;
@@ -104,7 +119,7 @@ private:
     QStringList m_also;
     Depth m_depth;
     std::atomic<bool> m_cancel{false};
-    int m_compressedLinks = 0; // files kept compressed that ntfs-3g shows as links (wof.h)
+    QStringList m_compressed; // files kept compressed by Windows that Linux couldn't read (wof.h)
 };
 
 // Gets the newest list with freshclam: everything the first time, the changes after that.

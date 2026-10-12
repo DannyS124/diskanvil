@@ -4,6 +4,7 @@
 #include "bootcheck.h"
 
 #include "authenticode.h"
+#include "wof.h"
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
@@ -30,9 +31,16 @@ constexpr int kMostBootFiles = 300;
 QByteArray readFile(const QString &path)
 {
     QFile f(path);
-    if (f.size() > kLargestBootFile || !f.open(QIODevice::ReadOnly))
-        return {};
-    return f.readAll();
+    QByteArray data;
+    if (f.size() <= kLargestBootFile && f.open(QIODevice::ReadOnly))
+        data = f.readAll();
+    // Kept compressed by Windows (CompactOS can, in its Windows folder), which Linux can't read.
+    if (data.isEmpty() && wof::compressed(path)) {
+        wof::Reader reader;
+        QString why;
+        reader.read(path, &data, &why, kLargestBootFile);
+    }
+    return data;
 }
 
 // A path under `root`, any case (an NTFS drive on Linux keeps the case).
@@ -332,7 +340,8 @@ bool putBack(const Finding &finding, const QString &backup, QString *message)
     }
     const QString next = finding.file + QStringLiteral(".diskanvil-new");
     QFile::remove(next);
-    if (!QFile::copy(finding.cleanCopy, next)) {
+    QString why;
+    if (!QFile::copy(finding.cleanCopy, next) && !(wof::compressed(finding.cleanCopy) && wof::Reader().copy(finding.cleanCopy, next, &why))) {
         *message = tr("Windows' copy couldn't be put there (is the drive full?)");
         return false;
     }
