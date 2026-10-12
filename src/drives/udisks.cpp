@@ -943,13 +943,22 @@ void UDisks::resize(const Volume &volume, quint64 newSize)
     const bool shrink = newSize < volume.size;
     const QString path = volume.objectPath;
     const QString done = tr("Resized %1 to %2").arg(name, formatSize(newSize));
-    auto resizeNow = [this, path, newSize, shrink, failure, done] {
+    // resize2fs won't shrink an ext file system that's been mounted since its last full check
+    // ("Please run e2fsck -f first"), so it's checked first, unmounted.
+    const bool checkFirst = shrink && volume.fsType.startsWith(QLatin1String("ext"));
+    auto resizeNow = [this, path, newSize, shrink, checkFirst, failure, done] {
         if (shrink) {
             // fs first so the partition never cuts into data
-            callThen(path, kFilesystem, QStringLiteral("Resize"), {newSize, options()}, failure, [this, path, newSize, failure, done](const QDBusMessage &) {
-                call(path, kPartition, QStringLiteral("Resize"), {newSize, options()},
-                     [done](const QDBusMessage &) { return done; }, failure);
-            });
+            auto shrinkNow = [this, path, newSize, failure, done] {
+                callThen(path, kFilesystem, QStringLiteral("Resize"), {newSize, options()}, failure, [this, path, newSize, failure, done](const QDBusMessage &) {
+                    call(path, kPartition, QStringLiteral("Resize"), {newSize, options()},
+                         [done](const QDBusMessage &) { return done; }, failure);
+                });
+            };
+            if (checkFirst)
+                callThen(path, kFilesystem, QStringLiteral("Repair"), {options()}, failure, [shrinkNow](const QDBusMessage &) { shrinkNow(); });
+            else
+                shrinkNow();
         } else {
             // size 0 = fill the partition
             callThen(path, kPartition, QStringLiteral("Resize"), {newSize, options()}, failure, [this, path, newSize, failure, done](const QDBusMessage &) {
