@@ -105,6 +105,7 @@ add_library(diskforge-core STATIC
     src/drives/gpt.cpp src/drives/gpt.h
     src/backup/blockcopy.cpp src/backup/blockcopy.h
     src/backup/zstdseek.cpp src/backup/zstdseek.h
+    src/backup/partclone.cpp src/backup/partclone.h
     src/health/blockmapdata.cpp src/health/blockmapdata.h
     src/tools/fswalk.cpp src/tools/fswalk.h src/tools/squarify.h
     src/backup/clone.cpp src/backup/clone.h
@@ -191,6 +192,7 @@ add_library(diskforge-ui STATIC
     src/viruses/driversdialog.cpp src/viruses/driversdialog.h
     src/viruses/bootentriesdialog.cpp src/viruses/bootentriesdialog.h
     src/backup/savefilesdialog.cpp src/backup/savefilesdialog.h
+    src/backup/clonezilladialog.cpp src/backup/clonezilladialog.h
     src/tools/linuxbootdialog.cpp src/tools/linuxbootdialog.h
     src/tools/tryrepairdialog.cpp src/tools/tryrepairdialog.h
     src/tools/winredialog.cpp src/tools/winredialog.h

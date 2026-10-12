@@ -41,6 +41,7 @@
 #include "../src/viruses/productkeydialog.h"
 #include "../src/viruses/driversdialog.h"
 #include "../src/viruses/bootentriesdialog.h"
+#include "../src/backup/clonezilladialog.h"
 #include "../src/backup/imagebackup.h"
 #include "../src/backup/savefilesdialog.h"
 #include "../src/tools/linuxbootdialog.h"
@@ -2622,6 +2623,90 @@ void linuxBootWindow()
     cleanUpLoop(udisks, loopPath);
 }
 
+// Restore from Clonezilla onto a loop device's partition: the folder's images are listed, one too
+// big for the partition is refused, and the ext4 is put back exactly (as root); as the user,
+// writing needs the admin password, so without a prompt it's refused and said.
+void clonezillaRestore()
+{
+    const bool asRoot = geteuid() == 0;
+    QTemporaryDir dir;
+    const QString image = dir.filePath(QStringLiteral("target.img"));
+    sh(QStringLiteral("truncate"), {QStringLiteral("-s"), QStringLiteral("24M"), image});
+    QProcess sfdisk;
+    sfdisk.start(QStringLiteral("sfdisk"), {QStringLiteral("-q"), image});
+    sfdisk.waitForStarted();
+    sfdisk.write("label: gpt\nstart=2048, size=20480, type=L\n");
+    sfdisk.closeWriteChannel();
+    sfdisk.waitForFinished();
+    QFile backing(image);
+    QString loopPath;
+    if (backing.open(QIODevice::ReadWrite)) {
+        QDBusMessage call = QDBusMessage::createMethodCall(QStringLiteral("org.freedesktop.UDisks2"), QStringLiteral("/org/freedesktop/UDisks2/Manager"),
+                                                           QStringLiteral("org.freedesktop.UDisks2.Manager"), QStringLiteral("LoopSetup"));
+        call << QVariant::fromValue(QDBusUnixFileDescriptor(backing.handle())) << QVariantMap{{QStringLiteral("auth.no_user_interaction"), true}};
+        loopPath = QDBusConnection::systemBus().call(call, QDBus::Block, 30000).arguments().value(0).value<QDBusObjectPath>().path();
+        backing.close();
+    }
+    report(!loopPath.isEmpty(), QStringLiteral("clonezilla: a loop device with a 10 MiB partition stands in"));
+    if (loopPath.isEmpty())
+        return;
+    UDisks udisks;
+    udisks.setInteractive(false);
+    const Volume *part = nullptr;
+    waitUntil([&] {
+        udisks.refresh();
+        const Disk *d = udisks.diskByPath(loopPath);
+        part = d && d->volumes.size() == 1 ? &d->volumes[0] : nullptr;
+        return part != nullptr;
+    }, 15000);
+    if (!part)
+        return;
+    const QString device = part->device;
+    QStringList boxes;
+    Answerer answerer;
+    answerer.answer = [&](QWidget *modal) {
+        if (auto *box = qobject_cast<QMessageBox *>(modal)) {
+            boxes << box->text();
+            box->accept();
+            return true;
+        }
+        return false;
+    };
+    {
+        ClonezillaDialog dialog(&udisks, *part);
+        dialog.show();
+        dialog.openFolder(QStringLiteral(SOURCE_DIR "/tests/data/clonezilla/image"));
+        auto *list = dialog.findChild<QListWidget *>(QStringLiteral("images"));
+        auto *note = dialog.findChild<QLabel *>(QStringLiteral("note"));
+        auto *restore = dialog.findChild<QPushButton *>(QStringLiteral("restore"));
+        list->setCurrentRow(1); // the 36 MiB FAT32: too big for 10 MiB
+        report(list->count() == 3 && note->text().contains(QLatin1String("smaller")), QStringLiteral("clonezilla: its images are listed, and one too big is refused"),
+               note->text());
+        list->setCurrentRow(0);
+        dialog.findChild<QLineEdit *>(QStringLiteral("confirm"))->setText(shortDevice(device));
+        report(restore->isEnabled(), QStringLiteral("clonezilla: the ext4 fits, and can be restored once the name is typed"));
+        restore->click();
+        waitUntil([&] { return (note->text().startsWith(QLatin1String("Done")) && !boxes.isEmpty()) || note->text().contains(QLatin1String("couldn't")); }, 60000);
+        if (asRoot)
+            report(note->text().startsWith(QLatin1String("Done")) && !boxes.isEmpty(), QStringLiteral("clonezilla: restored"),
+                   note->text() + QStringLiteral(" | ") + boxes.join(QStringLiteral(" | ")));
+        else
+            report(note->text().contains(QLatin1String("couldn't be opened")), QStringLiteral("clonezilla: as the user without a password prompt, it's refused and said"),
+                   note->text());
+    }
+    if (asRoot) {
+        QFile p(device);
+        QByteArray restored;
+        if (p.open(QIODevice::ReadOnly))
+            restored = p.read(8 * 1024 * 1024);
+        QFile sums(QStringLiteral(SOURCE_DIR "/tests/data/clonezilla/sha256.txt"));
+        const QByteArray want = sums.open(QIODevice::ReadOnly) ? sums.readLine().left(64) : QByteArray();
+        report(QCryptographicHash::hash(restored, QCryptographicHash::Sha256).toHex() == want,
+               QStringLiteral("clonezilla: the partition holds exactly the ext4 Clonezilla saved"));
+    }
+    cleanUpLoop(udisks, loopPath);
+}
+
 // Write Image to USB's "copy the files" way, with persistence, on a loop device of the user's
 // own (no raw access needed, so no password): a Debian-live-like ISO with a long label.
 // DISKFORGE_TEST_COPY_ISO uses a real ISO instead (one with live-boot persistence, like
@@ -5111,7 +5196,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},
@@ -5156,7 +5241,7 @@ int main(int argc, char *argv[])
     }
     // As root, the ones that make their own loop device can run by themselves.
     if (!only.isEmpty()) {
-        const QVector<QPair<const char *, void (*)()>> alone = {{"stickcheck", stickCheck}, {"sdcard", sdCardFormat}, {"refresh", slowAreaRefresh}, {"stopwipe", stopWipe}, {"luksheader", luksHeaderThroughWindow}, {"nas", nasDrives}, {"tryrepair", tryRepairFirst}};
+        const QVector<QPair<const char *, void (*)()>> alone = {{"stickcheck", stickCheck}, {"sdcard", sdCardFormat}, {"refresh", slowAreaRefresh}, {"stopwipe", stopWipe}, {"luksheader", luksHeaderThroughWindow}, {"nas", nasDrives}, {"tryrepair", tryRepairFirst}, {"clonezilla", clonezillaRestore}};
         for (const auto &[name, run] : alone) {
             if (only.contains(QLatin1String(name)))
                 run();
@@ -5246,6 +5331,7 @@ int main(int argc, char *argv[])
     lockInMap();
     luksHeaderThroughWindow();
     tryRepairFirst();
+    clonezillaRestore();
     inspector();
     recoverThroughWindow();
     scanThroughWindow();

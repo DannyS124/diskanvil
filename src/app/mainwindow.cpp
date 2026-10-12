@@ -14,6 +14,7 @@
 #include "bootentriesdialog.h"
 #include "catalogdialog.h"
 #include "closedsets.h"
+#include "clonezilladialog.h"
 #include "copydialogs.h"
 #include "erasedialog.h"
 #include "snapper.h"
@@ -663,6 +664,15 @@ void MainWindow::createActions()
             RescueDialog(m_udisks, d->blockPath, this).exec();
     });
 
+    m_clonezilla = new QAction(themeIcon("document-revert", "edit-undo"), tr("Restore from &Clonezilla…"), this);
+    m_clonezilla->setObjectName(QStringLiteral("clonezilla"));
+    m_clonezilla->setToolTip(tr("Puts one of a Clonezilla backup's partition images back on this partition"));
+    connect(m_clonezilla, &QAction::triggered, this, [this] {
+        if (const Volume *v = selectedVolume())
+            ClonezillaDialog(m_udisks, *v, this).exec();
+        updateActions();
+    });
+
     m_winRe = new QAction(themeIcon("tools-wizard", "system-run"), tr("Make Room for Windows &Recovery…"), this);
     m_winRe->setObjectName(QStringLiteral("winRe"));
     m_winRe->setToolTip(tr("Windows Update failing with 0x80070643: its recovery partition is too small. Microsoft's fix, done for you"));
@@ -819,7 +829,7 @@ void MainWindow::createActions()
     action->addSeparator();
     action->addActions({m_health, m_badSectors, m_checkStick, m_benchmark, m_raidCheck});
     action->addSeparator();
-    action->addActions({m_backup, m_restore, m_clone, m_newIds, m_rescue});
+    action->addActions({m_backup, m_restore, m_clonezilla, m_clone, m_newIds, m_rescue});
     action->addSeparator();
     action->addActions({m_copy, m_properties});
 
@@ -1568,6 +1578,7 @@ void MainWindow::updateActions()
     m_usage->setEnabled(mounted);
     m_snapshots->setEnabled(!snapper::mountedSubvolumes().isEmpty());
     m_restore->setText(partition ? tr("R&estore Partition Backup…") : tr("R&estore Drive Backup…"));
+    m_clonezilla->setEnabled(tableChangeable && partition && !v->isSystem);
     m_properties->setEnabled(d != nullptr);
 
     const QString why = d && d->isSystem ? tr("Disk holds the running system (%1)").arg(d->systemReason)
@@ -1691,7 +1702,7 @@ void MainWindow::buildContextMenu(QMenu *menu)
         else if (m_luksRestore->isEnabled())
             add({m_luksRestore});
         menu->addSeparator();
-        add({m_backup, m_restore});
+        add({m_backup, m_restore, m_clonezilla});
         if (v->effectiveFsType() == QLatin1String("btrfs"))
             add({m_snapshots});
     } else if (sel.kind == DiskMap::Selection::Kind::Free) {

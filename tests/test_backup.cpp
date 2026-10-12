@@ -6,7 +6,9 @@
 #include "testkit.h"
 
 #include "../src/backup/imagebackup.h"
+#include "../src/backup/partclone.h"
 #include "../src/backup/zstdseek.h"
+#include "../src/drives/blockio.h"
 #include "../src/lostfiles/vdisk.h"
 
 #include <QFile>
@@ -193,4 +195,63 @@ void backupTests()
     const QString stopped = path("stopped.img.zst");
     o = backup(disk, stopped, imagebackup::infoFor(source, nullptr), true);
     report(!o.ok && !QFile::exists(stopped) && !QFile::exists(imagebackup::infoPath(stopped)), QStringLiteral("a stopped backup is cleaned up"), o.message);
+}
+
+// Clonezilla's partclone images (tests/data/clonezilla/make.sh): each restores to exactly the
+// file system it was made from, gzip parts, zstd and checksum-less alike; a damaged one stops.
+void clonezillaTests()
+{
+    const QString folder = QStringLiteral(SOURCE_DIR "/tests/data/clonezilla/image");
+    const QVector<partclone::Image> images = partclone::scanFolder(folder);
+    QStringList found;
+    for (const partclone::Image &i : images)
+        found << QStringLiteral("%1 %2 %3 parts %4").arg(i.partition, i.fs, i.header.fs).arg(i.files.size());
+    report(images.size() == 3 && images[0].partition == QLatin1String("sda1") && images[0].files.size() == 2 && images[0].header.fs == QLatin1String("EXTFS")
+               && images[1].header.fs == QLatin1String("FAT32") && images[2].header.checksumMode == 0 && images[0].header.deviceSize == 8 * MiB,
+           QStringLiteral("clonezilla: its folder's images, their parts, and what partclone says of each"), found.join(QStringLiteral(" | ")));
+    QHash<QString, QString> expected;
+    QFile sums(QStringLiteral(SOURCE_DIR "/tests/data/clonezilla/sha256.txt"));
+    if (sums.open(QIODevice::ReadOnly)) {
+        for (const QByteArray &line : sums.readAll().split('\n')) {
+            const QList<QByteArray> f = line.simplified().split(' ');
+            if (f.size() == 2)
+                expected.insert(QString::fromLatin1(f[1]), QString::fromLatin1(f[0]));
+        }
+    }
+    QTemporaryDir dir;
+    const auto restore = [&dir](const partclone::Image &image, quint64 size, QString *where) {
+        *where = dir.filePath(image.partition + QStringLiteral(".img"));
+        makeFile(*where, qint64(size), '\0');
+        partclone::Result result;
+        partclone::Restore job(image, blockio::openFile(*where, blockio::FileMode::Update), size);
+        QObject::connect(&job, &partclone::Restore::finished, [&result](const partclone::Result &r) { result = r; });
+        job.run();
+        return result;
+    };
+    QString path;
+    for (int i = 0; i < images.size(); ++i) {
+        const partclone::Image &image = images[i];
+        const partclone::Result r = restore(image, image.header.deviceSize, &path);
+        const QString want = expected.value(image.header.fs == QLatin1String("FAT32") ? QStringLiteral("fat.img") : QStringLiteral("ext4.img"));
+        report(r.ok && sha256File(path) == want, QStringLiteral("clonezilla: %1 (%2) restores to exactly the file system it was").arg(image.partition, image.fs), r.error);
+    }
+    // A flipped byte in a block: its group's CRC catches it.
+    partclone::Image damaged = images[2];
+    {
+        // The checksummed ext4 (sda1), unpacked, one byte changed past the header and map.
+        const QString packed = dir.filePath(QStringLiteral("whole.gz"));
+        sh(QStringLiteral("sh"), {QStringLiteral("-c"), QStringLiteral("cat '%1'/sda1.ext4-ptcl-img.gz.a? | gzip -dc > '%2.ptcl'").arg(folder, packed)});
+        QFile f(packed + QStringLiteral(".ptcl"));
+        if (f.open(QIODevice::ReadWrite)) {
+            f.seek(f.size() / 2);
+            const char c = f.peek(1).at(0);
+            f.write(QByteArray(1, char(c ^ 0x5A)));
+        }
+        damaged.files = {packed + QStringLiteral(".ptcl")};
+        damaged.partition = QStringLiteral("damaged");
+    }
+    const partclone::Result broken = restore(damaged, 8 * MiB, &path);
+    report(!broken.ok && broken.error.contains(QLatin1String("damaged")), QStringLiteral("clonezilla: a damaged block is caught by its checksum"), broken.error);
+    const partclone::Result small = restore(images[0], 4 * MiB, &path);
+    report(!small.ok && small.error.contains(QLatin1String("smaller")), QStringLiteral("clonezilla: a partition too small for it is turned down"), small.error);
 }
