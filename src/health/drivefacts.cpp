@@ -7,6 +7,7 @@
 
 #include <QCoreApplication>
 #include <QFile>
+#include <QLocale>
 #include <QRegularExpression>
 
 namespace drivefacts {
@@ -114,6 +115,36 @@ QVector<Fact> aboutModel(const QString &modelIn, const QString &firmware)
     if (model.contains(QLatin1String("ST3000DM001")))
         out << Fact{Fact::Kind::Note, tr("This model failed far more often than most drives in Backblaze's published records. Keep what's "
                                          "on it backed up.")};
+    // Backblaze's lifetime failure rates, to the end of 2025 (Backblaze Drive Stats; they ask to be
+    // named as the source, and that the data stays free). Models with 500+ drives in their data centres.
+    struct Rate {
+        const char *model;
+        int drives;
+        double afr;
+    };
+    static const Rate rates[] = {
+        {"HMS5C4040ALE640", 8723, 0.57},   {"HMS5C4040BLE640", 16349, 0.40},  {"HUH728080ALE600", 1218, 1.44},
+        {"HUH721212ALE600", 2697, 0.60},   {"HUH721212ALE604", 14352, 1.64},  {"HUH721212ALN604", 11438, 2.22},
+        {"ST8000DM002", 10320, 1.52},      {"ST8000NM0055", 15680, 1.96},     {"ST10000NM0086", 1304, 3.09},
+        {"ST12000NM0007", 38843, 2.24},    {"ST12000NM0008", 21037, 2.06},    {"ST12000NM000J", 1094, 1.43},
+        {"ST12000NM001G", 13877, 0.99},    {"ST14000NM001G", 11268, 1.41},    {"ST14000NM0138", 1690, 5.81},
+        {"ST16000NM001G", 35231, 0.69},    {"ST24000NM002H", 8549, 2.72},     {"MG07ACA14TA", 39387, 1.03},
+        {"MG07ACA14TEY", 1048, 1.69},      {"MG08ACA16TA", 41061, 1.07},      {"MG08ACA16TE", 6550, 1.23},
+        {"MG08ACA16TEY", 5352, 2.37},      {"MG10ACA20TE", 18098, 0.63},      {"MG11ACA24TE", 4806, 0.68},
+        {"WUH721414ALE6L4", 8866, 0.53},   {"WUH721816ALE6L0", 3070, 0.90},   {"WUH721816ALE6L4", 27051, 0.46},
+        {"WUH722222ALE6L4", 44725, 0.63},
+    };
+    // The longest name that's in the model wins (MG08ACA16TE is also in MG08ACA16TEY).
+    const Rate *best = nullptr;
+    for (const Rate &r : rates) {
+        if (model.contains(QLatin1String(r.model)) && (!best || qstrlen(r.model) > qstrlen(best->model)))
+            best = &r;
+    }
+    if (best)
+        out << Fact{Fact::Kind::Note, tr("Backblaze runs %L1 of this model in its data centres: %2% of them fail each year (over all their "
+                                         "drives, 1.30%). From Backblaze Drive Stats, to the end of 2025.")
+                                          .arg(best->drives)
+                                          .arg(QLocale().toString(best->afr, 'f', 2))};
     return out;
 }
 

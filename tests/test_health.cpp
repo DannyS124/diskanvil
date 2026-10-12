@@ -251,6 +251,11 @@ void driveFacts()
                && kinds(QStringLiteral("Samsung SSD 990 PRO 2TB"), QStringLiteral("4B2QJXD7")).isEmpty()
                && kinds(QStringLiteral("ST3000DM001-1ER166"), QStringLiteral("CC26")) == QLatin1String("2"),
            QStringLiteral("drive facts: firmware with a known bug is pointed out until it's updated"));
+    const QVector<drivefacts::Fact> tey = drivefacts::aboutModel(QStringLiteral("TOSHIBA MG08ACA16TEY"), QStringLiteral("0102"));
+    report(tey.size() == 1 && tey[0].text.contains(QLatin1String("2.37")) && tey[0].text.contains(QLatin1String("Backblaze"))
+               && kinds(QStringLiteral("WDC  WUH721414ALE6L4"), QStringLiteral("LDGNW07G")) == QLatin1String("2")
+               && kinds(QStringLiteral("HGST HTS545050A7E380"), QStringLiteral("GG2OACA0")).isEmpty(),
+           QStringLiteral("drive facts: Backblaze's failure rate for models in their records, the closest name winning"), tey.value(0).text);
 }
 
 // Seagate's FARM record against SMART's: a wiped SMART history shows up.
