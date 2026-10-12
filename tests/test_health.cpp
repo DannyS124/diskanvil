@@ -361,7 +361,7 @@ void closedSets()
         v.partType = partType;
         return v;
     };
-    Disk a, b, c, e;
+    Disk a, b, c, e, f, g;
     a.device = QStringLiteral("/dev/sdb");
     a.volumes = {volume(QStringLiteral("/dev/sdb1"), QStringLiteral("linux_raid_member"), QStringLiteral("u-sys"), QStringLiteral("DiskStation:0"), QStringLiteral("md")),
                  volume(QStringLiteral("/dev/sdb5"), QStringLiteral("linux_raid_member"), QStringLiteral("u-data"), QStringLiteral("DiskStation:2"), QString())};
@@ -373,12 +373,22 @@ void closedSets()
                  volume(QStringLiteral("/dev/sdd2"), QString(), QString(), QString(), QString(), QStringLiteral("af9b60a0-1431-4f62-bc68-3311714a69ad"))};
     e.device = QStringLiteral("/dev/sde");
     e.volumes = {volume(QStringLiteral("/dev/sde1"), QString(), QString(), QString(), QString(), QStringLiteral("0x42"))};
-    const QVector<closedsets::Set> sets = closedsets::find({a, b, c, e}, false);
+    // An MBR dynamic disk as Linux shows it: the kernel's own volume, which the table doesn't have.
+    f.device = QStringLiteral("/dev/sdf");
+    f.tableType = QStringLiteral("dos");
+    f.volumes = {volume(QStringLiteral("/dev/sdf1"), QStringLiteral("ntfs"), QStringLiteral("AEEA5DF0EA5DB575"), QStringLiteral("DYNVOL"), QString())};
+    f.volumes[0].number = 1;
+    // An ordinary MBR disk.
+    g.device = QStringLiteral("/dev/sdg");
+    g.tableType = QStringLiteral("dos");
+    g.volumes = {volume(QStringLiteral("/dev/sdg1"), QStringLiteral("ntfs"), QStringLiteral("1234"), QStringLiteral("DATA"), QString(), QStringLiteral("0x07"))};
+    g.volumes[0].number = 1;
+    const QVector<closedsets::Set> sets = closedsets::find({a, b, c, e, f, g}, false);
     QStringList said;
     for (const auto &s : sets)
         said << closedsets::describe(s);
     report(sets.size() == 3 && sets[0].name == QLatin1String("DiskStation:0") && sets[1].members == QStringList{QStringLiteral("/dev/sdb5"), QStringLiteral("/dev/sdc5")}
-               && sets[2].kind == closedsets::Set::Kind::Dynamic && sets[2].members == QStringList{QStringLiteral("/dev/sdd"), QStringLiteral("/dev/sde")},
+               && sets[2].kind == closedsets::Set::Kind::Dynamic && sets[2].members == QStringList{QStringLiteral("/dev/sdd"), QStringLiteral("/dev/sde"), QStringLiteral("/dev/sdf")},
            QStringLiteral("closed sets: a NAS's arrays by their members (a running one left out), and Windows dynamic disks"), said.join(QStringLiteral(" | ")));
     report(closedsets::find({c}, true).isEmpty(), QStringLiteral("closed sets: dynamic disks whose volumes are open already aren't offered again"));
     const QString script = closedsets::openScript(sets);

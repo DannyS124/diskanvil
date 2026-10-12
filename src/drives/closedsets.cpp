@@ -49,7 +49,10 @@ QVector<Set> find(const QVector<Disk> &disks, bool dynamicOpen)
                 }
                 out[arrays.value(id)].members << v.device;
             }
-            dynamicDisk = dynamicDisk || isDynamicType(v.partType);
+            // Linux reads MBR dynamic disks itself (Debian's and Arch's kernels both do): their
+            // volumes show up as partitions the table doesn't have, so with no type.
+            const bool kernelsOwn = d.tableType == QLatin1String("dos") && v.number > 0 && v.partType.isEmpty();
+            dynamicDisk = dynamicDisk || isDynamicType(v.partType) || kernelsOwn;
         }
         if (dynamicDisk)
             dynamic.members << d.device;
@@ -82,8 +85,9 @@ QString openScript(const QVector<Set> &sets)
     // them and writes nothing.
     if (raid)
         script << QStringLiteral("if command -v vgchange >/dev/null; then vgchange -ay; fi");
+    // ldmtool's volumes are writable: made read-only like the arrays.
     if (dynamic)
-        script << QStringLiteral("ldmtool create all");
+        script << QStringLiteral("ldmtool create all; for v in /dev/mapper/ldm_vol_*; do [ -e \"$v\" ] && blockdev --setro \"$v\"; done");
     // Whatever opened, the rest is said by what shows up.
     return script.join(QStringLiteral("; ")) + QStringLiteral("; udevadm settle; true");
 }
