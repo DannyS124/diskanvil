@@ -5,6 +5,7 @@
 
 #include "applog.h"
 #include "rescuestick.h"
+#include "writeblock.h"
 #include "udisks.h"
 
 #include <QCoreApplication>
@@ -187,7 +188,9 @@ HomeWindow::HomeWindow(UDisks *udisks, Mode mode, QWidget *parent)
     m_network = new QLabel;
     m_drives = new QLabel;
     m_logs = new QLabel;
-    for (QLabel *label : {m_secureBoot, m_network, m_drives, m_logs}) {
+    m_kept = new QLabel;
+    m_protected = new QLabel;
+    for (QLabel *label : {m_secureBoot, m_network, m_drives, m_logs, m_kept, m_protected}) {
         label->setTextFormat(Qt::RichText);
         status->addWidget(label, 0, Qt::AlignRight);
     }
@@ -196,6 +199,10 @@ HomeWindow::HomeWindow(UDisks *udisks, Mode mode, QWidget *parent)
     m_secureBoot->setVisible(desktop);
     m_network->setVisible(desktop);
     m_logs->setVisible(desktop && rescue::runningInRescue());
+    m_kept->setVisible(desktop && rescue::runningInRescue());
+    m_kept->setObjectName(QStringLiteral("kept"));
+    m_protected->setObjectName(QStringLiteral("protected"));
+    m_protected->hide();
     header->addLayout(status);
     outer->addLayout(header);
 
@@ -461,6 +468,13 @@ void HomeWindow::updateStatus()
         const bool onStick = QStorageInfo(medium).fileSystemType() == "vfat";
         m_logs->setText(onStick ? dot(color("green"), tr("Logs are saved on the stick"))
                                 : dot(color("dim"), tr("Logs stay in memory (started from a CD or ISO)")));
+        QFile cmdline(QStringLiteral("/proc/cmdline"));
+        const bool kept = cmdline.open(QIODevice::ReadOnly) && cmdline.readAll().split(' ').contains("persistence");
+        m_kept->setText(kept ? dot(color("green"), tr("Changes are kept on the stick")) : dot(color("dim"), tr("Changes go when it's turned off")));
+    }
+    if (m_mode == Mode::Desktop) {
+        m_protected->setVisible(writeblock::isOn());
+        m_protected->setText(dot(color("amber"), tr("Drives are write-protected")));
     }
 }
 

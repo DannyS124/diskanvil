@@ -9,6 +9,7 @@
 // - Back Up a partition, damage it, Restore it, and it's back exactly.
 // sudo QT_QPA_PLATFORM=offscreen build/diskforge-uitest
 
+#include "../src/drives/writeblock.h"
 #include "../src/addons/addonoutput.h"
 #include "../src/addons/addonform.h"
 #include "../src/addons/addonmaker.h"
@@ -2996,6 +2997,152 @@ void testBootWindow()
     cleanUpLoop(udisks, loopPath);
 }
 
+// Write-Protect Every Drive: off a PC it says why not; as root, with the helper from the repo
+// limited to a loop device of its own, it makes the drive and its partition read-only (a mounted
+// one goes read-only too), shows the bar, and stops the Format and Wipe buttons; one drive can be
+// let through, and Switch Off makes them writable again. Nothing outside the loop device is touched.
+void writeBlockMode()
+{
+    if (::geteuid() != 0) {
+        UDisks udisks;
+        udisks.setInteractive(false);
+        MainWindow window(&udisks);
+        auto *action = window.findChild<QAction *>(QStringLiteral("writeBlock"));
+        report(action && !action->isEnabled() && action->toolTip().contains(QLatin1String("Only DiskForge Live")),
+               QStringLiteral("Write-Protect Every Drive: on a PC it's off, and says why"), action ? action->toolTip() : QString());
+        return;
+    }
+    QTemporaryDir dir;
+    const QString image = dir.filePath(QStringLiteral("drive.img"));
+    sh(QStringLiteral("truncate"), {QStringLiteral("-s"), QStringLiteral("64M"), image});
+    QProcess sfdisk;
+    sfdisk.start(QStringLiteral("sfdisk"), {QStringLiteral("-q"), image});
+    sfdisk.waitForStarted();
+    sfdisk.write("label: gpt\n,,L\n");
+    sfdisk.closeWriteChannel();
+    sfdisk.waitForFinished();
+    QString loop;
+    sh(QStringLiteral("losetup"), {QStringLiteral("-fP"), QStringLiteral("--show"), image}, &loop);
+    loop = loop.trimmed();
+    const QString name = loop.section(QLatin1Char('/'), -1), part = loop + QStringLiteral("p1");
+    waitUntil([&] { return QFile::exists(part); }, 5000);
+    sh(QStringLiteral("mkfs.ext4"), {QStringLiteral("-q"), part});
+    const QString mnt = dir.filePath(QStringLiteral("mnt"));
+    QDir().mkpath(mnt);
+    sh(QStringLiteral("mount"), {part, mnt});
+    const QString state = dir.filePath(QStringLiteral("state"));
+    qputenv("DISKFORGE_WRITEBLOCK_STATE", state.toLocal8Bit());
+    qputenv("DISKFORGE_WRITEBLOCK_ONLY", name.toLocal8Bit());
+    writeblock::helperForTest = QStringLiteral(SOURCE_DIR "/rescue/files/usr/local/bin/diskforge-live-writeblock");
+    const auto ro = [](const QString &device) {
+        QString said;
+        sh(QStringLiteral("blockdev"), {QStringLiteral("--getro"), device}, &said);
+        return said.trimmed() == QLatin1String("1");
+    };
+    const auto canWrite = [&] {
+        QFile f(mnt + QStringLiteral("/test.txt"));
+        return f.open(QIODevice::WriteOnly) && f.write("x") == 1;
+    };
+    report(canWrite() && !ro(loop), QStringLiteral("Write-Protect Every Drive: the test drive starts writable"));
+
+    UDisks udisks;
+    udisks.setInteractive(false);
+    MainWindow window(&udisks);
+    window.resize(1200, 800);
+    window.show();
+    auto *action = window.findChild<QAction *>(QStringLiteral("writeBlock"));
+    report(action && action->isEnabled(), QStringLiteral("Write-Protect Every Drive: offered on DiskForge Live (the helper is there)"));
+    if (!action) {
+        sh(QStringLiteral("umount"), {mnt});
+        sh(QStringLiteral("losetup"), {QStringLiteral("-d"), loop});
+        return;
+    }
+    action->trigger();
+    const Disk *disk = nullptr;
+    waitUntil([&] {
+        udisks.refresh();
+        disk = udisks.diskByPath(QString());
+        for (const Disk &d : udisks.disks()) {
+            if (d.device == loop)
+                disk = &d;
+        }
+        return disk && disk->readOnly;
+    }, 10000);
+    QFile rule(state + QStringLiteral("/90-diskforge-live-writeblock.rules"));
+    const QByteArray ruleText = rule.open(QIODevice::ReadOnly) ? rule.readAll() : QByteArray();
+    report(writeblock::isOn() && ro(loop) && ro(part) && !canWrite() && ruleText.contains("RUN+=\"/usr/sbin/blockdev --setro $env{DEVNAME}\""),
+           QStringLiteral("Write-Protect Every Drive: the drive and its partition are read-only, the mounted one too, and new drives get a udev rule"));
+    if (!QStandardPaths::findExecutable(QStringLiteral("udevadm")).isEmpty()) {
+        QString said;
+        const int verify = sh(QStringLiteral("udevadm"), {QStringLiteral("verify"), QStringLiteral("--no-style"), rule.fileName()}, &said);
+        report(verify == 0, QStringLiteral("Write-Protect Every Drive: udev reads the rule without complaint"), said.trimmed());
+    }
+    // Root may open it for writing; the kernel refuses the write itself.
+    QFile raw(loop);
+    const bool opened = raw.open(QIODevice::ReadWrite | QIODevice::Unbuffered);
+    const bool wrote = opened && raw.write(QByteArray(4096, 'w')) == 4096 && raw.flush();
+    report(!wrote, QStringLiteral("Write-Protect Every Drive: the kernel refuses a write to the drive"), raw.errorString());
+    raw.close();
+    report(disk && disk->readOnly, QStringLiteral("Write-Protect Every Drive: UDisks sees it read-only"));
+    QCoreApplication::processEvents();
+    NoticeBar *bar = window.findChild<NoticeBar *>(QStringLiteral("writeBlock"));
+    report(bar && bar->isVisibleTo(&window), QStringLiteral("Write-Protect Every Drive: a bar says so"), bar ? bar->text() : QString());
+    // The drive picked: Wipe says why it's off. (Unmounted first: a drive mounted under /tmp counts as the system's.)
+    sh(QStringLiteral("umount"), {mnt});
+    udisks.refresh();
+    auto *map = window.findChild<DiskMap *>();
+    const QVector<Disk> &disks = udisks.disks();
+    for (int i = 0; i < disks.size(); ++i) {
+        if (disks[i].device == loop)
+            map->selectDisk(i);
+    }
+    Q_EMIT map->selectionChanged(); // as a click would
+    QCoreApplication::processEvents();
+    QAction *wipe = nullptr;
+    for (QAction *a : window.findChildren<QAction *>()) {
+        if (a->text() == QStringLiteral("&Wipe Disk…"))
+            wipe = a;
+    }
+    report(wipe && !wipe->isEnabled() && wipe->toolTip().contains(QLatin1String("write-protected")),
+           QStringLiteral("Write-Protect Every Drive: Wipe Disk is off for it, and says why"),
+           !wipe ? QStringLiteral("no Wipe Disk action") : QStringLiteral("%1, \"%2\"").arg(wipe->isEnabled() ? QStringLiteral("on") : QStringLiteral("off"), wipe->toolTip()));
+    // One let through, to save to.
+    QProcess allow;
+    const QStringList command = writeblock::command({QStringLiteral("allow"), name});
+    allow.start(command.first(), command.mid(1));
+    allow.waitForFinished(30000);
+    report(allow.exitCode() == 0 && !ro(loop) && !ro(part) && writeblock::allowed() == QStringList{name},
+           QStringLiteral("Write-Protect Every Drive: one drive can be let through"), QString::fromLocal8Bit(allow.readAll()));
+    // On again, and off from the bar.
+    action->trigger(); // off (it was checked)
+    report(!writeblock::isOn() && !ro(loop), QStringLiteral("Write-Protect Every Drive: off from the menu"));
+    action->trigger(); // on
+    QCoreApplication::processEvents();
+    bar = window.findChild<NoticeBar *>(QStringLiteral("writeBlock"));
+    QPushButton *off = bar ? findButton(bar, QStringLiteral("Switch Off")) : nullptr;
+    report(ro(loop) && off, QStringLiteral("Write-Protect Every Drive: on again"));
+    if (off)
+        off->click();
+    waitUntil([&] { return !writeblock::isOn(); }, 5000);
+    sh(QStringLiteral("mount"), {part, mnt});
+    report(!writeblock::isOn() && !ro(loop) && !ro(part) && canWrite(), QStringLiteral("Write-Protect Every Drive: Switch Off makes it writable again"));
+    const auto barShown = [&] {
+        QCoreApplication::processEvents();
+        for (NoticeBar *b : window.findChildren<NoticeBar *>(QStringLiteral("writeBlock")))
+            if (b->isVisibleTo(&window))
+                return true;
+        return false;
+    };
+    waitUntil([&] { return !barShown(); }, 3000);
+    report(!barShown(), QStringLiteral("Write-Protect Every Drive: and the bar goes"));
+    window.close();
+    writeblock::helperForTest.clear();
+    qunsetenv("DISKFORGE_WRITEBLOCK_STATE");
+    qunsetenv("DISKFORGE_WRITEBLOCK_ONLY");
+    sh(QStringLiteral("umount"), {mnt});
+    sh(QStringLiteral("losetup"), {QStringLiteral("-d"), loop});
+}
+
 // Make a DiskForge Live USB with kept changes and a files drive, on a loop device: DiskForge
 // Live's partition, a "persistence" one with live-boot's persistence.conf, and an exFAT drive on
 // the rest. Then Update: only DiskForge Live's partition is made again; its logs, the kept
@@ -5657,7 +5804,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},
@@ -5702,7 +5849,7 @@ int main(int argc, char *argv[])
     }
     // As root, the ones that make their own loop device can run by themselves.
     if (!only.isEmpty()) {
-        const QVector<QPair<const char *, void (*)()>> alone = {{"stickcheck", stickCheck}, {"sdcard", sdCardFormat}, {"refresh", slowAreaRefresh}, {"stopwipe", stopWipe}, {"luksheader", luksHeaderThroughWindow}, {"nas", nasDrives}, {"tryrepair", tryRepairFirst}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"wipecert", wipeCertificate}, {"evidence", evidenceWindow}};
+        const QVector<QPair<const char *, void (*)()>> alone = {{"stickcheck", stickCheck}, {"sdcard", sdCardFormat}, {"refresh", slowAreaRefresh}, {"stopwipe", stopWipe}, {"luksheader", luksHeaderThroughWindow}, {"nas", nasDrives}, {"tryrepair", tryRepairFirst}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"wipecert", wipeCertificate}, {"evidence", evidenceWindow}, {"writeblock", writeBlockMode}};
         for (const auto &[name, run] : alone) {
             if (only.contains(QLatin1String(name)))
                 run();

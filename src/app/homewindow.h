@@ -82,4 +82,6 @@ private:
     QLabel *m_network = nullptr;
     QLabel *m_drives = nullptr;
     QLabel *m_logs = nullptr;
+    QLabel *m_kept = nullptr;       // changes kept on the stick (persistence), or not
+    QLabel *m_protected = nullptr;  // drives write-protected
 };

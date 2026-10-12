@@ -15,6 +15,7 @@
 #include "catalogdialog.h"
 #include "certificates.h"
 #include "closedsets.h"
+#include "writeblock.h"
 #include "clonezilladialog.h"
 #include "copydialogs.h"
 #include "erasedialog.h"
@@ -777,6 +778,22 @@ void MainWindow::createActions()
     m_openSets->setToolTip(tr("Drives that belong together (a NAS's, a RAID array's, Windows' dynamic disks), opened read-only"));
     connect(m_openSets, &QAction::triggered, this, &MainWindow::openClosedSets);
 
+    m_writeBlock = new QAction(themeIcon("object-locked", "document-encrypt"), tr("Write-Protect Every Drive"), this);
+    m_writeBlock->setObjectName(QStringLiteral("writeBlock"));
+    m_writeBlock->setCheckable(true);
+    m_writeBlock->setToolTip(writeblock::available()
+                                 ? tr("Every drive but this stick read-only, and those plugged in later too: nothing done here can change "
+                                      "them (for evidence, or a drive that mustn't be touched)")
+#ifdef Q_OS_WIN
+                                 : tr("Windows writes to a drive as soon as it's plugged in, before any program can stop it: start the PC "
+                                      "from DiskForge Live, \"Drives write-protected\", for that"));
+#else
+                                 : tr("Only DiskForge Live can: a running system's own drive can't be made read-only. Its boot menu has "
+                                      "\"Drives write-protected\" too."));
+#endif
+    m_writeBlock->setEnabled(writeblock::available());
+    connect(m_writeBlock, &QAction::triggered, this, [this](bool on) { setWriteBlock({on ? QStringLiteral("on") : QStringLiteral("off")}); });
+
     m_whatHappened = new QAction(themeIcon("help-hint", "help-contents"), tr("&What Happened?…"), this);
     m_whatHappened->setToolTip(tr("Lost files? Start here: what happened, the odds, what not to do, and which tool to use"));
     connect(m_whatHappened, &QAction::triggered, this, [this] {
@@ -930,6 +947,11 @@ void MainWindow::createActions()
         tools->addAction(m_whatHappened);
         tools->addAction(m_saveFiles);
         tools->addAction(m_openSets);
+        {
+            const QSignalBlocker block(m_writeBlock);
+            m_writeBlock->setChecked(writeblock::isOn());
+        }
+        tools->addAction(m_writeBlock);
         tools->addAction(m_bootMenu);
         tools->addAction(m_linuxBoot);
         tools->addAction(m_drivers);
@@ -1042,6 +1064,69 @@ void MainWindow::rebuild()
     updateNotices();
     updateCloneNotices();
     updateClosedNotices();
+    updateWriteBlockNotice();
+}
+
+void MainWindow::setWriteBlock(const QStringList &args)
+{
+    const QStringList command = writeblock::command(args);
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    QProcess run;
+    run.setProcessChannelMode(QProcess::MergedChannels);
+    run.start(command.first(), command.mid(1));
+    const bool ok = run.waitForFinished(60000) && run.exitStatus() == QProcess::NormalExit && run.exitCode() == 0;
+    QApplication::restoreOverrideCursor();
+    const QString said = QString::fromLocal8Bit(run.readAll()).trimmed();
+    qCInfo(lcOps).noquote() << "Write protection:" << args.join(QLatin1Char(' ')) << (ok ? "done" : "failed") << said;
+    if (!ok)
+        QMessageBox::warning(this, tr("Write-Protect Every Drive"),
+                             tr("That didn't work.\n\n%1").arg(said.isEmpty() ? run.errorString() : said.right(1500)));
+    // The kernel says so at once; UDisks a moment later.
+    m_udisks->refresh();
+    updateWriteBlockNotice();
+    QTimer::singleShot(1500, m_udisks, &UDisks::refresh);
+}
+
+// A bar for as long as the drives are write-protected, with which ones aren't.
+void MainWindow::updateWriteBlockNotice()
+{
+    const bool on = writeblock::isOn();
+    const QStringList allowed = writeblock::allowed();
+    const QString key = on ? QStringLiteral("on ") + allowed.join(QLatin1Char(' ')) : QString();
+    if (key == m_writeBlockKey)
+        return;
+    m_writeBlockKey = key;
+    for (NoticeBar *old : m_notices->findChildren<NoticeBar *>(QStringLiteral("writeBlock"), Qt::FindDirectChildrenOnly)) {
+        old->hide();
+        old->deleteLater();
+    }
+    if (!on)
+        return showNoticesIfAny();
+    QString text = tr("Every drive but this stick is write-protected: nothing done here can change them, drives plugged in later too.");
+    if (!allowed.isEmpty())
+        text += QLatin1Char(' ') + tr("Let through, to save to: %1.").arg(allowed.join(QStringLiteral(", ")));
+    auto *bar = new NoticeBar(NoticeBar::Level::Warning, text);
+    bar->setObjectName(QStringLiteral("writeBlock"));
+    QPushButton *allow = bar->addButton(tr("Let One Be Written…"));
+    allow->setObjectName(QStringLiteral("writeBlockAllow"));
+    connect(allow, &QPushButton::clicked, this, [this, allow] {
+        QMenu menu(this);
+        for (const Disk &d : m_udisks->disks()) {
+            const QString name = shortDevice(d.device);
+            if (d.isLoop || !d.readOnly || writeblock::allowed().contains(name))
+                continue;
+            menu.addAction(tr("%1 (%2, %3)").arg(name, d.model.isEmpty() ? tr("drive") : d.model, formatSize(d.size)), this,
+                           [this, name] { setWriteBlock({QStringLiteral("allow"), name}); });
+        }
+        if (menu.isEmpty())
+            menu.addAction(tr("No write-protected drives"))->setEnabled(false);
+        menu.exec(allow->mapToGlobal(QPoint(0, allow->height())));
+    });
+    QPushButton *off = bar->addButton(tr("Switch Off"));
+    connect(off, &QPushButton::clicked, this, [this] { QTimer::singleShot(0, this, [this] { setWriteBlock({QStringLiteral("off")}); }); });
+    m_notices->layout()->addWidget(bar);
+    bar->show();
+    showNoticesIfAny();
 }
 
 #ifdef Q_OS_WIN
@@ -1558,7 +1643,8 @@ void MainWindow::updateActions()
     const auto kind = m_map->selection().kind;
     const bool mounted = v && !v->mounts().isEmpty();
     const bool busy = m_udisks->isBusy();
-    const bool changeable = d && !d->isSystem && !busy;
+    // A read-only drive (a write-protected one, or an image opened read-only) can't be changed.
+    const bool changeable = d && !d->isSystem && !d->readOnly && !busy;
     // LVM groups: only what works on a logical volume's own device for now (mount, check,
     // label...); changes to the group and its volumes come later.
     const bool lvm = d && d->isLvm;
@@ -1626,7 +1712,7 @@ void MainWindow::updateActions()
     // Clone and Rescue read the whole drive and refuse the running system; Back Up works on
     // anything that can be unmounted (or isn't mounted); Restore writes, so not the system disk.
     m_clone->setEnabled(d && !lvm && !d->isSystem && !busy && d->size > 0);
-    m_newIds->setEnabled(d && !lvm && !d->isRaid && !d->isSystem && !busy && d->size > 0);
+    m_newIds->setEnabled(d && !lvm && !d->isRaid && !d->isSystem && !d->readOnly && !busy && d->size > 0);
     m_rescue->setEnabled(d && !lvm && !d->isSystem && !d->isLoop && !busy);
     const bool partition = v && !v->isContainer;
     bool anyMounted = false;
@@ -1647,6 +1733,8 @@ void MainWindow::updateActions()
     m_properties->setEnabled(d != nullptr);
 
     const QString why = d && d->isSystem ? tr("Disk holds the running system (%1)").arg(d->systemReason)
+                      : d && d->readOnly ? (writeblock::isOn() ? tr("This drive is write-protected (Tools > Write-Protect Every Drive)")
+                                                               : tr("This drive is read-only"))
                       : busy             ? tr("Wait for the current operation to finish")
                                          : QString();
     for (QAction *a : {m_unmount, m_newPartition, m_format, m_rename, m_delete, m_newTable, m_wipe, m_safelyRemove,

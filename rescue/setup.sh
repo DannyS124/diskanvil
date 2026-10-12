@@ -49,7 +49,7 @@ if [ -n "$missing" ]; then
 fi
 
 # Started on every boot
-systemctl enable diskforge-live-logs.service diskforge-live-logs.timer >/dev/null
+systemctl enable diskforge-live-logs.service diskforge-live-logs.timer diskforge-live-writeblock.service >/dev/null
 # Nothing that touches the PC's own drives on its own, or keeps the stick busy
 systemctl mask fstrim.timer e2scrub_all.timer e2scrub_reap.service smartmontools.service \
     apt-daily.timer apt-daily-upgrade.timer man-db.timer dpkg-db-backup.timer >/dev/null 2>&1

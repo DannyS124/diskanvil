@@ -71,6 +71,7 @@ add_library(diskforge-core STATIC
     src/drives/closedsets.cpp src/drives/closedsets.h
     src/drives/erasure.cpp src/drives/erasure.h
     src/drives/usbinfo.cpp src/drives/usbinfo.h
+    src/drives/writeblock.cpp src/drives/writeblock.h
     src/lostfiles/mediainfo.cpp src/lostfiles/mediainfo.h
     src/lostfiles/exif.cpp src/lostfiles/exif.h
     src/lostfiles/lookcopies.cpp src/lostfiles/lookcopies.h

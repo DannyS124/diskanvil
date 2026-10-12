@@ -1,0 +1,102 @@
+#!/bin/bash
+# DiskForge Live's write protection: every drive but DiskForge Live's own stick made read-only by
+# the kernel (blockdev --setro), and drives plugged in later too (a udev rule), so nothing done
+# here can change them: for evidence, or a drive that mustn't be touched.
+#
+#   diskforge-live-writeblock on           every drive read-only, and new ones
+#   diskforge-live-writeblock off          writable again
+#   diskforge-live-writeblock allow sdX    that one writable (somewhere to save to)
+#   diskforge-live-writeblock status       prints "on" or "off"
+#
+# As root (sudo). For the tests: DISKFORGE_WRITEBLOCK_ONLY names the only drives it touches,
+# DISKFORGE_WRITEBLOCK_STATE is used instead of /run/diskforge-live (and holds the rule then).
+set -u
+state=${DISKFORGE_WRITEBLOCK_STATE:-/run/diskforge-live}
+flag=$state/writeblock
+if [ -n "${DISKFORGE_WRITEBLOCK_STATE:-}" ]; then
+    rule=$state/90-diskforge-live-writeblock.rules
+else
+    rule=/run/udev/rules.d/90-diskforge-live-writeblock.rules
+fi
+
+# The drive DiskForge Live started from: it stays writable (its logs, its files drive).
+live_disk() {
+    local source
+    source=$(findmnt -no SOURCE /run/live/medium 2>/dev/null) || return 0
+    [ -n "$source" ] && lsblk -no PKNAME "$source" 2>/dev/null | head -1
+}
+
+drives() {
+    if [ -n "${DISKFORGE_WRITEBLOCK_ONLY:-}" ]; then
+        echo "$DISKFORGE_WRITEBLOCK_ONLY"
+        return
+    fi
+    local live name type
+    live=$(live_disk)
+    lsblk -dno NAME,TYPE | while read -r name type; do
+        [ "$type" = disk ] || continue
+        case $name in loop*|ram*|zram*|sr*) continue ;; esac
+        [ "$name" = "$live" ] && continue
+        echo "$name"
+    done
+}
+
+# A drive and its partitions; what's mounted from them for writing stays mounted, read-only.
+protect() {
+    local part mount
+    for part in $(lsblk -lno NAME "/dev/$1"); do
+        for mount in $(findmnt -rno TARGET -S "/dev/$part"); do
+            mount -o remount,ro "$mount" 2>/dev/null
+        done
+        blockdev --setro "/dev/$part"
+        # So UDisks (and DiskForge) see it read-only.
+        udevadm trigger --action=change "/sys/class/block/$part"
+    done
+}
+
+writable() {
+    local part
+    for part in $(lsblk -lno NAME "/dev/$1"); do
+        blockdev --setrw "/dev/$part"
+        udevadm trigger --action=change "/sys/class/block/$part"
+    done
+}
+
+case "${1:-}" in
+on)
+    mkdir -p "$state" "$(dirname "$rule")"
+    live=$(live_disk)
+    serial=none
+    [ -n "$live" ] && serial=$(udevadm info -q property -n "/dev/$live" 2>/dev/null | sed -n 's/^ID_SERIAL=//p')
+    {
+        echo '# DiskForge Live write protection: drives plugged in are made read-only too, but its own stick.'
+        echo "ACTION==\"add\", SUBSYSTEM==\"block\", KERNEL!=\"loop*|ram*|zram*|sr*|dm-*|md*\", ENV{ID_SERIAL}!=\"${serial:-none}\", RUN+=\"/usr/sbin/blockdev --setro \$env{DEVNAME}\""
+    } > "$rule"
+    [ -n "${DISKFORGE_WRITEBLOCK_STATE:-}" ] || udevadm control --reload
+    for drive in $(drives); do
+        protect "$drive"
+    done
+    : > "$state/writeblock-allowed"
+    touch "$flag"
+    ;;
+off)
+    rm -f "$rule" "$flag" "$state/writeblock-allowed"
+    [ -n "${DISKFORGE_WRITEBLOCK_STATE:-}" ] || udevadm control --reload
+    for drive in $(drives); do
+        writable "$drive"
+    done
+    ;;
+allow)
+    drive=${2:-}
+    [ -n "$drive" ] && [ -b "/dev/$drive" ] || { echo "no drive $drive" >&2; exit 1; }
+    writable "$drive"
+    echo "$drive" >> "$state/writeblock-allowed"
+    ;;
+status)
+    if [ -e "$flag" ]; then echo on; else echo off; fi
+    ;;
+*)
+    echo "usage: $0 on | off | allow sdX | status" >&2
+    exit 2
+    ;;
+esac
