@@ -21,6 +21,19 @@ namespace {
 
 constexpr int kRunning = 1;
 
+// On Windows, the drive Windows is running from: it's "This PC's own Windows" already (and its
+// registry files are locked, so reading them as another Windows' fails).
+bool runningRoot(const QString &mount)
+{
+#ifdef Q_OS_WIN
+    const QString system = QDir::cleanPath(qEnvironmentVariable("SystemDrive", QStringLiteral("C:")) + QStringLiteral("/"));
+    return QDir::cleanPath(QDir::fromNativeSeparators(mount)).compare(system, Qt::CaseInsensitive) == 0;
+#else
+    Q_UNUSED(mount)
+    return false;
+#endif
+}
+
 } // namespace
 
 QStringList WindowsPicker::mounted(UDisks *udisks)
@@ -29,7 +42,7 @@ QStringList WindowsPicker::mounted(UDisks *udisks)
     for (const Disk &d : udisks->disks()) {
         for (const Volume &v : d.volumes) {
             for (const QString &mount : v.mounts()) {
-                if (startup::hasWindows(mount))
+                if (startup::hasWindows(mount) && !runningRoot(mount))
                     out << mount;
             }
         }
@@ -74,6 +87,8 @@ void WindowsPicker::fill()
             const QStringList mounts = v.mounts();
             const QString fs = v.effectiveFsType();
             QString text;
+            if (!mounts.isEmpty() && runningRoot(mounts.first()))
+                continue;
             if (!mounts.isEmpty() && startup::hasWindows(mounts.first()))
                 text = tr("Windows on %1 (%2)").arg(volumeTitle(v), QDir::toNativeSeparators(mounts.first()));
             else if (mounts.isEmpty() && fs == QLatin1String("ntfs") && v.canMount())

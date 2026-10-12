@@ -160,8 +160,10 @@ const Disk *LiveOnPcDialog::target() const
 void LiveOnPcDialog::inspectImage()
 {
     const QString path = m_image->text().trimmed();
-    if (path == m_inspectedPath)
+    // The first time too, when there's no image yet: that says where to get one.
+    if (m_inspectedOnce && path == m_inspectedPath)
         return;
+    m_inspectedOnce = true;
     m_inspectedPath = path;
     m_imageBytes = 0;
     m_imageError.clear();

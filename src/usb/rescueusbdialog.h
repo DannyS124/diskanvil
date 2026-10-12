@@ -85,6 +85,7 @@ private:
 
     rescue::Image m_inspected;
     QString m_inspectedPath;
+    bool m_inspectedOnce = false;
     QString m_diskPath;   // the stick being made
     QString m_failure;    // why the copy failed, shown once the stick is unmounted
     UsbPrep *m_prep = nullptr;

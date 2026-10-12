@@ -66,6 +66,7 @@ private:
     QLabel *m_phase;
 
     QString m_inspectedPath;
+    bool m_inspectedOnce = false;
     quint64 m_imageBytes = 0;
     QString m_imageError;
     QString m_diskPath;   // the drive it's going on
