@@ -15,6 +15,7 @@
 #include "../src/health/triage.h"
 #include "../src/health/drivefacts.h"
 #include "../src/health/farm.h"
+#include "../src/drives/closedsets.h"
 #include "../src/drives/blockio.h"
 #include "../src/health/surfacescan.h"
 #include "../src/tools/systemd.h"
@@ -333,6 +334,48 @@ void slowRefresh()
            QStringLiteral("%1 bytes, %2 unreadable, same: %3 %4").arg(result.bytes).arg(result.unreadable).arg(after == data).arg(result.error));
 }
 
+// Drives that belong together but aren't opened: RAID members, Windows dynamic disks.
+void closedSets()
+{
+    const auto volume = [](const QString &device, const QString &fs, const QString &uuid, const QString &label, const QString &memberOf,
+                           const QString &partType = QString()) {
+        Volume v;
+        v.device = device;
+        v.fsType = fs;
+        v.uuid = uuid;
+        v.label = label;
+        v.raidMemberOf = memberOf;
+        v.partType = partType;
+        return v;
+    };
+    Disk a, b, c, e;
+    a.device = QStringLiteral("/dev/sdb");
+    a.volumes = {volume(QStringLiteral("/dev/sdb1"), QStringLiteral("linux_raid_member"), QStringLiteral("u-sys"), QStringLiteral("DiskStation:0"), QStringLiteral("md")),
+                 volume(QStringLiteral("/dev/sdb5"), QStringLiteral("linux_raid_member"), QStringLiteral("u-data"), QStringLiteral("DiskStation:2"), QString())};
+    b.device = QStringLiteral("/dev/sdc");
+    b.volumes = {volume(QStringLiteral("/dev/sdc5"), QStringLiteral("linux_raid_member"), QStringLiteral("u-data"), QStringLiteral("DiskStation:2"), QString()),
+                 volume(QStringLiteral("/dev/sdc6"), QStringLiteral("linux_raid_member"), QStringLiteral("u-run"), QStringLiteral("box:1"), QStringLiteral("md127"))};
+    c.device = QStringLiteral("/dev/sdd");
+    c.volumes = {volume(QStringLiteral("/dev/sdd1"), QString(), QString(), QString(), QString(), QStringLiteral("5808C8AA-7E8F-42E0-85D2-E1E90434CFB3")),
+                 volume(QStringLiteral("/dev/sdd2"), QString(), QString(), QString(), QString(), QStringLiteral("af9b60a0-1431-4f62-bc68-3311714a69ad"))};
+    e.device = QStringLiteral("/dev/sde");
+    e.volumes = {volume(QStringLiteral("/dev/sde1"), QString(), QString(), QString(), QString(), QStringLiteral("0x42"))};
+    const QVector<closedsets::Set> sets = closedsets::find({a, b, c, e}, false);
+    QStringList said;
+    for (const auto &s : sets)
+        said << closedsets::describe(s);
+    report(sets.size() == 3 && sets[0].name == QLatin1String("DiskStation:0") && sets[1].members == QStringList{QStringLiteral("/dev/sdb5"), QStringLiteral("/dev/sdc5")}
+               && sets[2].kind == closedsets::Set::Kind::Dynamic && sets[2].members == QStringList{QStringLiteral("/dev/sdd"), QStringLiteral("/dev/sde")},
+           QStringLiteral("closed sets: a NAS's arrays by their members (a running one left out), and Windows dynamic disks"), said.join(QStringLiteral(" | ")));
+    report(closedsets::find({c}, true).isEmpty(), QStringLiteral("closed sets: dynamic disks whose volumes are open already aren't offered again"));
+    const QString script = closedsets::openScript(sets);
+    report(script.contains(QLatin1String("mdadm --assemble --scan --readonly --run")) && script.contains(QLatin1String("vgchange -ay"))
+               && script.contains(QLatin1String("ldmtool create all")) && !closedsets::openScript({sets[2]}).contains(QLatin1String("mdadm")),
+           QStringLiteral("closed sets: opened read-only, each program only for what needs it"), script);
+    report(closedsets::missing(sets, [](const QString &p) { return p == QLatin1String("mdadm"); }) == QStringList{QStringLiteral("ldmtool")},
+           QStringLiteral("closed sets: a program that isn't here is named"));
+}
+
 void healthTests()
 {
     hiddenArea();
@@ -340,6 +383,7 @@ void healthTests()
     driveFacts();
     farmHistory();
     slowRefresh();
+    closedSets();
     rawPages();
     QTemporaryDir config;
     qputenv("XDG_CONFIG_HOME", QFile::encodeName(config.path()));

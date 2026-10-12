@@ -1411,6 +1411,106 @@ void raidBanner()
     }
 }
 
+// A NAS's drives plugged into this PC: two loop devices holding a RAID 1 named the way a
+// Synology names its arrays, with LVM and ext4 on it, stopped. The window says they're here and
+// not opened; Open Read-Only assembles the array read-only and switches LVM on, and the file on
+// it can be read.
+void nasDrives()
+{
+    QTemporaryDir dir;
+    QStringList loops;
+    for (const char *name : {"nas1.img", "nas2.img"}) {
+        const QString image = dir.filePath(QLatin1String(name));
+        sh(QStringLiteral("truncate"), {QStringLiteral("-s"), QStringLiteral("96M"), image});
+        QString loop;
+        sh(QStringLiteral("losetup"), {QStringLiteral("-f"), QStringLiteral("--show"), image}, &loop);
+        loops << loop.trimmed();
+    }
+    const QString md = QStringLiteral("/dev/md/dfnas");
+    const int created = sh(QStringLiteral("mdadm"), {QStringLiteral("--create"), md, QStringLiteral("--level=1"), QStringLiteral("--raid-devices=2"),
+                                                     QStringLiteral("--metadata=1.2"), QStringLiteral("--homehost=DiskStation"), QStringLiteral("--name=2"),
+                                                     QStringLiteral("--assume-clean"), QStringLiteral("--run"), QStringLiteral("--quiet"), loops.value(0), loops.value(1)});
+    sh(QStringLiteral("pvcreate"), {QStringLiteral("-q"), md});
+    sh(QStringLiteral("vgcreate"), {QStringLiteral("-q"), QStringLiteral("vgdfnas"), md});
+    sh(QStringLiteral("lvcreate"), {QStringLiteral("-q"), QStringLiteral("-l"), QStringLiteral("100%FREE"), QStringLiteral("-n"), QStringLiteral("volume_1"), QStringLiteral("vgdfnas")});
+    const QString lv = QStringLiteral("/dev/vgdfnas/volume_1");
+    sh(QStringLiteral("mkfs.ext4"), {QStringLiteral("-q"), lv});
+    const QString mnt = dir.filePath(QStringLiteral("mnt"));
+    QDir().mkpath(mnt);
+    sh(QStringLiteral("mount"), {lv, mnt});
+    {
+        QFile f(mnt + QStringLiteral("/photos.txt"));
+        if (f.open(QIODevice::WriteOnly))
+            f.write("on the NAS\n");
+    }
+    sh(QStringLiteral("umount"), {mnt});
+    sh(QStringLiteral("vgchange"), {QStringLiteral("-q"), QStringLiteral("-an"), QStringLiteral("vgdfnas")});
+    sh(QStringLiteral("mdadm"), {QStringLiteral("--stop"), md});
+    sh(QStringLiteral("udevadm"), {QStringLiteral("settle")});
+    report(created == 0, QStringLiteral("NAS: a stopped RAID 1 with LVM and ext4 stands in for a NAS's drives"));
+
+    QStringList boxes;
+    {
+        UDisks udisks;
+        udisks.setInteractive(false);
+        MainWindow window(&udisks);
+        window.show();
+        NoticeBar *bar = nullptr;
+        waitUntil([&] {
+            udisks.refresh();
+            for (NoticeBar *b : window.findChildren<NoticeBar *>(QStringLiteral("closed"))) {
+                if (!b->isHidden() && b->text().contains(QLatin1String("DiskStation:2")))
+                    bar = b;
+            }
+            return bar != nullptr;
+        }, 20000);
+        report(bar != nullptr, QStringLiteral("NAS: a bar says its drives are here and not opened"), bar ? bar->text() : QString());
+        Answerer answerer;
+        answerer.answer = [&](QWidget *modal) {
+            if (auto *box = qobject_cast<QMessageBox *>(modal)) {
+                boxes << box->text();
+                if (QAbstractButton *yes = box->button(QMessageBox::Yes))
+                    yes->click();
+                else
+                    box->accept();
+                return true;
+            }
+            return false;
+        };
+        if (bar) {
+            if (QPushButton *open = findButton(bar, QStringLiteral("Open Read-Only…")))
+                open->click();
+        }
+        waitUntil([&] { return boxes.size() >= 2; }, 120000);
+    }
+    report(boxes.value(1).startsWith(QLatin1String("Opened")), QStringLiteral("NAS: Open Read-Only opens it"), boxes.join(QStringLiteral(" | ")).left(300));
+    // Opened by mdadm's scan, the array has the name it was made with: found through its drive.
+    const QStringList holders = QDir(QStringLiteral("/sys/block/%1/holders").arg(QFileInfo(loops.value(0)).fileName())).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    const QString array = holders.value(0);
+    QString state;
+    {
+        QFile f(QStringLiteral("/sys/block/%1/md/array_state").arg(array));
+        if (f.open(QIODevice::ReadOnly))
+            state = QString::fromLatin1(f.readAll()).trimmed();
+    }
+    sh(QStringLiteral("mount"), {QStringLiteral("-o"), QStringLiteral("ro"), lv, mnt});
+    QByteArray read;
+    {
+        QFile photos(mnt + QStringLiteral("/photos.txt"));
+        if (photos.open(QIODevice::ReadOnly))
+            read = photos.readAll();
+    }
+    report(state == QLatin1String("readonly") && read == "on the NAS\n", QStringLiteral("NAS: the array is read-only, and the file on it reads back"),
+           array + QStringLiteral(" ") + state + QStringLiteral(" | ") + QString::fromLatin1(read));
+    sh(QStringLiteral("umount"), {mnt});
+    sh(QStringLiteral("vgchange"), {QStringLiteral("-q"), QStringLiteral("-an"), QStringLiteral("vgdfnas")});
+    sh(QStringLiteral("mdadm"), {QStringLiteral("--stop"), array.isEmpty() ? md : QStringLiteral("/dev/") + array});
+    for (const QString &loop : std::as_const(loops)) {
+        sh(QStringLiteral("mdadm"), {QStringLiteral("--zero-superblock"), loop});
+        sh(QStringLiteral("losetup"), {QStringLiteral("-d"), loop});
+    }
+}
+
 // Job bars, with jobs faked through the test hook: a firmware erase says it can't be
 // stopped and has no Stop; a wipe has Stop and turns on the toolbar's Stop; when the jobs
 // end, the bars go.
@@ -4674,7 +4774,7 @@ int main(int argc, char *argv[])
     }
     // As root, the ones that make their own loop device can run by themselves.
     if (!only.isEmpty()) {
-        const QVector<QPair<const char *, void (*)()>> alone = {{"stickcheck", stickCheck}, {"sdcard", sdCardFormat}, {"refresh", slowAreaRefresh}, {"stopwipe", stopWipe}, {"luksheader", luksHeaderThroughWindow}};
+        const QVector<QPair<const char *, void (*)()>> alone = {{"stickcheck", stickCheck}, {"sdcard", sdCardFormat}, {"refresh", slowAreaRefresh}, {"stopwipe", stopWipe}, {"luksheader", luksHeaderThroughWindow}, {"nas", nasDrives}};
         for (const auto &[name, run] : alone) {
             if (only.contains(QLatin1String(name)))
                 run();
@@ -4767,6 +4867,7 @@ int main(int argc, char *argv[])
     recoverThroughWindow();
     scanThroughWindow();
     raidBanner();
+    nasDrives();
     stickCheck();
     sdCardFormat();
     slowAreaRefresh();

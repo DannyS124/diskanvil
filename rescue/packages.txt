@@ -108,6 +108,7 @@ f2fs-tools
 lvm2
 thin-provisioning-tools
 mdadm
+ldmtool
 cryptsetup
 parted
 gdisk

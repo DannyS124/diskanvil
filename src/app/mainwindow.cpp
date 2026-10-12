@@ -12,6 +12,7 @@
 #include "addonprompt.h"
 #include "addonsdialog.h"
 #include "catalogdialog.h"
+#include "closedsets.h"
 #include "copydialogs.h"
 #include "erasedialog.h"
 #include "snapper.h"
@@ -81,6 +82,10 @@
 #include <QSaveFile>
 #include <QSettings>
 #include <QVBoxLayout>
+
+#ifndef Q_OS_WIN
+#include <unistd.h>
+#endif
 
 namespace {
 
@@ -637,6 +642,11 @@ void MainWindow::createActions()
             RescueDialog(m_udisks, d->blockPath, this).exec();
     });
 
+    m_openSets = new QAction(themeIcon("drive-multidisk", "drive-harddisk"), tr("Open RAID, NAS and Dynamic Disks…"), this);
+    m_openSets->setObjectName(QStringLiteral("openSets"));
+    m_openSets->setToolTip(tr("Drives that belong together (a NAS's, a RAID array's, Windows' dynamic disks), opened read-only"));
+    connect(m_openSets, &QAction::triggered, this, &MainWindow::openClosedSets);
+
     m_whatHappened = new QAction(themeIcon("help-hint", "help-contents"), tr("&What Happened?…"), this);
     m_whatHappened->setToolTip(tr("Lost files? Start here: what happened, the odds, what not to do, and which tool to use"));
     connect(m_whatHappened, &QAction::triggered, this, [this] {
@@ -786,6 +796,7 @@ void MainWindow::createActions()
     connect(tools, &QMenu::aboutToShow, this, [this, tools] {
         tools->clear();
         tools->addAction(m_whatHappened);
+        tools->addAction(m_openSets);
         tools->addSeparator();
 #ifdef Q_OS_WIN
         // Quick Fixes' tools, and add-ons (Linux commands), aren't in the Windows version yet.
@@ -892,7 +903,107 @@ void MainWindow::rebuild()
     updateProgress();
     updateNotices();
     updateCloneNotices();
+    updateClosedNotices();
 }
+
+#ifdef Q_OS_WIN
+void MainWindow::updateClosedNotices()
+{
+}
+
+void MainWindow::openClosedSets()
+{
+    // Windows opens its own dynamic disks; Linux RAID (a NAS's drives) it can't read at all.
+    QMessageBox::information(this, tr("Open RAID, NAS and Dynamic Disks"),
+                             tr("Windows opens its own dynamic disks by itself (Disk Management). Drives from a NAS or a Linux RAID "
+                                "array it can't read: DiskForge Live opens them, read-only."));
+}
+#else
+namespace {
+
+bool dynamicVolumesOpen()
+{
+    return !QDir(QStringLiteral("/dev/mapper")).entryList({QStringLiteral("ldm_vol_*")}, QDir::System).isEmpty();
+}
+
+} // namespace
+
+// A bar while drives that belong together are here but not opened: a NAS's, a RAID array's,
+// Windows' dynamic disks.
+void MainWindow::updateClosedNotices()
+{
+    const QVector<closedsets::Set> sets = closedsets::find(m_udisks->disks(), dynamicVolumesOpen());
+    QStringList key;
+    for (const closedsets::Set &s : sets)
+        key << closedsets::describe(s);
+    if (key == m_closedNoticeKey)
+        return;
+    m_closedNoticeKey = key;
+    for (NoticeBar *old : m_notices->findChildren<NoticeBar *>(QStringLiteral("closed"), Qt::FindDirectChildrenOnly)) {
+        old->hide();
+        old->deleteLater();
+    }
+    if (sets.isEmpty())
+        return showNoticesIfAny();
+    auto *bar = new NoticeBar(NoticeBar::Level::Info, tr("These belong together and aren't opened: %1. Opened read-only, their files can "
+                                                         "be copied off, and nothing on them changes.")
+                                                          .arg(key.join(QStringLiteral("; "))));
+    bar->setObjectName(QStringLiteral("closed"));
+    QPushButton *open = bar->addButton(tr("Open Read-Only…"));
+    connect(open, &QPushButton::clicked, this, [this] { QTimer::singleShot(0, this, &MainWindow::openClosedSets); });
+    m_notices->layout()->addWidget(bar);
+    bar->show();
+    showNoticesIfAny();
+}
+
+void MainWindow::openClosedSets()
+{
+    const QString title = tr("Open RAID, NAS and Dynamic Disks");
+    const QVector<closedsets::Set> sets = closedsets::find(m_udisks->disks(), dynamicVolumesOpen());
+    if (sets.isEmpty()) {
+        QMessageBox::information(this, title, tr("Nothing to open: no RAID, NAS or Windows dynamic disks are here that aren't open already."));
+        return;
+    }
+    const QStringList missing = closedsets::missing(sets, [](const QString &program) { return host::programExists(program); });
+    if (!missing.isEmpty()) {
+        QMessageBox::information(this, title,
+                                 tr("Opening these takes %1, which isn't on this computer. Install it, or start from DiskForge Live, "
+                                    "which has everything.")
+                                     .arg(missing.join(QStringLiteral(", "))));
+        return;
+    }
+    QStringList list;
+    for (const closedsets::Set &s : sets)
+        list << QStringLiteral("• ") + closedsets::describe(s);
+    if (QMessageBox::question(this, title,
+                              tr("Open these, read-only?\n\n%1\n\nNothing is written to them: an array that was left unclean isn't "
+                                 "rebuilt, and Windows' dynamic volumes aren't changed. It takes the admin password.")
+                                  .arg(list.join(QLatin1Char('\n'))))
+        != QMessageBox::Yes)
+        return;
+    // As root: DiskForge Live's sudo, or the admin password through pkexec.
+    const QString script = closedsets::openScript(sets);
+    const QStringList command = rescue::runningInRescue() ? QStringList{QStringLiteral("sudo"), QStringLiteral("-n"), QStringLiteral("sh"), QStringLiteral("-c"), script}
+                              : ::geteuid() == 0          ? QStringList{QStringLiteral("sh"), QStringLiteral("-c"), script}
+                                                          : host::command({QStringLiteral("pkexec"), QStringLiteral("sh"), QStringLiteral("-c"), script});
+    statusBar()->showMessage(tr("Opening…"));
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    QProcess run;
+    run.setProcessChannelMode(QProcess::MergedChannels);
+    run.start(command.first(), command.mid(1));
+    run.waitForFinished(300000);
+    QApplication::restoreOverrideCursor();
+    statusBar()->clearMessage();
+    const QString said = QString::fromLocal8Bit(run.readAll()).trimmed();
+    qCInfo(lcOps).noquote() << "Open closed sets:" << script << "->" << said;
+    m_udisks->refresh();
+    const QVector<closedsets::Set> left = closedsets::find(m_udisks->disks(), dynamicVolumesOpen());
+    if (left.size() < sets.size())
+        QMessageBox::information(this, title, tr("Opened. They're in the list of drives now (read-only): mount a volume to copy files off."));
+    else
+        QMessageBox::warning(this, title, tr("They didn't open.\n\n%1").arg(said.isEmpty() ? tr("No reason was given.") : said.right(1500)));
+}
+#endif
 
 // A bar for each pair of drives that are copies of each other (the same IDs), until it's
 // dismissed: Linux may mount the wrong one, and Windows switches one off.
@@ -1313,7 +1424,7 @@ void MainWindow::updateActions()
     // LVM groups: only what works on a logical volume's own device for now (mount, check,
     // label...); changes to the group and its volumes come later.
     const bool lvm = d && d->isLvm;
-    const bool tableChangeable = changeable && !lvm;
+    const bool tableChangeable = changeable && !lvm && !d->isDynamicVolume;
     const FsType *fs = v ? m_udisks->filesystem(v->effectiveFsType()) : nullptr;
 
     m_open->setEnabled(mounted);

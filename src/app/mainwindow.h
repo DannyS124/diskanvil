@@ -58,6 +58,11 @@ private:
     void updateNotices();
     void updateCloneNotices();
     QStringList m_cloneNoticeKey;
+    // RAID/NAS drives and Windows dynamic disks that aren't opened yet (closedsets.h).
+    void updateClosedNotices();
+    void openClosedSets();
+    QStringList m_closedNoticeKey;
+    QAction *m_openSets = nullptr;
     void updateJobBars();
     void showNoticesIfAny();
     void stopJob(const QString &jobPath);

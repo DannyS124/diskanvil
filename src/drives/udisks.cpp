@@ -279,7 +279,10 @@ void UDisks::refresh()
         // skip zram/dm (no drive) and unused loop devices; RAID arrays are listed like drives
         const QString raid = objectPath(block.value(QStringLiteral("MDRaid")));
         d.isRaid = arrays.contains(raid);
-        if (d.isLoop ? d.backingFile.isEmpty() : (d.drivePath == QLatin1String("/") && !d.isRaid))
+        // A Windows dynamic volume ldmtool opened: a drive of its own, like an array.
+        const QString preferred = byteString(block.value(QStringLiteral("PreferredDevice")));
+        d.isDynamicVolume = preferred.startsWith(QLatin1String("/dev/mapper/ldm_vol_"));
+        if (d.isLoop ? d.backingFile.isEmpty() : (d.drivePath == QLatin1String("/") && !d.isRaid && !d.isDynamicVolume))
             continue;
         // A live system's own image (DiskForge Live, any Debian live): part of the system, not a disk.
         if (d.isLoop && d.backingFile.startsWith(QLatin1String("/run/live/")))
@@ -315,6 +318,8 @@ void UDisks::refresh()
             d.model = d.backingFile.section(QLatin1Char('/'), -1);
         if (d.isRaid) // "nas:0" is host:name; the name is what people chose
             d.model = tr("%1 array %2").arg(raidLevelName(d.raidLevel), arrays.value(raid).value(QStringLiteral("Name")).toString().section(QLatin1Char(':'), -1));
+        if (d.isDynamicVolume) // ldm_vol_<disk group>-Dg0_Volume1
+            d.model = tr("Windows dynamic volume %1").arg(preferred.section(QLatin1Char('_'), -1));
         d.model = cleanName(d.model);
         d.serial = cleanName(drive.value(QStringLiteral("Serial")).toString());
         d.revision = cleanName(drive.value(QStringLiteral("Revision")).toString());

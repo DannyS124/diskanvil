@@ -67,6 +67,7 @@ add_library(diskforge-core STATIC
     src/drives/exfatformat.cpp src/drives/exfatformat.h
     src/drives/sdcard.cpp src/drives/sdcard.h
     src/drives/luksheader.cpp src/drives/luksheader.h
+    src/drives/closedsets.cpp src/drives/closedsets.h
     src/lostfiles/mediainfo.cpp src/lostfiles/mediainfo.h
     src/lostfiles/exif.cpp src/lostfiles/exif.h
     src/lostfiles/lookcopies.cpp src/lostfiles/lookcopies.h

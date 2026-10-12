@@ -130,6 +130,8 @@ struct Disk {
     int ataEraseMinutes = 0; // ATA Secure Erase estimates; 0 = not supported
     int ataEnhancedEraseMinutes = 0;
     bool ataFrozen = false; // the firmware refuses security commands until the next sleep/wake
+    // A Windows dynamic volume (opened by ldmtool), listed like a drive.
+    bool isDynamicVolume = false;
     // A software RAID array (Linux md), listed like a drive.
     bool isRaid = false;
     QString raidPath;         // its MDRaid object
