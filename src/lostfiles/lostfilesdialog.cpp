@@ -1249,15 +1249,17 @@ void LostFilesDialog::chooseImage()
 {
     const QString file = QFileDialog::getOpenFileName(
         this, tr("Choose a Disk Image"), QDir::homePath(),
-        tr("Disk images (*.img *.iso *.raw *.dd *.bin *.vdi *.vmdk *.vhd *.vhdx *.qcow2);;Virtual machines' disks (*.vdi *.vmdk *.vhd *.vhdx "
-           "*.qcow2);;All files (*)"));
+        tr("Disk images (*.img *.iso *.raw *.dd *.bin *.vdi *.vmdk *.vhd *.vhdx *.qcow2 *.zst);;DiskForge backups (*.img.zst);;"
+           "Virtual machines' disks (*.vdi *.vmdk *.vhd *.vhdx *.qcow2);;All files (*)"));
     if (!file.isEmpty())
         scanImage(file);
 }
 
 void LostFilesDialog::scanImage(const QString &path)
 {
-    if (path.endsWith(QLatin1String(".zst")) || path.endsWith(QLatin1String(".xz")) || path.endsWith(QLatin1String(".gz"))) {
+    // DiskForge's backups are read a piece at a time (vdisk); other packed images can't be.
+    if ((path.endsWith(QLatin1String(".zst")) && vdisk::formatOf(path) != QLatin1String("ZSTD")) || path.endsWith(QLatin1String(".xz"))
+        || path.endsWith(QLatin1String(".gz"))) {
         m_driveNote->setText(redText(tr("A packed image can't be looked through as it is. Unpack it first (or restore the backup "
                                         "to a drive).")));
         return;
@@ -1434,8 +1436,7 @@ void LostFilesDialog::lookInCopies()
         m_copiesLook->hide();
         QString text = stopped ? tr("Stopped looking in the earlier versions.")
                      : listed == 0 ? tr("Everything in the earlier versions is the same on the drive now.")
-                                   : tr("%n file(s) from the earlier versions have changed or gone since: they're in the \"as it was on\" folders.", nullptr,
-                                        listed);
+                                   : tr("Changed or gone since the earlier versions: %n file(s), in the \"as it was on\" folders.", nullptr, listed);
         if (!problem.isEmpty())
             text += QLatin1Char(' ') + problem;
         m_copiesText->setText(text);
@@ -1489,7 +1490,7 @@ void LostFilesDialog::scanDone(bool stopped)
     else if (kept == 0)
         text = tr("Done: found %1 files on %2.").arg(deleted).arg(m_title);
     else if (deleted == 0)
-        text = tr("Done: nothing deleted was found on %1. %n file(s) that weren't deleted show when \"Only deleted files\" is unticked.", nullptr, kept)
+        text = tr("Done: nothing deleted was found on %1. Untick \"Only deleted files\" to see what wasn't deleted: %n file(s).", nullptr, kept)
                    .arg(m_title);
     else
         text = tr("Done: found %1 deleted files on %2, and %3 that weren't deleted.").arg(deleted).arg(m_title).arg(kept);

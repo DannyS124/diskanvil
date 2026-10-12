@@ -2003,7 +2003,7 @@ void BadSectorsDialog::startRefresh()
                 text += QLatin1Char(' ') + tr("A MiB took %1 ms to read before, and %2 ms after.")
                                                .arg(QLocale().toString(r.beforeMs, 'f', 1), QLocale().toString(r.afterMs, 'f', 1));
             if (r.unreadable > 0)
-                text += QLatin1Char(' ') + tr("%n piece(s) couldn't be read and were left alone: scan again, then Repair.", nullptr, r.unreadable);
+                text += QLatin1Char(' ') + tr("Not read, so left alone: %n piece(s). Scan again, then Repair.", nullptr, r.unreadable);
             m_status->setText(text);
             m_slow.clear();
             setRunning(false);

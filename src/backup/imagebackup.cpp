@@ -5,6 +5,7 @@
 
 #include "blockcopy.h"
 #include "blockio.h"
+#include "zstdseek.h"
 #include "format.h"
 #include "gpt.h"
 
@@ -110,7 +111,16 @@ BackupInfo describe(const QString &imagePath)
         i.size = quint64(f.size());
         return i;
     }
-    // zstd records the uncompressed size in the frame header when it was known up front.
+    // A seekable one (0.5.2 on) says in its table at the end; an older one, in its one frame's
+    // header when the size was known up front.
+    const auto table = zstdseek::readTable(quint64(f.size()), [&f](quint64 offset, char *buf, quint64 len) {
+        return f.seek(qint64(offset)) && f.read(buf, qint64(len)) == qint64(len);
+    });
+    if (table) {
+        i.size = table->last().offset + table->last().size;
+        return i;
+    }
+    f.seek(0);
     const QByteArray head = f.read(kZstdHeaderMax);
     const unsigned long long size = ZSTD_getFrameContentSize(head.constData(), size_t(head.size()));
     if (size == ZSTD_CONTENTSIZE_ERROR)

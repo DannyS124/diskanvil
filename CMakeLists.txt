@@ -104,6 +104,7 @@ add_library(diskforge-core STATIC
     src/health/surfacescan.cpp src/health/surfacescan.h
     src/drives/gpt.cpp src/drives/gpt.h
     src/backup/blockcopy.cpp src/backup/blockcopy.h
+    src/backup/zstdseek.cpp src/backup/zstdseek.h
     src/health/blockmapdata.cpp src/health/blockmapdata.h
     src/tools/fswalk.cpp src/tools/fswalk.h src/tools/squarify.h
     src/backup/clone.cpp src/backup/clone.h

@@ -1044,7 +1044,7 @@ QVector<CatalogEntry> Addons::parseCatalog(const QByteArray &json, QString *erro
         entries << e;
     }
     if (skipped)
-        *error = QObject::tr("%n entry(s) in the list were left out because they didn't check out", nullptr, skipped);
+        *error = QObject::tr("Left out of the list for not checking out: %n item(s)", nullptr, skipped);
     return entries;
 }
 

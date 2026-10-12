@@ -6,10 +6,13 @@
 #include "testkit.h"
 
 #include "../src/backup/imagebackup.h"
+#include "../src/backup/zstdseek.h"
+#include "../src/lostfiles/vdisk.h"
 
 #include <QFile>
 #include <QJsonDocument>
 #include <QRandomGenerator>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 
 #include <fcntl.h>
@@ -96,6 +99,43 @@ void backupTests()
            QStringLiteral("the description reads back"), info.error);
     report(info.sha256 == sha256File(disk), QStringLiteral("its checksum matches the disk"));
     report(info.fileSha256 == sha256File(image), QStringLiteral("its file checksum matches sha256sum"));
+
+    // Seekable (0.5.2 on): 8 MiB frames and their table, which the zstd program reads like any
+    // other zstd file, and which Find Lost Files reads a piece at a time.
+    {
+        QFile f(image);
+        const bool opened = f.open(QIODevice::ReadOnly);
+        const auto table = zstdseek::readTable(quint64(f.size()), [&f](quint64 offset, char *buf, quint64 len) {
+            return f.seek(qint64(offset)) && f.read(buf, qint64(len)) == qint64(len);
+        });
+        report(opened && table && table->size() == 4 && table->first().size == 8 * MiB && table->last().offset == 24 * MiB,
+               QStringLiteral("the backup is seekable: four 8 MiB frames, and their table"), table ? QString::number(table->size()) : QStringLiteral("no table"));
+    }
+    if (!QStandardPaths::findExecutable(QStringLiteral("zstd")).isEmpty()) {
+        const QString unpacked = sh(QStringLiteral("sh"), {QStringLiteral("-c"), QStringLiteral("zstd -q -d -c '%1' | sha256sum").arg(image)}).left(64);
+        report(unpacked == sha256File(disk), QStringLiteral("the zstd program unpacks it to the same bytes"), unpacked);
+    }
+    {
+        QString problem;
+        const auto opened = vdisk::open(image, &problem);
+        bool same = opened && opened->size() == quint64(32 * MiB);
+        QFile raw(disk);
+        same = same && raw.open(QIODevice::ReadOnly);
+        for (const quint64 at : {quint64(0), quint64(5 * MiB + 123), quint64(8 * MiB - 700), quint64(31 * MiB + 1)}) {
+            QByteArray mine(4096, '\0');
+            const quint64 n = opened ? opened->read(at, mine.data(), 4096) : 0;
+            raw.seek(qint64(at));
+            same = same && raw.read(qint64(n)) == mine.left(qsizetype(n)) && n > 0;
+        }
+        report(same && vdisk::formatOf(image) == QLatin1String("ZSTD"), QStringLiteral("Find Lost Files reads the backup anywhere, across frames too"), problem);
+    }
+    if (!QStandardPaths::findExecutable(QStringLiteral("zstd")).isEmpty()) {
+        const QString old = path("old.img.zst");
+        sh(QStringLiteral("sh"), {QStringLiteral("-c"), QStringLiteral("zstd -q -c '%1' > '%2'").arg(disk, old)});
+        QString problem;
+        report(!vdisk::open(old, &problem) && problem.contains(QLatin1String("before DiskForge 0.5.2")) && imagebackup::describe(old).size == quint64(32 * MiB),
+               QStringLiteral("an older one-piece backup: its size still read, and Find Lost Files says to unpack it"), problem);
+    }
 
     // Restore onto a bigger disk.
     const QString target = path("target.img");

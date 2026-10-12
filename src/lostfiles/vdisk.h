@@ -4,7 +4,8 @@
 #pragma once
 
 // Virtual machines' disk files, read as the disk inside them: VirtualBox's .vdi, VMware's .vmdk,
-// Windows' and Hyper-V's .vhd and .vhdx, and QEMU's .qcow2. Our own readers, from each format's
+// Windows' and Hyper-V's .vhd and .vhdx, and QEMU's .qcow2. And DiskForge's own backups
+// (.img.zst), unpacked a piece at a time. Our own readers, from each format's
 // published description. Only ever read: the file isn't changed.
 
 #include "lostsource.h"
@@ -15,7 +16,7 @@
 
 namespace vdisk {
 
-// "VDI", "VMDK", "VHD", "VHDX" or "QCOW2" for a virtual machine's disk file; empty for anything
+// "VDI", "VMDK", "VHD", "VHDX" or "QCOW2" for a virtual machine's disk file, "ZSTD" for a backup; empty for anything
 // else (a plain image is just its bytes).
 QString formatOf(const QString &path);
 

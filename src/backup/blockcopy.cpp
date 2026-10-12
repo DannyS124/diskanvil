@@ -4,6 +4,7 @@
 #include "blockcopy.h"
 
 #include "blockio.h"
+#include "zstdseek.h"
 
 #include <QCryptographicHash>
 #include <QObject>
@@ -90,8 +91,21 @@ public:
                 return fail(error, QObject::tr("The backup holds more data than expected"));
             m_lastResult = r;
         }
-        if (m_input.pos < m_input.size || refill(error))
-            return fail(error, QObject::tr("The backup holds more data than expected"));
+        // What comes after may only be skippable frames (the seekable format's table at the end):
+        // they unpack to nothing. Anything that unpacks to more is data that shouldn't be there.
+        while (m_input.pos < m_input.size || refill(error)) {
+            while (m_input.pos < m_input.size) {
+                ZSTD_outBuffer out{&extra, 1, 0};
+                const size_t r = ZSTD_decompressStream(m_ctx, &out, &m_input);
+                if (ZSTD_isError(r))
+                    return fail(error, QObject::tr("The backup file is damaged (%1)").arg(QString::fromLatin1(ZSTD_getErrorName(r))));
+                if (out.pos > 0)
+                    return fail(error, QObject::tr("The backup holds more data than expected"));
+                m_lastResult = r;
+            }
+        }
+        if (m_lastResult != 0)
+            return error->isEmpty() ? fail(error, QObject::tr("The backup file is cut short")) : false;
         return error->isEmpty();
     }
 
@@ -179,25 +193,37 @@ private:
     int m_fd;
 };
 
+// Writes zstd's seekable format (zstdseek.h): a frame for every 8 MiB, and the table of them at
+// the end, so the backup can be read from anywhere without unpacking it all.
 class ZstdWriter : public Writer
 {
 public:
     ZstdWriter(int fd, int level, quint64 totalSize)
-        : m_fd(fd), m_out(new char[ZSTD_CStreamOutSize()])
+        : m_fd(fd), m_out(new char[ZSTD_CStreamOutSize()]), m_left(totalSize)
     {
         ZSTD_CCtx_setParameter(m_ctx, ZSTD_c_compressionLevel, level);
         ZSTD_CCtx_setParameter(m_ctx, ZSTD_c_checksumFlag, 1);
-        // Uses more cores when libzstd was built with threads; otherwise ignored.
+        // Uses more cores when libzstd was built with threads; otherwise ignored. Jobs of 2 MiB
+        // keep them busy inside each 8 MiB frame.
         ZSTD_CCtx_setParameter(m_ctx, ZSTD_c_nbWorkers, std::clamp(QThread::idealThreadCount() - 1, 0, 4));
-        ZSTD_CCtx_setPledgedSrcSize(m_ctx, totalSize);
+        ZSTD_CCtx_setParameter(m_ctx, ZSTD_c_jobSize, 2 * 1024 * 1024);
+        startFrame();
     }
     ~ZstdWriter() override { ZSTD_freeCCtx(m_ctx); }
 
     bool write(const char *buf, size_t len, quint64, QString *error) override
     {
-        ZSTD_inBuffer in{buf, len, 0};
-        while (in.pos < in.size) {
-            if (!step(&in, ZSTD_e_continue, error))
+        while (len > 0) {
+            const size_t n = std::min<size_t>(len, zstdseek::kFrameSize - m_inFrame);
+            ZSTD_inBuffer in{buf, n, 0};
+            while (in.pos < in.size) {
+                if (!step(&in, ZSTD_e_continue, error))
+                    return false;
+            }
+            m_inFrame += quint32(n);
+            buf += n;
+            len -= n;
+            if (m_inFrame == zstdseek::kFrameSize && !endFrame(error))
                 return false;
         }
         return true;
@@ -205,13 +231,14 @@ public:
 
     bool finish(QString *error) override
     {
-        ZSTD_inBuffer in{nullptr, 0, 0};
-        size_t remaining = 1;
-        while (remaining != 0) {
-            remaining = 0;
-            if (!step(&in, ZSTD_e_end, error, &remaining))
-                return false;
+        if ((m_inFrame > 0 || m_frames.isEmpty()) && !endFrame(error))
+            return false;
+        const QByteArray table = zstdseek::table(m_frames);
+        if (!blockio::writeAll(m_fd, table.constData(), table.size())) {
+            *error = QObject::tr("Couldn't write the backup file: %1").arg(errnoText());
+            return false;
         }
+        hash.addData(table);
         if (!blockio::flush(m_fd)) {
             *error = QObject::tr("Couldn't finish writing: %1").arg(errnoText());
             return false;
@@ -220,6 +247,29 @@ public:
     }
 
 private:
+    // Each frame says how much it holds: 8 MiB, or what's left for the last one.
+    void startFrame()
+    {
+        ZSTD_CCtx_setPledgedSrcSize(m_ctx, std::min<quint64>(m_left, zstdseek::kFrameSize));
+        m_frameOut = 0;
+    }
+
+    bool endFrame(QString *error)
+    {
+        ZSTD_inBuffer in{nullptr, 0, 0};
+        size_t remaining = 1;
+        while (remaining != 0) {
+            remaining = 0;
+            if (!step(&in, ZSTD_e_end, error, &remaining))
+                return false;
+        }
+        m_frames.push_back({m_frameOut, m_inFrame});
+        m_left -= std::min<quint64>(m_left, m_inFrame);
+        m_inFrame = 0;
+        startFrame();
+        return true;
+    }
+
     bool step(ZSTD_inBuffer *in, ZSTD_EndDirective mode, QString *error, size_t *remaining = nullptr)
     {
         ZSTD_outBuffer out{m_out.get(), ZSTD_CStreamOutSize(), 0};
@@ -236,6 +286,7 @@ private:
                 return false;
             }
             hash.addData(QByteArrayView(m_out.get(), qsizetype(out.pos)));
+            m_frameOut += quint32(out.pos);
         }
         return true;
     }
@@ -243,6 +294,10 @@ private:
     int m_fd;
     ZSTD_CCtx *m_ctx = ZSTD_createCCtx();
     std::unique_ptr<char[]> m_out;
+    quint64 m_left;           // what's still to come
+    quint32 m_inFrame = 0;    // unpacked bytes in the frame being made
+    quint32 m_frameOut = 0;   // its compressed bytes so far
+    QVector<QPair<quint32, quint32>> m_frames;
 };
 
 } // namespace

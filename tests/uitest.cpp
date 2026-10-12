@@ -41,6 +41,7 @@
 #include "../src/viruses/productkeydialog.h"
 #include "../src/viruses/driversdialog.h"
 #include "../src/viruses/bootentriesdialog.h"
+#include "../src/backup/imagebackup.h"
 #include "../src/backup/savefilesdialog.h"
 #include "../src/tools/linuxbootdialog.h"
 #include "../src/tools/tryrepairdialog.h"
@@ -3417,6 +3418,32 @@ void lostFilesFromVirtualDisk()
     names.sort();
     report(status->text().contains(QLatin1String("dynamic.vhdx")) && names == QStringList({QStringLiteral("notes.txt"), QStringLiteral("numbers.txt")}),
            QStringLiteral("a VHDX is read as the disk inside it"), status->text() + QStringLiteral(" / ") + names.join(QStringLiteral(", ")));
+
+    // DiskForge's own backup of a FAT drive, opened as it is: read a piece at a time.
+    const QString fat = dir.filePath(QStringLiteral("stick.img"));
+    sh(QStringLiteral("truncate"), {QStringLiteral("-s"), QStringLiteral("40M"), fat});
+    sh(QStringLiteral("mkfs.fat"), {QStringLiteral("-F"), QStringLiteral("32"), fat});
+    {
+        QFile note(dir.filePath(QStringLiteral("holiday.txt")));
+        if (note.open(QIODevice::WriteOnly))
+            note.write("kept in a backup\n");
+    }
+    sh(QStringLiteral("mcopy"), {QStringLiteral("-i"), fat, dir.filePath(QStringLiteral("holiday.txt")), QStringLiteral("::/holiday.txt")});
+    const QString backup = dir.filePath(QStringLiteral("stick.img.zst"));
+    {
+        BackupInfo info;
+        info.kind = QStringLiteral("disk");
+        info.size = quint64(QFileInfo(fat).size());
+        BackupJob job(blockio::openFile(fat, blockio::FileMode::Read), backup, info);
+        job.run();
+    }
+    dialog.scanImage(backup);
+    waitUntil([&] { return status->text().startsWith(QLatin1String("Done")) && status->text().contains(QLatin1String("stick.img.zst")); }, 60000);
+    names.clear();
+    for (int r = 0; r < view->model()->rowCount(); ++r)
+        names << view->model()->index(r, 0).data().toString().toLower();
+    report(names.contains(QLatin1String("holiday.txt")), QStringLiteral("a DiskForge backup is looked through without restoring it"),
+           status->text() + QStringLiteral(" / ") + names.join(QStringLiteral(", ")));
 }
 
 // Windows' earlier copies of a drive (tests/data/lostfs/shadow-job.ps1): once the drive's file
@@ -3437,9 +3464,9 @@ void lostFilesFromShadowCopies()
     report(copies->text().startsWith(QLatin1String("Windows kept 2 earlier versions of this drive")),
            QStringLiteral("Find Lost Files: it says Windows kept earlier versions of the drive"), copies->text());
     dialog.findChild<QPushButton *>(QStringLiteral("lookInCopies"))->click();
-    waitUntil([&] { return copies->text().contains(QLatin1String("changed or gone since.")) || copies->text().contains(QLatin1String("the same")); },
+    waitUntil([&] { return copies->text().startsWith(QLatin1String("Changed or gone since")) || copies->text().contains(QLatin1String("the same")); },
               60000);
-    report(copies->text().startsWith(QLatin1String("7 files from the earlier versions have changed or gone since")),
+    report(copies->text().startsWith(QLatin1String("Changed or gone since the earlier versions: 7 files")),
            QStringLiteral("looking in them finds what's changed or gone since"), copies->text());
 
     auto *status = dialog.findChild<QLabel *>(QStringLiteral("status"));

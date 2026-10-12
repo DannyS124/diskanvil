@@ -4,6 +4,7 @@
 #include "vdisk.h"
 
 #include "lostraw.h"
+#include "zstdseek.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -773,6 +774,80 @@ private:
 
 } // namespace
 
+// DiskForge's own backups (.img.zst, 0.5.2 on): zstd's seekable format, read a frame at a time.
+class ZstdBackup : public lost::Layer
+{
+public:
+    static std::unique_ptr<ZstdBackup> open(std::shared_ptr<lost::Source> file, QString *problem)
+    {
+        auto table = zstdseek::readTable(file->size(), [&file](quint64 offset, char *buf, quint64 len) { return file->read(offset, buf, len) == len; });
+        if (!table) {
+            *problem = tr("This backup was made in one piece, before DiskForge 0.5.2: restore it, or unpack it first (zstd -d) and open the "
+                          ".img.");
+            return nullptr;
+        }
+        auto z = std::make_unique<ZstdBackup>();
+        z->m_file = std::move(file);
+        z->m_frames = std::move(*table);
+        z->m_size = z->m_frames.last().offset + z->m_frames.last().size;
+        return z;
+    }
+    ~ZstdBackup() override { ZSTD_freeDCtx(m_ctx); }
+
+    quint64 size() const override { return m_size; }
+
+    bool read(quint64 offset, char *buf, quint64 len) override
+    {
+        QMutexLocker locker(&m_lock);
+        // The frame holding `offset`: the last one starting at or before it.
+        auto it = std::upper_bound(m_frames.cbegin(), m_frames.cend(), offset, [](quint64 at, const zstdseek::Frame &f) { return at < f.offset; });
+        while (len > 0 && it != m_frames.cbegin()) {
+            const zstdseek::Frame &f = *(it - 1);
+            const QByteArray *data = frame(int(it - 1 - m_frames.cbegin()));
+            if (!data || quint64(data->size()) != f.size)
+                return false;
+            const quint64 from = offset - f.offset, n = std::min<quint64>(len, f.size - from);
+            memcpy(buf, data->constData() + from, n);
+            offset += n;
+            buf += n;
+            len -= n;
+            if (it == m_frames.cend())
+                break;
+            ++it;
+        }
+        return len == 0;
+    }
+
+private:
+    // A frame, unpacked; the last few are kept.
+    const QByteArray *frame(int index)
+    {
+        if (m_cache.contains(index))
+            return &m_cache[index];
+        const zstdseek::Frame &f = m_frames.at(index);
+        QByteArray packed(qsizetype(f.compressedSize), '\0');
+        if (m_file->read(f.compressedOffset, packed.data(), f.compressedSize) != f.compressedSize)
+            return nullptr;
+        QByteArray out(qsizetype(f.size), '\0');
+        const size_t r = ZSTD_decompressDCtx(m_ctx, out.data(), size_t(out.size()), packed.constData(), size_t(packed.size()));
+        if (ZSTD_isError(r) || r != f.size)
+            return nullptr;
+        if (m_order.size() >= 6)
+            m_cache.remove(m_order.takeFirst());
+        m_order << index;
+        m_cache.insert(index, out);
+        return &m_cache[index];
+    }
+
+    std::shared_ptr<lost::Source> m_file;
+    QVector<zstdseek::Frame> m_frames;
+    quint64 m_size = 0;
+    ZSTD_DCtx *m_ctx = ZSTD_createDCtx();
+    QHash<int, QByteArray> m_cache;
+    QVector<int> m_order;
+    QMutex m_lock;
+};
+
 QString formatOf(const QString &path)
 {
     QFile f(path);
@@ -792,6 +867,8 @@ QString formatOf(const QString &path)
         return QStringLiteral("VHD");
     if (f.size() >= 512 && f.seek(f.size() - 512) && f.read(8) == "conectix")
         return QStringLiteral("VHD");
+    if (start.startsWith("\x28\xB5\x2F\xFD"))
+        return QStringLiteral("ZSTD");
     return {};
 }
 
@@ -815,6 +892,8 @@ std::shared_ptr<lost::Source> open(const QString &path, QString *problem, QStrin
         disk = Vhdx::open(file, &why, warning);
     else if (format == QLatin1String("QCOW2"))
         disk = Qcow2::open(file, &why, warning);
+    else if (format == QLatin1String("ZSTD"))
+        disk = ZstdBackup::open(file, &why);
     else
         disk = Vmdk::open(path, file, &why, warning);
     if (!disk) {
