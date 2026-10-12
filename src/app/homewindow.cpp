@@ -90,17 +90,19 @@ protected:
         p.setBrush(fill);
         p.drawRoundedRect(QRectF(rect()).adjusted(1, 1, -1, -1), 12, 12);
 
-        const int iconSize = m_tile.small ? 24 : 44;
-        const int pad = m_tile.small ? 12 : 20;
+        // Narrow big tiles (four across on a 1280 screen) keep more room for their words.
+        const bool narrow = !m_tile.small && width() < 300;
+        const int iconSize = m_tile.small ? 24 : narrow ? 34 : 44;
+        const int pad = m_tile.small ? 12 : narrow ? 14 : 20;
         const QRect iconRect(pad, (height() - iconSize) / 2, iconSize, iconSize);
         icon().paint(&p, iconRect);
-        const int left = iconRect.right() + (m_tile.small ? 10 : 18);
+        const int left = iconRect.right() + (m_tile.small ? 10 : narrow ? 12 : 18);
         const int room = width() - left - pad;
 
         QFont title = font();
         title.setBold(true);
         if (!m_tile.small)
-            title.setPointSizeF(font().pointSizeF() * 1.2);
+            title.setPointSizeF(font().pointSizeF() * (narrow ? 1.08 : 1.2));
         const QFontMetrics titleMetrics(title);
         p.setFont(title);
         p.setPen(m_colour("text"));
