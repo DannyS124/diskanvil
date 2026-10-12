@@ -1,7 +1,7 @@
 <p align="center">
-  <img src="data/io.github.DannyS124.DiskForge.svg" width="96" alt="DiskForge">
+  <img src="data/io.github.DannyS124.DiskForge.svg" width="96" alt="DiskAnvil">
 </p>
-<h1 align="center">DiskForge</h1>
+<h1 align="center">DiskAnvil</h1>
 <p align="center">A disk manager for Linux that looks and works like Windows Disk Management,<br>plus a rescue USB stick that can start any PC and fix its drives.</p>
 
 ## Support
