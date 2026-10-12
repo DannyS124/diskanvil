@@ -1895,6 +1895,34 @@ void stickCheck()
     cleanUpLoop(udisks, loopPath);
 }
 
+// Unlocking as VeraCrypt: the window's answers become UDisks' unlock options, with the types its
+// D-Bus call wants (pim a uint32, hidden and system booleans, keyfiles a list of paths).
+void veraCryptWindow()
+{
+    VeraCryptDialog dialog(QStringLiteral("sdb2"));
+    dialog.show();
+    QPushButton *unlock = findButton(&dialog, QStringLiteral("Unlock"));
+    report(unlock && !unlock->isEnabled(), QStringLiteral("VeraCrypt: nothing to unlock with before a password or keyfile"));
+    dialog.findChild<QLineEdit *>(QStringLiteral("password"))->setText(QStringLiteral("hunter2"));
+    dialog.findChild<QSpinBox *>(QStringLiteral("pim"))->setValue(485);
+    for (QCheckBox *box : dialog.findChildren<QCheckBox *>()) {
+        if (box->text().startsWith(QLatin1String("A hidden volume")))
+            box->setChecked(true);
+    }
+    const QVariantMap o = dialog.options();
+    report(unlock && unlock->isEnabled() && dialog.password() == QLatin1String("hunter2") && o.value(QStringLiteral("pim")).metaType().id() == QMetaType::UInt
+               && o.value(QStringLiteral("pim")).toUInt() == 485 && o.value(QStringLiteral("hidden")) == QVariant(true) && !o.contains(QStringLiteral("system"))
+               && !o.contains(QStringLiteral("keyfiles")),
+           QStringLiteral("VeraCrypt: password, PIM and hidden volume go to UDisks as its unlock options want them"));
+    Volume v;
+    v.encrypted = true;
+    v.fsType = QStringLiteral("crypto_unknown");
+    const QString unknown = volumeStatus(v);
+    v.fsType = QStringLiteral("crypto_TCRYPT");
+    report(unknown.contains(QLatin1String("maybe VeraCrypt")) && volumeStatus(v).startsWith(QLatin1String("VeraCrypt")),
+           QStringLiteral("VeraCrypt: what UDisks can't tell is said to be maybe VeraCrypt"), unknown);
+}
+
 // Change the Sector Size: the sizes offered, the type-to-confirm, and the exact hdparm command,
 // captured instead of run (nothing reaches a drive).
 void sectorSizeWindow()
@@ -4601,7 +4629,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},

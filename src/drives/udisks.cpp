@@ -20,6 +20,7 @@
 #include <QDBusMessage>
 #include <QDBusObjectPath>
 #include <QDBusPendingCallWatcher>
+#include <QDBusServiceWatcher>
 #include <QDBusVariant>
 #include <QMap>
 #include <QStorageInfo>
@@ -151,6 +152,9 @@ UDisks::UDisks(QObject *parent)
                 this, SLOT(onDBusSignal(QDBusMessage)));
     bus.connect(kService, QString(), QStringLiteral("org.freedesktop.DBus.Properties"),
                 QStringLiteral("PropertiesChanged"), this, SLOT(onDBusSignal(QDBusMessage)));
+    // UDisks restarted (an update, or a setting changed): everything is read again from the new one.
+    auto *watcher = new QDBusServiceWatcher(kService, bus, QDBusServiceWatcher::WatchForRegistration, this);
+    connect(watcher, &QDBusServiceWatcher::serviceRegistered, this, [this] { m_debounce.start(); });
 
     detectFilesystems();
     refresh();

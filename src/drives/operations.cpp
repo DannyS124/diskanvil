@@ -518,10 +518,13 @@ void UDisks::detachImage(const Disk &disk)
     }, true);
 }
 
-void UDisks::unlock(const Volume &volume, const QString &passphrase)
+void UDisks::unlock(const Volume &volume, const QString &passphrase, const QVariantMap &extra)
 {
     const QString name = shortDevice(volume.device);
-    call(volume.objectPath, kEncrypted, QStringLiteral("Unlock"), {passphrase, options()},
+    QVariantMap o = options();
+    for (auto it = extra.begin(); it != extra.end(); ++it)
+        o.insert(it.key(), it.value());
+    call(volume.objectPath, kEncrypted, QStringLiteral("Unlock"), {passphrase, o},
          [name](const QDBusMessage &) { return tr("Unlocked %1").arg(name); },
          tr("Couldn't unlock %1. Is the passphrase right?").arg(name));
 }

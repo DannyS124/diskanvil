@@ -30,6 +30,7 @@
 #include "diskmap.h"
 #include "format.h"
 #include "health.h"
+#include "hostprocess.h"
 #include "inspectdialog.h"
 #include "recoverdialog.h"
 #include "rescuestick.h"
@@ -386,6 +387,17 @@ void MainWindow::createActions()
         if (!v)
             return;
         const QString path = v->objectPath;
+        // What UDisks takes for VeraCrypt (or can't tell from it): VeraCrypt's own questions.
+        if (v->fsType == QLatin1String("crypto_unknown") || v->fsType == QLatin1String("crypto_TCRYPT")) {
+            VeraCryptDialog dialog(shortDevice(v->device), this);
+            if (dialog.exec() != QDialog::Accepted)
+                return;
+            if (const Volume *fresh = volumeByPath(path))
+                m_udisks->unlock(*fresh, dialog.password(), dialog.options());
+            else
+                gone();
+            return;
+        }
         bool ok = false;
         // The label comes from the drive: shown as plain text. BitLocker takes its password or its
         // recovery key, which people rarely know where to find.
@@ -1597,10 +1609,16 @@ void MainWindow::showProperties()
         add(tr("Starts at"), bytes(v->offset));
         if (!v->fstab.isEmpty())
             add(tr("Mounts at startup"), QString::fromLocal8Bit(v->fstab.value(QStringLiteral("dir")).toByteArray()).remove(QChar(0)));
-        if (v->encrypted)
-            add(tr("Encryption"), v->fsType == QLatin1String("BitLocker")
-                                      ? (v->cleartextPath.isEmpty() ? tr("BitLocker, locked") : tr("BitLocker, unlocked (%1 inside)").arg(v->cleartextFsType))
-                                      : (v->cleartextPath.isEmpty() ? tr("LUKS, locked") : tr("LUKS, unlocked (%1 inside)").arg(v->cleartextFsType)));
+        const bool veracrypt = v->fsType == QLatin1String("crypto_unknown") || v->fsType == QLatin1String("crypto_TCRYPT");
+        if (v->encrypted) {
+            const QString kind = v->fsType == QLatin1String("BitLocker") ? tr("BitLocker") : veracrypt ? tr("VeraCrypt") : tr("LUKS");
+            add(tr("Encryption"), v->cleartextPath.isEmpty() ? tr("%1, locked").arg(kind) : tr("%1, unlocked (%2 inside)").arg(kind, v->cleartextFsType));
+        }
+        if (v->fsType == QLatin1String("crypto_unknown"))
+            add(tr("Contents"), tr("Nothing recognizable, which is how a VeraCrypt volume looks (or an empty or damaged one): "
+                                   "Unlock tries it as VeraCrypt"));
+        else if (v->fsType.isEmpty() && !v->isContainer && v->number > 0)
+            add(tr("Contents"), tr("Nothing recognizable: empty, damaged, or encrypted (VeraCrypt looks like this)"));
         add(tr("Disk"), d->device);
 #ifdef Q_OS_WIN
         add(tr("Windows path"), v->objectPath);
@@ -1681,6 +1699,42 @@ void MainWindow::showProperties()
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     auto *layout = new QVBoxLayout(&dialog);
     layout->addWidget(tree);
+#ifndef Q_OS_WIN
+    // UDisks only looks for VeraCrypt when /etc/udisks2/tcrypt.conf is there as it starts
+    // (DiskForge Live has it). On a partition nothing is recognized on, that can be switched on.
+    if (v && v->fsType.isEmpty() && !v->isContainer && v->number > 0
+        && host::run({QStringLiteral("test"), QStringLiteral("-e"), QStringLiteral("/etc/udisks2/tcrypt.conf")}) != 0) {
+        auto *look = new QPushButton(tr("Look for VeraCrypt…"));
+        look->setObjectName(QStringLiteral("lookForVeraCrypt"));
+        connect(look, &QPushButton::clicked, &dialog, [&dialog] {
+            QMessageBox box(QMessageBox::Question, tr("Look for VeraCrypt"),
+                            tr("VeraCrypt volumes look like random data, so UDisks (which DiskForge unlocks drives through) only "
+                               "tries partitions like this one as VeraCrypt when the file /etc/udisks2/tcrypt.conf exists. Make it? "
+                               "It takes the admin password, and UDisks restarts, which takes a moment.\n\nThen this partition "
+                               "shows as \"Unknown, maybe VeraCrypt\", and Unlock asks for VeraCrypt's password."),
+                            QMessageBox::Cancel, &dialog);
+            QAbstractButton *on = box.addButton(tr("Switch It On"), QMessageBox::AcceptRole);
+            box.exec();
+            if (box.clickedButton() != on)
+                return;
+            const QStringList command = host::command(
+                {QStringLiteral("pkexec"), QStringLiteral("sh"), QStringLiteral("-c"),
+                 QStringLiteral("printf '%s\\n' '# Made by DiskForge: UDisks looks for VeraCrypt and TrueCrypt volumes while this file is here.' "
+                                "> /etc/udisks2/tcrypt.conf && systemctl restart udisks2.service")});
+            QProcess run;
+            run.setProcessChannelMode(QProcess::MergedChannels);
+            run.start(command.first(), command.mid(1));
+            const bool ok = run.waitForFinished(180000) && run.exitStatus() == QProcess::NormalExit && run.exitCode() == 0;
+            qCInfo(lcOps).noquote() << "tcrypt.conf for VeraCrypt" << (ok ? "made" : "not made");
+            if (ok)
+                QMessageBox::information(&dialog, tr("Look for VeraCrypt"), tr("Done: UDisks looks for VeraCrypt now."));
+            else
+                QMessageBox::warning(&dialog, tr("Look for VeraCrypt"),
+                                     tr("It wasn't switched on: %1").arg(QString::fromLocal8Bit(run.readAll()).trimmed()));
+        });
+        layout->addWidget(look, 0, Qt::AlignRight);
+    }
+#endif
     // The hidden area (HPA): the end of an ATA drive its own settings hide, where malware and
     // some makers' recovery tools keep things. Only hdparm sees it, so only DiskForge Live.
     // hdparm asks the drive itself, whatever UDisks made of it; USB bridges rarely pass this on.

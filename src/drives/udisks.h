@@ -305,7 +305,8 @@ public:
     void closeIso(const QString &path, QObject *context, const std::function<void()> &done);
 #endif
     // LUKS
-    void unlock(const Volume &volume, const QString &passphrase);
+    // `extra`: more of UDisks' unlock options (VeraCrypt's "pim", "hidden", "system", "keyfiles").
+    void unlock(const Volume &volume, const QString &passphrase, const QVariantMap &extra = {});
     void lock(const Volume &volume);
     void changePassphrase(const Volume &volume, const QString &oldPassphrase, const QString &newPassphrase);
     // Overwrite the whole disk with zeros; leaves it without a partition table.

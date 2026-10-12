@@ -67,7 +67,12 @@ QString volumeStatus(const Volume &v, bool brief)
     else if (v.fsType == QLatin1String("swap"))
         parts << (v.swapActive ? tr("Swap, in use") : tr("Swap, not in use"));
     else if (v.encrypted) {
-        parts << (v.fsType == QLatin1String("BitLocker") ? tr("BitLocker") : tr("Encrypted"));
+        // UDisks calls what it can't recognize "crypto_unknown" when it's looking for VeraCrypt:
+        // random-looking, so maybe a VeraCrypt volume (or just empty, or damaged).
+        parts << (v.fsType == QLatin1String("BitLocker")        ? tr("BitLocker")
+                  : v.fsType == QLatin1String("crypto_TCRYPT")  ? tr("VeraCrypt")
+                  : v.fsType == QLatin1String("crypto_unknown") ? tr("Unknown, maybe VeraCrypt")
+                                                                : tr("Encrypted"));
         if (v.cleartextPath.isEmpty())
             parts << tr("Locked");
         else if (v.cleartextMountPoints.isEmpty())

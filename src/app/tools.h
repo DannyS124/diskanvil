@@ -12,6 +12,7 @@
 #include <QDialog>
 #include <QMap>
 #include <QSet>
+#include <QVariantMap>
 
 #include <functional>
 
@@ -24,6 +25,7 @@ class Systemd;
 class QTimer;
 class QGroupBox;
 class QLineEdit;
+class QListWidget;
 class QProgressBar;
 class QPushButton;
 class QRadioButton;
@@ -50,6 +52,25 @@ private:
     QLineEdit *m_pass;
     QLineEdit *m_confirm;
     QLabel *m_note;
+};
+
+// Unlocks a VeraCrypt (or TrueCrypt) volume through UDisks: its password, and what VeraCrypt
+// asks besides when it was made that way: a PIM, keyfiles, a hidden volume, Windows' system
+// encryption.
+class VeraCryptDialog : public QDialog
+{
+    Q_OBJECT
+public:
+    explicit VeraCryptDialog(const QString &volumeName, QWidget *parent = nullptr);
+    QString password() const;
+    QVariantMap options() const; // UDisks' unlock options
+
+private:
+    QLineEdit *m_password;
+    QSpinBox *m_pim;
+    QCheckBox *m_hidden;
+    QCheckBox *m_system;
+    QListWidget *m_keyfiles;
 };
 
 class ChangePassphraseDialog : public QDialog

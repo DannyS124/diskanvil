@@ -44,6 +44,7 @@
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QMessageBox>
 #include <QProgressBar>
 #include <QPushButton>
@@ -267,6 +268,82 @@ WipeDialog::WipeDialog(const Disk &disk, int diskNumber, QWidget *parent)
 }
 
 // --- Health -------------------------------------------------------------------
+
+// --- VeraCrypt -------------------------------------------------------------------
+
+VeraCryptDialog::VeraCryptDialog(const QString &volumeName, QWidget *parent)
+    : QDialog(parent)
+    , m_password(new QLineEdit)
+    , m_pim(new QSpinBox)
+    , m_hidden(new QCheckBox(tr("A hidden volume inside it")))
+    , m_system(new QCheckBox(tr("Windows' own drive, encrypted by VeraCrypt (system encryption)")))
+    , m_keyfiles(new QListWidget)
+{
+    setWindowTitle(tr("Unlock %1 as VeraCrypt").arg(volumeName));
+    m_password->setEchoMode(QLineEdit::Password);
+    m_password->setObjectName(QStringLiteral("password"));
+    m_pim->setRange(0, 2147468);
+    m_pim->setSpecialValueText(tr("None (VeraCrypt's own)"));
+    m_pim->setObjectName(QStringLiteral("pim"));
+    m_pim->setToolTip(tr("Only if one was set when the volume was made"));
+    m_keyfiles->setMaximumHeight(90);
+    auto *add = new QPushButton(tr("Add Keyfile…"));
+    auto *remove = new QPushButton(tr("Remove"));
+    connect(add, &QPushButton::clicked, this, [this] {
+        for (const QString &file : QFileDialog::getOpenFileNames(this, tr("Keyfiles"), QDir::homePath()))
+            m_keyfiles->addItem(QDir::toNativeSeparators(file));
+    });
+    connect(remove, &QPushButton::clicked, this, [this] { delete m_keyfiles->currentItem(); });
+    auto *keyButtons = new QVBoxLayout;
+    keyButtons->addWidget(add);
+    keyButtons->addWidget(remove);
+    keyButtons->addStretch();
+    auto *keys = new QHBoxLayout;
+    keys->addWidget(m_keyfiles, 1);
+    keys->addLayout(keyButtons);
+
+    auto *form = new QFormLayout;
+    form->addRow(tr("Password:"), m_password);
+    form->addRow(tr("PIM:"), m_pim);
+    form->addRow(tr("Keyfiles:"), keys);
+    form->addRow(QString(), m_hidden);
+    form->addRow(QString(), m_system);
+    auto *layout = new QVBoxLayout(this);
+    layout->addWidget(wrappingLabel(tr("VeraCrypt volumes look like random data, so nothing on %1 says it is one: if it is, its password "
+                                       "(and whatever else was set when it was made) opens it. TrueCrypt volumes open the same way.")
+                                        .arg(volumeName.toHtmlEscaped())));
+    layout->addLayout(form);
+    QPushButton *ok;
+    layout->addWidget(dialogButtons(this, tr("Unlock"), &ok));
+    auto update = [this, ok] { ok->setEnabled(!m_password->text().isEmpty() || m_keyfiles->count() > 0); };
+    connect(m_password, &QLineEdit::textChanged, this, update);
+    connect(m_keyfiles->model(), &QAbstractItemModel::rowsInserted, this, update);
+    connect(m_keyfiles->model(), &QAbstractItemModel::rowsRemoved, this, update);
+    update();
+    resize(520, sizeHint().height());
+}
+
+QString VeraCryptDialog::password() const
+{
+    return m_password->text();
+}
+
+QVariantMap VeraCryptDialog::options() const
+{
+    QVariantMap o;
+    if (m_pim->value() > 0)
+        o.insert(QStringLiteral("pim"), QVariant::fromValue(quint32(m_pim->value())));
+    if (m_hidden->isChecked())
+        o.insert(QStringLiteral("hidden"), true);
+    if (m_system->isChecked())
+        o.insert(QStringLiteral("system"), true);
+    QStringList files;
+    for (int i = 0; i < m_keyfiles->count(); ++i)
+        files << QDir::fromNativeSeparators(m_keyfiles->item(i)->text());
+    if (!files.isEmpty())
+        o.insert(QStringLiteral("keyfiles"), files);
+    return o;
+}
 
 // --- Sector size ----------------------------------------------------------------
 

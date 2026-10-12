@@ -1781,7 +1781,7 @@ QString UDisks::startupMountPoint(const Volume &)
 
 // BitLocker, through Windows' own Unlock-BitLocker. The password or recovery key goes in an
 // environment variable, never on a command line others can see.
-void UDisks::unlock(const Volume &volume, const QString &passphrase)
+void UDisks::unlock(const Volume &volume, const QString &passphrase, const QVariantMap &)
 {
     const QString name = shortDevice(volume.device);
     const QString failure = tr("Couldn't unlock %1").arg(name);
