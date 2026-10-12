@@ -19,3 +19,6 @@ mdadm          RAID arrays
 lvm            LVM
 thin_check     LVM thin volumes
 wpa_supplicant Wi-Fi
+x11vnc         Let Someone Help (the screen)
+sshd           Let Someone Help (a terminal)
+ssh-keygen     Let Someone Help (its own host keys)

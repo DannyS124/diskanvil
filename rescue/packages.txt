@@ -146,5 +146,8 @@ clamav
 clamav-freshclam
 # the sandbox for Find Lost Files' previews
 bubblewrap
+# Let Someone Help: the screen over VNC, a terminal over SSH (both off until switched on)
+x11vnc
+openssh-server
 # more picture kinds in those previews (WebP, TIFF...)
 qt6-image-formats-plugins

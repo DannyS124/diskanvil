@@ -56,6 +56,10 @@ systemctl mask fstrim.timer e2scrub_all.timer e2scrub_reap.service smartmontools
 # ClamAV's own updater would download 250 MB into memory at every start; Scan for Viruses
 # updates the list on the stick itself, when asked (diskforge-live-virus-list).
 systemctl mask clamav-freshclam.service >/dev/null 2>&1
+# SSH only runs while Let Someone Help has it on, and each start makes its own host keys
+# (diskforge-live-remote): the ones made now would be the same on every stick.
+systemctl disable ssh.service ssh.socket >/dev/null 2>&1
+rm -f /etc/ssh/ssh_host_*
 
 # Our boot animation. The initrd below gets it, so it shows from the start.
 plymouth-set-default-theme diskforge-live
