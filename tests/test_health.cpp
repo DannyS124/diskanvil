@@ -14,6 +14,7 @@
 #include "../src/health/smartdata.h"
 #include "../src/health/triage.h"
 #include "../src/health/drivefacts.h"
+#include "../src/health/farm.h"
 #include "../src/tools/systemd.h"
 
 #include <QDir>
@@ -252,11 +253,33 @@ void driveFacts()
            QStringLiteral("drive facts: firmware with a known bug is pointed out until it's updated"));
 }
 
+// Seagate's FARM record against SMART's: a wiped SMART history shows up.
+void farmHistory()
+{
+    const farm::Result reset = farm::parse(R"({"power_on_time":{"hours":3},"seagate_farm_log":{"page_1_drive_information":
+        {"poh":24267,"spoh":24300,"head_flight_hours":24100,"power_cycle_count":61}}})");
+    report(reset.read && reset.smartHours == 3 && reset.farmHours == 24267 && reset.reset() && farm::describe(reset).contains(QLatin1String("wiped")),
+           QStringLiteral("FARM: SMART says 3 hours, FARM 24,267: the SMART record was wiped, and it says so"), farm::describe(reset));
+    const farm::Result honest = farm::parse(R"({"ata_smart_attributes":{"table":[{"id":9,"raw":{"value":1500}}]},
+        "seagate_farm_log":{"page_1_drive_information":{"poh":1502}}})");
+    report(honest.read && honest.smartHours == 1500 && !honest.reset() && farm::describe(honest).contains(QLatin1String("agree")),
+           QStringLiteral("FARM: when they agree (SMART's hours from attribute 9), it says so"));
+    const farm::Result hgst = farm::parse(R"({"power_on_time":{"hours":1986},"seagate_farm_log":{"supported":false}})");
+    const farm::Result denied = farm::parse(R"({"smartctl":{"messages":[{"string":"Smartctl open device: /dev/sda failed: Permission denied","severity":"error"}]}})");
+    report(!hgst.read && hgst.problem.contains(QLatin1String("doesn't keep")) && !denied.read && denied.problem.contains(QLatin1String("Permission denied"))
+               && !farm::parse("not json").read,
+           QStringLiteral("FARM: a drive without one, and smartctl without the rights, each say why"), hgst.problem + QStringLiteral(" | ") + denied.problem);
+    report(farm::keeps(QStringLiteral("ST16000NM001G-2KK103")) && farm::keeps(QStringLiteral("Seagate BarraCuda")) && !farm::keeps(QStringLiteral("HGST HTS545050A7E380"))
+               && !farm::keeps(QStringLiteral("STORAGE DEVICE")),
+           QStringLiteral("FARM: asked of Seagate's drives only"));
+}
+
 void healthTests()
 {
     hiddenArea();
     triageAdvice();
     driveFacts();
+    farmHistory();
     rawPages();
     QTemporaryDir config;
     qputenv("XDG_CONFIG_HOME", QFile::encodeName(config.path()));

@@ -91,6 +91,11 @@ private:
     QPushButton *m_conveyance = nullptr;
     QPushButton *m_smartOn = nullptr;
     QPushButton *m_noise = nullptr; // what a hard drive's sounds mean
+    // Seagate's own record of its use (farm.h), through smartctl.
+    void checkFarm();
+    QPushButton *m_farm = nullptr;
+    QString m_farmText;
+    bool m_farmBusy = false;
     QPushButton *m_stopTest; // while one runs
     void checkFirmware();
     firmware::Result m_firmware;

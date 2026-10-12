@@ -19,7 +19,9 @@
 #include "rescuestick.h"
 #include "surfacescan.h"
 #include "drivefacts.h"
+#include "farm.h"
 #include "health.h"
+#include "hostprocess.h"
 #include "systemd.h"
 #include "btrfscheck.h"
 #include "theme.h"
@@ -334,6 +336,11 @@ HealthDialog::HealthDialog(UDisks *udisks, const QString &blockPath, QWidget *pa
         box.setTextFormat(Qt::RichText);
         box.exec();
     });
+    m_farm = new QPushButton(tr("Check Its History"));
+    m_farm->setObjectName(QStringLiteral("farm"));
+    m_farm->setToolTip(tr("Seagate drives keep a second record of their use (FARM) that a SMART reset doesn't touch: a drive sold as "
+                          "new with its SMART hours wiped shows up here"));
+    connect(m_farm, &QPushButton::clicked, this, &HealthDialog::checkFarm);
     auto *scan = new QPushButton(tr("Scan for Bad Sectors…"));
     connect(scan, &QPushButton::clicked, this, [this] {
         if (const Disk *d = m_udisks->diskByPath(m_blockPath))
@@ -353,6 +360,7 @@ HealthDialog::HealthDialog(UDisks *udisks, const QString &blockPath, QWidget *pa
     buttons->addWidget(m_conveyance);
     buttons->addWidget(scan);
     buttons->addWidget(m_noise);
+    buttons->addWidget(m_farm);
     buttons->addWidget(refresh);
     buttons->addStretch();
     buttons->addWidget(close);
@@ -382,6 +390,51 @@ HealthDialog::HealthDialog(UDisks *udisks, const QString &blockPath, QWidget *pa
         checkFirmware();
     reload();
     resize(680, 660);
+}
+
+void HealthDialog::checkFarm()
+{
+    const Disk *disk = m_udisks->diskByPath(m_blockPath);
+    if (!disk || m_farmBusy)
+        return;
+#ifdef Q_OS_WIN
+    // smartctl names Windows' drives /dev/pd0, /dev/pd1... (PhysicalDrive0, 1...).
+    const QString device = QStringLiteral("/dev/pd") + disk->device.section(QLatin1String("PhysicalDrive"), -1);
+    const QString program = QCoreApplication::applicationDirPath() + QStringLiteral("/smartctl.exe");
+    QStringList command = farm::command(device);
+    command[0] = QFileInfo::exists(program) ? program : QStringLiteral("smartctl");
+#else
+    const QString device = disk->device;
+    // smartctl talks to the drive itself, which takes admin rights: DiskForge Live has them.
+    QStringList command = farm::command(device);
+    if (rescue::runningInRescue())
+        command = QStringList{QStringLiteral("sudo"), QStringLiteral("-n")} + command;
+    else
+        command = host::command(command);
+#endif
+    m_farmBusy = true;
+    m_farmText = tr("Asking smartctl…");
+    reload();
+    auto *process = new QProcess(this);
+    connect(process, &QProcess::finished, this, [this, process, device](int, QProcess::ExitStatus) {
+        process->deleteLater();
+        m_farmBusy = false;
+        const QByteArray out = process->readAllStandardOutput();
+        if (process->error() == QProcess::FailedToStart) {
+            m_farmText = tr("This needs smartctl (smartmontools 7.4 or later), which isn't on this computer.");
+        } else {
+            const farm::Result r = farm::parse(out);
+            m_farmText = farm::describe(r);
+#ifndef Q_OS_WIN
+            if (!r.read && !rescue::runningInRescue())
+                m_farmText += QLatin1Char(' ') + tr("smartctl needs admin rights for this: in a terminal, run  sudo smartctl -l farm %1  (or "
+                                                     "use DiskForge Live).")
+                                                      .arg(device);
+#endif
+        }
+        reload();
+    });
+    process->start(command.first(), command.mid(1));
 }
 
 void HealthDialog::reload()
@@ -437,6 +490,13 @@ void HealthDialog::reload()
         row(tr("Unreadable sectors:"), QString::number(h.pendingSectors));
     if (!h.criticalWarnings.isEmpty())
         row(tr("Warnings:"), h.criticalWarnings.join(QStringLiteral(", ")));
+    if (!m_farmText.isEmpty()) {
+        auto *label = new QLabel(m_farmText);
+        label->setWordWrap(true);
+        label->setTextInteractionFlags(Qt::TextSelectableByMouse); // the command, when it has to be run by hand
+        label->setObjectName(QStringLiteral("farmText"));
+        m_form->addRow(tr("History (FARM):"), label);
+    }
     if (const drivefacts::EmmcLife life = drivefacts::emmcLife(disk->device); life.known)
         row(tr("Wear (eMMC):"), drivefacts::describe(life));
     if (const QStringList off = drivefacts::misaligned(*disk); !off.isEmpty())
@@ -493,6 +553,8 @@ void HealthDialog::reload()
     m_stopTest->setVisible(running);
     m_conveyance->setVisible(!h.nvme && !disk->isLoop && disk->rotationRate != 0);
     m_noise->setVisible(!h.nvme && !disk->isLoop && disk->rotationRate != 0 && !disk->removable);
+    m_farm->setVisible(!h.nvme && !disk->isLoop && farm::keeps(disk->model));
+    m_farm->setEnabled(!m_farmBusy);
     m_conveyance->setEnabled(!running && !h.smartOff);
     m_smartOn->setVisible(h.smartOff);
 
