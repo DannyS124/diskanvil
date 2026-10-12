@@ -69,7 +69,7 @@ mmdebstrap --mode=root --variant=important \
     "deb http://security.debian.org/debian-security trixie-security $components"
 
 echo "--> Kernel and the list of what's inside"
-mkdir -p "$iso/live" "$iso/.disk" "$iso/boot/grub/fonts" "$iso/boot/grub/i386-pc" "$iso/EFI/BOOT" "$iso/EFI/debian"
+mkdir -p "$iso/live" "$iso/.disk" "$iso/boot/grub/fonts" "$iso/boot/grub/i386-pc" "$iso/boot/grub/x86_64-efi" "$iso/EFI/BOOT" "$iso/EFI/debian"
 kernel=$(ls "$chroot"/boot/vmlinuz-* | sort -V | tail -1)
 kver=${kernel##*/vmlinuz-}
 cp "$kernel" "$iso/live/vmlinuz"
@@ -99,6 +99,11 @@ cp /usr/lib/shim/mmx64.efi.signed "$iso/EFI/BOOT/mmx64.efi"
 cp /usr/lib/grub/x86_64-efi-signed/gcdx64.efi.signed "$iso/EFI/BOOT/grubx64.efi"
 sed "s/@ID@/$build_id/g" "$rescue/boot/find-stick.cfg" > "$iso/EFI/BOOT/grub.cfg"
 cp "$iso/EFI/BOOT/grub.cfg" "$iso/EFI/debian/grub.cfg"
+# Its modules, from the same GRUB version, for what isn't built into it (exFAT, for Other ISOs on
+# the files drive). It only loads them with Secure Boot off.
+[ "$(dpkg-query -W -f='${Version}' grub-efi-amd64-bin)" = "$(dpkg-query -W -f='${Version}' grub-efi-amd64-signed | sed 's/+.*//')" ] ||
+    echo "note: grub-efi-amd64-bin $(dpkg-query -W -f='${Version}' grub-efi-amd64-bin) and the signed GRUB $(dpkg-query -W -f='${Version}' grub-efi-amd64-signed) differ"
+cp /usr/lib/grub/x86_64-efi/*.mod /usr/lib/grub/x86_64-efi/*.lst "$iso/boot/grub/x86_64-efi/"
 
 # Old BIOS PCs (and VMs set to BIOS): GRUB's own CD image. No Secure Boot there.
 cp /usr/lib/grub/i386-pc/*.mod /usr/lib/grub/i386-pc/*.lst "$iso/boot/grub/i386-pc/"

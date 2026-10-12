@@ -3333,6 +3333,8 @@ void rescueUsbLayout()
     // Things that have to stay: a kept change, a saved file, a log; and one that has to go.
     { QFile f(persistence + QStringLiteral("/kept-change.txt")); if (f.open(QIODevice::WriteOnly)) f.write("kept"); }
     const QString filesRoot = mountStick(udisks, loopPath, QStringLiteral("ANVIL-FILES"));
+    report(QFile::exists(filesRoot + QStringLiteral("/ISOs/ISO files go here.txt")),
+           QStringLiteral("Live USB layout: the files drive has the ISOs folder the boot menu looks in"));
     { QFile f(filesRoot + QStringLiteral("/saved.txt")); if (f.open(QIODevice::WriteOnly)) f.write("saved"); }
     const QString system = mountStick(udisks, loopPath, QStringLiteral("DISKANVIL"));
     QDir().mkpath(system + QStringLiteral("/logs/2026-10-12 09.00"));
@@ -3360,6 +3362,31 @@ void rescueUsbLayout()
                && QFile::exists(systemAgain + QStringLiteral("/live/filesystem.squashfs")) && QFile::exists(persistenceAgain + QStringLiteral("/kept-change.txt"))
                && QFile::exists(filesAgain + QStringLiteral("/saved.txt")) && QFile::exists(persistenceAgain + QStringLiteral("/persistence.conf")),
            QStringLiteral("Live USB layout: the update replaced DiskAnvil Live's files, and kept its logs, the changes and the files"));
+    // Made again with only the files drive: two partitions, and no persistence.conf anywhere.
+    boxes.clear();
+    {
+        RescueUsbDialog dialog(&udisks, loopPath);
+        dialog.show();
+        dialog.findChild<QLineEdit *>(QStringLiteral("image"))->setText(iso);
+        dialog.findChild<QCheckBox *>(QStringLiteral("update"))->setChecked(false);
+        dialog.findChild<QCheckBox *>(QStringLiteral("keep"))->setChecked(false);
+        dialog.findChild<QCheckBox *>(QStringLiteral("files"))->setChecked(true);
+        dialog.findChild<QLineEdit *>(QStringLiteral("confirm"))->setText(shortDevice(device));
+        findButton(&dialog, QStringLiteral("Make the DiskAnvil Live USB"))->click();
+        waitUntil([&] { return !boxes.isEmpty(); }, 180000);
+    }
+    waitUntil([&] {
+        udisks.refresh();
+        stick = udisks.diskByPath(loopPath);
+        parts.clear();
+        for (const Volume &v : stick ? stick->volumes : QVector<Volume>())
+            parts << QStringLiteral("%1:%2").arg(v.fsType, v.label);
+        return parts.size() == 2;
+    }, 20000);
+    const QString filesOnly = mountStick(udisks, loopPath, QStringLiteral("ANVIL-FILES"));
+    report(boxes.value(0).startsWith(QLatin1String("The DiskAnvil Live USB is ready")) && parts == QStringList{QStringLiteral("vfat:DISKANVIL"), QStringLiteral("exfat:ANVIL-FILES")}
+               && QFile::exists(filesOnly + QStringLiteral("/ISOs/ISO files go here.txt")) && !QFile::exists(filesOnly + QStringLiteral("/persistence.conf")),
+           QStringLiteral("Live USB layout: with only the files drive, it's DiskAnvil Live and the files drive"), (boxes + parts).join(QStringLiteral(" | ")).left(300));
     RescueUsbDialog::allowLoopDevicesForTest = false;
     RescueUsbDialog::openStickForTest = nullptr;
     cleanUpLoop(udisks, loopPath);

@@ -91,7 +91,7 @@ RescueUsbDialog::RescueUsbDialog(UDisks *udisks, const QString &preferredDisk, Q
     , m_bios(new QCheckBox(tr("Also start old PCs without UEFI (BIOS)")))
     , m_keep(new QCheckBox(tr("Keep my changes between starts (settings, downloads, programs added):")))
     , m_keepSize(new QSpinBox)
-    , m_files(new QCheckBox(tr("A drive for my files on the rest of the stick (exFAT: Windows, Macs and Linux read it)")))
+    , m_files(new QCheckBox(tr("A drive for my files on the rest of the stick (exFAT: Windows, Macs and Linux read it; ISOs in its ISOs folder start from the boot menu)")))
     , m_update(new QCheckBox(tr("Only update DiskAnvil Live: the kept changes and the files drive stay as they are")))
     , m_progress(new QProgressBar)
     , m_phase(new QLabel)
@@ -474,22 +474,33 @@ void RescueUsbDialog::start()
     if (keep)
         parts.append({QStringLiteral("ext4"), kPersistence, files ? quint64(m_keepSize->value()) * GiB : 0, 0, true});
     if (files)
-        parts.append({QStringLiteral("exfat"), kFilesLabel, 0, 0, false});
+        parts.append({QStringLiteral("exfat"), kFilesLabel, 0, 0, true});
     m_persistenceMount.clear();
     m_prep = new UsbPrep(m_udisks, m_diskPath, QStringLiteral("dos"), parts, this);
     connect(m_prep, &UsbPrep::phase, m_phase, &QLabel::setText);
     connect(m_prep, &UsbPrep::failed, this, [this](const QString &message, bool shownAlready) {
         finish(false, message, shownAlready);
     });
-    connect(m_prep, &UsbPrep::ready, this, [this](const QStringList &mountPoints) {
+    connect(m_prep, &UsbPrep::ready, this, [this, keep, files](const QStringList &mountPoints) {
         // live-boot keeps all of / in the persistence partition when it says so.
-        if (mountPoints.size() > 1) {
+        if (keep) {
             QFile conf(mountPoints.value(1) + QStringLiteral("/persistence.conf"));
-            if (!conf.open(QIODevice::WriteOnly) || conf.write("/ union\n") <= 0) {
+            if (mountPoints.value(1).isEmpty() || !conf.open(QIODevice::WriteOnly) || conf.write("/ union\n") <= 0) {
                 m_failure = tr("The partition that keeps changes couldn't be set up: %1").arg(conf.errorString());
                 m_copyDone = false;
                 return m_prep->finish();
             }
+        }
+        // The files drive: a folder for ISOs the boot menu offers (Other ISOs on this stick).
+        if (files) {
+            const QString isos = mountPoints.value(keep ? 2 : 1) + QStringLiteral("/ISOs");
+            QDir().mkpath(isos);
+            QFile note(isos + QStringLiteral("/ISO files go here.txt"));
+            if (note.open(QIODevice::WriteOnly))
+                note.write(tr("Linux ISO files copied into this folder show up in DiskAnvil Live's boot menu, under \"Other ISOs on this "
+                              "stick\", and start from there without being written to a stick of their own. That needs Secure Boot "
+                              "off. Windows ISOs can't start this way: make a Windows USB from them instead.\n")
+                               .toUtf8());
         }
         copyFiles(mountPoints.value(0));
     });
