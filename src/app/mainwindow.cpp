@@ -50,6 +50,7 @@
 #include "driversdialog.h"
 #include "theme.h"
 #include "thememaker.h"
+#include "tryrepairdialog.h"
 #include "updates.h"
 #include "udisks.h"
 
@@ -211,8 +212,21 @@ MainWindow::MainWindow(UDisks *udisks, QWidget *parent)
         const Volume *v = volumeByPath(objectPath);
         if (clean || !v)
             return;
-        if (!askPlain(this, tr("Errors Found"), tr("%1 has file system errors. Repair them now?").arg(volumeTitle(*v))))
+        // On DiskForge Live the repair can be tried on a stand-in first, to see what it does.
+        const QString fs = v->effectiveFsType();
+        QMessageBox ask(QMessageBox::Question, tr("Errors Found"), tr("%1 has file system errors. Repair them now?").arg(volumeTitle(*v)),
+                        QMessageBox::NoButton, this);
+        QAbstractButton *repair = ask.addButton(tr("Repair"), QMessageBox::AcceptRole);
+        QAbstractButton *tryFirst = TryRepairDialog::possible(fs) ? ask.addButton(tr("Try the Repair First…"), QMessageBox::ActionRole) : nullptr;
+        ask.addButton(tr("Not Now"), QMessageBox::RejectRole);
+        ask.exec();
+        if (tryFirst && ask.clickedButton() == tryFirst) {
+            TryRepairDialog trying(v->encrypted ? v->cleartextDevice : v->device, fs, volumeTitle(*v), this);
+            if (trying.exec() != QDialog::Accepted)
+                return;
+        } else if (ask.clickedButton() != repair) {
             return;
+        }
         if (const Volume *again = volumeByPath(objectPath); !again || !failingDriveOk(*again, true))
             return;
         if (const Volume *fresh = volumeByPath(objectPath))

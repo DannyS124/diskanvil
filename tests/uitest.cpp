@@ -43,6 +43,7 @@
 #include "../src/viruses/bootentriesdialog.h"
 #include "../src/backup/savefilesdialog.h"
 #include "../src/tools/linuxbootdialog.h"
+#include "../src/tools/tryrepairdialog.h"
 #include "../src/backup/newids.h"
 #include "../src/backup/newidsdialog.h"
 #include "../src/viruses/hashlookup.h"
@@ -1181,6 +1182,39 @@ void luksHeaderThroughWindow()
            QStringLiteral("LUKS header: it says the header is gone, then puts the copy back"), boxes.join(QStringLiteral(" | ")).left(300));
     report(cryptsetup({QStringLiteral("open"), QStringLiteral("--test-passphrase"), part, QStringLiteral("--key-file"), QStringLiteral("-")}, "header test") == 0,
            QStringLiteral("LUKS header: and the partition opens with its passphrase again"));
+    sh(QStringLiteral("losetup"), {QStringLiteral("-d"), loop});
+}
+
+// Try the Repair First, as root, on a loop device holding an ext4 with a real error: the repair
+// fixes the stand-in, the partition itself still has its error, and throwing it away leaves
+// nothing behind (no device-mapper device, no loop device, no file).
+void tryRepairFirst()
+{
+    QTemporaryDir dir;
+    const QString image = dir.filePath(QStringLiteral("broken.img"));
+    sh(QStringLiteral("truncate"), {QStringLiteral("-s"), QStringLiteral("64M"), image});
+    sh(QStringLiteral("mkfs.ext4"), {QStringLiteral("-q"), image});
+    sh(QStringLiteral("debugfs"), {QStringLiteral("-w"), QStringLiteral("-R"), QStringLiteral("set_inode_field <2> links_count 7"), image});
+    QString loop;
+    sh(QStringLiteral("losetup"), {QStringLiteral("-f"), QStringLiteral("--show"), image}, &loop);
+    loop = loop.trimmed();
+    report(sh(QStringLiteral("e2fsck"), {QStringLiteral("-fn"), loop}) == 4, QStringLiteral("try first: a partition with a real error"));
+    {
+        TryRepairDialog dialog(loop, QStringLiteral("ext4"), QStringLiteral("broken (test)"));
+        dialog.show();
+        dialog.findChild<QPushButton *>(QStringLiteral("try"))->click();
+        auto *status = dialog.findChild<QLabel *>(QStringLiteral("status"));
+        waitUntil([&] { return status->text().startsWith(QLatin1String("The repair ran")) || status->text().contains(QLatin1String("couldn't")); }, 60000);
+        report(status->text().startsWith(QLatin1String("The repair ran")) && dialog.findChild<QPlainTextEdit *>(QStringLiteral("output"))->toPlainText().contains(QLatin1String("MODIFIED")),
+               QStringLiteral("try first: the repair runs on the stand-in"), status->text().left(160));
+        report(sh(QStringLiteral("e2fsck"), {QStringLiteral("-fn"), loop}) == 4 && sh(QStringLiteral("e2fsck"), {QStringLiteral("-fn"), QStringLiteral("/dev/mapper/diskforge-try")}) == 0,
+               QStringLiteral("try first: the stand-in is repaired, the partition itself untouched"));
+        findButton(&dialog, QStringLiteral("Throw It Away"))->click();
+    }
+    QString mapped;
+    sh(QStringLiteral("dmsetup"), {QStringLiteral("ls")}, &mapped);
+    report(!mapped.contains(QLatin1String("diskforge-try")) && !QFile::exists(QStringLiteral("/tmp/diskforge-try.changes")),
+           QStringLiteral("try first: thrown away, nothing is left behind"), mapped.trimmed());
     sh(QStringLiteral("losetup"), {QStringLiteral("-d"), loop});
 }
 
@@ -5095,7 +5129,7 @@ int main(int argc, char *argv[])
     }
     // As root, the ones that make their own loop device can run by themselves.
     if (!only.isEmpty()) {
-        const QVector<QPair<const char *, void (*)()>> alone = {{"stickcheck", stickCheck}, {"sdcard", sdCardFormat}, {"refresh", slowAreaRefresh}, {"stopwipe", stopWipe}, {"luksheader", luksHeaderThroughWindow}, {"nas", nasDrives}};
+        const QVector<QPair<const char *, void (*)()>> alone = {{"stickcheck", stickCheck}, {"sdcard", sdCardFormat}, {"refresh", slowAreaRefresh}, {"stopwipe", stopWipe}, {"luksheader", luksHeaderThroughWindow}, {"nas", nasDrives}, {"tryrepair", tryRepairFirst}};
         for (const auto &[name, run] : alone) {
             if (only.contains(QLatin1String(name)))
                 run();
@@ -5184,6 +5218,7 @@ int main(int argc, char *argv[])
     typeAndFlags();
     lockInMap();
     luksHeaderThroughWindow();
+    tryRepairFirst();
     inspector();
     recoverThroughWindow();
     scanThroughWindow();
