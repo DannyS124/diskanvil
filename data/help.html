@@ -271,7 +271,11 @@ Secure Erase, can't be done from a running Windows: DiskAnvil says so and points
 Open Disk Image takes .vhd and .vhdx files; Windows opens ISOs by itself.</p>
 <p><b>Only on Windows:</b> Change BitLocker Password (while the drive is unlocked), Optimize Drives with Windows' own
 weekly task, and Disk Cleanup for Windows' temporary files, the Recycle Bin, error reports and update files shared with
-other PCs. Windows won't format FAT32 over 32 GB, so DiskAnvil does that with its own formatter.</p>
+other PCs, and Make Room for Windows Recovery (update error 0x80070643). Windows won't format FAT32 over 32 GB, so
+DiskAnvil does that with its own formatter.</p>
+<p><b>Left to DiskAnvil Live:</b> Write-Protect Every Drive (Windows writes to a drive the moment it's plugged in), Let
+Someone Help (Windows has Quick Assist for that), Start Other PCs from This One, Repair Linux Boot, the sector size
+switch, NAS and RAID drives, and VeraCrypt.</p>
 <p><b>Scan for Viruses</b> uses ClamAV if it's installed, and otherwise Microsoft Defender, which keeps its list up to
 date by itself and always checks every file. The previews in Find Lost Files run without a sandbox there. The Problems
 above about polkit, pacman and the Flatpak are Linux-only.</p>

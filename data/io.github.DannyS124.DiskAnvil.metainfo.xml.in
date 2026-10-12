@@ -59,14 +59,20 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
-    <release version="0.5.2" date="2026-10-10">
+    <release version="0.5.2" date="2026-10-12">
       <description>
-        <p>DiskAnvil runs on Windows now too, with an installer. Scan for Viruses checks a drive for malware, and
+        <p>DiskForge is now called DiskAnvil; settings move over by themselves. It runs on Windows now too, with an installer. Scan for Viruses checks a drive for malware, and
         a Windows drive's startup entries, boot files and firmware too. Give New IDs lets a copied drive be used
         next to the one it was copied from.</p>
         <p>Find Lost Files brings deleted files back with their names and folders from FAT, exFAT and NTFS drives,
         finds Windows' earlier versions of a drive, opens virtual machines' disks, and previews documents, music
         and films. Also: settings for every SATA drive, NVMe sanitize, BitLocker drives, and fixes.</p>
+        <p>What Happened? starts from what went wrong. Find Lost Files has a viewer, file dates and photo details,
+        more file kinds, Repair a Copy, search by words, ransomware help and a timeline. Disk Health knows more about
+        each drive, including Backblaze's failure rates. Also: VeraCrypt, LUKS header backups, NAS and dynamic disks,
+        tools for a PC that won't start, Clonezilla restores, certificates of erasure and evidence images.</p>
+        <p>DiskAnvil Live can keep changes, hold a drive for files and other ISOs, go on a PC's own drive, start
+        other PCs over the network, write-protect every drive, and let someone help over the network.</p>
       </description>
     </release>
     <release version="0.5.1" date="2026-10-09">
