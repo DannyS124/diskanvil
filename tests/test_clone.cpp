@@ -245,12 +245,13 @@ void cloneTests()
             sh(QStringLiteral("mkfs.ext4"), {QStringLiteral("-q"), QStringLiteral("-F"), volumeOf(*mbr, n)->device});
         mbr = waitForDisk(udisks, mbrFile, [](const Disk &d) { return d.volumes.size() == 4 && !d.volumes.last().uuid.isEmpty(); });
     }
+    // A copy, not the pointer: the list it points into is made again when the target is attached.
+    const Disk mbrSource = mbr ? *mbr : Disk();
     const QString mbrTarget = dir.filePath(QStringLiteral("mbr-target.img"));
     makeImage(mbrTarget, 160 * MiB, char(0xAA));
     attach(mbrTarget);
     const Disk *mt = waitForDisk(udisks, mbrTarget, [](const Disk &) { return true; });
     if (mbr && mt) {
-        const Disk mbrSource = *mbr;
         report(cloneTo(udisks, mbrSource, *mt, false, &message), QStringLiteral("clone the MBR drive"), message);
         run(udisks, {}, [&] { udisks.rescan(mt->blockPath); }, &message);
         mt = waitForDisk(udisks, mbrTarget, [](const Disk &d) { return d.volumes.size() == 4 && !d.volumes.last().uuid.isEmpty(); }, 2000);
