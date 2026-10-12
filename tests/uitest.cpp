@@ -2996,6 +2996,128 @@ void testBootWindow()
     cleanUpLoop(udisks, loopPath);
 }
 
+// Make a DiskForge Live USB with kept changes and a files drive, on a loop device: DiskForge
+// Live's partition, a "persistence" one with live-boot's persistence.conf, and an exFAT drive on
+// the rest. Then Update: only DiskForge Live's partition is made again; its logs, the kept
+// changes and the files stay.
+void rescueUsbLayout()
+{
+    QTemporaryDir dir;
+    const QString tree = dir.filePath(QStringLiteral("tree"));
+    QMap<QString, QByteArray> files;
+    files[QStringLiteral(".disk/diskforge-live")] = "DiskForge Live\nversion=0.0.2\nbuilt=2026-10-12\nid=test\n";
+    files[QStringLiteral("EFI/BOOT/BOOTX64.EFI")] = QByteArray(300000, 'x');
+    files[QStringLiteral("boot/grub/i386-pc/stick-boot.img")] = QByteArray(510, 'b') + QByteArray("\x55\xaa", 2);
+    files[QStringLiteral("boot/grub/i386-pc/stick-core.img")] = QByteArray(40000, 'c');
+    files[QStringLiteral("live/filesystem.squashfs")] = QByteArray(9 * 1024 * 1024, 's');
+    QByteArray sums;
+    for (auto it = files.cbegin(); it != files.cend(); ++it) {
+        QDir().mkpath(QFileInfo(tree + QLatin1Char('/') + it.key()).path());
+        QFile f(tree + QLatin1Char('/') + it.key());
+        if (f.open(QIODevice::WriteOnly))
+            f.write(it.value());
+        sums += QCryptographicHash::hash(it.value(), QCryptographicHash::Sha256).toHex() + "  ./" + it.key().toUtf8() + "\n";
+    }
+    QFile sumsFile(tree + QStringLiteral("/sha256sum.txt"));
+    if (sumsFile.open(QIODevice::WriteOnly))
+        sumsFile.write(sums);
+    sumsFile.close();
+    const QString iso = dir.filePath(QStringLiteral("rescue.iso"));
+    if (sh(QStringLiteral("xorriso"), {QStringLiteral("-as"), QStringLiteral("mkisofs"), QStringLiteral("-quiet"), QStringLiteral("-J"), QStringLiteral("-joliet-long"),
+                                       QStringLiteral("-R"), QStringLiteral("-o"), iso, tree}) != 0) {
+        out << "SKIP  Live USB layout: xorriso isn't installed" << Qt::endl;
+        return;
+    }
+    const QString stickImage = dir.filePath(QStringLiteral("stick.img"));
+    sh(QStringLiteral("truncate"), {QStringLiteral("-s"), QStringLiteral("5G"), stickImage});
+    const QString loopPath = userLoop(stickImage);
+    report(!loopPath.isEmpty(), QStringLiteral("Live USB layout: a 5 GB loop device stands in for the stick"));
+    if (loopPath.isEmpty())
+        return;
+    UDisks udisks;
+    udisks.setInteractive(false);
+    const Disk *stick = nullptr;
+    waitUntil([&] {
+        udisks.refresh();
+        stick = udisks.diskByPath(loopPath);
+        return stick != nullptr;
+    }, 15000);
+    const QString device = stick ? stick->device : QString();
+    RescueUsbDialog::allowLoopDevicesForTest = true;
+    writeBiosBootTo(stickImage);
+    QStringList boxes;
+    Answerer answerer;
+    answerer.answer = [&](QWidget *modal) {
+        if (auto *box = qobject_cast<QMessageBox *>(modal)) {
+            boxes << box->text();
+            box->accept();
+            return true;
+        }
+        return false;
+    };
+    {
+        RescueUsbDialog dialog(&udisks, loopPath);
+        dialog.show();
+        dialog.findChild<QLineEdit *>(QStringLiteral("image"))->setText(iso);
+        dialog.findChild<QCheckBox *>(QStringLiteral("keep"))->setChecked(true);
+        dialog.findChild<QSpinBox *>(QStringLiteral("keepSize"))->setValue(1);
+        dialog.findChild<QCheckBox *>(QStringLiteral("files"))->setChecked(true);
+        dialog.findChild<QLineEdit *>(QStringLiteral("confirm"))->setText(shortDevice(device));
+        findButton(&dialog, QStringLiteral("Make the DiskForge Live USB"))->click();
+        waitUntil([&] { return !boxes.isEmpty(); }, 180000);
+    }
+    report(boxes.value(0).startsWith(QLatin1String("The DiskForge Live USB is ready")), QStringLiteral("Live USB layout: made"), boxes.join(QStringLiteral(" | ")).left(200));
+    QStringList parts;
+    waitUntil([&] {
+        udisks.refresh();
+        stick = udisks.diskByPath(loopPath);
+        parts.clear();
+        for (const Volume &v : stick ? stick->volumes : QVector<Volume>())
+            parts << QStringLiteral("%1:%2:%3").arg(v.fsType, v.label).arg(v.size / (1024 * 1024));
+        return parts.size() == 3;
+    }, 20000);
+    report(parts.size() == 3 && parts[0] == QLatin1String("vfat:DISKFORGE:2048") && parts[1] == QLatin1String("ext4:persistence:1024")
+               && parts[2].startsWith(QLatin1String("exfat:DF-FILES:")),
+           QStringLiteral("Live USB layout: DiskForge Live's 2 GB, 1 GB keeping changes, and the files drive on the rest"), parts.join(QStringLiteral(", ")));
+    const QString persistence = mountStick(udisks, loopPath, QStringLiteral("persistence"));
+    QFile conf(persistence + QStringLiteral("/persistence.conf"));
+    report(conf.open(QIODevice::ReadOnly) && conf.readAll() == "/ union\n", QStringLiteral("Live USB layout: the persistence partition has live-boot's persistence.conf"));
+    conf.close();
+    // Things that have to stay: a kept change, a saved file, a log; and one that has to go.
+    { QFile f(persistence + QStringLiteral("/kept-change.txt")); if (f.open(QIODevice::WriteOnly)) f.write("kept"); }
+    const QString filesRoot = mountStick(udisks, loopPath, QStringLiteral("DF-FILES"));
+    { QFile f(filesRoot + QStringLiteral("/saved.txt")); if (f.open(QIODevice::WriteOnly)) f.write("saved"); }
+    const QString system = mountStick(udisks, loopPath, QStringLiteral("DISKFORGE"));
+    QDir().mkpath(system + QStringLiteral("/logs/2026-10-12 09.00"));
+    { QFile f(system + QStringLiteral("/logs/2026-10-12 09.00/boot.log")); if (f.open(QIODevice::WriteOnly)) f.write("log"); }
+    { QFile f(system + QStringLiteral("/old-version-file.txt")); if (f.open(QIODevice::WriteOnly)) f.write("old"); }
+    sh(QStringLiteral("sync"), {});
+    boxes.clear();
+    {
+        RescueUsbDialog dialog(&udisks, loopPath);
+        dialog.show();
+        dialog.findChild<QLineEdit *>(QStringLiteral("image"))->setText(iso);
+        auto *update = dialog.findChild<QCheckBox *>(QStringLiteral("update"));
+        report(update && update->isVisibleTo(&dialog), QStringLiteral("Live USB layout: opened again, it offers to update only"));
+        update->setChecked(true);
+        auto *make = findButton(&dialog, QStringLiteral("Make the DiskForge Live USB"));
+        report(make->isEnabled(), QStringLiteral("Live USB layout: an update needs no name typed (nothing else is erased)"));
+        make->click();
+        waitUntil([&] { return !boxes.isEmpty(); }, 180000);
+    }
+    report(boxes.value(0).startsWith(QLatin1String("The DiskForge Live USB is ready")), QStringLiteral("Live USB layout: updated"), boxes.join(QStringLiteral(" | ")).left(200));
+    const QString systemAgain = mountStick(udisks, loopPath, QStringLiteral("DISKFORGE"));
+    const QString persistenceAgain = mountStick(udisks, loopPath, QStringLiteral("persistence"));
+    const QString filesAgain = mountStick(udisks, loopPath, QStringLiteral("DF-FILES"));
+    report(!QFile::exists(systemAgain + QStringLiteral("/old-version-file.txt")) && QFile::exists(systemAgain + QStringLiteral("/logs/2026-10-12 09.00/boot.log"))
+               && QFile::exists(systemAgain + QStringLiteral("/live/filesystem.squashfs")) && QFile::exists(persistenceAgain + QStringLiteral("/kept-change.txt"))
+               && QFile::exists(filesAgain + QStringLiteral("/saved.txt")) && QFile::exists(persistenceAgain + QStringLiteral("/persistence.conf")),
+           QStringLiteral("Live USB layout: the update replaced DiskForge Live's files, and kept its logs, the changes and the files"));
+    RescueUsbDialog::allowLoopDevicesForTest = false;
+    RescueUsbDialog::openStickForTest = nullptr;
+    cleanUpLoop(udisks, loopPath);
+}
+
 // Write Image to USB's "copy the files" way, with persistence, on a loop device of the user's
 // own (no raw access needed, so no password): a Debian-live-like ISO with a long label.
 // DISKFORGE_TEST_COPY_ISO uses a real ISO instead (one with live-boot persistence, like
@@ -5535,7 +5657,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},

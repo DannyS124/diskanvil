@@ -15,6 +15,7 @@
 #include <QDesktopServices>
 #include <QDialogButtonBox>
 #include <QDir>
+#include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
@@ -24,6 +25,7 @@
 #include <QMessageBox>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QSpinBox>
 #include <QStandardPaths>
 #include <QStorageInfo>
 #include <QThread>
@@ -37,6 +39,9 @@
 namespace {
 
 const QString kLabel = QStringLiteral("DISKFORGE");
+const QString kFilesLabel = QStringLiteral("DF-FILES");
+const QString kPersistence = QStringLiteral("persistence"); // the label live-boot looks for
+constexpr quint64 GiB = 1024ull * 1024 * 1024;
 // Sticks made while it was still called DiskForge Rescue, then Bluespark.
 const QStringList kOldLabels = {QStringLiteral("DFRESCUE"), QStringLiteral("BLUESPARK")};
 constexpr quint64 kRoomForLogs = 64 * 1024 * 1024;
@@ -83,6 +88,10 @@ RescueUsbDialog::RescueUsbDialog(UDisks *udisks, const QString &preferredDisk, Q
     , m_warning(new QLabel)
     , m_confirm(new QLineEdit)
     , m_bios(new QCheckBox(tr("Also start old PCs without UEFI (BIOS)")))
+    , m_keep(new QCheckBox(tr("Keep my changes between starts (settings, downloads, programs added):")))
+    , m_keepSize(new QSpinBox)
+    , m_files(new QCheckBox(tr("A drive for my files on the rest of the stick (exFAT: Windows, Macs and Linux read it)")))
+    , m_update(new QCheckBox(tr("Only update DiskForge Live: the kept changes and the files drive stay as they are")))
     , m_progress(new QProgressBar)
     , m_phase(new QLabel)
     , m_meter(m_progress, m_phase)
@@ -138,6 +147,27 @@ RescueUsbDialog::RescueUsbDialog(UDisks *udisks, const QString &preferredDisk, Q
     m_bios->setToolTip(tr("Puts GRUB's boot code in front of the stick's partition, so PCs from before UEFI start from it too. "
                           "That's a direct write to the stick, so on a normal PC it asks for the admin password once."));
     layout->addWidget(m_bios);
+    m_keep->setObjectName(QStringLiteral("keep"));
+    m_keepSize->setObjectName(QStringLiteral("keepSize"));
+    m_files->setObjectName(QStringLiteral("files"));
+    m_update->setObjectName(QStringLiteral("update"));
+    m_keepSize->setRange(1, 256);
+    m_keepSize->setValue(4);
+    m_keepSize->setSuffix(tr(" GB"));
+    m_keep->setToolTip(tr("A partition the stick keeps what changes in: the boot menu then offers \"Start DiskForge Live, keeping my "
+                          "changes\" first."));
+    m_files->setToolTip(tr("A partition for Rescue Copies and the files saved from a PC, readable on any computer"));
+    m_update->setToolTip(tr("Replaces DiskForge Live with this version on its own partition, and leaves the others alone"));
+    auto *keepRow = new QHBoxLayout;
+    keepRow->addWidget(m_keep);
+    keepRow->addWidget(m_keepSize);
+    keepRow->addStretch();
+    layout->addLayout(keepRow);
+    layout->addWidget(m_files);
+    layout->addWidget(m_update);
+    for (QCheckBox *box : {m_keep, m_files, m_update})
+        connect(box, &QCheckBox::toggled, this, &RescueUsbDialog::updateState);
+    connect(m_keepSize, &QSpinBox::valueChanged, this, &RescueUsbDialog::updateState);
     layout->addWidget(m_warning);
     layout->addWidget(m_confirm);
     layout->addWidget(m_phase);
@@ -217,6 +247,25 @@ const Volume *RescueUsbDialog::rescueVolume(const Disk &disk) const
     return nullptr;
 }
 
+quint64 RescueUsbDialog::systemSize() const
+{
+    // Room for this version and bigger ones: half again, 2 GB at least, in 256 MB steps.
+    const quint64 step = 256ull * 1024 * 1024;
+    const quint64 wanted = std::max<quint64>(2 * GiB, (m_inspected.bytes + kRoomForLogs) * 3 / 2);
+    return (wanted + step - 1) / step * step;
+}
+
+bool RescueUsbDialog::laidOut(const Disk &disk) const
+{
+    if (!rescueVolume(disk) || disk.volumes.isEmpty() || &disk.volumes.first() != rescueVolume(disk))
+        return false;
+    for (const Volume &v : disk.volumes) {
+        if (v.label == kPersistence || v.label == kFilesLabel)
+            return true;
+    }
+    return false;
+}
+
 void RescueUsbDialog::inspectImage()
 {
     const QString path = m_image->text().trimmed();
@@ -289,8 +338,21 @@ void RescueUsbDialog::updateState()
     } else if (d && QFileInfo(m_inspectedPath).isFile() && blockio::pathIsOnDisk(QFileInfo(m_inspectedPath).absoluteFilePath(), d->device)) {
         warning = redText(tr("The ISO is on this stick. Pick another stick, or copy the ISO somewhere else first."));
         ok = false;
+    } else if (d && m_inspected.error.isEmpty() && m_update->isVisibleTo(this) && m_update->isChecked()) {
+        // An update: only DiskForge Live's own partition is written.
+        const Volume *system = rescueVolume(*d);
+        if (system && system->size < m_inspected.bytes + kRoomForLogs) {
+            warning = redText(tr("DiskForge Live's partition on this stick is too small for this version: make the stick again."));
+            ok = false;
+        } else {
+            warning = tr("DiskForge Live on %1 is replaced with this version; the kept changes and the files drive stay. Its logs stay "
+                         "too.")
+                          .arg(diskTitle(*d).toHtmlEscaped());
+        }
     } else if (d && m_inspected.error.isEmpty()) {
-        const quint64 needed = m_inspected.bytes + kRoomForLogs;
+        const quint64 needed = (m_keep->isChecked() || m_files->isChecked())
+                                   ? systemSize() + (m_keep->isChecked() ? quint64(m_keepSize->value()) * GiB : 0) + (m_files->isChecked() ? GiB : 0)
+                                   : m_inspected.bytes + kRoomForLogs;
         if (d->size < needed) {
             warning = redText(tr("This stick is too small: DiskForge Live needs at least %1.").arg(formatSize(needed)));
             ok = false;
@@ -307,6 +369,20 @@ void RescueUsbDialog::updateState()
             asked = true;
         }
     }
+    // A stick laid out with kept changes or a files drive can just be updated.
+    const bool canUpdate = d && laidOut(*d);
+    m_update->setVisible(canUpdate);
+#ifdef Q_OS_WIN
+    // Kept changes live in a Linux file system (ext4), which Windows can't make.
+    m_keep->setEnabled(false);
+    m_keep->setChecked(false);
+    m_keep->setToolTip(tr("Windows can't make the Linux file system that keeps the changes: make the stick from DiskForge Live (or "
+                          "Linux) to have it"));
+#else
+    m_keep->setEnabled(!(canUpdate && m_update->isChecked()));
+#endif
+    m_keepSize->setEnabled(m_keep->isEnabled() && m_keep->isChecked());
+    m_files->setEnabled(!(canUpdate && m_update->isChecked()));
     m_warning->setText(warning);
     m_confirm->setVisible(asked);
     m_make->setEnabled(ok);
@@ -387,13 +463,35 @@ void RescueUsbDialog::start()
     qCInfo(lcOps).noquote() << "Make a DiskForge Live USB on" << d->device << d->model << "from" << m_inspectedPath
                             << "version" << m_inspected.info.version << "build" << m_inspected.info.id;
 
-    // One FAT32 partition, marked bootable: some PCs only offer a USB stick in their boot menu then.
-    m_prep = new UsbPrep(m_udisks, m_diskPath, QStringLiteral("dos"), {{QStringLiteral("vfat"), kLabel, 0, 0x80, true}}, this);
+    if (m_update->isVisibleTo(this) && m_update->isChecked())
+        return update();
+    // DiskForge Live's FAT32 partition, marked bootable: some PCs only offer a USB stick in their
+    // boot menu then. The whole stick, or room for it, then the kept changes and the files drive.
+    QVector<UsbPrep::Partition> parts;
+    const bool keep = m_keep->isChecked(), files = m_files->isChecked();
+    parts.append({QStringLiteral("vfat"), kLabel, keep || files ? systemSize() : 0, 0x80, true});
+    if (keep)
+        parts.append({QStringLiteral("ext4"), kPersistence, files ? quint64(m_keepSize->value()) * GiB : 0, 0, true});
+    if (files)
+        parts.append({QStringLiteral("exfat"), kFilesLabel, 0, 0, false});
+    m_persistenceMount.clear();
+    m_prep = new UsbPrep(m_udisks, m_diskPath, QStringLiteral("dos"), parts, this);
     connect(m_prep, &UsbPrep::phase, m_phase, &QLabel::setText);
     connect(m_prep, &UsbPrep::failed, this, [this](const QString &message, bool shownAlready) {
         finish(false, message, shownAlready);
     });
-    connect(m_prep, &UsbPrep::ready, this, [this](const QStringList &mountPoints) { copyFiles(mountPoints.value(0)); });
+    connect(m_prep, &UsbPrep::ready, this, [this](const QStringList &mountPoints) {
+        // live-boot keeps all of / in the persistence partition when it says so.
+        if (mountPoints.size() > 1) {
+            QFile conf(mountPoints.value(1) + QStringLiteral("/persistence.conf"));
+            if (!conf.open(QIODevice::WriteOnly) || conf.write("/ union\n") <= 0) {
+                m_failure = tr("The partition that keeps changes couldn't be set up: %1").arg(conf.errorString());
+                m_copyDone = false;
+                return m_prep->finish();
+            }
+        }
+        copyFiles(mountPoints.value(0));
+    });
     connect(m_prep, &UsbPrep::done, this, [this] {
         if (!m_copyDone)
             return finish(false, m_failure.isEmpty() ? tr("The files couldn't be copied.") : m_failure);
@@ -403,6 +501,53 @@ void RescueUsbDialog::start()
         finish(true, readyText(false));
     });
     m_prep->start();
+}
+
+void RescueUsbDialog::update()
+{
+    const Disk *d = target();
+    const Volume *system = d ? rescueVolume(*d) : nullptr;
+    if (!system)
+        return finish(false, tr("DiskForge Live's partition isn't on the stick any more."));
+    qCInfo(lcOps).noquote() << "Updating DiskForge Live on" << d->device << "only its own partition";
+    const QString path = system->objectPath;
+    const auto copyInto = [this](const QString &root) {
+        // What's there goes, but for the logs and the virus list kept on it.
+        const QStringList kept = {QStringLiteral("logs"), QStringLiteral("diskforge-live")};
+        for (const QFileInfo &f : QDir(root).entryInfoList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System)) {
+            if (kept.contains(f.fileName(), Qt::CaseInsensitive))
+                continue;
+            if (f.isDir() && !f.isSymLink())
+                QDir(f.absoluteFilePath()).removeRecursively();
+            else
+                QFile::remove(f.absoluteFilePath());
+        }
+        copyFiles(root);
+    };
+    if (!system->mounts().isEmpty())
+        return copyInto(system->mounts().first());
+    m_phase->setText(tr("Mounting DiskForge Live's partition…"));
+    auto mounted = std::make_shared<QMetaObject::Connection>();
+    auto failed = std::make_shared<QMetaObject::Connection>();
+    *mounted = connect(m_udisks, &UDisks::changed, this, [this, path, copyInto, mounted, failed] {
+        for (const Disk &disk : m_udisks->disks()) {
+            for (const Volume &v : disk.volumes) {
+                if (v.objectPath == path && !v.mounts().isEmpty()) {
+                    disconnect(*mounted);
+                    disconnect(*failed);
+                    return copyInto(v.mounts().first());
+                }
+            }
+        }
+    });
+    *failed = connect(m_udisks, &UDisks::operationFinished, this, [this, mounted, failed](bool ok, const QString &message) {
+        if (ok)
+            return;
+        disconnect(*mounted);
+        disconnect(*failed);
+        finish(false, message, true);
+    });
+    m_udisks->mount(*system);
 }
 
 void RescueUsbDialog::copyFiles(const QString &mountPoint)
@@ -424,7 +569,16 @@ void RescueUsbDialog::copyFiles(const QString &mountPoint)
         m_failure = ok ? QString() : message;
         // Unmounted either way, so it isn't left mounted after a failed copy.
         m_progress->setRange(0, 0);
-        m_prep->finish();
+        if (m_prep)
+            return m_prep->finish();
+        // An update: the boot code for old PCs again (that unmounts the stick), or just unmounted.
+        if (!ok)
+            return finish(false, message);
+        if (m_bios->isChecked() && !m_biosCore.isEmpty())
+            return writeBiosBoot();
+        if (const Disk *d = m_udisks->diskByPath(m_diskPath); d && rescueVolume(*d))
+            m_udisks->unmount(*rescueVolume(*d));
+        finish(true, readyText(false));
     });
     m_thread = startOnThread(this, m_writer);
 }

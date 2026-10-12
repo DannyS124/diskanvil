@@ -17,6 +17,7 @@ class QComboBox;
 class QLabel;
 class QLineEdit;
 class QProgressBar;
+class QSpinBox;
 class QPushButton;
 class QThread;
 class UsbPrep;
@@ -54,6 +55,11 @@ private:
 
     void start();
     void copyFiles(const QString &mountPoint);
+    // The stick's layout: DiskForge Live's partition, then (when asked for) one keeping changes
+    // between starts and one for files. Sizes in bytes; 0 for the rest of the stick.
+    quint64 systemSize() const;
+    bool laidOut(const Disk &disk) const; // already has the parts kept by Update
+    void update(); // DiskForge Live's partition made again, the others kept
     void writeBiosBoot();
     QString readyText(bool bios) const;
     void finish(bool ok, const QString &message, bool alreadyShown = false);
@@ -67,6 +73,11 @@ private:
     QLabel *m_warning;
     QLineEdit *m_confirm;
     QCheckBox *m_bios;
+    QCheckBox *m_keep;    // a persistence partition: changes kept between starts
+    QSpinBox *m_keepSize; // its size, in GB
+    QCheckBox *m_files;   // an exFAT partition on the rest, for files
+    QCheckBox *m_update;  // only DiskForge Live's partition, on a stick laid out this way already
+    QString m_persistenceMount; // where the persistence partition is mounted while it's made
     QPushButton *m_make;
     QProgressBar *m_progress;
     QLabel *m_phase;
