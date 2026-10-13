@@ -551,7 +551,9 @@ Log read(const QByteArray &file, const std::atomic<bool> *cancel)
                     seen.insert(record);
                     log.events << *e;
                 }
-            } else if (!c.ok) {
+            } else if (!c.ok && at < official) {
+                // Past where the chunk's data ends, a leftover from its earlier use can fail to
+                // read (its template has been written over since): that's not damage.
                 ++log.broken;
             }
             at += int(size);
