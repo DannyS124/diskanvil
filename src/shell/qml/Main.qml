@@ -101,6 +101,8 @@ WaylandCompositor {
             id: screen
             width: 1600; height: 1000
             visible: true
+            // The whole screen on DiskAnvil Live (straight to the screen, or on Xorg); a window while it's worked on.
+            visibility: shell.fullScreen ? Window.FullScreen : Window.AutomaticVisibility
             color: pal.bg
             title: "DiskAnvil Live"
 
@@ -116,6 +118,22 @@ WaylandCompositor {
             PowerMenu { id: powerMenu; comp: comp; z: 100001 }
 
             Shortcut { sequences: ["Alt+Tab"]; context: Qt.ApplicationShortcut; onActivated: comp.cycle() }
+
+            // The mouse pointer, drawn here when nothing else does: the shape the program under it
+            // asks for (an I-beam over text, arrows on an edge), or our arrow.
+            WaylandCursorItem {
+                id: cursor
+                seat: comp.defaultSeat
+                inputEventsEnabled: false
+                visible: shell.drawsPointer && surface !== null
+                x: shell.pointer.x - hotspotX; y: shell.pointer.y - hotspotY
+                z: 1000000
+            }
+            Image {
+                visible: shell.drawsPointer && cursor.surface === null
+                source: "qrc:/shell/art/pointer.svg"; sourceSize: Qt.size(24, 24)
+                x: shell.pointer.x; y: shell.pointer.y; z: 1000000
+            }
         }
     }
 
@@ -124,5 +142,11 @@ WaylandCompositor {
     }
     XdgDecorationManagerV1 { preferredMode: XdgToplevel.ServerSideDecoration }
     Component { id: frame; ShellWindow {} }
-    Component.onCompleted: shell.setSocket(socketName)
+    Component.onCompleted: {
+        shell.setSocket(socketName)
+        if (shell.keyboardLayout.length > 0) {
+            defaultSeat.keymap.layout = shell.keyboardLayout
+            defaultSeat.keymap.variant = shell.keyboardVariant
+        }
+    }
 }

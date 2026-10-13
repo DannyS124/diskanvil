@@ -159,3 +159,11 @@ seabios
 qt6-image-formats-plugins
 # Find Lost Files' viewer: a film saved at another speed, and a film's frame in the previews
 ffmpeg
+# DiskAnvil Live's own screen (diskanvil-shell): Qt drawing straight to the screen (linuxfb), its
+# compositor's QML, and Qt programs shown in it (Wayland).
+qt6-qpa-plugins
+qml6-module-qtwayland-compositor
+qml6-module-qtquick
+qml6-module-qtquick-window
+qml6-module-qtqml-workerscript
+qt6-wayland

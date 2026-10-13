@@ -4,8 +4,10 @@
 #include "shell.h"
 
 #include <QFile>
+#include <QGuiApplication>
 #include <QFileInfo>
 #include <QIcon>
+#include <QMouseEvent>
 #include <QPainter>
 #include <QProcess>
 
@@ -35,6 +37,12 @@ qint64 Shell::launch(const QString &program, const QStringList &arguments)
     return process.startDetached(&pid) ? pid : 0;
 }
 
+bool Shell::drawsPointer() const
+{
+    const QString platform = QGuiApplication::platformName();
+    return platform == QLatin1String("linuxfb") || platform == QLatin1String("eglfs");
+}
+
 bool Shell::running(qint64 pid) const
 {
     return pid > 0 && ::kill(pid_t(pid), 0) == 0;
@@ -54,6 +62,21 @@ void Shell::power(const QString &how)
         QProcess::startDetached(QStringLiteral("systemctl"), {QStringLiteral("reboot")});
     else if (how == QLatin1String("firmware"))
         QProcess::startDetached(QStringLiteral("systemctl"), {QStringLiteral("reboot"), QStringLiteral("--firmware-setup")});
+}
+
+bool PointerWatch::eventFilter(QObject *watched, QEvent *event)
+{
+    switch (event->type()) {
+    case QEvent::MouseMove:
+    case QEvent::MouseButtonPress:
+    case QEvent::MouseButtonRelease:
+    case QEvent::HoverMove:
+        m_shell->setPointer(static_cast<QSinglePointEvent *>(event)->scenePosition());
+        break;
+    default:
+        break;
+    }
+    return QObject::eventFilter(watched, event);
 }
 
 QImage IconProvider::requestImage(const QString &id, QSize *size, const QSize &requestedSize)

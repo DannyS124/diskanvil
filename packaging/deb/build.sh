@@ -21,11 +21,11 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq >/dev/null
 apt-get install -y -qq --no-install-recommends build-essential cmake ninja-build pkg-config file dpkg-dev \
     qt6-base-dev qt6-base-dev-tools qt6-tools-dev qt6-tools-dev-tools qt6-l10n-tools qt6-svg-plugins \
-    libzstd-dev zlib1g-dev libssl-dev libblkid-dev libarchive-dev libpoppler-qt6-dev qt6-multimedia-dev qt6-image-formats-plugins sqlite3 clamav \
+    libzstd-dev zlib1g-dev libssl-dev libblkid-dev libarchive-dev libpoppler-qt6-dev qt6-multimedia-dev qt6-declarative-dev qt6-wayland-dev qt6-image-formats-plugins sqlite3 clamav \
     fdisk e2fsprogs dosfstools mtools btrfs-progs cryptsetup-bin systemd ffmpeg zstd xorriso >/dev/null
 echo "Debian $(cat /etc/debian_version), Qt $(dpkg-query -W -f='${Version}' qt6-base-dev), gcc $(gcc -dumpversion)"
 mkdir -p /src && tar -xf /work/src.tar -C /src
-cmake -S /src -B /build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=/usr >/build.log 2>&1 \
+cmake -S /src -B /build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=/usr -DDISKANVIL_SHELL=ON >/build.log 2>&1 \
     || { tail -30 /build.log; exit 1; }
 # One compile per GB of memory that's free right now (each takes up to about 600 MB).
 jobs=$(awk '/MemAvailable/ {print int($2 / 1048576)}' /proc/meminfo); [ "$jobs" -ge 1 ] || jobs=1

@@ -1,25 +1,45 @@
 #!/bin/bash
-# Starts the desktop on the first screen (~/.bash_profile runs this). If it won't start, it
-# says so, saves the logs and leaves a text console to work in.
+# Starts DiskAnvil Live's screen, diskanvil-shell, on the first screen (~/.bash_profile runs
+# this). It draws straight to the screen through the kernel (any PC with a display the kernel
+# drives, no graphics driver needed); then the old framebuffer; then on Xorg. If none of them
+# start, it says so, saves the logs and leaves a text console to work in.
 session=/run/diskanvil-live/session
 # DiskAnvil writes its own log there, and the log saver picks it up.
 export DISKANVIL_LOG=$session/diskanvil.log
+log=$session/desktop.log
 
-for attempt in 1 2; do
-    echo "== $(date '+%H:%M:%S') starting the desktop (try $attempt)" >> "$session/desktop.log"
-    started=$(date +%s)
-    startx /usr/bin/startlxqt -- -keeptty "vt${XDG_VTNR:-1}" >> "$session/desktop.log" 2>&1
-    # A desktop that ran for a while was closed on purpose (Log Out).
-    if [ $(($(date +%s) - started)) -gt 30 ]; then
-        echo
-        echo "The desktop is closed. Type startx to open it again, or poweroff to turn the PC off."
-        exit 0
-    fi
+# The keyboard the boot menu or the stick's settings chose, for the shell and every program in it.
+if [ -r /etc/default/keyboard ]; then
+    . /etc/default/keyboard
+    export XKB_DEFAULT_LAYOUT=${XKBLAYOUT:-us} XKB_DEFAULT_VARIANT=${XKBVARIANT:-} XKB_DEFAULT_OPTIONS=${XKBOPTIONS:-}
+fi
+export QT_QPA_FB_USE_LIBINPUT=1
+
+run() {
+    echo "== $(date '+%H:%M:%S') starting the screen: $1" >> "$log"
+    local started=$(date +%s)
+    case $1 in
+    drm) QT_QPA_PLATFORM=linuxfb:drm=1 diskanvil-shell >> "$log" 2>&1 ;;
+    fb) QT_QPA_PLATFORM=linuxfb diskanvil-shell >> "$log" 2>&1 ;;
+    xorg) DISKANVIL_SHELL_FULLSCREEN=1 QT_QPA_PLATFORM=xcb startx /usr/bin/diskanvil-shell -- -keeptty "vt${XDG_VTNR:-1}" >> "$log" 2>&1 ;;
+    esac
+    # One that ran for a while worked: it closed or crashed later on, so it's started again.
+    [ $(($(date +%s) - started)) -gt 20 ]
+}
+
+for how in drm fb xorg; do
+    if [ "$how" = drm ] && ! ls /dev/dri/card* >/dev/null 2>&1; then continue; fi
+    if [ "$how" = fb ] && [ ! -e /dev/fb0 ]; then continue; fi
+    worked=0
+    for attempt in 1 2 3; do
+        run "$how" && worked=1 || break
+    done
+    [ $worked = 1 ] && break
 done
 
 clear
 cat <<TEXT
-The desktop didn't start. Sorry about that.
+The screen didn't start. Sorry about that.
 
 What usually helps: restart (type reboot) and pick "Safe graphics" in the boot
 menu.

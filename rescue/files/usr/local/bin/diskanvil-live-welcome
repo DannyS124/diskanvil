@@ -15,7 +15,7 @@ Some things that work from here (sudo doesn't ask for a password):
   lsblk                       list the drives
   nmtui                       connect to Wi-Fi
   diskanvil-live-logs         save the logs to the stick
-  startx                      try the desktop anyway
+  diskanvil-live-session      try the screen again
   reboot, poweroff
 
 TEXT

@@ -72,8 +72,8 @@ case "$cmd" in
     fi
 
     echo "==> building and running the self-tests"
-    cmake -S . -B build >/dev/null
-    cmake --build build -j"$(nproc)" >/dev/null
+    cmake -S . -B build -DDISKANVIL_SHELL=ON >/dev/null
+    cmake --build build -j"$(awk '/MemAvailable/ {j = int($2 / 1048576); print j < 1 ? 1 : j}' /proc/meminfo)" >/dev/null
     # New or changed strings must be in the translation template before a release.
     cmake --build build --target update_translations >/dev/null 2>&1
     python3 -I packaging/fill-english-plurals.py i18n/diskanvil_en.ts
@@ -95,6 +95,10 @@ case "$cmd" in
         run_tests $suite ./build/diskanvil-selftest --$suite
     done
     run_tests window-user env QT_QPA_PLATFORM=offscreen ./build/diskanvil-uitest --user
+    # DiskAnvil Live's screen, used with real DiskAnvil windows in it (a socket folder of its own).
+    shell_run=$(mktemp -d); chmod 700 "$shell_run"
+    run_tests shell env PATH="$PWD/build:$PATH" XDG_RUNTIME_DIR="$shell_run" QT_QPA_PLATFORM=offscreen ./build/diskanvil-shell --selftest
+    rm -rf "$shell_run"
     # As root: test devices made with losetup and dmsetup.
     run_tests disks sudo ./build/diskanvil-selftest
     # Again as root, where DiskAnvil can open the test drive itself to unpack Windows' compressed files.

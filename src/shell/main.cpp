@@ -21,6 +21,9 @@ int main(int argc, char **argv)
     // Software drawing when there's no graphics driver to draw with (or when it's asked for).
     if (qEnvironmentVariableIsEmpty("QT_QUICK_BACKEND") && (qgetenv("QT_QPA_PLATFORM").startsWith("linuxfb") || qgetenv("QT_QPA_PLATFORM") == "offscreen"))
         qputenv("QT_QUICK_BACKEND", "software");
+    // The platform's own pointer is hidden: the shell draws the one the program under it asks for.
+    qputenv("QT_QPA_FB_HIDECURSOR", "1");
+    qputenv("QT_QPA_EGLFS_HIDECURSOR", "1");
     QGuiApplication app(argc, argv);
     QGuiApplication::setApplicationName(QStringLiteral("diskanvil-shell"));
     // Drawing straight to the screen there's no desktop to say where icon themes are.
@@ -39,6 +42,9 @@ int main(int argc, char **argv)
     engine.loadFromModule("DiskAnvilShell", "Main");
     if (engine.rootObjects().isEmpty())
         return 1;
+    // Where the mouse is, for the pointer the shell draws.
+    for (QQuickWindow *w : engine.rootObjects().first()->findChildren<QQuickWindow *>())
+        w->installEventFilter(new PointerWatch(&shell, w));
 
     // For checking it without a screen: --shot FILE MS saves what's on it, then quits;
     // --selftest uses it with real windows in it.
