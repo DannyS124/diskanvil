@@ -3511,6 +3511,65 @@ void enhanceTools()
     const double before = difference(soft, greyStill), after = difference(refocused, greyStill);
     report(!refocused.isNull() && after < before * 0.85, QStringLiteral("enhance: out-of-focus blur taken out, closer to the sharp picture"),
            QStringLiteral("off by %1 before, %2 after").arg(before, 0, 'f', 1).arg(after, 0, 'f', 1));
+    // A lens out of focus: each point a disc. Taken out with Wiener (one step) and with
+    // Richardson-Lucy told it's a disc, both nearer the sharp picture.
+    QImage disc(sharp.size(), QImage::Format_ARGB32);
+    {
+        const int r = 4;
+        const auto at = [&greyStill](int x, int y) { return qGray(greyStill.pixel(std::clamp(x, 0, greyStill.width() - 1), std::clamp(y, 0, greyStill.height() - 1))); };
+        for (int y = 0; y < sharp.height(); ++y)
+            for (int x = 0; x < sharp.width(); ++x) {
+                double v = 0;
+                int n = 0;
+                for (int j2 = -r; j2 <= r; ++j2)
+                    for (int i2 = -r; i2 <= r; ++i2)
+                        if (i2 * i2 + j2 * j2 <= r * r) {
+                            v += at(x + i2, y + j2);
+                            ++n;
+                        }
+                const int g = qRound(v / n);
+                disc.setPixel(x, y, qRgb(g, g, g));
+            }
+    }
+    enhance::Settings wiener;
+    wiener.focus = 4;
+    wiener.focusDisc = true;
+    wiener.wiener = true;
+    wiener.noise = 20;
+    enhance::Settings rlDisc = wiener;
+    rlDisc.wiener = false;
+    rlDisc.rounds = 25;
+    const double discBefore = difference(disc, greyStill), wienerAfter = difference(enhance::apply(disc, wiener), greyStill),
+                 rlAfter = difference(enhance::apply(disc, rlDisc), greyStill);
+    report(wienerAfter < discBefore * 0.85 && rlAfter < discBefore * 0.9, QStringLiteral("enhance: a lens's out-of-focus disc taken out, by Wiener and by Richardson-Lucy"),
+           QStringLiteral("off by %1 blurred, %2 Wiener, %3 Richardson-Lucy").arg(discBefore, 0, 'f', 1).arg(wienerAfter, 0, 'f', 1).arg(rlAfter, 0, 'f', 1));
+    // Non-local means: grain taken out, the edges kept.
+    {
+        QImage noisy(96, 64, QImage::Format_RGB32);
+        QRandomGenerator grain(9);
+        for (int y = 0; y < 64; ++y)
+            for (int x = 0; x < 96; ++x) {
+                const int v = std::clamp((x < 48 ? 70 : 180) + int(grain.bounded(41)) - 20, 0, 255);
+                noisy.setPixel(x, y, qRgb(v, v, v));
+            }
+        enhance::Settings nlm;
+        nlm.nlm = 60;
+        const QImage clean = enhance::apply(noisy, nlm);
+        const auto spread = [](const QImage &im) {
+            double sum = 0, sq = 0;
+            int n = 0;
+            for (int y = 8; y < 56; ++y)
+                for (int x = 6; x < 40; ++x, ++n) {
+                    const int v = qGray(im.pixel(x, y));
+                    sum += v;
+                    sq += v * v;
+                }
+            return std::sqrt(sq / n - (sum / n) * (sum / n));
+        };
+        const int edge = qGray(clean.pixel(50, 30)) - qGray(clean.pixel(45, 30));
+        report(spread(clean) < spread(noisy) / 2.5 && edge > 90, QStringLiteral("enhance: non-local means takes the grain out, the edge stays"),
+               QStringLiteral("grain %1 to %2, edge %3").arg(spread(noisy), 0, 'f', 1).arg(spread(clean), 0, 'f', 1).arg(edge));
+    }
     // Moved sideways while it was taken: each pixel the average of 9 in a row.
     QImage moved(sharp.size(), QImage::Format_ARGB32);
     for (int y = 0; y < sharp.height(); ++y) {

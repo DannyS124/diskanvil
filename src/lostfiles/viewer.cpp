@@ -738,6 +738,9 @@ public:
         m_sharpen = slider(viewer::tr("Sharpen"), 0, 100, QStringLiteral("sharpen"));
         m_smooth = slider(viewer::tr("Smooth grain"), 0, 100, QStringLiteral("smooth"));
         m_deblock = slider(viewer::tr("JPEG squares"), 0, 100, QStringLiteral("deblock"));
+        m_nlm = slider(viewer::tr("Grain (non-local)"), 0, 100, QStringLiteral("nlm"));
+        m_nlm->setToolTip(viewer::tr("Grain taken out by non-local means: each point from the patches that look like it, so edges and "
+                                     "texture stay (the best of the free ways; slow on a big picture)"));
         m_homomorphic = slider(viewer::tr("Uneven light"), 0, 100, QStringLiteral("homomorphic"));
         m_homomorphic->setToolTip(viewer::tr("The light falling on things turned down and what's lit turned up: a backlit face in a doorway, "
                                              "a street with one bright lamp (a homomorphic filter)"));
@@ -752,6 +755,19 @@ public:
         m_focus->setToolTip(viewer::tr("How blurred it is, in pixels: the blur is taken back out (slow on a big picture)"));
         m_motion->setToolTip(viewer::tr("How far it moved while it was taken, in pixels (or draw along a streak)"));
         m_angle->setToolTip(viewer::tr("Which way it moved: 0 across, 90 up and down"));
+        m_noise = slider(viewer::tr("Grain allowance"), 1, 100, QStringLiteral("noise"));
+        m_noise->setToolTip(viewer::tr("For Wiener: how much grain to allow for. Low is sharpest but grainy; raise it if the picture fills with speckle or rings"));
+        m_noise->setValue(30);
+        m_blurShape = new QComboBox;
+        m_blurShape->setObjectName(QStringLiteral("blurShape"));
+        m_blurShape->addItems({viewer::tr("Out of focus: soft (Gaussian)"), viewer::tr("Out of focus: a lens's disc")});
+        m_blurShape->setToolTip(viewer::tr("A camera's lens out of focus turns each point into a round spot (a disc): the truest shape for it"));
+        m_deblurWay = new QComboBox;
+        m_deblurWay->setObjectName(QStringLiteral("deblurWay"));
+        m_deblurWay->addItems({viewer::tr("Taken out step by step (Richardson-Lucy)"), viewer::tr("Taken out in one go (Wiener)")});
+        m_deblurWay->setToolTip(viewer::tr("Richardson-Lucy is careful and keeps grain down; Wiener handles big blurs best (set its grain allowance)"));
+        form->addRow(QString(), m_blurShape);
+        form->addRow(QString(), m_deblurWay);
         layout->addLayout(form);
         m_measure = new QPushButton(viewer::tr("Draw Along a Streak"));
         m_measure->setCheckable(true);
@@ -791,7 +807,7 @@ public:
         QObject::connect(m_grain, &QComboBox::currentIndexChanged, this, [this] { touched(); });
         for (QCheckBox *box : {m_levels, m_grey, m_invert, m_deinterlace, m_steady, m_fullRange})
             QObject::connect(box, &QCheckBox::toggled, this, [this] { touched(); });
-        for (QComboBox *box : {m_field, m_channel})
+        for (QComboBox *box : {m_field, m_channel, m_blurShape, m_deblurWay})
             QObject::connect(box, &QComboBox::currentIndexChanged, this, [this] { touched(); });
         QObject::connect(m_clipped, &QCheckBox::toggled, this, [this](bool on) { if (showClipped) showClipped(on); });
         // A spot: a box drawn around part of the picture (a face, a number plate), which is then
@@ -892,6 +908,10 @@ public:
         s.denoise = m_grain->isEnabled() ? m_grain->currentIndex() : 0;
         s.smooth = m_smooth->isEnabled() ? m_smooth->value() : 0;
         s.deblock = m_deblock->value();
+        s.nlm = m_nlm->isEnabled() ? m_nlm->value() : 0;
+        s.noise = m_noise->value();
+        s.focusDisc = m_blurShape->currentIndex() == 1;
+        s.wiener = m_deblurWay->currentIndex() == 1;
         s.homomorphic = m_homomorphic->value();
         s.retinex = m_retinex->value();
         s.fullRange = m_fullRange->isChecked();
@@ -922,6 +942,10 @@ public:
         m_invert->setChecked(s.invert);
         m_smooth->setValue(s.smooth);
         m_deblock->setValue(s.deblock);
+        m_nlm->setValue(s.nlm);
+        m_noise->setValue(std::clamp(s.noise, 1, 100));
+        m_blurShape->setCurrentIndex(s.focusDisc ? 1 : 0);
+        m_deblurWay->setCurrentIndex(s.wiener ? 1 : 0);
         m_homomorphic->setValue(s.homomorphic);
         m_retinex->setValue(s.retinex);
         m_fullRange->setChecked(s.fullRange);
@@ -992,6 +1016,9 @@ public:
             box->setChecked(false);
         m_field->setCurrentIndex(0);
         m_channel->setCurrentIndex(0);
+        m_blurShape->setCurrentIndex(0);
+        m_deblurWay->setCurrentIndex(0);
+        m_noise->setValue(30);
         m_bigger->setCurrentIndex(0);
         m_measure->setChecked(false);
         m_quiet = false;
@@ -1023,7 +1050,8 @@ public:
     {
         for (QWidget *w : {static_cast<QWidget *>(m_focus), static_cast<QWidget *>(m_motion), static_cast<QWidget *>(m_angle),
                            static_cast<QWidget *>(m_grain), static_cast<QWidget *>(m_measure), static_cast<QWidget *>(m_bigger),
-                           static_cast<QWidget *>(m_smooth), static_cast<QWidget *>(m_straighten)})
+                           static_cast<QWidget *>(m_smooth), static_cast<QWidget *>(m_straighten), static_cast<QWidget *>(m_nlm),
+                           static_cast<QWidget *>(m_noise), static_cast<QWidget *>(m_blurShape), static_cast<QWidget *>(m_deblurWay)})
             w->setEnabled(!film);
         m_steady->setVisible(film);
         m_save->setText(film ? viewer::tr("Save This Frame…") : viewer::tr("Save as a New Picture…"));
@@ -1165,7 +1193,8 @@ private:
     QAction *m_saveProfile, *m_removeProfile, *m_importProfile, *m_exportProfile;
     QVector<enhance::Profile> m_builtIn, m_saved;
     QPushButton *m_pick, *m_whole, *m_straighten, *m_stack;
-    QSlider *m_local, *m_smooth, *m_deblock, *m_homomorphic, *m_retinex;
+    QSlider *m_local, *m_smooth, *m_deblock, *m_homomorphic, *m_retinex, *m_nlm, *m_noise;
+    QComboBox *m_blurShape, *m_deblurWay;
     QCheckBox *m_fullRange, *m_clipped;
     QComboBox *m_field, *m_channel, *m_stackHow;
     QCheckBox *m_deinterlace, *m_steady, *m_stackDouble;

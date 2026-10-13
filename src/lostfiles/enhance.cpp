@@ -16,6 +16,7 @@
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <complex>
 #include <numbers>
 #include <thread>
 #include <vector>
@@ -175,7 +176,7 @@ Plane median(const Plane &in, int radius)
 
 bool Settings::isDefault() const
 {
-    return !fullRange && field == 0 && homomorphic == 0 && retinex == 0 && channel == AllColour && deblock == 0 && brightness == 0 && contrast == 0 && shadows == 0 && !autoLevels && denoise == 0 && smooth == 0 && localContrast == 0 && !deinterlace
+    return nlm == 0 && !fullRange && field == 0 && homomorphic == 0 && retinex == 0 && channel == AllColour && deblock == 0 && brightness == 0 && contrast == 0 && shadows == 0 && !autoLevels && denoise == 0 && smooth == 0 && localContrast == 0 && !deinterlace
         && sharpen == 0 && focus == 0 && motion == 0 && !grey && !invert;
 }
 
@@ -194,10 +195,13 @@ QStringList Settings::describe() const
         out << tr("grain smoothed with the edges kept (%1%)").arg(smooth);
     if (denoise > 0)
         out << tr("grain smoothed (%1)").arg(denoise);
+    if (nlm > 0)
+        out << tr("grain taken out by non-local means (%1%)").arg(nlm);
+    const QString how = wiener ? tr("Wiener, grain allowance %1").arg(noise) : tr("Richardson-Lucy, %1 rounds").arg(rounds);
     if (focus > 0)
-        out << tr("out-of-focus blur of %1 px taken out (%2 rounds)").arg(focus).arg(rounds);
+        out << tr("out-of-focus blur of %1 px (%2) taken out (%3)").arg(focus).arg(focusDisc ? tr("a lens's disc") : tr("Gaussian")).arg(how);
     if (motion > 0)
-        out << tr("movement blur of %1 px at %2° taken out (%3 rounds)").arg(motion).arg(motionAngle).arg(rounds);
+        out << tr("movement blur of %1 px at %2° taken out (%3)").arg(motion).arg(motionAngle).arg(how);
     if (sharpen > 0)
         out << tr("sharpened %1%").arg(sharpen);
     if (homomorphic > 0)
@@ -306,6 +310,274 @@ Plane retinexFilter(const Plane &light)
     for (float &v : sum.v)
         v = std::clamp((v - bottom) / std::max(top - bottom, 1e-4f), 0.0f, 1.0f);
     return sum;
+}
+
+// A Fourier transform of our own (radix 2), in place, for convolving with any blur and
+// taking it back out (Wiener).
+using Complex = std::complex<float>;
+void fft(std::vector<Complex> &a, bool inverse)
+{
+    const size_t n = a.size();
+    for (size_t i = 1, j = 0; i < n; ++i) {
+        size_t bit = n >> 1;
+        for (; j & bit; bit >>= 1)
+            j ^= bit;
+        j ^= bit;
+        if (i < j)
+            std::swap(a[i], a[j]);
+    }
+    for (size_t len = 2; len <= n; len <<= 1) {
+        const double angle = 2 * std::numbers::pi / double(len) * (inverse ? 1 : -1);
+        const Complex step(float(std::cos(angle)), float(std::sin(angle)));
+        for (size_t i = 0; i < n; i += len) {
+            Complex w(1);
+            for (size_t k = 0; k < len / 2; ++k) {
+                const Complex u = a[i + k], v = a[i + k + len / 2] * w;
+                a[i + k] = u + v;
+                a[i + k + len / 2] = u - v;
+                w *= step;
+            }
+        }
+    }
+    if (inverse)
+        for (Complex &x : a)
+            x /= float(n);
+}
+
+// A grid of complex numbers, W by H (powers of two), turned in both directions.
+struct Spectrum {
+    int w = 0, h = 0;
+    std::vector<Complex> v;
+    void transform(bool inverse)
+    {
+        rows(h, [&](int y0, int y1) {
+            std::vector<Complex> line(static_cast<size_t>(w));
+            for (int y = y0; y < y1; ++y) {
+                std::copy_n(v.begin() + std::ptrdiff_t(size_t(y) * size_t(w)), w, line.begin());
+                fft(line, inverse);
+                std::copy_n(line.begin(), w, v.begin() + std::ptrdiff_t(size_t(y) * size_t(w)));
+            }
+        });
+        rows(w, [&](int x0, int x1) {
+            std::vector<Complex> column(static_cast<size_t>(h));
+            for (int x = x0; x < x1; ++x) {
+                for (int y = 0; y < h; ++y)
+                    column[size_t(y)] = v[size_t(y) * size_t(w) + size_t(x)];
+                fft(column, inverse);
+                for (int y = 0; y < h; ++y)
+                    v[size_t(y) * size_t(w) + size_t(x)] = column[size_t(y)];
+            }
+        });
+    }
+};
+
+int powerOfTwo(int n)
+{
+    int p = 1;
+    while (p < n)
+        p <<= 1;
+    return p;
+}
+
+// The picture on a grid big enough for its blur, its edges mirrored outwards (so the transform,
+// which wraps round, doesn't see a hard edge and ring), and the blur's own spectrum, its middle at 0,0.
+Spectrum padded(const Plane &p, int margin, int W, int H)
+{
+    Spectrum s{W, H, std::vector<Complex>(size_t(W) * size_t(H))};
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < W; ++x) {
+            int sx = x - margin, sy = y - margin;
+            // Mirrored past each edge, and mirrored back where the grid wraps round.
+            if (sx >= p.w + (W - p.w - margin) / 2) sx -= W;
+            if (sy >= p.h + (H - p.h - margin) / 2) sy -= H;
+            sx = sx < 0 ? -sx - 1 : sx >= p.w ? 2 * p.w - sx - 1 : sx;
+            sy = sy < 0 ? -sy - 1 : sy >= p.h ? 2 * p.h - sy - 1 : sy;
+            s.v[size_t(y) * size_t(W) + size_t(x)] = p.at(sx, sy);
+        }
+    return s;
+}
+
+Spectrum kernelSpectrum(const std::vector<float> &kernel, int size, int W, int H)
+{
+    Spectrum k{W, H, std::vector<Complex>(size_t(W) * size_t(H))};
+    const int r = size / 2;
+    for (int j = 0; j < size; ++j)
+        for (int i = 0; i < size; ++i) {
+            const float v = kernel[size_t(j * size + i)];
+            if (v != 0)
+                k.v[size_t((j - r + H) % H) * size_t(W) + size_t((i - r + W) % W)] = v;
+        }
+    k.transform(false);
+    return k;
+}
+
+// The blur as a picture of what one point becomes: a disc (a lens out of focus), a Gaussian, or
+// a line (it moved), summing to 1. `size` is its width and height.
+std::vector<float> discKernel(double radius, int *size)
+{
+    const int r = int(std::ceil(radius)) + 1;
+    *size = 2 * r + 1;
+    std::vector<float> k(size_t(*size) * size_t(*size));
+    double sum = 0;
+    for (int y = -r; y <= r; ++y)
+        for (int x = -r; x <= r; ++x) {
+            // Its edge anti-aliased: how much of each pixel the disc covers, roughly.
+            const double d = std::hypot(x, y);
+            const double v = std::clamp(radius + 0.5 - d, 0.0, 1.0);
+            k[size_t((y + r) * *size + x + r)] = float(v);
+            sum += v;
+        }
+    for (float &v : k)
+        v = float(v / sum);
+    return k;
+}
+
+std::vector<float> gaussianKernel2D(double sigma, int *size)
+{
+    const int r = std::max(1, int(std::ceil(sigma * 3)));
+    *size = 2 * r + 1;
+    std::vector<float> k(size_t(*size) * size_t(*size));
+    double sum = 0;
+    for (int y = -r; y <= r; ++y)
+        for (int x = -r; x <= r; ++x) {
+            const double v = std::exp(-(x * x + y * y) / (2 * sigma * sigma));
+            k[size_t((y + r) * *size + x + r)] = float(v);
+            sum += v;
+        }
+    for (float &v : k)
+        v = float(v / sum);
+    return k;
+}
+
+std::vector<float> lineKernel(int length, int angle, int *size)
+{
+    const int r = length / 2 + 1;
+    *size = 2 * r + 1;
+    std::vector<float> k(size_t(*size) * size_t(*size));
+    const double a = angle * std::numbers::pi / 180, dx = std::cos(a), dy = -std::sin(a);
+    double sum = 0;
+    for (int i = 0; i < length * 4; ++i) {
+        const double t = (i / 4.0) - (length - 1) / 2.0;
+        const double fx = t * dx + r, fy = t * dy + r;
+        const int ix = int(std::floor(fx)), iy = int(std::floor(fy));
+        const double tx = fx - ix, ty = fy - iy;
+        const auto add = [&](int x, int y, double v) {
+            if (x >= 0 && y >= 0 && x < *size && y < *size) {
+                k[size_t(y * *size + x)] += float(v);
+                sum += v;
+            }
+        };
+        add(ix, iy, (1 - tx) * (1 - ty)); add(ix + 1, iy, tx * (1 - ty)); add(ix, iy + 1, (1 - tx) * ty); add(ix + 1, iy + 1, tx * ty);
+    }
+    for (float &v : k)
+        v = float(v / sum);
+    return k;
+}
+
+// Wiener deconvolution: the picture that, blurred by the kernel, gives this one, with `noise`
+// (the noise-to-signal ratio) keeping the grain from being blown up where the blur took
+// everything away.
+Plane wienerDeblur(const Plane &in, const std::vector<float> &kernel, int size, float noise)
+{
+    const int margin = size + 8;
+    const int W = powerOfTwo(in.w + 2 * margin), H = powerOfTwo(in.h + 2 * margin);
+    Spectrum pic = padded(in, margin, W, H);
+    pic.transform(false);
+    const Spectrum k = kernelSpectrum(kernel, size, W, H);
+    for (size_t i = 0; i < pic.v.size(); ++i) {
+        const Complex h = k.v[i];
+        pic.v[i] = pic.v[i] * std::conj(h) / (std::norm(h) + noise);
+    }
+    pic.transform(true);
+    Plane out{in.w, in.h, std::vector<float>(in.v.size())};
+    for (int y = 0; y < in.h; ++y)
+        for (int x = 0; x < in.w; ++x)
+            out(x, y) = pic.v[size_t(y + margin) * size_t(W) + size_t(x + margin)].real();
+    return out;
+}
+
+// Blurring by any kernel (for Richardson-Lucy with a disc), through the transform.
+Plane convolve(const Plane &in, const std::vector<float> &kernel, int size)
+{
+    const int margin = size + 8;
+    const int W = powerOfTwo(in.w + 2 * margin), H = powerOfTwo(in.h + 2 * margin);
+    Spectrum pic = padded(in, margin, W, H);
+    pic.transform(false);
+    const Spectrum k = kernelSpectrum(kernel, size, W, H);
+    for (size_t i = 0; i < pic.v.size(); ++i)
+        pic.v[i] *= k.v[i];
+    pic.transform(true);
+    Plane out{in.w, in.h, std::vector<float>(in.v.size())};
+    for (int y = 0; y < in.h; ++y)
+        for (int x = 0; x < in.w; ++x)
+            out(x, y) = pic.v[size_t(y + margin) * size_t(W) + size_t(x + margin)].real();
+    return out;
+}
+
+// Non-local means (Buades, Coll and Morel): each point the average of points around it whose
+// little patches look like its own, weighted by how alike; grain, different in each, averages
+// out, while edges and texture, alike in their patches, stay. Patches are compared on the
+// brightness, and the same weights used for each colour.
+void nonLocalMeans(std::array<Plane, 3> &c, const Plane &light, int strength)
+{
+    constexpr int reach = 6, patch = 2;
+    // How grainy it is (the spread of what's left after a little blur), so the strength means
+    // the same on every picture.
+    const Plane soft = gaussian(light, 1.0);
+    std::vector<float> rest(light.v.size());
+    for (size_t i = 0; i < rest.size(); ++i)
+        rest[i] = std::abs(light.v[i] - soft.v[i]);
+    std::nth_element(rest.begin(), rest.begin() + std::ptrdiff_t(rest.size() / 2), rest.end());
+    const float sigma = std::max(0.004f, rest[rest.size() / 2] * 1.4826f * 1.6f);
+    const float h = sigma * (0.4f + strength / 100.0f * 1.4f);
+    const float h2 = h * h * float((2 * patch + 1) * (2 * patch + 1));
+    const int w = light.w, H = light.h;
+    std::array<Plane, 3> sum = {Plane{w, H, std::vector<float>(light.v.size(), 0)}, Plane{w, H, std::vector<float>(light.v.size(), 0)},
+                                Plane{w, H, std::vector<float>(light.v.size(), 0)}};
+    std::vector<float> total(light.v.size(), 0);
+    // One offset at a time: its patch distances for every point from a running box sum.
+    std::vector<float> diff(light.v.size()), box(light.v.size());
+    for (int dy = -reach; dy <= reach; ++dy) {
+        for (int dx = -reach; dx <= reach; ++dx) {
+            for (int y = 0; y < H; ++y)
+                for (int x = 0; x < w; ++x) {
+                    const float d = light.at(x, y) - light.at(x + dx, y + dy);
+                    diff[size_t(y) * size_t(w) + size_t(x)] = d * d;
+                }
+            // Box sum across, then down.
+            rows(H, [&](int y0, int y1) {
+                for (int y = y0; y < y1; ++y) {
+                    float run = 0;
+                    for (int x = -patch; x <= patch; ++x)
+                        run += diff[size_t(y) * size_t(w) + size_t(std::clamp(x, 0, w - 1))];
+                    for (int x = 0; x < w; ++x) {
+                        box[size_t(y) * size_t(w) + size_t(x)] = run;
+                        run += diff[size_t(y) * size_t(w) + size_t(std::clamp(x + patch + 1, 0, w - 1))]
+                             - diff[size_t(y) * size_t(w) + size_t(std::clamp(x - patch, 0, w - 1))];
+                    }
+                }
+            });
+            rows(w, [&](int x0, int x1) {
+                for (int x = x0; x < x1; ++x) {
+                    float run = 0;
+                    for (int y = -patch; y <= patch; ++y)
+                        run += box[size_t(std::clamp(y, 0, H - 1)) * size_t(w) + size_t(x)];
+                    for (int y = 0; y < H; ++y) {
+                        const float wgt = std::exp(-std::max(0.0f, run - 2 * sigma * sigma * float((2 * patch + 1) * (2 * patch + 1))) / h2);
+                        const size_t i = size_t(y) * size_t(w) + size_t(x);
+                        for (int k = 0; k < 3; ++k)
+                            sum[size_t(k)].v[i] += wgt * c[size_t(k)].at(x + dx, y + dy);
+                        total[i] += wgt;
+                        run += box[size_t(std::clamp(y + patch + 1, 0, H - 1)) * size_t(w) + size_t(x)]
+                             - box[size_t(std::clamp(y - patch, 0, H - 1)) * size_t(w) + size_t(x)];
+                    }
+                }
+            });
+        }
+    }
+    for (size_t i = 0; i < total.size(); ++i)
+        for (int k = 0; k < 3; ++k)
+            c[size_t(k)].v[i] = sum[size_t(k)].v[i] / std::max(total[i], 1e-6f);
 }
 
 // JPEG squeezes a picture in 8 by 8 squares; squeezed hard, their edges show. Where the step
@@ -534,7 +806,9 @@ QByteArray profileToFile(const Profile &p)
                          {QStringLiteral("steady"), s.steady},         {QStringLiteral("deblock"), s.deblock},
                          {QStringLiteral("homomorphic"), s.homomorphic}, {QStringLiteral("retinex"), s.retinex},
                          {QStringLiteral("channel"), s.channel},       {QStringLiteral("field"), s.field},
-                         {QStringLiteral("fullRange"), s.fullRange}};
+                         {QStringLiteral("fullRange"), s.fullRange},   {QStringLiteral("nlm"), s.nlm},
+                         {QStringLiteral("noise"), s.noise},           {QStringLiteral("focusDisc"), s.focusDisc},
+                         {QStringLiteral("wiener"), s.wiener}};
     QJsonObject o{{QStringLiteral("diskanvil-enhance-profile"), 1}, {QStringLiteral("name"), p.name}, {QStringLiteral("settings"), settings}};
     if (!p.description.isEmpty())
         o.insert(QStringLiteral("description"), p.description);
@@ -593,6 +867,10 @@ bool profileFromFile(const QByteArray &file, Profile *p, QString *why)
     s.channel = number("channel", 0, Settings::MostContrast);
     s.field = number("field", 0, 2);
     s.fullRange = j.value(QStringLiteral("fullRange")).toBool();
+    s.nlm = number("nlm", 0, 100);
+    s.noise = std::max(1, number("noise", 0, 100));
+    s.focusDisc = j.value(QStringLiteral("focusDisc")).toBool();
+    s.wiener = j.value(QStringLiteral("wiener")).toBool();
     s.localContrast = number("localContrast", 0, 100);
     s.deinterlace = j.value(QStringLiteral("deinterlace")).toBool();
     s.steady = j.value(QStringLiteral("steady")).toBool();
@@ -724,6 +1002,11 @@ QImage apply(const QImage &in, const Settings &s, const std::function<bool(int p
         if (step(10))
             return {};
     }
+    if (s.nlm > 0) {
+        nonLocalMeans(c, lightOf(c), std::clamp(s.nlm, 0, 100));
+        if (step(14))
+            return {};
+    }
     if (s.smooth > 0) {
         bilateral(c, lightOf(c), std::clamp(s.smooth, 0, 100));
         if (step(15))
@@ -734,15 +1017,30 @@ QImage apply(const QImage &in, const Settings &s, const std::function<bool(int p
         const Plane y = lightOf(c);
         Plane sharp = y;
         const int rounds = std::clamp(s.rounds, 1, 60);
+        // Wiener's allowance for grain: 1 is almost none (sharpest, grainiest), 100 a lot.
+        const float noise = float(std::pow(10.0, -4.0 + std::clamp(s.noise, 1, 100) / 100.0 * 3.0));
         if (s.focus > 0) {
-            const double sigma = std::clamp(s.focus, 1, 15) / 2.0;
-            sharp = deblur(sharp, [sigma](const Plane &p) { return gaussian(p, sigma); }, rounds, [&] { return step(20); });
+            int size = 0;
+            const std::vector<float> kernel = s.focusDisc ? discKernel(std::clamp(s.focus, 1, 15), &size) : gaussianKernel2D(std::clamp(s.focus, 1, 15) / 2.0, &size);
+            if (s.wiener)
+                sharp = wienerDeblur(sharp, kernel, size, noise);
+            else if (s.focusDisc)
+                sharp = deblur(sharp, [&kernel, size](const Plane &p) { return convolve(p, kernel, size); }, rounds, [&] { return step(20); });
+            else {
+                const double sigma = std::clamp(s.focus, 1, 15) / 2.0;
+                sharp = deblur(sharp, [sigma](const Plane &p) { return gaussian(p, sigma); }, rounds, [&] { return step(20); });
+            }
             if (stopped)
                 return {};
         }
         if (s.motion > 0) {
             const int length = std::clamp(s.motion, 2, 60), angle = s.motionAngle;
-            sharp = deblur(sharp, [length, angle](const Plane &p) { return motionBlur(p, length, angle); }, rounds, [&] { return step(40); });
+            if (s.wiener) {
+                int size = 0;
+                sharp = wienerDeblur(sharp, lineKernel(length, angle, &size), size, noise);
+            } else {
+                sharp = deblur(sharp, [length, angle](const Plane &p) { return motionBlur(p, length, angle); }, rounds, [&] { return step(40); });
+            }
             if (stopped)
                 return {};
         }

@@ -44,6 +44,14 @@ struct Settings {
     int motion = 0;     // 0 off, else how far it moved while it was taken, in pixels (2 to 60)
     int motionAngle = 0; // which way it moved: degrees, 0 left to right, 90 up and down
     int rounds = 15;     // how hard the blur is taken out (Richardson-Lucy's iterations)
+    // How an out-of-focus blur is shaped: soft (a Gaussian) or a lens out of focus (a disc, the
+    // way a camera's lens really blurs: a point becomes a round spot).
+    bool focusDisc = false;
+    // How blur is taken out: Richardson-Lucy, a step at a time (careful, keeps grain down), or
+    // Wiener (one step, best on big blurs); `noise` is how much grain the Wiener step allows for.
+    bool wiener = false;
+    int noise = 30;           // 1 to 100
+    int nlm = 0;              // 0 to 100: grain taken out by non-local means (each point from the patches like it)
     bool grey = false;
     bool invert = false;
     bool isDefault() const;
