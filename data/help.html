@@ -117,6 +117,12 @@ to Start) reads the copy's file systems (FAT, exFAT and NTFS) and lists each fil
 how much of each is missing; everything else came off whole. The list can be saved next to the copy. Deleted FAT files
 whose pieces are a guess, and files Windows keeps compressed, are marked. ext4 and other file systems can't be listed
 yet: it says so.</p>
+<p><b>"Target is busy": it won't unmount.</b> Something has a file or folder open on it. The error offers Who's Using
+It? (also on a mounted partition's right-click menu): the programs with something open there, and what (a terminal
+sitting in a folder on it counts), plus a disk image on it that's attached or a drive mounted inside it. Close It asks
+a program to close, so it can save; Stop It stops it at once; Try Again unmounts it. Other users' and the system's
+programs need the admin password to be seen (Look as Admin). Linux and DiskAnvil Live; the Windows version locks the
+drive instead, so it doesn't need this.</p>
 <p><b>Copy a whole drive:</b> right-click the drive, Clone Drive, for example to move to a bigger SSD. Empty
 space isn't copied, and on a bigger drive the last partition can grow into the extra space. Pick "replaces the old
 drive" if the old one is going away (it's an exact copy), or "keep using both" so the copy gets its own IDs. You

@@ -165,6 +165,8 @@ private:
     QAction *m_checkStick = nullptr;
     QAction *m_writeProtected = nullptr;
     QAction *m_whyCrash = nullptr;
+    QAction *m_whoUses = nullptr;
+    QString m_busyPath; // an unmount refused as busy: its file system, for Who's Using It?
     QAction *m_clone = nullptr;
     QAction *m_newIds = nullptr;
     QAction *m_backup = nullptr;

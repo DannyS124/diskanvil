@@ -7,16 +7,19 @@
 
 #include "testkit.h"
 
+#include "../src/drives/holders.h"
 #include "../src/drives/writeprotect.h"
 #include "../src/usb/stickcheck.h"
 
 #include <QDir>
 #include <QFile>
+#include <QProcess>
 #include <QRandomGenerator>
 #include <QTemporaryDir>
 
 #include <algorithm>
 #include <cstring>
+#include <unistd.h>
 
 namespace {
 
@@ -228,10 +231,74 @@ void writeProtectTests()
     report(askDrive(-1) == -1, QStringLiteral("write-protected: no drive to ask: not known, not guessed"));
 }
 
+void holderTests()
+{
+    // A pretend /proc: a shell sitting in a folder on the stick, a player with a film on it open,
+    // a program with a library from it loaded, and one with nothing there.
+    QTemporaryDir dir;
+    const QString proc = dir.path() + QStringLiteral("/proc"), sys = dir.path() + QStringLiteral("/sys");
+    const QString stick = QStringLiteral("/media/me/MY STICK");
+    const auto process = [&](int pid, const QString &comm, const QString &cwd, const QStringList &fds, const QString &maps) {
+        const QString p = proc + QLatin1Char('/') + QString::number(pid);
+        QDir().mkpath(p + QStringLiteral("/fd"));
+        QFile::link(cwd, p + QStringLiteral("/cwd"));
+        QFile::link(QStringLiteral("/"), p + QStringLiteral("/root"));
+        QFile::link(QStringLiteral("/usr/bin/") + comm, p + QStringLiteral("/exe"));
+        for (int i = 0; i < fds.size(); ++i)
+            QFile::link(fds[i], p + QStringLiteral("/fd/%1").arg(i + 3));
+        const auto write = [](const QString &path, const QByteArray &text) {
+            QFile f(path);
+            return f.open(QIODevice::WriteOnly) && f.write(text) == text.size();
+        };
+        write(p + QStringLiteral("/comm"), comm.toUtf8() + '\n');
+        write(p + QStringLiteral("/cmdline"), comm.toUtf8() + QByteArray("\0--x\0", 5));
+        write(p + QStringLiteral("/status"), "Name:\t" + comm.toUtf8() + "\nUid:\t" + QByteArray::number(::geteuid()) + "\t0\t0\t0\n");
+        write(p + QStringLiteral("/maps"), maps.toUtf8());
+    };
+    process(101, QStringLiteral("bash"), stick + QStringLiteral("/Photos"), {QStringLiteral("/dev/pts/0")}, QString());
+    process(102, QStringLiteral("vlc"), QStringLiteral("/home/me"), {stick + QStringLiteral("/clip.mp4"), QStringLiteral("/dev/null")}, QString());
+    process(103, QStringLiteral("game"), QStringLiteral("/home/me"), {}, QStringLiteral("7f00-7f10 r-xp 0 08:11 12 ") + stick + QStringLiteral("/lib/x.so\n"));
+    process(104, QStringLiteral("other"), QStringLiteral("/home/me"), {QStringLiteral("/home/me/a.txt")}, QString());
+    process(105, QStringLiteral("dd"), QStringLiteral("/home/me"), {QStringLiteral("/dev/sdz1")}, QString());
+    QDir().mkpath(sys + QStringLiteral("/block/loop3/loop"));
+    {
+        QFile f(sys + QStringLiteral("/block/loop3/loop/backing_file"));
+        if (f.open(QIODevice::WriteOnly))
+            f.write((stick + QStringLiteral("/disk.img\n")).toUtf8());
+        QFile m(dir.path() + QStringLiteral("/mountinfo"));
+        if (m.open(QIODevice::WriteOnly))
+            m.write("30 1 8:1 / /media/me/MY\\040STICK rw - vfat /dev/sdz1 rw\n40 30 7:3 / /media/me/MY\\040STICK/inner rw - ext4 /dev/loop3 rw\n");
+    }
+    const holders::Report r = holders::find({stick}, {QStringLiteral("/dev/sdz1")}, proc, dir.path() + QStringLiteral("/mountinfo"), sys);
+    QStringList found;
+    for (const holders::Holder &h : r.programs)
+        found << h.program;
+    found.sort();
+    report(found == QStringList({QStringLiteral("bash"), QStringLiteral("dd"), QStringLiteral("game"), QStringLiteral("vlc")}),
+           QStringLiteral("who's using it: a folder, a file, a loaded library and the drive itself are found; nothing else"), found.join(QLatin1Char(' ')));
+    report(r.others.size() == 2 && r.others.join(QLatin1Char(' ')).contains(QLatin1String("disk.img")) && r.others.join(QLatin1Char(' ')).contains(QLatin1String("/inner")),
+           QStringLiteral("who's using it: an attached disk image on it and a drive mounted inside it"), r.others.join(QLatin1String(" | ")));
+    const holders::Report back = holders::fromLines(holders::toLines(r));
+    report(back.programs.size() == r.programs.size() && back.others == r.others && back.programs.value(0).what == r.programs.value(0).what,
+           QStringLiteral("who's using it: what the admin helper prints comes back the same"));
+    // A real program, sitting in a folder taken as a mount point.
+    QTemporaryDir mount;
+    QProcess sleeper;
+    sleeper.setWorkingDirectory(mount.path());
+    sleeper.start(QStringLiteral("sleep"), {QStringLiteral("30")});
+    sleeper.waitForStarted();
+    const holders::Report live = holders::find({mount.path()}, {});
+    const bool seen = std::any_of(live.programs.cbegin(), live.programs.cend(), [&](const holders::Holder &h) { return h.pid == sleeper.processId() && h.mine; });
+    sleeper.kill();
+    sleeper.waitForFinished();
+    report(seen, QStringLiteral("who's using it: a real program in a folder on it is found in /proc"));
+}
+
 } // namespace
 
 void stickCheckTests()
 {
+    holderTests();
     using stickcheck::Mode;
     const Mode modes[] = {Mode::Quick, Mode::Full, Mode::FullTwice};
 

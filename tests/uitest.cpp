@@ -19,6 +19,7 @@
 #include "../src/tools/writeprotectdialog.h"
 #include "../src/lostfiles/hitfilesdialog.h"
 #include "../src/viruses/whycrashdialog.h"
+#include "../src/tools/holdersdialog.h"
 #include "../src/lostfiles/lostscan.h"
 #include "../src/lostfiles/viewerhost.h"
 #include "../src/usb/liveonpc.h"
@@ -5205,6 +5206,44 @@ void filmTools()
 
 // Files, DiskAnvil Live's file window: copying, a second copy kept beside the first, moving,
 // deleting, and a folder that can't be changed.
+void holdersWindow()
+{
+    // A real program sitting in a folder taken as the drive's mount point.
+    QTemporaryDir mount;
+    QProcess sleeper;
+    sleeper.setWorkingDirectory(mount.path());
+    sleeper.start(QStringLiteral("sleep"), {QStringLiteral("60")});
+    sleeper.waitForStarted();
+    UDisks udisks;
+    Volume v;
+    v.device = QStringLiteral("/dev/sdz1");
+    v.label = QStringLiteral("STICK");
+    v.mountPoints << mount.path();
+    HoldersDialog dialog(&udisks, v);
+    QVector<QPair<qint64, int>> sent;
+    dialog.sendSignal = [&sent](qint64 pid, int signal) {
+        sent << qMakePair(pid, signal);
+        return true;
+    };
+    dialog.show();
+    QCoreApplication::processEvents();
+    auto *list = dialog.findChild<QTreeWidget *>(QStringLiteral("holders"));
+    QTreeWidgetItem *it = nullptr;
+    for (int i = 0; list && i < list->topLevelItemCount(); ++i)
+        if (list->topLevelItem(i)->text(1) == QString::number(sleeper.processId()))
+            it = list->topLevelItem(i);
+    report(it && it->text(0) == QLatin1String("sleep") && it->text(3).contains(mount.path()), QStringLiteral("who's using it: the program in a folder on it is listed, with where"));
+    if (it) {
+        list->setCurrentItem(it);
+        dialog.findChild<QPushButton *>(QStringLiteral("closeIt"))->click();
+    }
+    report(sent.size() == 1 && sent[0].first == sleeper.processId() && sent[0].second == 15, QStringLiteral("who's using it: Close It asks it to close (TERM)"));
+    sleeper.kill();
+    sleeper.waitForFinished();
+    if (qEnvironmentVariableIsSet("DISKANVIL_SHOTS"))
+        dialog.grab().save(qEnvironmentVariable("DISKANVIL_SHOTS") + QStringLiteral("/holders.png"));
+}
+
 void whyCrashWindow()
 {
     whycrash::Report r;
@@ -7131,7 +7170,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"lookcloser", lookCloserWindow}, {"files", filesWindow}, {"writeprotected", writeProtectedWindow}, {"hitfiles", hitFilesWindow}, {"whycrash", whyCrashWindow}, {"enhance", enhanceWindow}, {"film", filmTools}, {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"lookcloser", lookCloserWindow}, {"files", filesWindow}, {"writeprotected", writeProtectedWindow}, {"hitfiles", hitFilesWindow}, {"whycrash", whyCrashWindow}, {"holders", holdersWindow}, {"enhance", enhanceWindow}, {"film", filmTools}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},

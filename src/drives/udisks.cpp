@@ -629,6 +629,10 @@ void UDisks::callThen(const QString &path, const QString &interface, const QStri
             if (failed)
                 failed();
         } else if (w->isError()) {
+            // A drive that won't unmount because something has it open: Who's Using It? can say what.
+            if (method == QLatin1String("Unmount")
+                && (w->error().name() == QLatin1String("org.freedesktop.UDisks2.Error.DeviceBusy") || w->error().message().contains(QLatin1String("busy"))))
+                emit busy(path);
             QString text = failure + QStringLiteral(": ") + w->error().message();
             if (const QString more = explain ? explain(w->error().message()) : QString(); !more.isEmpty())
                 text += QStringLiteral("\n\n") + more;

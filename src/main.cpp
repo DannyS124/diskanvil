@@ -10,6 +10,7 @@
 #include "translations.h"
 #include "udisks.h"
 #include "viewer.h"
+#include "holders.h"
 #include "writeprotect.h"
 
 #include <QApplication>
@@ -64,6 +65,14 @@ void dump(const QVector<Disk> &disks)
 
 int main(int argc, char *argv[])
 {
+    // Who's Using It? looking at other users' programs, as root.
+    if (argc >= 3 && QByteArray(argv[1]) == holders::kOption) {
+        QStringList devices;
+        for (int i = 3; i < argc; ++i)
+            devices << QString::fromLocal8Bit(argv[i]);
+        std::printf("%s\n", holders::toLines(holders::find({QString::fromLocal8Bit(argv[2])}, devices)).toLocal8Bit().constData());
+        return 0;
+    }
     // Write-Protected Drive asking a drive whether it's write-protected, as root on DiskAnvil Live.
     if (argc == 3 && QByteArray(argv[1]) == writeprotect::kAskOption) {
         std::printf("%d\n", writeprotect::askDevice(QString::fromLocal8Bit(argv[2])));

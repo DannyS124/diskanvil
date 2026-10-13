@@ -16,6 +16,7 @@
 #include "certificates.h"
 #include "closedsets.h"
 #include "writeblock.h"
+#include "holdersdialog.h"
 #include "whycrashdialog.h"
 #include "writeprotectdialog.h"
 #include "remotehelpdialog.h"
@@ -215,11 +216,27 @@ MainWindow::MainWindow(UDisks *udisks, QWidget *parent)
             statusBar()->showMessage(message, 8000);
         } else if (m_udisks->wasStopped()) {
             statusBar()->showMessage(message, 15000); // stopped on purpose: not an error
+        } else if (!m_busyPath.isEmpty()) {
+            // In use: offer to show what has it open.
+            const QString path = std::exchange(m_busyPath, QString());
+            statusBar()->clearMessage();
+            QMessageBox box(QMessageBox::Warning, windowTitle(), message, QMessageBox::Close, this);
+            QAbstractButton *who = box.addButton(tr("Who's Using It?"), QMessageBox::ActionRole);
+            box.exec();
+            if (box.clickedButton() == who) {
+                for (const Disk &d : m_udisks->disks())
+                    for (const Volume &v : d.volumes)
+                        if (v.filesystemPath() == path || v.objectPath == path) {
+                            HoldersDialog(m_udisks, v, this).exec();
+                            return;
+                        }
+            }
         } else {
             statusBar()->clearMessage();
             QMessageBox::warning(this, windowTitle(), message);
         }
     });
+    connect(m_udisks, &UDisks::busy, this, [this](const QString &path) { m_busyPath = path; });
     // A finished erasure is kept, for its certificate, and a bar offers one now.
     connect(m_udisks, &UDisks::erased, this, [this](const erasure::Record &record) {
         erasure::remember(record);
@@ -326,6 +343,14 @@ void MainWindow::createActions()
             statusBar()->showMessage(tr("Mounting %1…").arg(shortDevice(v->device)));
             m_udisks->mount(*v);
         }
+    });
+
+    m_whoUses = new QAction(themeIcon("system-search", "edit-find"), tr("Who's &Using It?…"), this);
+    m_whoUses->setObjectName(QStringLiteral("whoUses"));
+    m_whoUses->setToolTip(tr("The programs with something open on it, which keep it from unmounting"));
+    connect(m_whoUses, &QAction::triggered, this, [this] {
+        if (const Volume *v = selectedVolume())
+            HoldersDialog(m_udisks, *v, this).exec();
     });
 
     m_unmount = new QAction(themeIcon("media-eject", "media-eject"), tr("&Unmount"), this);
@@ -1949,6 +1974,10 @@ void MainWindow::buildContextMenu(QMenu *menu)
     if (v) {
         menu->addSection(volumeTitle(*v));
         add({m_open, m_usage, m_mount, m_unmount, m_unlock, m_lock});
+#ifndef Q_OS_WIN
+        if (!v->mounts().isEmpty())
+            add({m_whoUses});
+#endif
         menu->addSeparator();
         add({m_format, m_resize, m_rename, m_typeFlags, m_check, m_startup, m_changePass, m_delete});
         if (v->fsType == QLatin1String("crypto_LUKS"))

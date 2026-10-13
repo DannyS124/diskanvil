@@ -373,6 +373,8 @@ public:
 signals:
     void changed();
     void operationFinished(bool ok, const QString &message);
+    // An unmount refused because the file system at `filesystemPath` is in use (just before its operationFinished).
+    void busy(const QString &filesystemPath);
     void jobStopFailed(const QString &message);
     void checkFinished(const QString &objectPath, bool clean);
     void imageOpened(const QString &loopBlockPath);
