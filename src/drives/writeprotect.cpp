@@ -120,9 +120,9 @@ QVector<Finding> diagnose(const State &s)
         Finding f;
         f.title = tr("Linux was told not to write to it");
         f.text = s.drivesays == 0 ? tr("The drive itself is writable, but a read-only flag is set on it in Linux (a program "
-                                       "or a rule did it: blockdev --setro). Clearing it takes the admin password.")
+                                       "or a rule did it: blockdev --setro). Clearing it may ask for the admin password.")
                                   : tr("A read-only flag is set on it in Linux. When a program or a rule set it (blockdev --setro), "
-                                       "clearing it is the fix; it takes the admin password. If the flag comes back, it's the "
+                                       "clearing it is the fix (it may ask for the admin password). If the flag comes back, it's the "
                                        "drive's own switch or the drive locked itself.");
         f.fix = Fix::ClearKernelFlag;
         f.fixLabel = tr("Clear the Flag");

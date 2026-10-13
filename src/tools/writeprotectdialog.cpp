@@ -78,22 +78,6 @@ WriteProtectDialog::WriteProtectDialog(UDisks *udisks, QWidget *parent)
             then(ok, message);
         }
     });
-    connect(m_udisks, &UDisks::checkFinished, this, [this](const QString &objectPath, bool clean) {
-        if (objectPath != m_waitingFor)
-            return;
-        m_waitingFor.clear();
-        m_status->setText(clean ? tr("Repaired. Opening it again…") : tr("The repair didn't finish cleanly. Opening it again anyway…"));
-        for (const Disk &d : m_udisks->disks())
-            for (const Volume &v : d.volumes)
-                if (v.objectPath == objectPath) {
-                    m_afterOperation = [this](bool, const QString &message) {
-                        m_status->setText(message);
-                        look();
-                    };
-                    m_udisks->mount(v);
-                    return;
-                }
-    });
     fillDrives();
 
     runAsRoot = [](const QStringList &command, QString *said) {
@@ -339,9 +323,17 @@ void WriteProtectDialog::reopen(const QString &objectPath, bool repairFirst)
     }
     const Volume v = *volume;
     if (repairFirst) {
-        // UDisks' repair closes it first; it's opened again when the repair says it's done.
+        // UDisks' repair closes it first; it's opened again when the repair says it's done
+        // (even when it couldn't fix everything: then it says so, and Look Again shows how it is).
         m_status->setText(tr("Closing it and repairing its file system…"));
-        m_waitingFor = v.objectPath;
+        m_afterOperation = [this, v](bool ok, const QString &message) {
+            m_status->setText(message + QStringLiteral(". ") + tr("Opening it again…"));
+            m_afterOperation = [this, repaired = ok, said = message](bool, const QString &opened) {
+                m_status->setText(repaired ? opened : said + QStringLiteral(". ") + opened);
+                look();
+            };
+            m_udisks->mount(v);
+        };
         m_udisks->repair(v);
         return;
     }
