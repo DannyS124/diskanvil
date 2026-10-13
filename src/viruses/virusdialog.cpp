@@ -999,7 +999,7 @@ void VirusDialog::remountWritable(const QString &objectPath, const std::function
                     continue;
                 if (*step == 0 && v.mounts().isEmpty()) {
                     *step = 1;
-                    m_udisks->mount(v, false);
+                    m_udisks->mount(v, false, false); // to delete files: writable or not at all
                 } else if (*step == 1 && !v.mounts().isEmpty()) {
                     disconnect(*changed);
                     disconnect(*failed);
@@ -1025,7 +1025,7 @@ void VirusDialog::remountWritable(const QString &objectPath, const std::function
         updateButtons();
     });
     if (*step == 1)
-        m_udisks->mount(*volume, false);
+        m_udisks->mount(*volume, false, false);
     else
         m_udisks->unmount(*volume);
 }

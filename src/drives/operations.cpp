@@ -268,11 +268,11 @@ QVector<SmartAttribute> UDisks::smartAttributes(const Disk &disk)
         arg.endArray();
     }
     if (!sensors.isEmpty())
-        out.push_back({0, tr("Temperature sensors"), -1, -1, -1, sensors.join(QStringLiteral(", ")), -1, false});
+        out.push_back({0, tr("Temperature sensors"), -1, -1, -1, sensors.join(QStringLiteral(", ")), -1, false, {}});
     const int wctemp = a.value(QStringLiteral("wctemp")).toInt(), cctemp = a.value(QStringLiteral("cctemp")).toInt();
     if (wctemp > 0 && cctemp > 0)
         out.push_back({0, tr("Temperature limits"), -1, -1, -1,
-                       tr("warning at %1 °C, critical at %2 °C").arg(qRound(wctemp - 273.15)).arg(qRound(cctemp - 273.15)), -1, false});
+                       tr("warning at %1 °C, critical at %2 °C").arg(qRound(wctemp - 273.15)).arg(qRound(cctemp - 273.15)), -1, false, {}});
     return out;
 }
 

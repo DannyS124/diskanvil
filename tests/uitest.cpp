@@ -5647,6 +5647,81 @@ void hardwareWindow()
     }
 }
 
+// Sets NTFS's "not closed properly" mark in an image mkntfs made, the way a crash leaves it.
+bool markNtfsDirty(const QString &image)
+{
+    QFile f(image);
+    if (!f.open(QIODevice::ReadWrite))
+        return false;
+    const QByteArray boot = f.read(512);
+    const quint32 cluster = qFromLittleEndian<quint16>(boot.constData() + 0x0B) * quint8(boot[0x0D]);
+    const qint64 mft = qint64(qFromLittleEndian<quint64>(boot.constData() + 0x30) * cluster);
+    const qint8 per = qint8(boot[0x40]);
+    const qint64 record = per > 0 ? qint64(per) * cluster : (1ll << -per);
+    f.seek(mft + 3 * record); // $Volume
+    QByteArray r = f.read(record);
+    int at = qFromLittleEndian<quint16>(r.constData() + 0x14);
+    while (at + 8 < r.size()) {
+        const quint32 type = qFromLittleEndian<quint32>(r.constData() + at);
+        if (type == 0xFFFFFFFF)
+            return false;
+        if (type == 0x70) { // $VOLUME_INFORMATION: its flags, 1 = dirty
+            const int value = at + qFromLittleEndian<quint16>(r.constData() + at + 0x14);
+            r[value + 10] = char(r[value + 10] | 1);
+            f.seek(mft + 3 * record);
+            return f.write(r) == r.size();
+        }
+        at += int(qFromLittleEndian<quint32>(r.constData() + at + 4));
+    }
+    return false;
+    }
+
+
+// Mount on an NTFS drive Windows didn't shut down fully: Linux won't open it for changes, so it's
+// opened read-only and the message says why, instead of "wrong fs type, bad option".
+void mountDirtyNtfs()
+{
+    if (QStandardPaths::findExecutable(QStringLiteral("mkntfs")).isEmpty())
+        return report(true, QStringLiteral("mount, unclosed NTFS: skipped, ntfs-3g isn't here"));
+    QTemporaryDir dir;
+    const QString image = dir.filePath(QStringLiteral("windows.img"));
+    sh(QStringLiteral("truncate"), {QStringLiteral("-s"), QStringLiteral("64M"), image});
+    sh(QStringLiteral("mkntfs"), {QStringLiteral("-q"), QStringLiteral("-F"), QStringLiteral("-f"), QStringLiteral("-L"), QStringLiteral("Unclosed"), image});
+    report(markNtfsDirty(image), QStringLiteral("mount, unclosed NTFS: a drive marked as not closed properly"));
+    const QString loopPath = userLoop(image);
+    if (loopPath.isEmpty())
+        return report(false, QStringLiteral("mount, unclosed NTFS: a loop device holds it"));
+    UDisks udisks;
+    udisks.setInteractive(false);
+    const Disk *disk = nullptr;
+    waitUntil([&] {
+        udisks.refresh();
+        disk = udisks.diskByPath(loopPath);
+        return disk && !disk->volumes.isEmpty();
+    }, 15000);
+    QString said;
+    bool ok = false, done = false;
+    QObject::connect(&udisks, &UDisks::operationFinished, [&](bool good, const QString &message) {
+        ok = good;
+        said = message;
+        done = true;
+    });
+    if (disk)
+        udisks.mount(disk->volumes.first());
+    waitUntil([&] { return done; }, 30000);
+    QString mount;
+    waitUntil([&] {
+        udisks.refresh();
+        const Disk *d = udisks.diskByPath(loopPath);
+        if (d && !d->volumes.isEmpty() && !d->volumes.first().mounts().isEmpty())
+            mount = d->volumes.first().mounts().first();
+        return !mount.isEmpty();
+    }, 10000);
+    report(ok && said.contains(QLatin1String("read-only")) && said.contains(QLatin1String("Shift")) && !mount.isEmpty() && !QFileInfo(mount).isWritable(),
+           QStringLiteral("mount, unclosed NTFS: opened read-only, and it says why and what to do"), said.left(160));
+    cleanUpLoop(udisks, loopPath);
+}
+
 // The Windows picker on an NTFS drive Windows didn't close properly (the "dirty" mark a crash or a
 // pulled plug leaves, set here in a drive mkntfs made): Linux won't open it for changes, so the
 // picker says why, clears the mark when asked (ntfsfix -d) and opens it. Root: no password then.
@@ -5662,33 +5737,7 @@ void dirtyWindowsDrive()
     sh(QStringLiteral("mkntfs"), {QStringLiteral("-q"), QStringLiteral("-F"), QStringLiteral("-f"), QStringLiteral("-L"), QStringLiteral("WinTest"), image});
     // Something on it, put in with ntfs-3g's own tool (no Windows: what's checked is opening it).
     sh(QStringLiteral("ntfscp"), {QStringLiteral("-q"), image, QStringLiteral(SOURCE_DIR "/tests/data/registry/software.hiv"), QStringLiteral("/SOFTWARE")});
-    const auto markDirty = [&image] {
-        QFile f(image);
-        if (!f.open(QIODevice::ReadWrite))
-            return false;
-        const QByteArray boot = f.read(512);
-        const quint32 cluster = qFromLittleEndian<quint16>(boot.constData() + 0x0B) * quint8(boot[0x0D]);
-        const qint64 mft = qint64(qFromLittleEndian<quint64>(boot.constData() + 0x30) * cluster);
-        const qint8 per = qint8(boot[0x40]);
-        const qint64 record = per > 0 ? qint64(per) * cluster : (1ll << -per);
-        f.seek(mft + 3 * record); // $Volume
-        QByteArray r = f.read(record);
-        int at = qFromLittleEndian<quint16>(r.constData() + 0x14);
-        while (at + 8 < r.size()) {
-            const quint32 type = qFromLittleEndian<quint32>(r.constData() + at);
-            if (type == 0xFFFFFFFF)
-                return false;
-            if (type == 0x70) { // $VOLUME_INFORMATION: its flags, 1 = dirty
-                const int value = at + qFromLittleEndian<quint16>(r.constData() + at + 0x14);
-                r[value + 10] = char(r[value + 10] | 1);
-                f.seek(mft + 3 * record);
-                return f.write(r) == r.size();
-            }
-            at += int(qFromLittleEndian<quint32>(r.constData() + at + 4));
-        }
-        return false;
-    };
-    report(markDirty(), QStringLiteral("dirty NTFS: a drive marked as not closed properly"));
+    report(markNtfsDirty(image), QStringLiteral("dirty NTFS: a drive marked as not closed properly"));
     const QString loopPath = userLoop(image);
     if (loopPath.isEmpty())
         return report(false, QStringLiteral("dirty NTFS: a loop device holds it"));
@@ -7666,7 +7715,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"testbootdata", testBootDataDrive}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"lookcloser", lookCloserWindow}, {"files", filesWindow}, {"writeprotected", writeProtectedWindow}, {"hitfiles", hitFilesWindow}, {"whycrash", whyCrashWindow}, {"winstart", winStartWindow}, {"stillok", stillOkWindow}, {"burnin", burnInWindow}, {"writespeed", writeSpeedWindow}, {"opal", opalWindow}, {"hardware", hardwareWindow}, {"holders", holdersWindow}, {"enhance", enhanceWindow}, {"film", filmTools}, {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"testbootdata", testBootDataDrive}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"lookcloser", lookCloserWindow}, {"files", filesWindow}, {"writeprotected", writeProtectedWindow}, {"hitfiles", hitFilesWindow}, {"whycrash", whyCrashWindow}, {"winstart", winStartWindow}, {"stillok", stillOkWindow}, {"burnin", burnInWindow}, {"writespeed", writeSpeedWindow}, {"opal", opalWindow}, {"mountntfs", mountDirtyNtfs}, {"hardware", hardwareWindow}, {"holders", holdersWindow}, {"enhance", enhanceWindow}, {"film", filmTools}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},

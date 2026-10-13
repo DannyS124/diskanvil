@@ -251,7 +251,7 @@ void WindowsPicker::mountThen(const QString &path, bool readOnly, const std::fun
         disconnect(*failedConn);
         then({}, message);
     });
-    m_udisks->mount(*v, readOnly);
+    m_udisks->mount(*v, readOnly, false);
 }
 
 void WindowsPicker::unmountThen(const QString &path, const std::function<void()> &then)

@@ -985,9 +985,10 @@ void UDisks::unmountThen(const QVector<Volume> &volumes, const QString &failure,
     QTimer::singleShot(0, this, then);
 }
 
-void UDisks::mount(const Volume &volume, bool readOnly)
+void UDisks::mount(const Volume &volume, bool readOnly, bool readOnlyIfNeeded)
 {
-    Q_UNUSED(readOnly) // a letter doesn't make a volume read-only on Windows
+    Q_UNUSED(readOnly)
+    Q_UNUSED(readOnlyIfNeeded) // Windows opens its own drives whatever state they were left in // a letter doesn't make a volume read-only on Windows
     const QString name = shortDevice(volume.device);
     const QString failure = tr("Couldn't mount %1").arg(name);
     const QString volumeName = m_windows->volumeNames.value(volume.objectPath);

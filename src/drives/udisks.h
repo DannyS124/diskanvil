@@ -265,7 +265,9 @@ public:
 
     // Async, results via operationFinished. System disks are refused here as well.
     // readOnly: nothing on it can change while it's mounted (Scan for Viruses looks at drives so).
-    void mount(const Volume &volume, bool readOnly = false);
+    // `readOnlyIfNeeded`: an NTFS Windows didn't shut down fully (Linux only reads those) is opened
+    // read-only instead, and said why. The Windows repair tools turn it off: they need to write.
+    void mount(const Volume &volume, bool readOnly = false, bool readOnlyIfNeeded = true);
     // besideSystem: a volume on the running system's drive that isn't the system's own (DiskAnvil
     // Live's partition, from Put DiskAnvil Live on This PC).
     void unmount(const Volume &volume, bool besideSystem = false);

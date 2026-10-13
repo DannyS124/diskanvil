@@ -332,7 +332,7 @@ void WriteProtectDialog::reopen(const QString &objectPath, bool repairFirst)
                 m_status->setText(repaired ? opened : said + QStringLiteral(". ") + opened);
                 look();
             };
-            m_udisks->mount(v);
+            m_udisks->mount(v, false, false);
         };
         m_udisks->repair(v);
         return;
@@ -348,7 +348,7 @@ void WriteProtectDialog::reopen(const QString &objectPath, bool repairFirst)
             m_status->setText(said);
             look();
         };
-        m_udisks->mount(v);
+        m_udisks->mount(v, false, false); // for writing, or it says why not
     };
     m_udisks->unmount(v);
 }

@@ -349,7 +349,7 @@ void NewIdsDialog::fixNext()
     });
     connect(timer, &QTimer::timeout, this, [done] { done(false); });
     timer->start(20000);
-    m_udisks->mount(*v, false);
+    m_udisks->mount(*v, false, false);
 }
 
 void NewIdsDialog::fixIn(const QString &objectPath, const QString &mount, bool mountedHere)

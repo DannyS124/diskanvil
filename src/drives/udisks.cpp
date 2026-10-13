@@ -21,6 +21,7 @@
 #include <QDBusMessage>
 #include <QDBusObjectPath>
 #include <QDBusPendingCallWatcher>
+#include <QDBusReply>
 #include <QDBusServiceWatcher>
 #include <QDBusVariant>
 #include <QMap>
@@ -680,7 +681,7 @@ void UDisks::unmountThen(const QVector<Volume> &volumes, const QString &failure,
     (*run)(0);
 }
 
-void UDisks::mount(const Volume &volume, bool readOnly)
+void UDisks::mount(const Volume &volume, bool readOnly, bool readOnlyIfNeeded)
 {
     const QString name = shortDevice(volume.device);
     if (volume.encrypted && volume.cleartextPath.isEmpty()) {
@@ -699,6 +700,44 @@ void UDisks::mount(const Volume &volume, bool readOnly)
                            "version 1.13; a newer one, or one spread over several drives, opens on the PC that made it)").arg(name)
                       : tr("Couldn't mount %1 (bcachefs: Linux reads it only with its bcachefs module, which left Linux itself in version "
                            "6.17, so newer ones need bcachefs-dkms installed; one spread over several drives can't be opened here)").arg(name);
+    // NTFS that Windows left hibernated (Fast Startup, on by default) or didn't close properly (a
+    // crash, the power): Linux only reads it. Opened read-only then, and said why, instead of
+    // Linux's "wrong fs type, bad option, bad superblock".
+    if (!readOnly && readOnlyIfNeeded && volume.effectiveFsType() == QLatin1String("ntfs")) {
+        QDBusMessage message = QDBusMessage::createMethodCall(kService, volume.filesystemPath(), kFilesystem, QStringLiteral("Mount"));
+        message.setArguments({options(extra)});
+        message.setInteractiveAuthorizationAllowed(m_interactive);
+        qCInfo(lcOps).noquote() << "Mount" << volume.filesystemPath();
+        ++m_pending;
+        auto *watcher = new QDBusPendingCallWatcher(QDBusConnection::systemBus().asyncCall(message, kNoTimeout), this);
+        const Volume v = volume;
+        connect(watcher, &QDBusPendingCallWatcher::finished, this, [this, v, name, failure](QDBusPendingCallWatcher *w) {
+            w->deleteLater();
+            --m_pending;
+            if (!w->isError()) {
+                qCInfo(lcOps).noquote() << "Mount" << v.filesystemPath() << "done";
+                emit operationFinished(true, tr("Mounted %1 at %2").arg(name, QDBusReply<QString>(*w).value()));
+                return;
+            }
+            const QString error = w->error().message();
+            qCInfo(lcOps).noquote() << "Mount" << v.filesystemPath() << "failed:" << w->error().name() << error;
+            if (!error.contains(QLatin1String("wrong fs type"))) {
+                emit operationFinished(false, failure + QStringLiteral(": ") + error);
+                return;
+            }
+            QVariantMap readOnlyOptions;
+            readOnlyOptions.insert(QStringLiteral("options"), QStringLiteral("ro"));
+            call(v.filesystemPath(), kFilesystem, QStringLiteral("Mount"), {options(readOnlyOptions)},
+                 [name](const QDBusMessage &reply) {
+                     return tr("Mounted %1 read-only at %2. Windows didn't shut down fully: it's hibernated (Fast Startup, which "
+                               "Windows has on by default) or it crashed or lost power. Files can be copied off it; to change them, "
+                               "start Windows and shut it down while holding Shift, then mount it again.")
+                         .arg(name, reply.arguments().value(0).toString());
+                 },
+                 failure);
+        });
+        return;
+    }
     call(volume.filesystemPath(), kFilesystem, QStringLiteral("Mount"), {options(extra)},
          [name](const QDBusMessage &reply) { return tr("Mounted %1 at %2").arg(name, reply.arguments().value(0).toString()); }, failure);
 }

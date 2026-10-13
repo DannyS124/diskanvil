@@ -180,7 +180,10 @@ void BurnInDialog::showSteps()
 {
     m_steps->clear();
     for (int i = 0; i < burnin::kSteps; ++i) {
-        const burnin::StepResult s = i < m_report.steps.size() ? m_report.steps[i] : burnin::StepResult{Step(i)};
+        burnin::StepResult s;
+        s.step = Step(i);
+        if (i < m_report.steps.size())
+            s = m_report.steps[i];
         QString how;
         switch (s.outcome) {
         case Outcome::NotRun:
