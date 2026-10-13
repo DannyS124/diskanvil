@@ -38,7 +38,7 @@ optdepends=(
   'ldmtool: open Windows dynamic disks (from the AUR)'
 )
 source=("$pkgname-$pkgver.tar.gz::$url/releases/download/v$pkgver/$pkgname-$pkgver.tar.gz")
-sha256sums=('6810c2e71f1f8ebf85716f2bb2c308a18b5a109ac99c160ebbf8d7b6be3146e9')
+sha256sums=('37cd48e5889655708f0819a73ecaeed26f96c6f5735703f5ce03ea9db3bae397')
 
 build() {
   rm -rf build  # makepkg keeps src/ between builds; an old cache breaks updates
