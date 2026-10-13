@@ -6,7 +6,19 @@ body:
     id: what
     attributes:
       label: What happened?
-      description: What did you do, what did you expect, and what happened instead?
+      description: What did you do, what did you expect, and what happened instead? A screenshot or a photo of the screen helps.
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where were you running it?
+      options:
+        - Linux (installed from the PKGBUILD or a .deb)
+        - Linux (Flatpak)
+        - Linux (AppImage)
+        - Windows
+        - DiskAnvil Live (the USB stick)
     validations:
       required: true
   - type: input
@@ -14,17 +26,26 @@ body:
     attributes:
       label: DiskAnvil version
       description: Help → About DiskAnvil, or `diskanvil --version`
-      placeholder: "0.4.0"
+      placeholder: "0.5.2"
     validations:
       required: true
   - type: input
-    id: distro
+    id: system
     attributes:
-      label: Distribution and desktop
-      placeholder: "Arch Linux, KDE Plasma 6"
+      label: System and PC
+      description: The distribution and desktop, or the Windows version. For DiskAnvil Live, the PC's make and model.
+      placeholder: "Arch Linux, KDE Plasma 6 / Windows 11 / Dell Latitude 5490"
   - type: textarea
     id: dump
     attributes:
       label: Output of `diskanvil --dump`
-      description: Shows how DiskAnvil sees your disks.
+      description: How DiskAnvil sees your drives (Linux and DiskAnvil Live). Leave it out if it's not about a drive.
       render: text
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: >-
+        If it went wrong while DiskAnvil was doing something: run `diskanvil --log ~/diskanvil.log`, do it again
+        and attach the file. On DiskAnvil Live, Save Logs puts everything in the stick's logs folder. Logs never
+        hold passwords.
