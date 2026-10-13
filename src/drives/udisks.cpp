@@ -10,6 +10,7 @@
 #include "btrfscheck.h"
 #include "format.h"
 #include "health.h"
+#include "rescuestick.h"
 
 #include <QCollator>
 #include <QFileInfo>
@@ -689,13 +690,15 @@ void UDisks::mount(const Volume &volume, bool readOnly)
     QVariantMap extra;
     if (readOnly)
         extra.insert(QStringLiteral("options"), QStringLiteral("ro"));
-    // bcachefs left Linux's own kernel in 6.17: newer kernels only read it with the bcachefs-dkms
-    // module added. Said when it doesn't mount.
-    const QString failure = volume.effectiveFsType() == QLatin1String("bcachefs")
-                                ? tr("Couldn't mount %1 (bcachefs: Linux reads it only with its bcachefs module, which left Linux itself in "
-                                     "version 6.17, so newer ones need bcachefs-dkms installed; DiskAnvil Live reads it; one spread over "
-                                     "several drives can't be opened here)").arg(name)
-                                : tr("Couldn't mount %1").arg(name);
+    // bcachefs: each Linux reads the versions of it up to its own, and it left Linux's own kernel
+    // in 6.17 (newer ones need the bcachefs-dkms module). Said when it doesn't mount.
+    QString failure = tr("Couldn't mount %1").arg(name);
+    if (volume.effectiveFsType() == QLatin1String("bcachefs"))
+        failure = rescue::runningInRescue()
+                      ? tr("Couldn't mount %1 (bcachefs: DiskAnvil Live's Linux 6.12 reads bcachefs file systems made by bcachefs up to about "
+                           "version 1.13; a newer one, or one spread over several drives, opens on the PC that made it)").arg(name)
+                      : tr("Couldn't mount %1 (bcachefs: Linux reads it only with its bcachefs module, which left Linux itself in version "
+                           "6.17, so newer ones need bcachefs-dkms installed; one spread over several drives can't be opened here)").arg(name);
     call(volume.filesystemPath(), kFilesystem, QStringLiteral("Mount"), {options(extra)},
          [name](const QDBusMessage &reply) { return tr("Mounted %1 at %2").arg(name, reply.arguments().value(0).toString()); }, failure);
 }
