@@ -15,6 +15,10 @@
 
 #include <memory>
 #include <optional>
+namespace viewer {
+enum class ProfileDo : qint32;
+}
+
 
 class QCheckBox;
 class QComboBox;
@@ -232,6 +236,10 @@ private:
     void savePicture(const QString &name, const QByteArray &png);
     // The film shown in the viewer at another speed, with its light tools, made by ffmpeg.
     void exportFilm(int index, double speed, const enhance::Settings &settings, qint64 durationMs);
+    // Enhance profiles, kept for the viewer: the list sent to it, and what it asks done.
+    void sendProfiles(const QString &note);
+    QString profilesFolder() const;
+    void profileAsked(viewer::ProfileDo what, const QString &name, const QByteArray &file, const QStringList &dropped);
     // The next or previous file in the list that has something to show, -1 when there's none.
     int neighbour(int index, int step) const;
     // The times the file system kept, as "label", "value" rows.
@@ -244,6 +252,9 @@ public:
     // For the tests: where the changed copy goes, instead of asking; and a message as if the
     // viewer had sent it.
     void setChangedCopyTarget(const QString &path) { m_changedCopyTarget = path; }
+    // The tests: where enhance profiles are kept, and the files "Add Profiles" picks.
+    void setProfilesFolder(const QString &folder) { m_profilesFolder = folder; }
+    void setProfileFilesToAdd(const QStringList &files) { m_profileFilesHook = files; }
     // For the tests: a source read through into a Rescue Copy image, as for a drive with Keep a Copy ticked.
     void scanReadThrough(std::shared_ptr<lost::Source> drive, const QString &title, const QString &image);
     void hearFromViewer(const QByteArray &said) { viewerSaid(said); }
@@ -325,6 +336,8 @@ private:
     QHash<int, QStringList> m_facts; // what each file said about itself, once its preview did
     bool m_warnedDrop = false;
     QString m_changedCopyTarget;
+    QString m_profilesFolder;
+    QStringList m_profileFilesHook;
     bool m_repairing = false;
     QWidget *m_copiesBar = nullptr;
     QLabel *m_copiesText = nullptr;

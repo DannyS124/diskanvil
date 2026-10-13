@@ -2266,6 +2266,7 @@ void LostFilesDialog::startViewer()
     look.style = QApplication::style()->name();
     look.palette = QApplication::palette();
     sendToViewer(viewer::encode(look));
+    sendProfiles(QString());
     // A sandbox that hangs rather than failing is given up on after a while, the same way.
     QTimer::singleShot(15000, process, [this, process] {
         if (process == m_viewer && !m_viewerReady)
@@ -2627,6 +2628,94 @@ void LostFilesDialog::savePicture(const QString &name, const QByteArray &png)
         QMessageBox::warning(this, windowTitle(), tr("The picture couldn't be saved: %1").arg(out.errorString()));
 }
 
+void LostFilesDialog::sendProfiles(const QString &note)
+{
+    viewer::Message m;
+    m.type = viewer::Message::Profiles;
+    for (const enhance::Profile &p : enhance::savedProfiles(profilesFolder()))
+        m.profiles << enhance::profileToFile(p);
+    m.note = note;
+    sendToViewer(viewer::encode(m));
+}
+
+QString LostFilesDialog::profilesFolder() const
+{
+    return m_profilesFolder.isEmpty() ? enhance::profilesFolder() : m_profilesFolder;
+}
+
+void LostFilesDialog::profileAsked(viewer::ProfileDo what, const QString &name, const QByteArray &file, const QStringList &dropped)
+{
+    // Kept here, not in the viewer: it can't reach the home folder. What comes from it, or from a
+    // file, is checked the same way before it's kept.
+    const QString folder = profilesFolder();
+    QString why;
+    switch (what) {
+    case viewer::ProfileDo::Save: {
+        enhance::Profile p;
+        if (!enhance::profileFromFile(file, &p, &why))
+            return sendProfiles(why);
+        if (enhance::saveProfile(p, &why, folder).isEmpty())
+            return sendProfiles(tr("The profile couldn't be saved: %1").arg(why));
+        return sendProfiles(tr("Saved the profile \"%1\".").arg(p.name));
+    }
+    case viewer::ProfileDo::Remove:
+        return sendProfiles(enhance::removeProfile(name, folder) ? tr("Removed the profile \"%1\".").arg(name)
+                                                                  : tr("The profile \"%1\" couldn't be removed.").arg(name));
+    case viewer::ProfileDo::Import:
+    case viewer::ProfileDo::Dropped: {
+        QStringList files = dropped;
+        if (what == viewer::ProfileDo::Import) {
+            raise();
+            activateWindow();
+            files = m_profileFilesHook.isEmpty()
+                        ? QFileDialog::getOpenFileNames(this, tr("Add Enhance Profiles"), QStandardPaths::writableLocation(QStandardPaths::DownloadLocation),
+                                                        tr("Enhance profiles (*.%1 *.json)").arg(QLatin1String(enhance::kProfileSuffix)))
+                        : m_profileFilesHook;
+            if (files.isEmpty())
+                return;
+        }
+        QStringList added, refused;
+        for (const QString &path : std::as_const(files).mid(0, 50)) {
+            QFile f(path);
+            enhance::Profile p;
+            if (!f.open(QIODevice::ReadOnly) || !enhance::profileFromFile(f.read(64 * 1024 + 1), &p, &why)) {
+                refused << QStringLiteral("%1 (%2)").arg(QFileInfo(path).fileName(), f.isOpen() ? why : f.errorString());
+                continue;
+            }
+            if (enhance::saveProfile(p, &why, folder).isEmpty())
+                refused << QStringLiteral("%1 (%2)").arg(QFileInfo(path).fileName(), why);
+            else
+                added << p.name;
+        }
+        QString note = added.isEmpty() ? QString() : tr("Added %n profile(s): %1.", nullptr, int(added.size())).arg(added.join(QStringLiteral(", ")));
+        if (!refused.isEmpty())
+            note += (note.isEmpty() ? QString() : QStringLiteral(" ")) + tr("Not added: %1").arg(refused.join(QStringLiteral("; ")));
+        return sendProfiles(note);
+    }
+    case viewer::ProfileDo::Export: {
+        enhance::Profile p;
+        if (!enhance::profileFromFile(file, &p, &why))
+            return sendProfiles(why);
+        raise();
+        activateWindow();
+        const QString suggested = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + QLatin1Char('/') + lost::cleanName(p.name)
+                                + QLatin1Char('.') + QLatin1String(enhance::kProfileSuffix);
+        const QString target = m_changedCopyTarget.isEmpty()
+                                   ? QFileDialog::getSaveFileName(this, tr("Save the Profile as a File"), suggested,
+                                                                  tr("Enhance profile (*.%1)").arg(QLatin1String(enhance::kProfileSuffix)))
+                                   : m_changedCopyTarget;
+        if (target.isEmpty())
+            return;
+        QSaveFile out(target);
+        const QByteArray bytes = enhance::profileToFile(p);
+        if (out.open(QIODevice::WriteOnly) && out.write(bytes) == bytes.size() && out.commit())
+            return sendProfiles(tr("Saved \"%1\" as %2: give it to anyone with DiskAnvil, who drops it on the viewer to add it.")
+                                    .arg(p.name, QDir::toNativeSeparators(target)));
+        return sendProfiles(tr("The profile couldn't be saved: %1").arg(out.errorString()));
+    }
+    }
+}
+
 void LostFilesDialog::exportFilm(int index, double speed, const enhance::Settings &s, qint64 durationMs)
 {
     const QString copy = m_looks && index >= 0 ? m_looks->made(index) : QString();
@@ -2730,6 +2819,10 @@ void LostFilesDialog::viewerSaid(const QByteArray &said)
         }
         if (m.type == viewer::Message::ExportFilm) {
             exportFilm(m_viewerIndex, m.speed, m.settings, m.durationMs);
+            continue;
+        }
+        if (m.type == viewer::Message::Profile) {
+            profileAsked(m.profileDo, m.profileName, m.profile, m.dropped);
             continue;
         }
         if (m.type != viewer::Message::AskFor)

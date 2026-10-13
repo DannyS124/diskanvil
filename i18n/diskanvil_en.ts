@@ -256,11 +256,19 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="2480"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="2481"/>
         <source>&quot;%1&quot; was saved again after it was made: its %n earlier version(s) are in &quot;Earlier versions&quot;.</source>
         <translation>
             <numerusform>"%1" was saved again after it was made: its %n earlier version are in "Earlier versions".</numerusform>
             <numerusform>"%1" was saved again after it was made: its %n earlier versions are in "Earlier versions".</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="2690"/>
+        <source>Added %n profile(s): %1.</source>
+        <translation>
+            <numerusform>Added %n profile: %1.</numerusform>
+            <numerusform>Added %n profiles: %1.</numerusform>
         </translation>
     </message>
 </context>
@@ -1000,7 +1008,7 @@
 <context>
     <name>viewer</name>
     <message numerus="yes">
-        <location filename="../src/lostfiles/viewer.cpp" line="1255"/>
+        <location filename="../src/lostfiles/viewer.cpp" line="1594"/>
         <source>%n byte(s) changed</source>
         <translation>
             <numerusform>%n byte changed</numerusform>
@@ -1008,7 +1016,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/viewer.cpp" line="1335"/>
+        <location filename="../src/lostfiles/viewer.cpp" line="1674"/>
         <source>%n part(s) damaged, in red: pick one to see where it is.</source>
         <translation>
             <numerusform>%n part damaged, in red: pick one to see where it is.</numerusform>

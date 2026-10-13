@@ -52,13 +52,20 @@ struct Show {
 // Map: show where the one shown was taken on a map (the viewer can't go online; the window asks).
 enum class Ask : qint32 { Ready = 0, Previous, Next, Save, Open, Shown, Repair, Map };
 
+// What the viewer asks to be done with enhance profiles. The viewer can't reach the home folder
+// (it's sandboxed), so Find Lost Files keeps them: saves one, removes one, brings ones in (picked,
+// or dropped on the viewer), and saves one where the person says.
+enum class ProfileDo : qint32 { Save = 0, Remove, Import, Export, Dropped };
+
 // The messages between them, each a small header and then its body.
 struct Message {
     // Edited: the viewer's changes to the bytes of the one shown, to save as a copy.
     // SavePicture: a picture made in the viewer (one enhanced, a film's frame), to save where the
     // person says. Find Lost Files only writes its bytes, it never reads them.
     // ExportFilm: a copy of the film shown at another speed, with the light tools, made by ffmpeg.
-    enum Type : quint32 { Look = 1, ShowFile = 2, AskFor = 3, Facts = 4, Edited = 5, SavePicture = 6, ExportFilm = 7 } type = ShowFile;
+    // Profiles: the saved enhance profiles (their files), sent at the start and after each change,
+    // with a line saying what happened. Profile: what the viewer asks done with one (ProfileDo).
+    enum Type : quint32 { Look = 1, ShowFile = 2, AskFor = 3, Facts = 4, Edited = 5, SavePicture = 6, ExportFilm = 7, Profiles = 8, Profile = 9 } type = ShowFile;
     QString style;    // Look: the widget style's name
     QPalette palette; // and the colours
     Show show;        // ShowFile; Facts: just show.facts, for the one shown
@@ -69,6 +76,12 @@ struct Message {
     double speed = 1;     // ExportFilm: how fast, 0.1 to 2
     enhance::Settings settings;
     qint64 durationMs = 0;
+    QList<QByteArray> profiles; // Profiles
+    QString note;               // and what happened
+    ProfileDo profileDo = ProfileDo::Save; // Profile
+    QString profileName;
+    QByteArray profile;         // Save, Export: its file
+    QStringList dropped;        // Dropped: the files
 };
 QByteArray encode(const Message &message);
 // One message off the front of `buffer` when a whole one is there (removed from it). False
@@ -97,6 +110,8 @@ public:
     ~Window() override;
     void present(const Show &show);
     void setFacts(const QStringList &facts);
+    // The saved enhance profiles, and what was just done with them.
+    void setProfiles(const QList<QByteArray> &files, const QString &note);
     // What's shown now (the tests look).
     Kind shownKind() const { return m_shown.kind; }
     QString problem() const; // why it can't be shown, when it can't
@@ -110,9 +125,12 @@ Q_SIGNALS:
     void savePicture(const QString &name, const QByteArray &png);
     // A copy of the film shown at another speed, with the Enhance panel's light tools.
     void exportFilm(double speed, const enhance::Settings &settings, qint64 durationMs);
+    void profileAsked(viewer::ProfileDo what, const QString &name, const QByteArray &profile, const QStringList &dropped);
 
 protected:
     void keyPressEvent(QKeyEvent *event) override;
+    void dragEnterEvent(QDragEnterEvent *event) override;
+    void dropEvent(QDropEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
 
 private:
@@ -122,6 +140,10 @@ private:
     void enhanceSoon();
     void enhanceNow();
     void saveEnhanced(int factor);
+    // A spot: picking one, showing it (in the picture's pixels), and going back to the whole.
+    void pickSpot(bool on);
+    void showSpot(QRect spot);
+    void showWhole();
 
     Show m_shown;
     QStackedWidget *m_pages;
@@ -144,6 +166,10 @@ private:
     QToolBar *m_bar = nullptr;
     int m_barWidth = 0;              // the toolbar with words, to know when only icons fit
     bool m_detailsForEnhance = false; // Details was put away to make room for Enhance
+    QImage m_whole;             // while a spot is picked or shown: the whole picture (or the film's frame)
+    QRect m_spot;               // the spot shown, in its pixels; empty for the whole
+    bool m_spotFromFilm = false; // the film's frame is being worked on as a still
+    QString m_spotWhen;         // and where in the film it is
     QTimer *m_enhanceTimer;
     std::shared_ptr<std::atomic<int>> m_enhanceRound; // a newer request stops the ones before it
 };

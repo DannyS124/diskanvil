@@ -3554,6 +3554,51 @@ void enhanceTools()
     report(stopped.isNull(), QStringLiteral("enhance: it can be stopped part way"));
     report(focus.describe().join(QStringLiteral("; ")).contains(QLatin1String("4 px")), QStringLiteral("enhance: what was done, in words"),
            focus.describe().join(QStringLiteral("; ")));
+
+    // Profiles: DiskAnvil's own, and files people save and pass on.
+    const QVector<enhance::Profile> own = enhance::builtInProfiles();
+    bool ownFine = own.size() >= 6;
+    for (const enhance::Profile &p : own) {
+        enhance::Profile back;
+        QString why;
+        ownFine = ownFine && p.builtIn && !p.settings.isDefault() && !p.description.isEmpty() && enhance::profileFromFile(enhance::profileToFile(p), &back, &why)
+               && back.name == p.name && back.settings.describe() == p.settings.describe();
+    }
+    report(ownFine, QStringLiteral("enhance profiles: DiskAnvil's own each do something, and come back the same from their files"));
+    QTemporaryDir profiles;
+    enhance::Profile mine;
+    mine.name = QStringLiteral("Night: car park / gate 2");
+    mine.settings.shadows = 70;
+    mine.settings.motion = 12;
+    mine.settings.motionAngle = 45;
+    QString why;
+    const QString file = enhance::saveProfile(mine, &why, profiles.path());
+    report(!file.isEmpty() && QFileInfo(file).fileName() == QLatin1String("Night_ car park _ gate 2.anvil-enhance")
+               && enhance::savedProfiles(profiles.path()).size() == 1 && enhance::savedProfiles(profiles.path()).first().settings.motionAngle == 45,
+           QStringLiteral("enhance profiles: saved under a name that's safe for any drive, and read back"), QFileInfo(file).fileName() + why);
+    mine.settings.shadows = 10;
+    enhance::saveProfile(mine, &why, profiles.path());
+    report(enhance::savedProfiles(profiles.path()).size() == 1 && enhance::savedProfiles(profiles.path()).first().settings.shadows == 10,
+           QStringLiteral("enhance profiles: saving one of the same name replaces it"));
+    // What comes from someone else is checked: only the settings, each kept to its range.
+    enhance::Profile wild;
+    const QByteArray odd = R"({"diskanvil-enhance-profile": 1, "name": "  Too\nmuch\u0007  ", "description": "x",
+        "settings": {"brightness": 9999, "sharpen": -50, "focus": 99, "denoise": 7, "grey": true, "run": "rm -rf /"}})";
+    report(enhance::profileFromFile(odd, &wild, &why) && wild.name == QLatin1String("Too much") && wild.settings.brightness == 100 && wild.settings.sharpen == 0
+               && wild.settings.focus == 15 && wild.settings.denoise == 2 && wild.settings.grey,
+           QStringLiteral("enhance profiles: one from elsewhere is kept to what the tools can do"), wild.name);
+    const bool refused = !enhance::profileFromFile("{\"name\": \"x\"}", &wild, &why) && !enhance::profileFromFile("garbage", &wild, &why)
+                      && !enhance::profileFromFile(R"({"diskanvil-enhance-profile": 2, "name": "x"})", &wild, &why) && why.contains(QLatin1String("newer"))
+                      && !enhance::profileFromFile(R"({"diskanvil-enhance-profile": 1, "name": ""})", &wild, &why)
+                      && !enhance::profileFromFile(QByteArray(70000, ' '), &wild, &why);
+    report(refused, QStringLiteral("enhance profiles: what isn't one (or is from a newer DiskAnvil, or too big) is refused, saying why"));
+    QFile junk(profiles.filePath(QStringLiteral("junk.anvil-enhance")));
+    if (junk.open(QIODevice::WriteOnly))
+        junk.write("not json");
+    junk.close();
+    report(enhance::savedProfiles(profiles.path()).size() == 1 && enhance::removeProfile(QStringLiteral("night: CAR park / gate 2"), profiles.path())
+               && enhance::savedProfiles(profiles.path()).isEmpty() && junk.exists(),
+           QStringLiteral("enhance profiles: a broken file in the folder is passed over, and one is removed by its name"));
 }
 
 // Where a photo was taken, in words and on a map, from what DiskAnvil carries (no internet).

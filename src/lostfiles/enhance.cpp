@@ -4,6 +4,12 @@
 #include "enhance.h"
 
 #include <QCoreApplication>
+#include <QDir>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QRegularExpression>
+#include <QSaveFile>
+#include <QStandardPaths>
 
 #include <algorithm>
 #include <array>
@@ -195,6 +201,167 @@ QStringList Settings::describe() const
     if (invert)
         out << tr("inverted");
     return out;
+}
+
+QVector<Profile> builtInProfiles()
+{
+    const auto make = [](const QString &name, const QString &description, const std::function<void(Settings &)> &set) {
+        Profile p;
+        p.name = name;
+        p.description = description;
+        set(p.settings);
+        p.builtIn = true;
+        return p;
+    };
+    return {
+        make(tr("Too dark"), tr("A photo taken with too little light: lighter, the dark parts lifted, the levels stretched, a little grain smoothed."),
+             [](Settings &s) { s.brightness = 20; s.shadows = 50; s.autoLevels = true; s.denoise = 1; }),
+        make(tr("Out of focus"), tr("Soft all over: a blur of 3 pixels taken back out, then sharpened a little. Raise Out of focus if it's softer."),
+             [](Settings &s) { s.focus = 3; s.sharpen = 20; }),
+        make(tr("Moved while it was taken"), tr("Streaked by a shaky hand or something moving: then use Draw Along a Streak to set how far and which way."),
+             [](Settings &s) { s.motion = 10; s.sharpen = 10; }),
+        make(tr("Faded old photo"), tr("A print gone pale: the levels stretched, more contrast, sharpened a little."),
+             [](Settings &s) { s.autoLevels = true; s.contrast = 25; s.sharpen = 15; }),
+        make(tr("Night camera"), tr("A security or dashboard camera at night: lighter, the dark parts lifted, grain smoothed, sharpened."),
+             [](Settings &s) { s.brightness = 20; s.shadows = 60; s.contrast = 15; s.denoise = 2; s.sharpen = 20; }),
+        make(tr("Grainy"), tr("Speckled from a high ISO or a cheap camera: grain smoothed, then sharpened a little."),
+             [](Settings &s) { s.denoise = 2; s.sharpen = 10; }),
+        make(tr("Scanned page"), tr("A document or receipt: black and white, the levels stretched, strong contrast, sharpened, so the writing stands out."),
+             [](Settings &s) { s.grey = true; s.autoLevels = true; s.contrast = 40; s.sharpen = 30; }),
+        make(tr("Film negative"), tr("A photo of a negative: turned back into a positive, the levels stretched."),
+             [](Settings &s) { s.invert = true; s.autoLevels = true; }),
+    };
+}
+
+QByteArray profileToFile(const Profile &p)
+{
+    const Settings &s = p.settings;
+    QJsonObject settings{{QStringLiteral("brightness"), s.brightness}, {QStringLiteral("contrast"), s.contrast},
+                         {QStringLiteral("shadows"), s.shadows},       {QStringLiteral("autoLevels"), s.autoLevels},
+                         {QStringLiteral("denoise"), s.denoise},       {QStringLiteral("sharpen"), s.sharpen},
+                         {QStringLiteral("focus"), s.focus},           {QStringLiteral("motion"), s.motion},
+                         {QStringLiteral("motionAngle"), s.motionAngle}, {QStringLiteral("grey"), s.grey},
+                         {QStringLiteral("invert"), s.invert}};
+    QJsonObject o{{QStringLiteral("diskanvil-enhance-profile"), 1}, {QStringLiteral("name"), p.name}, {QStringLiteral("settings"), settings}};
+    if (!p.description.isEmpty())
+        o.insert(QStringLiteral("description"), p.description);
+    return QJsonDocument(o).toJson();
+}
+
+bool profileFromFile(const QByteArray &file, Profile *p, QString *why)
+{
+    if (file.size() > 64 * 1024) {
+        *why = tr("It's too big to be an enhance profile.");
+        return false;
+    }
+    QJsonParseError error;
+    const QJsonDocument document = QJsonDocument::fromJson(file, &error);
+    const QJsonObject o = document.object();
+    if (error.error != QJsonParseError::NoError || !o.contains(QStringLiteral("diskanvil-enhance-profile"))) {
+        *why = tr("It isn't a DiskAnvil enhance profile.");
+        return false;
+    }
+    if (o.value(QStringLiteral("diskanvil-enhance-profile")).toInt() != 1) {
+        *why = tr("It was made by a newer DiskAnvil: update this one to use it.");
+        return false;
+    }
+    // Names and notes shown on the screen: one line, no control characters, not too long.
+    const auto clean = [](QString text, int most) {
+        text.replace(QRegularExpression(QStringLiteral("[\\x00-\\x1f\\x7f]+")), QStringLiteral(" "));
+        return text.simplified().left(most);
+    };
+    Profile out;
+    out.name = clean(o.value(QStringLiteral("name")).toString(), 60);
+    out.description = clean(o.value(QStringLiteral("description")).toString(), 300);
+    if (out.name.isEmpty()) {
+        *why = tr("The profile has no name.");
+        return false;
+    }
+    const QJsonObject j = o.value(QStringLiteral("settings")).toObject();
+    const auto number = [&j](const char *key, int low, int high) { return std::clamp(j.value(QLatin1String(key)).toInt(0), low, high); };
+    Settings &s = out.settings;
+    s.brightness = number("brightness", -100, 100);
+    s.contrast = number("contrast", -100, 100);
+    s.shadows = number("shadows", 0, 100);
+    s.denoise = number("denoise", 0, 2);
+    s.sharpen = number("sharpen", 0, 100);
+    s.focus = number("focus", 0, 15);
+    s.motion = number("motion", 0, 60);
+    if (s.motion == 1)
+        s.motion = 2;
+    s.motionAngle = number("motionAngle", 0, 179);
+    s.autoLevels = j.value(QStringLiteral("autoLevels")).toBool();
+    s.grey = j.value(QStringLiteral("grey")).toBool();
+    s.invert = j.value(QStringLiteral("invert")).toBool();
+    *p = out;
+    return true;
+}
+
+QString profilesFolder()
+{
+    return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + QStringLiteral("/enhance-profiles");
+}
+
+namespace {
+// Its file's name: the profile's name made safe for any file system.
+QString profileFile(const QString &folder, const QString &name)
+{
+    QString base = name;
+    base.replace(QRegularExpression(QStringLiteral("[\\\\/:*?\"<>|]+")), QStringLiteral("_"));
+    base = base.trimmed();
+    while (base.endsWith(QLatin1Char('.')))
+        base.chop(1);
+    if (base.isEmpty())
+        base = QStringLiteral("profile");
+    return folder + QLatin1Char('/') + base + QLatin1Char('.') + QLatin1String(kProfileSuffix);
+}
+} // namespace
+
+QVector<Profile> savedProfiles(const QString &folder)
+{
+    QVector<Profile> out;
+    const QFileInfoList files = QDir(folder).entryInfoList({QStringLiteral("*.") + QLatin1String(kProfileSuffix)}, QDir::Files, QDir::Name | QDir::IgnoreCase);
+    for (const QFileInfo &info : files) {
+        QFile f(info.filePath());
+        Profile p;
+        QString why;
+        if (info.size() <= 64 * 1024 && f.open(QIODevice::ReadOnly) && profileFromFile(f.readAll(), &p, &why))
+            out << p;
+    }
+    return out;
+}
+
+QString saveProfile(const Profile &p, QString *why, const QString &folder)
+{
+    if (!QDir().mkpath(folder)) {
+        *why = tr("The folder for profiles couldn't be made: %1").arg(folder);
+        return {};
+    }
+    removeProfile(p.name, folder); // one of the same name, whatever its file is called
+    const QString path = profileFile(folder, p.name);
+    QSaveFile out(path);
+    const QByteArray bytes = profileToFile(p);
+    if (!out.open(QIODevice::WriteOnly) || out.write(bytes) != bytes.size() || !out.commit()) {
+        *why = out.errorString();
+        return {};
+    }
+    return path;
+}
+
+bool removeProfile(const QString &name, const QString &folder)
+{
+    bool removed = false;
+    const QFileInfoList files = QDir(folder).entryInfoList({QStringLiteral("*.") + QLatin1String(kProfileSuffix)}, QDir::Files);
+    for (const QFileInfo &info : files) {
+        QFile f(info.filePath());
+        Profile p;
+        QString why;
+        if (f.open(QIODevice::ReadOnly) && profileFromFile(f.read(64 * 1024 + 1), &p, &why) && p.name.compare(name, Qt::CaseInsensitive) == 0) {
+            f.close();
+            removed = QFile::remove(info.filePath()) || removed;
+        }
+    }
+    return removed;
 }
 
 QImage apply(const QImage &in, const Settings &s, const std::function<bool(int percent)> &progress)

@@ -121,6 +121,9 @@
 #include <QLineEdit>
 #include <QMenu>
 #include <QToolBar>
+#include <QAbstractScrollArea>
+#include <QDropEvent>
+#include <QMimeData>
 #include <QInputDialog>
 #include <QMouseEvent>
 #include <QListWidget>
@@ -4811,6 +4814,89 @@ void enhanceWindow()
     report(name == QLatin1String("stripes (enhanced).png") && saved.size() == stripes.size() && saved.text(QStringLiteral("Description")).contains(QLatin1String("sharpened 50%"))
                && saved.text(QStringLiteral("Description")).contains(QLatin1String("brightness +20")) && qGray(saved.pixel(4, 4)) > qGray(stripes.pixel(4, 4)),
            QStringLiteral("viewer: an enhanced picture is saved new, saying what was done to it"), saved.text(QStringLiteral("Description")));
+
+    // Profiles: DiskAnvil's own are listed, and choosing one sets the sliders.
+    auto *profiles = window.findChild<QComboBox *>(QStringLiteral("profiles"));
+    const int dark = profiles ? profiles->findText(QStringLiteral("Too dark")) : -1;
+    report(dark > 0 && profiles->findText(QStringLiteral("Night camera")) > 0 && profiles->findText(QStringLiteral("Scanned page")) > 0,
+           QStringLiteral("viewer: DiskAnvil's own enhance profiles are listed"));
+    if (dark > 0) {
+        profiles->setCurrentIndex(dark);
+        Q_EMIT profiles->activated(dark);
+    }
+    report(window.findChild<QSlider *>(QStringLiteral("shadows"))->value() == 50 && window.findChild<QSlider *>(QStringLiteral("brightness"))->value() == 20,
+           QStringLiteral("viewer: choosing a profile sets what it says"));
+    window.findChild<QSlider *>(QStringLiteral("sharpen"))->setValue(30);
+    report(profiles && profiles->currentIndex() == 0, QStringLiteral("viewer: changing a slider afterwards makes them your own settings again"));
+    // Saved ones come from Find Lost Files (the viewer can't see the home folder) and are listed after.
+    enhance::Profile mine;
+    mine.name = QStringLiteral("My CCTV");
+    mine.settings.contrast = 33;
+    mine.settings.denoise = 2;
+    window.setProfiles({enhance::profileToFile(mine), QByteArray("not a profile")}, QStringLiteral("Added 1 profile: My CCTV."));
+    const int own = profiles ? profiles->findText(QStringLiteral("My CCTV")) : -1;
+    report(own > dark && window.findChild<QLabel *>(QStringLiteral("profileNote"))->text().contains(QLatin1String("Added")),
+           QStringLiteral("viewer: saved profiles are listed after DiskAnvil's, and what happened is said"));
+    if (own > 0) {
+        profiles->setCurrentIndex(own);
+        Q_EMIT profiles->activated(own);
+    }
+    report(window.findChild<QSlider *>(QStringLiteral("contrast"))->value() == 33, QStringLiteral("viewer: a saved profile is used the same way"));
+    // A profile file dropped on the viewer goes to Find Lost Files to be checked and kept.
+    QStringList dropped;
+    QObject::connect(&window, &viewer::Window::profileAsked,
+                     [&](viewer::ProfileDo what, const QString &, const QByteArray &, const QStringList &files) {
+                         if (what == viewer::ProfileDo::Dropped)
+                             dropped = files;
+                     });
+    const QString given = dir.path() + QStringLiteral("/given.anvil-enhance");
+    {
+        QMimeData data;
+        data.setUrls({QUrl::fromLocalFile(given), QUrl::fromLocalFile(dir.path() + QStringLiteral("/photo.jpg"))});
+        QDragEnterEvent enter(QPointF(10, 10), Qt::CopyAction, &data, Qt::LeftButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(&window, &enter);
+        QDropEvent drop(QPointF(10, 10), Qt::CopyAction, &data, Qt::LeftButton, Qt::NoModifier);
+        QCoreApplication::sendEvent(&window, &drop);
+        report(enter.isAccepted() && dropped == QStringList{given}, QStringLiteral("viewer: a profile file dropped on it is passed on to be added (a photo isn't)"),
+               dropped.join(QLatin1Char(' ')));
+    }
+
+    // A spot: a box drawn on the picture is shown on its own, and that's what's saved.
+    auto *picture = window.findChild<QAbstractScrollArea *>(QStringLiteral("picture"));
+    window.findChild<QPushButton *>(QStringLiteral("pickSpot"))->setChecked(true);
+    QCoreApplication::processEvents();
+    if (picture) {
+        // The picture is shown whole (it's smaller than the window), centred: its corner, then 100 by 60 of it.
+        QWidget *port = picture->viewport();
+        const QPointF corner((port->width() - stripes.width()) / 2.0, (port->height() - stripes.height()) / 2.0);
+        const auto mouse = [port](QEvent::Type type, QPointF at) {
+            QMouseEvent e(type, at, port->mapToGlobal(at), Qt::LeftButton, type == QEvent::MouseButtonRelease ? Qt::NoButton : Qt::LeftButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(port, &e);
+        };
+        mouse(QEvent::MouseButtonPress, corner + QPointF(40, 50));
+        mouse(QEvent::MouseMove, corner + QPointF(90, 80));
+        mouse(QEvent::MouseMove, corner + QPointF(140, 110));
+        mouse(QEvent::MouseButtonRelease, corner + QPointF(140, 110));
+    }
+    QCoreApplication::processEvents();
+    png.clear();
+    window.findChild<QPushButton *>(QStringLiteral("saveEnhanced"))->click();
+    waitUntil([&] { return !png.isEmpty(); }, 20000);
+    saved.loadFromData(png, "PNG");
+    report(window.findChild<QPushButton *>(QStringLiteral("wholePicture"))->isEnabled() && name.contains(QLatin1String("(spot)"))
+               && saved.width() == 100 * 4 && saved.height() == 60 * 4 && saved.text(QStringLiteral("Description")).contains(QStringLiteral("100 × 60 pixels from 40, 50")),
+           QStringLiteral("viewer: a spot picked is saved on its own, bigger, saying where it was"),
+           QStringLiteral("%1, %2x%3: %4").arg(name).arg(saved.width()).arg(saved.height()).arg(saved.text(QStringLiteral("Description"))));
+    if (qEnvironmentVariableIsSet("DISKANVIL_UITEST_SHOTS"))
+        window.grab().save(qEnvironmentVariable("DISKANVIL_UITEST_SHOTS") + QStringLiteral("/enhance-spot.png"));
+    window.findChild<QPushButton *>(QStringLiteral("wholePicture"))->click();
+    png.clear();
+    window.findChild<QPushButton *>(QStringLiteral("saveEnhanced"))->click();
+    waitUntil([&] { return !png.isEmpty(); }, 20000);
+    saved.loadFromData(png, "PNG");
+    report(saved.size() == stripes.size() && !name.contains(QLatin1String("spot")), QStringLiteral("viewer: Whole Picture goes back to all of it"),
+           QStringLiteral("%1 %2x%3").arg(name).arg(saved.width()).arg(saved.height()));
+
     show.kind = viewer::Kind::Words;
     window.present(show);
     report(!action->isVisible() && !action->isChecked(), QStringLiteral("viewer: Enhance goes away for what isn't a picture"));
@@ -4899,6 +4985,35 @@ void filmTools()
     QObject::connect(&window, &viewer::Window::exportFilm, [&exportSpeed](double rate, const enhance::Settings &, qint64) { exportSpeed = rate; });
     window.findChild<QPushButton *>(QStringLiteral("exportFilm"))->click();
     report(exportSpeed == 0.25, QStringLiteral("film tools: a slowed-down copy is asked for at the speed chosen"));
+    // A spot in a paused frame (a face on a security camera): the frame becomes a still to pick in.
+    window.findChild<QSlider *>(QStringLiteral("brightness"))->setValue(0);
+    window.findChild<QPushButton *>(QStringLiteral("pickSpot"))->setChecked(true);
+    QCoreApplication::processEvents();
+    auto *picture = window.findChild<QAbstractScrollArea *>(QStringLiteral("picture"));
+    const bool still = picture && picture->isVisible() && window.findChild<QSlider *>(QStringLiteral("focus"))->isEnabled();
+    if (picture) {
+        QWidget *port = picture->viewport();
+        const QPointF corner((port->width() - 320) / 2.0, (port->height() - 240) / 2.0);
+        const auto mouse = [port](QEvent::Type type, QPointF at) {
+            QMouseEvent e(type, at, port->mapToGlobal(at), Qt::LeftButton, type == QEvent::MouseButtonRelease ? Qt::NoButton : Qt::LeftButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(port, &e);
+        };
+        mouse(QEvent::MouseButtonPress, corner + QPointF(100, 80));
+        mouse(QEvent::MouseMove, corner + QPointF(180, 120));
+        mouse(QEvent::MouseButtonRelease, corner + QPointF(180, 120));
+    }
+    png.clear();
+    window.findChild<QPushButton *>(QStringLiteral("saveEnhanced"))->click();
+    waitUntil([&] { return !png.isEmpty(); }, 10000);
+    frame.loadFromData(png, "PNG");
+    report(still && name.startsWith(QLatin1String("pattern frame ")) && name.contains(QLatin1String("(spot)")) && frame.width() >= 300 && std::abs(frame.width() - 2 * frame.height()) <= 16
+               && frame.text(QStringLiteral("Description")).contains(QLatin1String("in, only the spot")),
+           QStringLiteral("film tools: a spot picked in the paused frame is saved on its own, bigger, saying when and where"),
+           QStringLiteral("%1 %2x%3: %4").arg(name).arg(frame.width()).arg(frame.height()).arg(frame.text(QStringLiteral("Description"))));
+    window.findChild<QPushButton *>(QStringLiteral("wholePicture"))->click();
+    QCoreApplication::processEvents();
+    report(!picture->isVisible() && !window.findChild<QSlider *>(QStringLiteral("focus"))->isEnabled(),
+           QStringLiteral("film tools: Back to the Film goes back to it"));
 #endif
 }
 
@@ -6414,6 +6529,50 @@ void lostFilesThroughWindow()
     report(refused && changedBytes.size() > 4 && changedBytes[2] == '\0' && changedBytes[3] == '\x7F',
            QStringLiteral("the viewer's changed copy is saved with its changes, and never onto the drive searched"),
            boxes.join(QStringLiteral(" | ")).left(100));
+    // Enhance profiles the viewer asks to keep: it can't reach the home folder, so they're kept here, checked.
+    QTemporaryDir kept;
+    dialog.setProfilesFolder(kept.path());
+    const auto ask = [&](viewer::ProfileDo what, const QString &profileName, const QByteArray &file, const QStringList &files = {}) {
+        viewer::Message m;
+        m.type = viewer::Message::Profile;
+        m.profileDo = what;
+        m.profileName = profileName;
+        m.profile = file;
+        m.dropped = files;
+        dialog.hearFromViewer(viewer::encode(m));
+    };
+    enhance::Profile gate;
+    gate.name = QStringLiteral("Gate camera");
+    gate.settings.shadows = 40;
+    ask(viewer::ProfileDo::Save, gate.name, enhance::profileToFile(gate));
+    ask(viewer::ProfileDo::Save, QStringLiteral("bad"), QByteArray("{not a profile"));
+    const bool keptOne = enhance::savedProfiles(kept.path()).size() == 1;
+    // Files dropped on the viewer: a good one added, a bad one refused.
+    enhance::Profile given;
+    given.name = QStringLiteral("From a friend");
+    given.settings.sharpen = 45;
+    QFile good(elsewhere.filePath(QStringLiteral("friend.anvil-enhance"))), badFile(elsewhere.filePath(QStringLiteral("bad.anvil-enhance")));
+    if (good.open(QIODevice::WriteOnly))
+        good.write(enhance::profileToFile(given));
+    good.close();
+    if (badFile.open(QIODevice::WriteOnly))
+        badFile.write("MZ\x90\x00");
+    badFile.close();
+    ask(viewer::ProfileDo::Dropped, {}, {}, {good.fileName(), badFile.fileName()});
+    QStringList names;
+    for (const enhance::Profile &p : enhance::savedProfiles(kept.path()))
+        names << p.name;
+    report(keptOne && names == QStringList{QStringLiteral("From a friend"), QStringLiteral("Gate camera")},
+           QStringLiteral("enhance profiles the viewer saves, and good ones dropped on it, are kept; what isn't one is refused"), names.join(QStringLiteral(", ")));
+    dialog.setChangedCopyTarget(elsewhere.filePath(QStringLiteral("shared.anvil-enhance")));
+    ask(viewer::ProfileDo::Export, given.name, enhance::profileToFile(given));
+    enhance::Profile shared;
+    QString sharedWhy;
+    QFile sharedFile(elsewhere.filePath(QStringLiteral("shared.anvil-enhance")));
+    const bool exported = sharedFile.open(QIODevice::ReadOnly) && enhance::profileFromFile(sharedFile.readAll(), &shared, &sharedWhy) && shared.settings.sharpen == 45;
+    ask(viewer::ProfileDo::Remove, QStringLiteral("Gate camera"), {});
+    report(exported && enhance::savedProfiles(kept.path()).size() == 1, QStringLiteral("enhance profiles: one saved as a file to pass on, and one removed"));
+    dialog.setChangedCopyTarget(QString());
     // Closing with files found asks first, and No keeps them.
     boxes.clear();
     answerer.answer = [&](QWidget *modal) {

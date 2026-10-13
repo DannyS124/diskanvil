@@ -35,7 +35,12 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QMovie>
+#include <QInputDialog>
+#include <QMenu>
+#include <QMessageBox>
+#include <QMimeData>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPlainTextEdit>
 #include <QScrollArea>
 #include <QScrollBar>
@@ -162,6 +167,16 @@ QByteArray encode(const Message &m)
         s << m.speed << m.durationMs << qint32(m.settings.brightness) << qint32(m.settings.contrast) << qint32(m.settings.shadows)
           << qint32(m.settings.sharpen) << m.settings.grey << m.settings.invert;
         break;
+    case Message::Profiles:
+        s << quint32(m.profiles.size());
+        for (const QByteArray &file : m.profiles)
+            s << file;
+        s << m.note;
+        break;
+    case Message::Profile:
+        s << qint32(m.profileDo) << m.profileName << m.profile;
+        preview::writeStrings(s, m.dropped);
+        break;
     }
     QByteArray out;
     QDataStream header(&out, QIODevice::WriteOnly);
@@ -179,7 +194,7 @@ bool decode(QByteArray &buffer, Message &m, bool *bad)
     header >> magic >> type >> length;
     // A picture to save can be big (a photo made four times bigger); everything else is small.
     const quint32 most = type == Message::SavePicture ? kMostPicture : kMostMessage;
-    if (magic != kMagic || length > most || type < Message::Look || type > Message::ExportFilm) {
+    if (magic != kMagic || length > most || type < Message::Look || type > Message::Profile) {
         *bad = true;
         return false;
     }
@@ -236,6 +251,24 @@ bool decode(QByteArray &buffer, Message &m, bool *bad)
         m.settings.sharpen = std::clamp(sharpen, 0, 100);
         break;
     }
+    case Message::Profiles: {
+        quint32 count = 0;
+        s >> count;
+        for (quint32 i = 0; i < count && i < 1000 && s.status() == QDataStream::Ok; ++i) {
+            QByteArray file;
+            s >> file;
+            m.profiles << file;
+        }
+        s >> m.note;
+        break;
+    }
+    case Message::Profile: {
+        qint32 what = 0;
+        s >> what >> m.profileName >> m.profile;
+        preview::readStrings(s, m.dropped);
+        m.profileDo = what >= 0 && what <= qint32(ProfileDo::Dropped) ? ProfileDo(what) : ProfileDo::Save;
+        break;
+    }
     }
     buffer.remove(0, 12 + length);
     if (s.status() != QDataStream::Ok) {
@@ -255,6 +288,7 @@ public:
         : QAbstractScrollArea(parent)
     {
         setFrameShape(QFrame::NoFrame);
+        setObjectName(QStringLiteral("picture"));
         viewport()->setCursor(Qt::OpenHandCursor);
     }
 
@@ -310,8 +344,35 @@ public:
         m_image = QImage();
         m_processed = QImage();
         m_line = QLineF();
+        m_box = QRectF();
+        m_spot = false;
         viewport()->update();
     }
+
+    // A picture made here (a film's frame) shown the same way as one loaded.
+    void showImage(const QImage &image)
+    {
+        clear();
+        m_image = image;
+        fit();
+    }
+    // A spot of `whole`, filling the window: shown bigger smoothly, nothing made up.
+    void showSpot(const QImage &whole, const QRect &spot)
+    {
+        clear();
+        m_image = whole.copy(spot);
+        m_spot = true;
+        fit();
+    }
+    // Picking a spot: a box dragged around it, in the picture's own pixels.
+    void setPicking(bool on)
+    {
+        m_picking = on;
+        m_box = QRectF();
+        viewport()->setCursor(on ? Qt::CrossCursor : Qt::OpenHandCursor);
+        viewport()->update();
+    }
+    std::function<void(const QRect &spot)> picked;
 
     // Enhancing: the picture as it was found, and what's shown instead of it.
     const QImage &original() const { return m_image; }
@@ -366,6 +427,16 @@ protected:
             p.setPen(QPen(palette().color(QPalette::Highlight), 2));
             p.drawLine(m_line);
         }
+        if (m_picking && !m_box.isNull()) {
+            // The rest dimmed, the spot outlined.
+            QPainterPath outside;
+            outside.addRect(QRectF(viewport()->rect()));
+            QPainterPath inside;
+            inside.addRect(m_box);
+            p.fillPath(outside.subtracted(inside), QColor(0, 0, 0, 120));
+            p.setPen(QPen(palette().color(QPalette::Highlight), 2, Qt::DashLine));
+            p.drawRect(m_box);
+        }
     }
 
     void resizeEvent(QResizeEvent *event) override
@@ -393,6 +464,11 @@ protected:
             m_line = QLineF(event->position(), event->position());
             return;
         }
+        if (event->button() == Qt::LeftButton && m_picking) {
+            m_boxFrom = event->position();
+            m_box = QRectF(m_boxFrom, m_boxFrom);
+            return;
+        }
         if (event->button() == Qt::LeftButton) {
             m_drag = event->position().toPoint();
             viewport()->setCursor(Qt::ClosedHandCursor);
@@ -405,6 +481,11 @@ protected:
             return;
         if (m_measuring) {
             m_line.setP2(event->position());
+            viewport()->update();
+            return;
+        }
+        if (m_picking) {
+            m_box = QRectF(m_boxFrom, event->position()).normalized();
             viewport()->update();
             return;
         }
@@ -429,6 +510,17 @@ protected:
                 measured(int(std::lround(length)), int(std::lround(angle)) % 180);
             return;
         }
+        if (m_picking) {
+            // In the picture's own pixels, kept inside it; a box too small to see is no spot.
+            const QRectF at = target();
+            const QRectF in((m_box.topLeft() - at.topLeft()) / m_zoom, m_box.size() / m_zoom);
+            const QRect spot = in.toAlignedRect().intersected(m_image.rect());
+            m_box = QRectF();
+            viewport()->update();
+            if (spot.width() >= 4 && spot.height() >= 4 && picked)
+                picked(spot);
+            return;
+        }
         viewport()->setCursor(Qt::OpenHandCursor);
     }
 
@@ -446,7 +538,8 @@ private:
         if (m_image.isNull())
             return 1;
         const QSize room = viewport()->size();
-        return std::min({1.0, room.width() / double(m_image.width()), room.height() / double(m_image.height())});
+        // A spot fills the window, up to 16 times bigger; a whole picture is never shown bigger than it is.
+        return std::min({m_spot ? 16.0 : 1.0, room.width() / double(m_image.width()), room.height() / double(m_image.height())});
     }
 
     QSizeF shownSize() const { return QSizeF(m_image.size()) * m_zoom; }
@@ -496,6 +589,10 @@ private:
     bool m_comparing = false;
     bool m_measuring = false;
     QLineF m_line;
+    bool m_picking = false;
+    bool m_spot = false;
+    QPointF m_boxFrom;
+    QRectF m_box;
     QPoint m_drag;
 };
 
@@ -513,6 +610,34 @@ public:
                                            "never make any up. The file found is never changed: what's saved is a new picture."));
         note->setWordWrap(true);
         layout->addWidget(note);
+        // Profiles: settings kept under a name. DiskAnvil's own, then the person's.
+        auto *profileRow = new QHBoxLayout;
+        m_profiles = new QComboBox;
+        m_profiles->setObjectName(QStringLiteral("profiles"));
+        m_profiles->setToolTip(viewer::tr("Settings kept under a name: DiskAnvil's own, and ones you saved or were given. "
+                                          "Drop a profile file (.%1) on this window to add it.").arg(QLatin1String(enhance::kProfileSuffix)));
+        auto *more = new QToolButton;
+        more->setText(viewer::tr("Profiles"));
+        more->setPopupMode(QToolButton::InstantPopup);
+        auto *menu = new QMenu(more);
+        m_saveProfile = menu->addAction(viewer::tr("Save as a Profile…"));
+        m_removeProfile = menu->addAction(viewer::tr("Remove This Profile"));
+        menu->addSeparator();
+        m_importProfile = menu->addAction(viewer::tr("Add Profiles From Files…"));
+        m_exportProfile = menu->addAction(viewer::tr("Save This Profile as a File…"));
+        more->setMenu(menu);
+        profileRow->addWidget(m_profiles, 1);
+        profileRow->addWidget(more);
+        layout->addLayout(profileRow);
+        m_profileNote = new QLabel;
+        m_profileNote->setWordWrap(true);
+        m_profileNote->setObjectName(QStringLiteral("profileNote"));
+        layout->addWidget(m_profileNote);
+        QObject::connect(m_profiles, &QComboBox::activated, this, [this](int row) { useProfile(row); });
+        QObject::connect(m_saveProfile, &QAction::triggered, this, [this] { saveProfileAs(); });
+        QObject::connect(m_removeProfile, &QAction::triggered, this, [this] { removeChosen(); });
+        QObject::connect(m_importProfile, &QAction::triggered, this, [this] { if (profileAsked) profileAsked(viewer::ProfileDo::Import, {}, {}); });
+        QObject::connect(m_exportProfile, &QAction::triggered, this, [this] { exportChosen(); });
         auto *form = new QFormLayout;
         const auto slider = [this, form](const QString &label, int low, int high, const QString &name) {
             auto *s = new QSlider(Qt::Horizontal);
@@ -526,8 +651,7 @@ public:
             form->addRow(label, row);
             QObject::connect(s, &QSlider::valueChanged, this, [this, value](int v) {
                 value->setText(QString::number(v));
-                if (!m_quiet && changed)
-                    changed();
+                touched();
             });
             m_rows << s;
             return s;
@@ -554,9 +678,25 @@ public:
         m_invert = new QCheckBox(viewer::tr("Inverted (for a negative)"));
         for (QWidget *w : {static_cast<QWidget *>(m_grain), static_cast<QWidget *>(m_levels), static_cast<QWidget *>(m_grey), static_cast<QWidget *>(m_invert)})
             layout->addWidget(w);
-        QObject::connect(m_grain, &QComboBox::currentIndexChanged, this, [this] { if (!m_quiet && changed) changed(); });
+        QObject::connect(m_grain, &QComboBox::currentIndexChanged, this, [this] { touched(); });
         for (QCheckBox *box : {m_levels, m_grey, m_invert})
-            QObject::connect(box, &QCheckBox::toggled, this, [this] { if (!m_quiet && changed) changed(); });
+            QObject::connect(box, &QCheckBox::toggled, this, [this] { touched(); });
+        // A spot: a box drawn around part of the picture (a face, a number plate), which is then
+        // shown filling the window and is what the tools work on and what's saved.
+        auto *spotRow = new QHBoxLayout;
+        m_pick = new QPushButton(viewer::tr("Pick a Spot"));
+        m_pick->setObjectName(QStringLiteral("pickSpot"));
+        m_pick->setCheckable(true);
+        m_pick->setToolTip(viewer::tr("Draw a box around part of the picture, or of the film where it's paused: just that part is "
+                                      "shown, bigger, to work on and save"));
+        m_whole = new QPushButton(viewer::tr("Whole Picture"));
+        m_whole->setObjectName(QStringLiteral("wholePicture"));
+        m_whole->setEnabled(false);
+        spotRow->addWidget(m_pick);
+        spotRow->addWidget(m_whole);
+        layout->addLayout(spotRow);
+        QObject::connect(m_pick, &QPushButton::toggled, this, [this](bool on) { if (pick) pick(on); });
+        QObject::connect(m_whole, &QPushButton::clicked, this, [this] { if (whole) whole(); });
         auto *buttons = new QHBoxLayout;
         m_compare = new QPushButton(viewer::tr("Hold to Compare"));
         m_compare->setToolTip(viewer::tr("Shows the picture as it was found while it's held down"));
@@ -586,6 +726,7 @@ public:
         QObject::connect(m_measure, &QPushButton::toggled, this, [this](bool on) { if (measure) measure(on); });
         QObject::connect(m_save, &QPushButton::clicked, this, [this] { if (save) save(m_bigger->currentIndex() + 1); });
         QObject::connect(m_export, &QPushButton::clicked, this, [this] { if (exportFilm) exportFilm(); });
+        fillProfiles({});
     }
 
     enhance::Settings settings() const
@@ -605,9 +746,70 @@ public:
         return s;
     }
 
+    void setSettings(const enhance::Settings &s)
+    {
+        m_quiet = true;
+        m_brightness->setValue(s.brightness);
+        m_contrast->setValue(s.contrast);
+        m_shadows->setValue(s.shadows);
+        m_sharpen->setValue(s.sharpen);
+        m_focus->setValue(s.focus);
+        m_motion->setValue(s.motion);
+        m_angle->setValue(s.motionAngle);
+        m_grain->setCurrentIndex(std::clamp(s.denoise, 0, 2));
+        m_levels->setChecked(s.autoLevels);
+        m_grey->setChecked(s.grey);
+        m_invert->setChecked(s.invert);
+        m_quiet = false;
+        if (changed)
+            changed();
+    }
+
+    // The saved profiles, from Find Lost Files (as their files), and what was just done.
+    void setSaved(const QList<QByteArray> &files, const QString &note)
+    {
+        const QString chosen = m_profiles->currentIndex() > 0 ? m_profiles->currentText() : QString();
+        m_saved.clear();
+        for (const QByteArray &file : files) {
+            enhance::Profile p;
+            QString why;
+            if (enhance::profileFromFile(file, &p, &why))
+                m_saved << p;
+        }
+        fillProfiles(chosen);
+        m_profileNote->setText(note);
+    }
+    QStringList profileNames() const // the tests
+    {
+        QStringList out;
+        for (int i = 1; i < m_profiles->count(); ++i)
+            if (!m_profiles->itemText(i).isEmpty())
+                out << m_profiles->itemText(i);
+        return out;
+    }
+    // Chooses one by name, as picking it in the list does (the tests).
+    bool chooseProfile(const QString &name)
+    {
+        const int row = m_profiles->findText(name);
+        if (row <= 0)
+            return false;
+        m_profiles->setCurrentIndex(row);
+        useProfile(row);
+        return true;
+    }
+
+    // Whether a spot is shown (Whole Picture goes back), and whether picking is on.
+    void setSpotShown(bool shown)
+    {
+        m_whole->setEnabled(shown);
+        const QSignalBlocker quiet(m_pick);
+        m_pick->setChecked(false);
+    }
+
     void reset()
     {
         m_quiet = true;
+        m_profiles->setCurrentIndex(0);
         for (QSlider *s : std::as_const(m_rows))
             s->setValue(0);
         m_grain->setCurrentIndex(0);
@@ -617,7 +819,11 @@ public:
         m_measure->setChecked(false);
         m_quiet = false;
         setStatus(QString());
+        setSpotShown(false);
     }
+
+    // Bigger when saved: a spot is usually wanted bigger.
+    void setBigger(int factor) { m_bigger->setCurrentIndex(std::clamp(factor, 1, 4) - 1); }
 
     void setMotion(int length, int angle)
     {
@@ -636,6 +842,8 @@ public:
             w->setEnabled(!film);
         m_save->setText(film ? viewer::tr("Save This Frame…") : viewer::tr("Save as a New Picture…"));
         m_export->setVisible(film);
+        m_pick->setText(film ? viewer::tr("Pick a Spot in This Frame") : viewer::tr("Pick a Spot"));
+        m_whole->setText(film ? viewer::tr("Back to the Film") : viewer::tr("Whole Picture"));
     }
 
     void setStatus(const QString &text) { m_status->setText(text); }
@@ -645,8 +853,129 @@ public:
     std::function<void(bool on)> compare;
     std::function<void(bool on)> measure;
     std::function<void()> exportFilm;
+    std::function<void(bool on)> pick;
+    std::function<void()> whole;
+    std::function<void(viewer::ProfileDo what, const QString &name, const QByteArray &file)> profileAsked;
 
 private:
+    // A slider or box changed by hand: the settings are no longer the profile's.
+    void touched()
+    {
+        if (m_quiet)
+            return;
+        m_profiles->setCurrentIndex(0);
+        updateProfileActions();
+        if (changed)
+            changed();
+    }
+
+    // The list: "your own settings", DiskAnvil's, then the saved ones.
+    void fillProfiles(const QString &chosen)
+    {
+        m_builtIn = enhance::builtInProfiles();
+        const QSignalBlocker quiet(m_profiles);
+        m_profiles->clear();
+        m_profiles->addItem(viewer::tr("Your own settings"));
+        for (int i = 0; i < m_builtIn.size(); ++i) {
+            m_profiles->addItem(m_builtIn[i].name, i);
+            m_profiles->setItemData(m_profiles->count() - 1, m_builtIn[i].description, Qt::ToolTipRole);
+        }
+        if (!m_saved.isEmpty())
+            m_profiles->insertSeparator(m_profiles->count());
+        for (int i = 0; i < m_saved.size(); ++i) {
+            m_profiles->addItem(m_saved[i].name, 1000 + i);
+            m_profiles->setItemData(m_profiles->count() - 1, m_saved[i].description.isEmpty() ? viewer::tr("Yours") : m_saved[i].description,
+                                    Qt::ToolTipRole);
+        }
+        const int at = chosen.isEmpty() ? 0 : m_profiles->findText(chosen);
+        m_profiles->setCurrentIndex(std::max(0, at));
+        updateProfileActions();
+    }
+
+    const enhance::Profile *chosenProfile() const
+    {
+        const QVariant id = m_profiles->currentData();
+        if (!id.isValid())
+            return nullptr;
+        const int i = id.toInt();
+        if (i >= 1000)
+            return i - 1000 < m_saved.size() ? &m_saved[i - 1000] : nullptr;
+        return i < m_builtIn.size() ? &m_builtIn[i] : nullptr;
+    }
+
+    void useProfile(int row)
+    {
+        Q_UNUSED(row)
+        if (const enhance::Profile *p = chosenProfile()) {
+            setSettings(p->settings);
+            m_profileNote->setText(p->description);
+        } else {
+            m_profileNote->clear();
+        }
+        updateProfileActions();
+    }
+
+    void updateProfileActions()
+    {
+        const enhance::Profile *p = chosenProfile();
+        m_removeProfile->setEnabled(p && !p->builtIn);
+        m_exportProfile->setEnabled(true);
+    }
+
+    void saveProfileAs()
+    {
+        const enhance::Profile *p = chosenProfile();
+        bool ok = false;
+        const QString name = QInputDialog::getText(this, viewer::tr("Save as a Profile"), viewer::tr("Its name:"), QLineEdit::Normal,
+                                                   p && !p->builtIn ? p->name : QString(), &ok)
+                                 .simplified();
+        if (!ok || name.isEmpty())
+            return;
+        enhance::Profile made;
+        made.name = name.left(60);
+        made.settings = settings();
+        made.description = made.settings.describe().join(QStringLiteral(", "));
+        if (profileAsked)
+            profileAsked(viewer::ProfileDo::Save, made.name, enhance::profileToFile(made));
+    }
+
+    void removeChosen()
+    {
+        const enhance::Profile *p = chosenProfile();
+        if (!p || p->builtIn)
+            return;
+        if (QMessageBox::question(this, viewer::tr("Remove This Profile"), viewer::tr("Remove the profile \"%1\"?").arg(p->name)) != QMessageBox::Yes)
+            return;
+        if (profileAsked)
+            profileAsked(viewer::ProfileDo::Remove, p->name, {});
+    }
+
+    // The chosen profile, or the settings as they are (named then), as a file to pass on.
+    void exportChosen()
+    {
+        enhance::Profile out;
+        if (const enhance::Profile *p = chosenProfile()) {
+            out = *p;
+        } else {
+            bool ok = false;
+            out.name = QInputDialog::getText(this, viewer::tr("Save as a File"), viewer::tr("A name for these settings:"), QLineEdit::Normal, QString(), &ok)
+                           .simplified()
+                           .left(60);
+            if (!ok || out.name.isEmpty())
+                return;
+            out.settings = settings();
+            out.description = out.settings.describe().join(QStringLiteral(", "));
+        }
+        out.builtIn = false;
+        if (profileAsked)
+            profileAsked(viewer::ProfileDo::Export, out.name, enhance::profileToFile(out));
+    }
+
+    QComboBox *m_profiles;
+    QLabel *m_profileNote;
+    QAction *m_saveProfile, *m_removeProfile, *m_importProfile, *m_exportProfile;
+    QVector<enhance::Profile> m_builtIn, m_saved;
+    QPushButton *m_pick, *m_whole;
     QVector<QSlider *> m_rows;
     QSlider *m_brightness, *m_contrast, *m_shadows, *m_sharpen, *m_focus, *m_motion, *m_angle;
     QComboBox *m_grain, *m_bigger;
@@ -1069,6 +1398,16 @@ public:
 #endif
     }
 
+    // The frame on the screen now as the film has it, nothing applied.
+    QImage rawFrame() const
+    {
+#ifdef DISKANVIL_MEDIA
+        return QVideoFrame(m_last).toImage();
+#else
+        return {};
+#endif
+    }
+
     // The frame on the screen now, whole and with what's set applied.
     QImage frame() const
     {
@@ -1487,6 +1826,8 @@ Window::Window(QWidget *parent)
             m_details->setChecked(true);
         }
         if (!on) {
+            if (!m_whole.isNull() || m_spotFromFilm)
+                showWhole();
             m_enhance->reset();
             ++*m_enhanceRound;
             m_picture->showProcessed(QImage());
@@ -1495,13 +1836,13 @@ Window::Window(QWidget *parent)
     });
     // A film's frames are enhanced as they're shown (the light tools only); a picture a moment later.
     m_enhance->changed = [this] {
-        if (m_shown.kind == Kind::Film)
+        if (m_shown.kind == Kind::Film && !m_spotFromFilm)
             m_media->setEnhance(m_enhance->settings());
         else
             enhanceSoon();
     };
     m_enhance->compare = [this](bool on) {
-        if (m_shown.kind == Kind::Film)
+        if (m_shown.kind == Kind::Film && !m_spotFromFilm)
             m_media->setEnhance(on ? enhance::Settings() : m_enhance->settings());
         else
             m_picture->setComparing(on);
@@ -1515,6 +1856,131 @@ Window::Window(QWidget *parent)
         m_enhance->setMotion(length, angle);
     };
     m_enhance->save = [this](int factor) { saveEnhanced(factor); };
+    m_enhance->profileAsked = [this](ProfileDo what, const QString &name, const QByteArray &file) {
+        Q_EMIT profileAsked(what, name, file, {});
+    };
+    m_enhance->pick = [this](bool on) { pickSpot(on); };
+    m_enhance->whole = [this] { showWhole(); };
+    m_picture->picked = [this](const QRect &spot) { showSpot(spot); };
+    setAcceptDrops(true);
+}
+
+void Window::setProfiles(const QList<QByteArray> &files, const QString &note)
+{
+    m_enhance->setSaved(files, note);
+}
+
+namespace {
+// The profile files among what's dragged here.
+QStringList profileFiles(const QMimeData *data)
+{
+    QStringList out;
+    if (!data || !data->hasUrls())
+        return out;
+    for (const QUrl &url : data->urls()) {
+        const QString path = url.toLocalFile();
+        if (path.endsWith(QLatin1Char('.') + QLatin1String(enhance::kProfileSuffix), Qt::CaseInsensitive)
+            || path.endsWith(QLatin1String(".json"), Qt::CaseInsensitive))
+            out << path;
+    }
+    return out;
+}
+} // namespace
+
+void Window::dragEnterEvent(QDragEnterEvent *event)
+{
+    if (!profileFiles(event->mimeData()).isEmpty())
+        event->acceptProposedAction();
+}
+
+void Window::dropEvent(QDropEvent *event)
+{
+    // The viewer can't open them (it can't see the home folder): Find Lost Files reads and checks them.
+    const QStringList files = profileFiles(event->mimeData());
+    if (files.isEmpty())
+        return;
+    event->acceptProposedAction();
+    m_enhanceAction->setChecked(m_enhanceAction->isVisible() || m_enhanceAction->isChecked());
+    Q_EMIT profileAsked(ProfileDo::Dropped, {}, {}, files.mid(0, 50));
+}
+
+void Window::pickSpot(bool on)
+{
+    if (!on) {
+        m_picture->setPicking(false);
+        return;
+    }
+    if (m_shown.kind == Kind::Film && !m_spotFromFilm) {
+        // The frame on the screen, paused, becomes a still picture to pick in (and the slow tools work on it).
+        if (m_media->playing())
+            m_media->playPause();
+        const QImage frame = m_media->rawFrame();
+        if (frame.isNull()) {
+            m_enhance->setStatus(tr("Play the film to the moment you want, then pick a spot in it."));
+            m_enhance->setSpotShown(false);
+            return;
+        }
+        const qint64 at = m_media->position();
+        m_spotWhen = QStringLiteral("%1m%2s%3").arg(at / 60000).arg(at / 1000 % 60, 2, 10, QLatin1Char('0')).arg(at % 1000, 3, 10, QLatin1Char('0'));
+        m_spotFromFilm = true;
+        m_whole = frame;
+        m_picture->showImage(frame);
+        m_pages->setCurrentWidget(m_picture);
+        m_enhance->setForFilm(false);
+        m_enhance->setSpotShown(true);
+        enhanceSoon();
+    }
+    if (m_whole.isNull())
+        m_whole = m_picture->original();
+    m_picture->setPicking(true);
+    m_enhance->setStatus(tr("Drag a box around the spot."));
+}
+
+void Window::showSpot(QRect spot)
+{
+    if (m_whole.isNull())
+        return;
+    // A spot picked inside a spot is part of the one before.
+    if (!m_spot.isNull())
+        spot.translate(m_spot.topLeft());
+    m_spot = spot.intersected(m_whole.rect());
+    m_picture->setPicking(false);
+    m_picture->showSpot(m_whole, m_spot);
+    m_enhance->setSpotShown(true);
+    // Saved bigger: as big as fits in 4 times, about as big as the screen shows it.
+    const int longest = std::max(m_spot.width(), m_spot.height());
+    m_enhance->setBigger(longest >= 900 ? 1 : longest >= 450 ? 2 : longest >= 300 ? 3 : 4);
+    m_enhance->setStatus(tr("The spot: %1 × %2 pixels, from %3, %4 in. It's shown bigger, smoothly: what's there, nothing made up.")
+                             .arg(m_spot.width()).arg(m_spot.height()).arg(m_spot.x()).arg(m_spot.y()));
+    enhanceSoon();
+}
+
+void Window::showWhole()
+{
+    ++*m_enhanceRound;
+    m_picture->setPicking(false);
+    if (m_spotFromFilm) {
+        // Back to the film where it was paused.
+        m_spotFromFilm = false;
+        m_whole = QImage();
+        m_spot = QRect();
+        m_picture->clear();
+        m_pages->setCurrentWidget(m_media);
+        m_enhance->setForFilm(true);
+        m_enhance->setSpotShown(false);
+        m_enhance->setBigger(1);
+        m_enhance->setStatus(QString());
+        m_media->setEnhance(m_enhance->settings());
+        return;
+    }
+    if (!m_whole.isNull())
+        m_picture->showImage(m_whole);
+    m_whole = QImage();
+    m_spot = QRect();
+    m_enhance->setSpotShown(false);
+    m_enhance->setBigger(1);
+    m_enhance->setStatus(QString());
+    enhanceSoon();
 }
 
 void Window::enhanceSoon()
@@ -1565,7 +2031,7 @@ void Window::enhanceNow()
 
 void Window::saveEnhanced(int factor)
 {
-    if (m_shown.kind == Kind::Film) {
+    if (m_shown.kind == Kind::Film && !m_spotFromFilm) {
         // The frame on the screen, whole, with the tools applied: named after where in the film it is.
         const QImage frame = m_media->frame();
         if (frame.isNull())
@@ -1592,10 +2058,15 @@ void Window::saveEnhanced(int factor)
     while (factor > 1 && qint64(original.width()) * factor * original.height() * factor > 200000000LL)
         --factor;
     m_enhance->setStatus(tr("Making the picture to save…"));
-    const QString base = QFileInfo(m_shown.name).completeBaseName();
-    const QString name = base + (settings.isDefault() ? QString() : tr(" (enhanced)")) + (factor > 1 ? tr(" (x%1)").arg(factor) : QString())
-                       + QStringLiteral(".png");
-    QStringList done = settings.describe();
+    const QString base = QFileInfo(m_shown.name).completeBaseName() + (m_spotFromFilm ? tr(" frame %1").arg(m_spotWhen) : QString());
+    const QString name = base + (m_spot.isNull() ? QString() : tr(" (spot)")) + (settings.isDefault() ? QString() : tr(" (enhanced)"))
+                       + (factor > 1 ? tr(" (x%1)").arg(factor) : QString()) + QStringLiteral(".png");
+    QStringList done;
+    if (m_spotFromFilm)
+        done << tr("the frame %1 in").arg(m_spotWhen);
+    if (!m_spot.isNull())
+        done << tr("only the spot of %1 × %2 pixels from %3, %4").arg(m_spot.width()).arg(m_spot.height()).arg(m_spot.x()).arg(m_spot.y());
+    done << settings.describe();
     if (factor > 1)
         done << tr("made %1 times as big (bicubic)").arg(factor);
     const QString note = tr("Made by DiskAnvil's viewer from \"%1\": %2.").arg(m_shown.name, done.isEmpty() ? tr("nothing changed") : done.join(QStringLiteral(", ")));
@@ -1635,6 +2106,9 @@ void Window::present(const Show &show)
 {
     m_shown = show;
     m_media->stop();
+    m_whole = QImage();
+    m_spot = QRect();
+    m_spotFromFilm = false;
     ++*m_enhanceRound;
     m_enhance->reset();
     m_picture->clear();
@@ -2004,6 +2478,17 @@ int run()
         out.write(encode(m));
         out.flush();
     });
+    QObject::connect(&window, &Window::profileAsked, &window,
+                     [&out](ProfileDo what, const QString &name, const QByteArray &file, const QStringList &dropped) {
+                         Message m;
+                         m.type = Message::Profile;
+                         m.profileDo = what;
+                         m.profileName = name;
+                         m.profile = file;
+                         m.dropped = dropped;
+                         out.write(encode(m));
+                         out.flush();
+                     });
     auto *reader = new Reader;
     QThread thread;
     reader->moveToThread(&thread);
@@ -2021,6 +2506,8 @@ int run()
             Q_EMIT window.asked(Ask::Shown);
         } else if (m.type == Message::Facts) {
             window.setFacts(m.show.facts);
+        } else if (m.type == Message::Profiles) {
+            window.setProfiles(m.profiles, m.note);
         }
     }, Qt::QueuedConnection);
     // Most of the screen, the first time.

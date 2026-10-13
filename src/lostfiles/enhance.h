@@ -11,6 +11,7 @@
 
 #include <QImage>
 #include <QStringList>
+#include <QVector>
 
 #include <functional>
 
@@ -39,6 +40,29 @@ struct Settings {
 QImage apply(const QImage &in, const Settings &settings, const std::function<bool(int percent)> &progress = {});
 // Bigger by a whole factor (2, 3 or 4), smoothly (bicubic): what's there, larger, nothing made up.
 QImage enlarge(const QImage &in, int factor);
+
+// A profile: the settings kept under a name, to use again. DiskAnvil comes with some for what
+// usually goes wrong (too dark, out of focus, a faded print...); people save their own and pass
+// them around as small files (*.anvil-enhance, JSON), which are checked when they come in: only
+// the settings above, each kept to its range.
+struct Profile {
+    QString name;
+    QString description;
+    Settings settings;
+    bool builtIn = false;
+};
+// The ones that come with DiskAnvil.
+QVector<Profile> builtInProfiles();
+// A profile as its file, and back. Anything else, or a file over 64 KB, is refused with why.
+QByteArray profileToFile(const Profile &profile);
+bool profileFromFile(const QByteArray &file, Profile *profile, QString *why);
+constexpr const char *kProfileSuffix = "anvil-enhance";
+// Where saved and imported ones are kept, one file each.
+QString profilesFolder();
+QVector<Profile> savedProfiles(const QString &folder = profilesFolder());
+// Saves it (replacing one of the same name); its file's path, or empty with why.
+QString saveProfile(const Profile &profile, QString *why, const QString &folder = profilesFolder());
+bool removeProfile(const QString &name, const QString &folder = profilesFolder());
 
 // ffmpeg's arguments for a film at another speed (0.1 to 2) with the light tools (lighter,
 // contrast, dark parts, sharpen, black and white, inverted) the same as the viewer shows them,
