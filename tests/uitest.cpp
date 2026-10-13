@@ -5647,6 +5647,99 @@ void hardwareWindow()
     }
 }
 
+// The Windows picker on an NTFS drive Windows didn't close properly (the "dirty" mark a crash or a
+// pulled plug leaves, set here in a drive mkntfs made): Linux won't open it for changes, so the
+// picker says why, clears the mark when asked (ntfsfix -d) and opens it. Root: no password then.
+void dirtyWindowsDrive()
+{
+    if (QStandardPaths::findExecutable(QStringLiteral("mkntfs")).isEmpty() || QStandardPaths::findExecutable(QStringLiteral("ntfsfix")).isEmpty()) {
+        report(true, QStringLiteral("dirty NTFS: skipped, ntfs-3g isn't here"));
+        return;
+    }
+    QTemporaryDir dir;
+    const QString image = dir.filePath(QStringLiteral("windows.img"));
+    sh(QStringLiteral("truncate"), {QStringLiteral("-s"), QStringLiteral("64M"), image});
+    sh(QStringLiteral("mkntfs"), {QStringLiteral("-q"), QStringLiteral("-F"), QStringLiteral("-f"), QStringLiteral("-L"), QStringLiteral("WinTest"), image});
+    // Something on it, put in with ntfs-3g's own tool (no Windows: what's checked is opening it).
+    sh(QStringLiteral("ntfscp"), {QStringLiteral("-q"), image, QStringLiteral(SOURCE_DIR "/tests/data/registry/software.hiv"), QStringLiteral("/SOFTWARE")});
+    const auto markDirty = [&image] {
+        QFile f(image);
+        if (!f.open(QIODevice::ReadWrite))
+            return false;
+        const QByteArray boot = f.read(512);
+        const quint32 cluster = qFromLittleEndian<quint16>(boot.constData() + 0x0B) * quint8(boot[0x0D]);
+        const qint64 mft = qint64(qFromLittleEndian<quint64>(boot.constData() + 0x30) * cluster);
+        const qint8 per = qint8(boot[0x40]);
+        const qint64 record = per > 0 ? qint64(per) * cluster : (1ll << -per);
+        f.seek(mft + 3 * record); // $Volume
+        QByteArray r = f.read(record);
+        int at = qFromLittleEndian<quint16>(r.constData() + 0x14);
+        while (at + 8 < r.size()) {
+            const quint32 type = qFromLittleEndian<quint32>(r.constData() + at);
+            if (type == 0xFFFFFFFF)
+                return false;
+            if (type == 0x70) { // $VOLUME_INFORMATION: its flags, 1 = dirty
+                const int value = at + qFromLittleEndian<quint16>(r.constData() + at + 0x14);
+                r[value + 10] = char(r[value + 10] | 1);
+                f.seek(mft + 3 * record);
+                return f.write(r) == r.size();
+            }
+            at += int(qFromLittleEndian<quint32>(r.constData() + at + 4));
+        }
+        return false;
+    };
+    report(markDirty(), QStringLiteral("dirty NTFS: a drive marked as not closed properly"));
+    const QString loopPath = userLoop(image);
+    if (loopPath.isEmpty())
+        return report(false, QStringLiteral("dirty NTFS: a loop device holds it"));
+    UDisks udisks;
+    udisks.setInteractive(false);
+    const Disk *disk = nullptr;
+    waitUntil([&] {
+        udisks.refresh();
+        disk = udisks.diskByPath(loopPath);
+        return disk && !disk->volumes.isEmpty();
+    }, 15000);
+    QStringList boxes;
+    Answerer answerer;
+    answerer.answer = [&](QWidget *modal) {
+        if (auto *box = qobject_cast<QMessageBox *>(modal)) {
+            boxes << box->text();
+            if (QAbstractButton *yes = box->button(QMessageBox::Yes))
+                yes->click();
+            else
+                box->accept();
+            return true;
+        }
+        return false;
+    };
+    WindowsPicker picker(&udisks, true, QStringLiteral("test"));
+    picker.show();
+    auto *list = picker.findChild<QListWidget *>();
+    for (int i = 0; list && i < list->count(); ++i)
+        if (list->item(i)->text().contains(QLatin1String("WinTest")))
+            list->setCurrentRow(i);
+    QPushButton *ok = nullptr;
+    for (QPushButton *b : picker.findChildren<QPushButton *>())
+        if (b->text().contains(QLatin1String("Choose")))
+            ok = b;
+    if (ok)
+        ok->click();
+    auto *note = picker.findChildren<QLabel *>().value(1);
+    QString mount;
+    waitUntil([&] {
+        QCoreApplication::processEvents();
+        for (const Volume &v : udisks.diskByPath(loopPath) ? udisks.diskByPath(loopPath)->volumes : QVector<Volume>())
+            if (!v.mounts().isEmpty())
+                mount = v.mounts().first();
+        return !mount.isEmpty() && QFileInfo(mount).isWritable();
+    }, 60000);
+    report(boxes.size() == 1 && boxes[0].contains(QLatin1String("didn't close this drive properly")) && !mount.isEmpty() && QFileInfo(mount).isWritable(),
+           QStringLiteral("dirty NTFS: said why, the mark cleared when asked, and opened for changes"),
+           boxes.join(QStringLiteral(" | ")).left(120) + QLatin1Char(' ') + mount + (note ? QLatin1Char(' ') + note->text().left(120) : QString()));
+    cleanUpLoop(udisks, loopPath);
+}
+
 void whyCrashWindow()
 {
     whycrash::Report r;
@@ -7621,7 +7714,7 @@ int main(int argc, char *argv[])
     }
     // As root, the ones that make their own loop device can run by themselves.
     if (!only.isEmpty()) {
-        const QVector<QPair<const char *, void (*)()>> alone = {{"stickcheck", stickCheck}, {"burnin", burnInWindow}, {"sdcard", sdCardFormat}, {"refresh", slowAreaRefresh}, {"stopwipe", stopWipe}, {"luksheader", luksHeaderThroughWindow}, {"nas", nasDrives}, {"tryrepair", tryRepairFirst}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"wipecert", wipeCertificate}, {"evidence", evidenceWindow}, {"writeblock", writeBlockMode}};
+        const QVector<QPair<const char *, void (*)()>> alone = {{"stickcheck", stickCheck}, {"burnin", burnInWindow}, {"dirtyntfs", dirtyWindowsDrive}, {"sdcard", sdCardFormat}, {"refresh", slowAreaRefresh}, {"stopwipe", stopWipe}, {"luksheader", luksHeaderThroughWindow}, {"nas", nasDrives}, {"tryrepair", tryRepairFirst}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"wipecert", wipeCertificate}, {"evidence", evidenceWindow}, {"writeblock", writeBlockMode}};
         for (const auto &[name, run] : alone) {
             if (only.contains(QLatin1String(name)))
                 run();

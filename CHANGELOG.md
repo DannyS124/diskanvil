@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.5.3
+- A Windows drive that Windows didn't close properly (it crashed, lost power, or was switched off while starting: usual for a Windows that won't start) can now be opened for fixing. Linux only changes an NTFS drive marked that way once the mark is cleared, so the tools that fix a Windows (Windows Won't Start, Windows Drivers and Services, Scan for Viruses and the rest) say why it won't open and offer to clear the mark (ntfs-3g's ntfsfix), then open it. One that Windows left hibernated (Fast Startup) still says to shut Windows down fully first, since clearing that would lose what Windows kept open
+
 ## 0.5.2
 DiskForge is now called DiskAnvil (too many other things are called DiskForge). Your settings, add-ons, virus list
 and the rest move over by themselves the first time it starts, the new package replaces the old one, and DiskForge

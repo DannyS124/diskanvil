@@ -6,10 +6,16 @@
 #include "activity.h"
 #include "dialogs.h"
 #include "format.h"
+#include "hostprocess.h"
 #include "rescuestick.h"
 #include "udisks.h"
+#include "winstart.h"
 #include "winstartup.h"
 
+#include <QApplication>
+#include <QFile>
+#include <QMessageBox>
+#include <QProcess>
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QLabel>
@@ -18,6 +24,10 @@
 #include <QVBoxLayout>
 
 #include <memory>
+
+#ifndef Q_OS_WIN
+#include <unistd.h>
+#endif
 
 namespace {
 
@@ -161,27 +171,138 @@ void WindowsPicker::choose()
     // Mounted, then used: read-only unless the tool changes something.
     m_ok->setEnabled(false);
     m_note->setText(m_writable ? tr("Mounting it…") : tr("Mounting it, read-only…"));
+    const QString device = v->device;
+    const bool ntfs = v->effectiveFsType() == QLatin1String("ntfs");
+    mountThen(path, !m_writable, [this, use, device, ntfs, path](const QString &mount, const QString &error) {
+        if (!mount.isEmpty())
+            return use(mount);
+#ifndef Q_OS_WIN
+        // Linux opens an NTFS drive for changes only when Windows closed it properly. Read-only
+        // tells which it is: hibernated (Fast Startup: it must stay as it is) or just not closed
+        // (a crash, the power, a PC switched off while starting: a mark that can be cleared).
+        if (m_writable && ntfs) {
+            m_note->setText(tr("Looking at why it can't be changed…"));
+            mountThen(path, true, [this, use, device, path, error](const QString &readOnly, const QString &) {
+                if (readOnly.isEmpty())
+                    return failed(error);
+                const bool hibernated = windowsHibernated(readOnly);
+                unmountThen(path, [this, use, device, path, hibernated, error] {
+                    if (hibernated)
+                        return failed(error, tr("Windows left it hibernated (Fast Startup), so it can only be read: start Windows and hold "
+                                                "Shift while clicking Shut down, then try again. Clearing that would lose what Windows "
+                                                "kept open."));
+                    if (QMessageBox::question(this, windowTitle(),
+                                              tr("Windows didn't close this drive properly: it crashed, lost power or was switched off while "
+                                                 "starting, which is usual for a Windows that won't start. Linux only changes such a drive "
+                                                 "once that mark is cleared.\n\nClear the mark and open it? Nothing else on the drive is "
+                                                 "changed. Afterwards, let Windows check the drive (chkdsk) when it starts again."))
+                        != QMessageBox::Yes)
+                        return failed(error);
+                    QString why;
+                    if (!clearDirtyMark(device, &why))
+                        return failed(error, tr("The mark couldn't be cleared: %1").arg(why));
+                    m_note->setText(tr("Mounting it…"));
+                    mountThen(path, false, [this, use, error](const QString &mount, const QString &again) {
+                        if (mount.isEmpty())
+                            return failed(again.isEmpty() ? error : again);
+                        use(mount);
+                    });
+                });
+            });
+            return;
+        }
+#endif
+        failed(error);
+    });
+}
+
+void WindowsPicker::failed(const QString &error, const QString &why)
+{
+    m_ok->setEnabled(true);
+    m_note->setText(redText(error.toHtmlEscaped()) + (why.isEmpty() ? QString() : QStringLiteral("<br>") + why.toHtmlEscaped()));
+}
+
+void WindowsPicker::mountThen(const QString &path, bool readOnly, const std::function<void(const QString &mount, const QString &error)> &then)
+{
+    const auto found = [this, path]() -> const Volume * {
+        for (const Disk &d : m_udisks->disks())
+            for (const Volume &v : d.volumes)
+                if (v.objectPath == path || v.cleartextPath == path)
+                    return &v;
+        return nullptr;
+    };
+    const Volume *v = found();
+    if (!v)
+        return then({}, tr("The drive is gone."));
     auto mountedConn = std::make_shared<QMetaObject::Connection>();
     auto failedConn = std::make_shared<QMetaObject::Connection>();
-    *mountedConn = connect(m_udisks, &UDisks::changed, this, [this, found, use, mountedConn, failedConn] {
+    *mountedConn = connect(m_udisks, &UDisks::changed, this, [found, then, mountedConn, failedConn] {
         const Volume *now = found();
         if (!now || now->mounts().isEmpty())
             return;
         disconnect(*mountedConn);
         disconnect(*failedConn);
-        use(now->mounts().first());
+        then(now->mounts().first(), {});
     });
-    *failedConn = connect(m_udisks, &UDisks::operationFinished, this, [this, mountedConn, failedConn](bool ok, const QString &message) {
+    *failedConn = connect(m_udisks, &UDisks::operationFinished, this, [then, mountedConn, failedConn](bool ok, const QString &message) {
         if (ok)
             return;
         disconnect(*mountedConn);
         disconnect(*failedConn);
-        m_ok->setEnabled(true);
-        // Windows left it hibernated (Fast Startup): it can only be read until Windows shuts down fully.
-        m_note->setText(redText(message.toHtmlEscaped()) + QStringLiteral("<br>")
-                        + (m_writable ? tr("If Windows was shut down with Fast Startup, it can only be read: start Windows and hold "
-                                           "Shift while clicking Shut down, then try again.")
-                                      : QString()));
+        then({}, message);
     });
-    m_udisks->mount(*v, !m_writable);
+    m_udisks->mount(*v, readOnly);
+}
+
+void WindowsPicker::unmountThen(const QString &path, const std::function<void()> &then)
+{
+    for (const Disk &d : m_udisks->disks()) {
+        for (const Volume &v : d.volumes) {
+            if ((v.objectPath == path || v.cleartextPath == path) && !v.mounts().isEmpty()) {
+                auto conn = std::make_shared<QMetaObject::Connection>();
+                *conn = connect(m_udisks, &UDisks::operationFinished, this, [then, conn](bool, const QString &) {
+                    disconnect(*conn);
+                    then();
+                });
+                m_udisks->unmount(v);
+                return;
+            }
+        }
+    }
+    then();
+}
+
+bool WindowsPicker::windowsHibernated(const QString &mount)
+{
+    // hiberfil.sys starts with "hibr" (or "HIBR", "wake") while it holds a hibernated Windows.
+    QFile f(winstart::find(mount, QStringLiteral("hiberfil.sys")));
+    if (!f.open(QIODevice::ReadOnly))
+        return false;
+    const QByteArray head = f.read(4).toLower();
+    return head == "hibr" || head == "wake";
+}
+
+bool WindowsPicker::clearDirtyMark(const QString &device, QString *why)
+{
+#ifdef Q_OS_WIN
+    Q_UNUSED(device)
+    *why = tr("not needed on Windows");
+    return false;
+#else
+    // ntfs-3g's ntfsfix, as root: DiskAnvil Live's sudo, or the admin password on a PC.
+    QStringList command{QStringLiteral("ntfsfix"), QStringLiteral("-d"), device};
+    if (::geteuid() != 0)
+        command = rescue::runningInRescue() ? QStringList{QStringLiteral("sudo"), QStringLiteral("-n")} + command
+                                            : host::command(QStringList{QStringLiteral("pkexec")} + command);
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    QProcess p;
+    p.start(command.first(), command.mid(1));
+    const bool ok = p.waitForFinished(60000) && p.exitStatus() == QProcess::NormalExit && p.exitCode() == 0;
+    QApplication::restoreOverrideCursor();
+    if (!ok)
+        *why = QString::fromLocal8Bit(p.readAllStandardError() + p.readAllStandardOutput()).trimmed().section(QLatin1Char('\n'), -2);
+    if (!ok && why->isEmpty())
+        *why = p.errorString();
+    return ok;
+#endif
 }

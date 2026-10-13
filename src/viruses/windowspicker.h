@@ -31,6 +31,13 @@ public:
 
 private:
     void fill();
+    void failed(const QString &error, const QString &why = {});
+    // Mounted (read-only, or for changes), then `then` with where, or with why not.
+    void mountThen(const QString &path, bool readOnly, const std::function<void(const QString &mount, const QString &error)> &then);
+    void unmountThen(const QString &path, const std::function<void()> &then);
+    static bool windowsHibernated(const QString &mount);
+    // Clears NTFS's "not closed properly" mark (ntfsfix -d, as root).
+    static bool clearDirtyMark(const QString &device, QString *why);
     void choose();
 
     UDisks *m_udisks;
