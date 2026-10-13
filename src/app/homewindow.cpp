@@ -73,7 +73,7 @@ public:
     }
 
     QSize sizeHint() const override { return m_tile.small ? QSize(168, 48) : QSize(320, 100); }
-    QSize minimumSizeHint() const override { return m_tile.small ? QSize(120, 48) : QSize(240, 84); }
+    QSize minimumSizeHint() const override { return m_tile.small ? QSize(120, 48) : QSize(240, 74); }
 
 protected:
     void paintEvent(QPaintEvent *) override
@@ -235,7 +235,7 @@ HomeWindow::HomeWindow(UDisks *udisks, Mode mode, QWidget *parent)
     outer->addWidget(heading);
 
     m_grid = new QGridLayout;
-    m_grid->setSpacing(14);
+    m_grid->setSpacing(12);
     for (const Tile &tile : std::as_const(m_tiles)) {
         if (tile.small)
             continue;
