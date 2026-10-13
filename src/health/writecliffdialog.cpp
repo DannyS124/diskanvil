@@ -180,6 +180,7 @@ WriteCliffDialog::WriteCliffDialog(UDisks *udisks, const QString &preferredDisk,
     connect(m_targets, &QComboBox::currentIndexChanged, this, &WriteCliffDialog::updateState);
     connect(modes, &QButtonGroup::buttonToggled, this, &WriteCliffDialog::updateState);
     connect(m_confirm, &QLineEdit::textChanged, this, &WriteCliffDialog::updateState);
+    connect(m_amount, &QSpinBox::valueChanged, this, &WriteCliffDialog::updateState);
     connect(m_udisks, &UDisks::changed, this, [this] {
         if (m_running)
             return;
@@ -282,6 +283,9 @@ void WriteCliffDialog::updateState()
     if (fresh)
         m_amount->setValue(std::min(gb, 64)); // enough to fill most caches; more to be sure
     ok = ok && room >= 64ull * 1024 * 1024;
+    // The empty graph's scale: what's going to be written.
+    if (!m_running && m_points.isEmpty())
+        m_graph->set({}, quint64(m_amount->value()) * 1000000000ull, {});
     m_where->setText(where);
     m_start->setEnabled(ok);
     m_targets->setEnabled(!m_running);
@@ -366,6 +370,7 @@ void WriteCliffDialog::done(bool completed, const QString &error)
     if (m_whole->isChecked() && !m_points.isEmpty())
         text += QStringLiteral(" ") + tr("The drive was written over: make a partition table on it before use.");
     m_result->setText(text);
+    m_confirm->clear();
     qCInfo(lcOps).noquote() << "Write speed over time:" << text;
     m_udisks->refresh();
     updateState();

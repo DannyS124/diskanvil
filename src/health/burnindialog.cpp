@@ -162,8 +162,11 @@ void BurnInDialog::updateState()
         if (mounted)
             warning += QStringLiteral(" ") + tr("Some of it is open now: it's closed first.").toHtmlEscaped();
         if (d->health.state == Health::State::Unknown)
-            warning += QStringLiteral("<br>") + tr("It doesn't report its health (through this USB adapter, say), so only the write and read "
-                                                    "steps can run.").toHtmlEscaped();
+            warning += QStringLiteral("<br>") + (d->bus == QLatin1String("usb")
+                                                      ? tr("It doesn't report its health through this USB adapter, so only the write and read steps "
+                                                           "can run (plugged in directly, it may).")
+                                                      : tr("It doesn't report its health, so only the write and read steps can run."))
+                                                     .toHtmlEscaped();
         warning += QStringLiteral("<br>") + tr("Type <b>%1</b> to confirm:").arg(name.toHtmlEscaped());
         m_confirm->setPlaceholderText(name);
         ok = ok && m_confirm->text().trimmed() == name;
