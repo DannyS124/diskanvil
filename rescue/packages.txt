@@ -47,33 +47,15 @@ xserver-xorg-legacy
 xinit
 xauth
 x11-xserver-utils
-openbox
-lxqt-session
-lxqt-panel
-lxqt-config
-lxqt-policykit
-lxqt-notificationd
-lxqt-qtplugin
-lxqt-themes
-lxqt-globalkeys
-lxqt-runner
-lxqt-sudo
-pcmanfm-qt
 qterminal
-featherpad
-qps
 breeze-icon-theme
 fonts-dejavu-core
 fonts-noto-core
-gvfs
-gvfs-daemons
-libnotify-bin
 
 # Network and the web browser (wpasupplicant and the regulatory list are what Wi-Fi needs)
 network-manager
 wpasupplicant
 wireless-regdb
-nm-tray
 firefox-esr
 ca-certificates
 curl

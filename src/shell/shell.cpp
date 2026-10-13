@@ -13,6 +13,40 @@
 
 #include <signal.h>
 
+Shell::Shell(QObject *parent)
+    : QObject(parent)
+{
+    m_layout = qEnvironmentVariable("XKB_DEFAULT_LAYOUT");
+    m_variant = qEnvironmentVariable("XKB_DEFAULT_VARIANT");
+    connect(&m_keyboardFile, &QFileSystemWatcher::fileChanged, this, &Shell::readKeyboard);
+    readKeyboard();
+}
+
+void Shell::readKeyboard()
+{
+    const QString path = QStringLiteral("/etc/default/keyboard");
+    QFile file(path);
+    if (file.open(QIODevice::ReadOnly)) {
+        QString layout, variant;
+        for (const QByteArray &line : file.readAll().split('\n')) {
+            const QString l = QString::fromUtf8(line).trimmed();
+            const auto value = [&l] { return l.section(QLatin1Char('='), 1).remove(QLatin1Char('"')).trimmed(); };
+            if (l.startsWith(QLatin1String("XKBLAYOUT=")))
+                layout = value();
+            else if (l.startsWith(QLatin1String("XKBVARIANT=")))
+                variant = value();
+        }
+        if (!layout.isEmpty() && (layout != m_layout || variant != m_variant)) {
+            m_layout = layout;
+            m_variant = variant;
+            Q_EMIT keyboardChanged();
+        }
+    }
+    // An editor (sed -i) puts a new file in its place: watched again.
+    if (QFile::exists(path) && !m_keyboardFile.files().contains(path))
+        m_keyboardFile.addPath(path);
+}
+
 QString Shell::version() const
 {
     return QStringLiteral(DISKANVIL_VERSION);

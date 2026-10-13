@@ -37,7 +37,6 @@ done
 mkdir -p "$work/icons"
 cp -a "$rescue/icons/DiskAnvil-Live" "$work/icons/"
 cp "$rescue/art/diskanvil-live-icon.svg" "$work/icons/DiskAnvil-Live/scalable/apps/diskanvil-live.svg"
-ln -sf diskanvil-live.svg "$work/icons/DiskAnvil-Live/scalable/apps/start-here-lxqt.svg"
 ln -sf diskanvil-live.svg "$work/icons/DiskAnvil-Live/scalable/apps/start-here.svg"
 
 echo "--> The live system"

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <QFileSystemWatcher>
 #include <QHash>
 #include <QObject>
 #include <QPointF>
@@ -18,8 +19,8 @@ class Shell : public QObject
     Q_PROPERTY(QPointF pointer READ pointer NOTIFY pointerChanged)
     Q_PROPERTY(bool drawsPointer READ drawsPointer CONSTANT)
     Q_PROPERTY(bool fullScreen READ fullScreen CONSTANT)
-    Q_PROPERTY(QString keyboardLayout READ keyboardLayout CONSTANT)
-    Q_PROPERTY(QString keyboardVariant READ keyboardVariant CONSTANT)
+    Q_PROPERTY(QString keyboardLayout READ keyboardLayout NOTIFY keyboardChanged)
+    Q_PROPERTY(QString keyboardVariant READ keyboardVariant NOTIFY keyboardChanged)
 public:
     // Drawing straight to the screen there's nothing else to draw the mouse pointer: the shell
     // does, where the mouse is.
@@ -33,9 +34,11 @@ public:
             Q_EMIT pointerChanged();
         }
     }
-    // The keyboard: what DiskAnvil Live was started with (XKB_DEFAULT_LAYOUT), given to programs too.
-    QString keyboardLayout() const { return qEnvironmentVariable("XKB_DEFAULT_LAYOUT"); }
-    QString keyboardVariant() const { return qEnvironmentVariable("XKB_DEFAULT_VARIANT"); }
+    // The keyboard layout programs get: /etc/default/keyboard's (diskanvil-live-keyboard changes
+    // it, and it's followed at once), else what DiskAnvil Live was started with (XKB_DEFAULT_LAYOUT).
+    explicit Shell(QObject *parent = nullptr);
+    QString keyboardLayout() const { return m_layout; }
+    QString keyboardVariant() const { return m_variant; }
     QString version() const;
     // Starts a program to show as a window here; its process number, or 0.
     Q_INVOKABLE qint64 launch(const QString &program, const QStringList &arguments = {});
@@ -48,10 +51,14 @@ public:
 
 Q_SIGNALS:
     void pointerChanged();
+    void keyboardChanged();
 
 private:
     QString m_socket;
     QPointF m_pointer;
+    QString m_layout, m_variant;
+    QFileSystemWatcher m_keyboardFile;
+    void readKeyboard();
 };
 
 // Hears where the mouse is in the shell's window, whoever it's going to.

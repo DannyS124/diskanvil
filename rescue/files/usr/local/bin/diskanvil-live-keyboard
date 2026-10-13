@@ -1,0 +1,50 @@
+#!/bin/bash
+# DiskAnvil Live's keyboard layout, in the terminal: pick one by its number (or type its code,
+# like gb or de), and every window uses it at once (the screen, diskanvil-shell, watches
+# /etc/default/keyboard). The text console gets it too.
+set -u
+if [ -t 1 ]; then neon=$'\e[38;2;0;229;255m' green=$'\e[38;2;43;238;138m' dim=$'\e[38;2;143;163;196m' bold=$'\e[1m' off=$'\e[0m'
+else neon= green= dim= bold= off=; fi
+
+layouts=(
+    "us:English (US)" "gb:English (UK)" "ie:English (Ireland)" "us:intl:English (US, with accents)"
+    "de:German" "ch:Swiss German" "at:Austrian" "fr:French" "be:Belgian" "es:Spanish" "latam:Latin American"
+    "pt:Portuguese" "br:Portuguese (Brazil)" "it:Italian" "nl:Dutch" "se:Swedish" "no:Norwegian" "dk:Danish"
+    "fi:Finnish" "is:Icelandic" "pl:Polish" "cz:Czech" "sk:Slovak" "hu:Hungarian" "ro:Romanian" "hr:Croatian"
+    "si:Slovenian" "rs:Serbian" "gr:Greek" "tr:Turkish" "ru:Russian" "ua:Ukrainian" "il:Hebrew" "ara:Arabic"
+    "in:Indian" "jp:Japanese" "kr:Korean" "cn:Chinese" "ca:Canadian French"
+)
+. /etc/default/keyboard 2>/dev/null
+now="${XKBLAYOUT:-us}${XKBVARIANT:+:$XKBVARIANT}"
+
+clear
+printf '%s%s  ⌨  Keyboard%s\n\n' "$neon" "$bold" "$off"
+printf '  Now: %s%s%s\n\n' "$bold" "$now" "$off"
+i=0
+for entry in "${layouts[@]}"; do
+    i=$((i + 1))
+    code=${entry%:*}
+    printf '  %s%2d%s  %-22s %s%s%s' "$neon" "$i" "$off" "${entry##*:}" "$dim" "$code" "$off"
+    [ $((i % 2)) -eq 0 ] && echo || printf '   '
+done
+echo
+echo
+read -r -p "  Number, or a layout's code (like gb), or Enter to leave it: " choice
+[ -z "$choice" ] && exit 0
+if [[ $choice =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le ${#layouts[@]} ]; then
+    code=${layouts[$((choice - 1))]%:*}
+else
+    code=$choice
+fi
+layout=${code%%:*} variant=
+[[ $code == *:* ]] && variant=${code#*:}
+if ! grep -qE "^ *$layout( |$)" /usr/share/X11/xkb/rules/base.lst 2>/dev/null && ! grep -qE "^ +$layout " /usr/share/X11/xkb/rules/base.lst 2>/dev/null; then
+    echo "  There's no layout called $layout."
+    read -r -p "  Press Enter. " _
+    exit 1
+fi
+sudo sed -i -e "s/^XKBLAYOUT=.*/XKBLAYOUT=\"$layout\"/" -e "s/^XKBVARIANT=.*/XKBVARIANT=\"$variant\"/" /etc/default/keyboard
+grep -q '^XKBLAYOUT=' /etc/default/keyboard || echo "XKBLAYOUT=\"$layout\"" | sudo tee -a /etc/default/keyboard >/dev/null
+sudo setupcon -k --force >/dev/null 2>&1
+echo "  ${green}✓ The keyboard is $layout${variant:+ ($variant)} now.${off}"
+sleep 1.5

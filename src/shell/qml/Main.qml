@@ -42,6 +42,7 @@ WaylandCompositor {
         { id: "netboot", icon: "diskanvil-live-netboot", title: "Start Other PCs", program: "diskanvil", args: ["--open", "net-boot"] },
         { id: "web", icon: "firefox-esr", title: "Web Browser", program: "firefox-esr", args: [] },
         { id: "wifi", icon: "network-wireless", title: "Wi-Fi", program: "qterminal", args: ["-e", "diskanvil-live-wifi"] },
+        { id: "keyboard", icon: "input-keyboard", title: "Keyboard", program: "qterminal", args: ["-e", "diskanvil-live-keyboard"] },
         { id: "logs", icon: "diskanvil-live-logs", title: "Save Logs", program: "diskanvil-live-logs", args: [] },
         { id: "readme", icon: "diskanvil-live-readme", title: "Read Me", program: "qterminal", args: ["-e", "less /usr/local/share/diskanvil-live/README.txt"] }
     ]
@@ -144,11 +145,15 @@ WaylandCompositor {
     }
     XdgDecorationManagerV1 { preferredMode: XdgToplevel.ServerSideDecoration }
     Component { id: frame; ShellWindow {} }
-    Component.onCompleted: {
-        shell.setSocket(socketName)
+    function useKeyboard() {
         if (shell.keyboardLayout.length > 0) {
             defaultSeat.keymap.layout = shell.keyboardLayout
             defaultSeat.keymap.variant = shell.keyboardVariant
         }
+    }
+    Connections { target: shell; function onKeyboardChanged() { comp.useKeyboard() } }
+    Component.onCompleted: {
+        shell.setSocket(socketName)
+        useKeyboard()
     }
 }

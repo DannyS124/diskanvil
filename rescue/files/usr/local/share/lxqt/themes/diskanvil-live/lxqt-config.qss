@@ -1,5 +1,0 @@
-/* LXQt's settings windows: the palette in lxqt.conf does most of the work. */
-QListView::item:selected {
-    background: #1f6fff;
-    color: #ffffff;
-}

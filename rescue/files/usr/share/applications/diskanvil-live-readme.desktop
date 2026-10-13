@@ -2,6 +2,6 @@
 Type=Application
 Name=Read Me
 Comment=What's on this stick and how it works
-Exec=featherpad /usr/local/share/diskanvil-live/README.txt
+Exec=qterminal -e "less /usr/local/share/diskanvil-live/README.txt"
 Icon=diskanvil-live-readme
 Categories=System;
