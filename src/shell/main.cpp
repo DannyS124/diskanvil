@@ -6,6 +6,8 @@
 // tools, a terminal and Firefox are its windows.
 
 #include "selftest.h"
+#include "network.h"
+#include "notifications.h"
 #include "shell.h"
 
 #include <QGuiApplication>
@@ -36,9 +38,13 @@ int main(int argc, char **argv)
     QIcon::setFallbackThemeName(QStringLiteral("breeze"));
 
     Shell shell;
+    Network network;
+    Notifications notifications;
     QQmlApplicationEngine engine;
     engine.addImageProvider(QStringLiteral("icon"), new IconProvider);
     engine.rootContext()->setContextProperty(QStringLiteral("shell"), &shell);
+    engine.rootContext()->setContextProperty(QStringLiteral("network"), &network);
+    engine.rootContext()->setContextProperty(QStringLiteral("notifications"), &notifications);
     engine.loadFromModule("DiskAnvilShell", "Main");
     if (engine.rootObjects().isEmpty())
         return 1;

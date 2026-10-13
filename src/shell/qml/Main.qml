@@ -41,6 +41,7 @@ WaylandCompositor {
         { id: "remotehelp", icon: "diskanvil-live-remotehelp", title: "Let Someone Help", program: "diskanvil", args: ["--open", "remote-help"] },
         { id: "netboot", icon: "diskanvil-live-netboot", title: "Start Other PCs", program: "diskanvil", args: ["--open", "net-boot"] },
         { id: "web", icon: "firefox-esr", title: "Web Browser", program: "firefox-esr", args: [] },
+        { id: "wifi", icon: "network-wireless", title: "Wi-Fi", program: "qterminal", args: ["-e", "diskanvil-live-wifi"] },
         { id: "logs", icon: "diskanvil-live-logs", title: "Save Logs", program: "diskanvil-live-logs", args: [] },
         { id: "readme", icon: "diskanvil-live-readme", title: "Read Me", program: "qterminal", args: ["-e", "less /usr/local/share/diskanvil-live/README.txt"] }
     ]
@@ -116,6 +117,7 @@ WaylandCompositor {
             Dock { id: dock; comp: comp; z: 100000 }
             AppGrid { id: grid; comp: comp; z: 100001 }
             PowerMenu { id: powerMenu; comp: comp; z: 100001 }
+            Toasts { comp: comp; z: 100002 }
 
             Shortcut { sequences: ["Alt+Tab"]; context: Qt.ApplicationShortcut; onActivated: comp.cycle() }
 

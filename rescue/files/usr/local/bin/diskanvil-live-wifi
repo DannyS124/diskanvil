@@ -1,0 +1,149 @@
+#!/bin/bash
+# DiskAnvil Live's Wi-Fi, in the terminal: the networks in reach, numbered with their signal;
+# pick one, type its password, and it joins. The Wi-Fi button on the bar opens this.
+# Uses NetworkManager (nmcli); the person at the PC may change the network without a password.
+set -u
+
+if [ -t 1 ]; then
+    neon=$'\e[38;2;0;229;255m' baby=$'\e[38;2;154;216;255m' green=$'\e[38;2;43;238;138m' red=$'\e[38;2;255;51;85m'
+    dim=$'\e[38;2;143;163;196m' bold=$'\e[1m' off=$'\e[0m'
+else
+    neon= baby= green= red= dim= bold= off=
+fi
+
+banner() {
+    clear
+    printf '%s' "$neon$bold"
+    cat <<'ART'
+   ___  _     _     _              _ _   __      ___      ___ _
+  |   \(_)___| |__ /_\  _ ___ __ _(_) |  \ \    / (_)___ | __(_)
+  | |) | (_-<| / // _ \| ' \ V / | | |   \ \/\/ /| |___|| _|| |
+  |___/|_/__/|_\_\/_/ \_\_||_\_/  |_|_|    \_/\_/ |_|    |_| |_|
+ART
+    printf '%s\n' "$off"
+    status
+    echo
+}
+
+# Online or not, and how.
+status() {
+    local wired wifi
+    wired=$(nmcli -t -f TYPE,STATE device 2>/dev/null | grep -c '^ethernet:connected$')
+    wifi=$(nmcli -t -f ACTIVE,SSID,SIGNAL device wifi list --rescan no 2>/dev/null | grep '^yes:' | head -1)
+    if [ "$wired" -gt 0 ]; then
+        printf '  %s● Online through the cable%s\n' "$green" "$off"
+    fi
+    if [ -n "$wifi" ]; then
+        printf '  %s● Wi-Fi: %s%s %s(%s%%)%s\n' "$green" "$bold" "$(cut -d: -f2 <<<"$wifi")" "$dim" "$(cut -d: -f3 <<<"$wifi")" "$off"
+    elif [ "$wired" -eq 0 ]; then
+        printf '  %s● Not online%s\n' "$red" "$off"
+    fi
+}
+
+bars() {
+    local s=$1
+    if [ "$s" -gt 75 ]; then printf '%s▂▄▆█%s' "$green" "$off"
+    elif [ "$s" -gt 50 ]; then printf '%s▂▄▆%s%s█%s' "$green" "$off" "$dim" "$off"
+    elif [ "$s" -gt 25 ]; then printf '%s▂▄%s%s▆█%s' "$baby" "$off" "$dim" "$off"
+    else printf '%s▂%s%s▄▆█%s' "$red" "$off" "$dim" "$off"
+    fi
+}
+
+# Something that takes a while, with a spinner beside it until it's done.
+spin() {
+    local message=$1; shift
+    "$@" > /tmp/diskanvil-wifi.$$ 2>&1 &
+    local pid=$! frames='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' i=0
+    while kill -0 "$pid" 2>/dev/null; do
+        printf '\r  %s%s%s %s' "$neon" "${frames:i++%${#frames}:1}" "$off" "$message"
+        sleep 0.1
+    done
+    wait "$pid"
+    local result=$?
+    printf '\r\e[K'
+    return $result
+}
+
+if ! command -v nmcli >/dev/null || ! nmcli -t general status >/dev/null 2>&1; then
+    banner
+    echo "  ${red}The network service isn't running.${off} Restart DiskAnvil Live and try again."
+    read -r -p "  Press Enter to close. " _
+    exit 1
+fi
+if ! nmcli -t -f TYPE device 2>/dev/null | grep -qx wifi; then
+    banner
+    echo "  No Wi-Fi was found in this PC. Plug in a network cable, or a USB Wi-Fi adapter,"
+    echo "  then press Enter to look again."
+    read -r _
+    exec "$0"
+fi
+
+while true; do
+    banner
+    if [ "$(nmcli radio wifi)" != enabled ]; then
+        echo "  Wi-Fi is off.  ${bold}o${off} turn it on   ${bold}q${off} close"
+        read -r -p "  ${neon}>${off} " choice
+        case $choice in o|O) nmcli radio wifi on; sleep 2; continue ;; *) exit 0 ;; esac
+    fi
+    spin "Looking for networks…" nmcli device wifi rescan
+    mapfile -t rows < <(nmcli -t -f IN-USE,SIGNAL,SECURITY,SSID device wifi list --rescan no 2>/dev/null |
+        awk -F: '$4 != "" && !seen[$4]++' | sort -t: -k1,1r -k2,2nr)
+    if [ ${#rows[@]} -eq 0 ]; then
+        echo "  No networks in reach."
+    fi
+    n=0
+    for row in "${rows[@]}"; do
+        n=$((n + 1))
+        inuse=${row%%:*}; rest=${row#*:}; signal=${rest%%:*}; rest=${rest#*:}; security=${rest%%:*}; ssid=${rest#*:}
+        lock=' '; [ -n "$security" ] && [ "$security" != -- ] && lock='🔒'
+        mark=' '; [ "$inuse" = '*' ] && mark="${green}●${off}"
+        printf '  %s%2d%s  %s %s  %s %s%s%s\n' "$neon" "$n" "$off" "$(bars "$signal")" "$lock" "$mark" "$bold" "${ssid//\\:/:}" "$off"
+    done
+    echo
+    echo "  ${bold}number${off} join   ${bold}h${off} a hidden network   ${bold}d${off} disconnect   ${bold}r${off} look again   ${bold}q${off} close"
+    read -r -p "  ${neon}>${off} " choice
+    case $choice in
+    q|Q) exit 0 ;;
+    r|R|'') continue ;;
+    d|D)
+        device=$(nmcli -t -f DEVICE,TYPE device | awk -F: '$2 == "wifi" {print $1; exit}')
+        spin "Leaving…" nmcli device disconnect "$device"
+        continue ;;
+    h|H)
+        read -r -p "  Its name: " ssid
+        [ -z "$ssid" ] && continue
+        read -r -s -p "  Its password (empty if none): " password; echo
+        if [ -n "$password" ]; then
+            spin "Joining $ssid…" nmcli device wifi connect "$ssid" password "$password" hidden yes
+        else
+            spin "Joining $ssid…" nmcli device wifi connect "$ssid" hidden yes
+        fi ;;
+    *[!0-9]*)
+        continue ;;
+    *)
+        [ "$choice" -ge 1 ] && [ "$choice" -le ${#rows[@]} ] || continue
+        row=${rows[$((choice - 1))]}
+        rest=${row#*:}; rest=${rest#*:}; security=${rest%%:*}; ssid=${rest#*:}; ssid=${ssid//\\:/:}
+        if [[ $security == *802.1X* ]]; then
+            echo "  $ssid needs a user name as well: nmtui (type it here) can join it."
+            read -r -p "  Press Enter. " _
+            continue
+        fi
+        if [ -n "$security" ] && [ "$security" != -- ]; then
+            read -r -s -p "  Password for ${bold}$ssid${off}: " password; echo
+            spin "Joining $ssid…" nmcli device wifi connect "$ssid" password "$password"
+        else
+            spin "Joining $ssid…" nmcli device wifi connect "$ssid"
+        fi ;;
+    esac
+    if [ $? -eq 0 ]; then
+        echo "  ${green}✓ Joined ${bold}$ssid${off}"
+        sleep 2
+    else
+        echo "  ${red}✗ $ssid wasn't joined.${off} $(grep -m1 -o 'Error:.*' /tmp/diskanvil-wifi.$$ | sed 's/^Error: //')"
+        grep -qi 'secrets\|password\|802-11-wireless-security' /tmp/diskanvil-wifi.$$ && echo "  ${dim}Is the password right?${off}"
+        nmcli -t -f NAME connection show | grep -qxF "$ssid" && nmcli connection delete "$ssid" >/dev/null 2>&1
+        read -r -p "  Press Enter. " _
+    fi
+    rm -f /tmp/diskanvil-wifi.$$
+done

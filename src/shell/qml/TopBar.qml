@@ -28,7 +28,12 @@ Rectangle {
             Image { id: img; anchors.centerIn: parent; width: 18; height: 18; sourceSize: Qt.size(36, 36) }
             MouseArea { id: area; anchors.fill: parent; hoverEnabled: true; onClicked: parent.clicked() }
         }
-        Button { icon: "image://icon/network-wireless"; anchors.verticalCenter: parent.verticalCenter }
+        Button { objectName: "wifiButton"; anchors.verticalCenter: parent.verticalCenter
+            // Wi-Fi is joined in the terminal: diskanvil-live-wifi.
+            onClicked: { comp.powerOpen = false; comp.launch(comp.more.find(m => m.id === "wifi")) }
+            icon: "image://icon/" + (network.wired ? "network-wired"
+                : network.joined.length > 0 ? "network-wireless-signal-" + (network.strength > 75 ? "excellent" : network.strength > 50 ? "good" : network.strength > 25 ? "ok" : "weak")
+                : network.wifiPresent && network.wifiOn ? "network-wireless-disconnected" : "network-offline") }
         Text { text: Qt.formatDate(bar.now, "ddd d MMM") + "  " + Qt.formatTime(bar.now, "hh:mm"); color: comp.pal.text; font.family: comp.sans; font.pixelSize: 13; anchors.verticalCenter: parent.verticalCenter
             rightPadding: 4; leftPadding: 4 }
         Button { objectName: "powerButton"; icon: "image://icon/system-shutdown"; anchors.verticalCenter: parent.verticalCenter; onClicked: comp.powerOpen = !comp.powerOpen }
