@@ -295,6 +295,36 @@ endif()
 target_link_libraries(diskanvil PRIVATE diskanvil-ui)
 target_compile_options(diskanvil PRIVATE -Wall -Wextra)
 
+# DiskAnvil Live's own screen (a Wayland compositor): Linux, and only where Qt's compositor is.
+if(NOT WIN32)
+    option(DISKANVIL_SHELL "Build diskanvil-shell, DiskAnvil Live's own screen (needs Qt Wayland Compositor)" ON)
+endif()
+if(DISKANVIL_SHELL)
+    find_package(Qt6 6.8 QUIET COMPONENTS Quick WaylandCompositor Test)
+    if(Qt6WaylandCompositor_FOUND AND Qt6Quick_FOUND AND Qt6Test_FOUND)
+        qt_add_executable(diskanvil-shell src/shell/main.cpp src/shell/shell.cpp src/shell/shell.h src/shell/selftest.cpp src/shell/selftest.h)
+        set_source_files_properties(src/shell/qml/Main.qml src/shell/qml/ShellWindow.qml src/shell/qml/TopBar.qml src/shell/qml/Dock.qml
+                                    src/shell/qml/AppGrid.qml src/shell/qml/PowerMenu.qml PROPERTIES QT_RESOURCE_ALIAS "")
+        qt_add_qml_module(diskanvil-shell URI DiskAnvilShell VERSION 1.0 NO_RESOURCE_TARGET_PATH
+            QML_FILES src/shell/qml/Main.qml src/shell/qml/ShellWindow.qml src/shell/qml/TopBar.qml src/shell/qml/Dock.qml
+                      src/shell/qml/AppGrid.qml src/shell/qml/PowerMenu.qml)
+        file(GLOB shell_icons ${CMAKE_CURRENT_SOURCE_DIR}/rescue/icons/DiskAnvil-Live/scalable/apps/diskanvil-live-*.svg)
+        foreach(icon ${shell_icons})
+            get_filename_component(name ${icon} NAME)
+            set_source_files_properties(${icon} PROPERTIES QT_RESOURCE_ALIAS icons/${name})
+        endforeach()
+        set_source_files_properties(rescue/art/desktop.svg PROPERTIES QT_RESOURCE_ALIAS art/desktop.svg)
+        set_source_files_properties(rescue/art/diskanvil-live-icon.svg PROPERTIES QT_RESOURCE_ALIAS art/diskanvil-live-icon.svg)
+        qt_add_resources(diskanvil-shell shell_art PREFIX /shell FILES ${shell_icons} rescue/art/desktop.svg rescue/art/diskanvil-live-icon.svg)
+        target_compile_definitions(diskanvil-shell PRIVATE DISKANVIL_VERSION="${PROJECT_VERSION}")
+        target_link_libraries(diskanvil-shell PRIVATE Qt6::Gui Qt6::Quick Qt6::WaylandCompositor Qt6::Test)
+        target_compile_options(diskanvil-shell PRIVATE -Wall -Wextra)
+        install(TARGETS diskanvil-shell RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    else()
+        message(STATUS "diskanvil-shell isn't built: Qt Wayland Compositor wasn't found")
+    endif()
+endif()
+
 
 # dev tools, not installed
 if(WIN32)
