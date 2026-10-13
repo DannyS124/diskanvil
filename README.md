@@ -4,14 +4,19 @@
 <h1 align="center">DiskAnvil</h1>
 <p align="center">A disk manager for Linux and Windows that looks and works like Windows Disk Management,<br>plus a rescue USB stick that can start any PC and fix its drives.</p>
 
+## Support
+DiskAnvil is free and it's staying free. If it got your files back or saved you a trip to the computer shop and you
+want to say thanks, you can buy me a coffee on Ko-fi. It helps me keep working on it.
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/K0C528JI83)
+
+
 I've been on Arch for a while and wanted something simple for managing drives without going to the terminal, so I
 made this. It does the everyday stuff, but also the things you need when a drive is dying, a stick is fake or files
 are gone. It never runs as root: changes go through udisks2 with the normal password prompt, and the drive your
 system runs from is locked so you can't format it by accident. It runs on Windows too ([see below](#windows)).
 
 It was called DiskForge up to 0.5.1. Same program, new name: settings move over by themselves.
-
-![DiskAnvil](docs/screenshot.png)
 
 ## What it does
 
@@ -269,12 +274,6 @@ touching a real drive. `packaging/release.sh` lists the other test suites.
 
 The Windows version is built on Linux too: `packaging/windows/build.sh` cross-compiles it with MinGW-w64, using Qt
 and the other libraries from MSYS2, and makes the installer with msitools when it's there.
-
-## Support
-DiskAnvil is free and it's staying free. If it got your files back or saved you a trip to the computer shop and you
-want to say thanks, you can buy me a coffee on Ko-fi. It helps me keep working on it.
-
-[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/K0C528JI83)
 
 ## Thanks
 The drive failure rates in Disk Health come from [Backblaze Drive Stats](https://www.backblaze.com/cloud-storage/resources/hard-drive-test-data),
