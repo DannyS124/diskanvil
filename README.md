@@ -133,7 +133,7 @@ back with their real names and folders, whatever kind they are.
 
 ### <img src="docs/icons/addons.svg" width="28" height="28" align="top" alt="">&nbsp; Extras
 
-- <img src="docs/icons/addons.svg" width="22" height="22" align="top" alt="">&nbsp; **Add-ons**: your own actions in the menus, from a JSON file or the Add-on Maker, and a signed list online to install them from ([docs/ADDONS.md](docs/ADDONS.md))
+- <img src="docs/icons/addons.svg" width="22" height="22" align="top" alt="">&nbsp; **Add-ons**: your own actions in the menus, from a JSON file or the Add-on Maker ([docs/ADDONS.md](docs/ADDONS.md))
 - <img src="docs/icons/themes.svg" width="22" height="22" align="top" alt="">&nbsp; **Themes**: System, Classic, Deadshadow, High Contrast and DiskAnvil Live, or make your own
 
 ## Screenshots

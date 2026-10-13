@@ -75,6 +75,7 @@ AddonsDialog::AddonsDialog(Addons *addons, const QList<QKeySequence> &takenShort
     m_details->setOpenExternalLinks(true);
 
     auto *catalog = new QPushButton(QIcon::fromTheme(QStringLiteral("get-hot-new-stuff"), QIcon::fromTheme(QStringLiteral("download"))), tr("Get Add-ons…"));
+    catalog->setVisible(Addons::kHasCatalog);
     auto *install = new QPushButton(QIcon::fromTheme(QStringLiteral("list-add")), tr("Install from File…"));
     auto *remove = new QPushButton(QIcon::fromTheme(QStringLiteral("list-remove")), tr("Remove"));
     auto *folder = new QPushButton(QIcon::fromTheme(QStringLiteral("folder-open")), tr("Open Folder"));

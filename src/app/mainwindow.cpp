@@ -1101,11 +1101,13 @@ void MainWindow::createActions()
             ThemeMaker(&m_addons, this).exec();
             refreshAddons();
         });
-        themes->addAction(tr("Get More…"), this, [this] {
-            CatalogDialog(&m_addons, this).exec();
-            m_addons.load();
-            refreshAddons();
-        });
+        if (Addons::kHasCatalog) {
+            themes->addAction(tr("Get More…"), this, [this] {
+                CatalogDialog(&m_addons, this).exec();
+                m_addons.load();
+                refreshAddons();
+            });
+        }
     });
 
     QMenu *tools = menuBar()->addMenu(tr("&Tools"));

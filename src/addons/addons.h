@@ -100,6 +100,9 @@ class Addons
 {
 public:
     static constexpr qint64 kMaxDownload = 64 * 1024; // the catalog, its signature and each add-on
+    // There's no online list yet (its repository doesn't exist), so Get Add-ons isn't offered.
+    // What reads and checks one stays, for when there is.
+    static constexpr bool kHasCatalog = false;
     static QString catalogUrl();
     static QString catalogSignatureUrl();
     // The keys that may sign the catalog ("ssh-ed25519 AAAA..."), and the signature namespace.

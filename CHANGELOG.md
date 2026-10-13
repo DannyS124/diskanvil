@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.5.3
+- Get Add-ons (and Themes → Get More) is hidden until there's an online list of add-ons to get them from; the docs pointed at a repository that doesn't exist yet. Install from File and Make an Add-on are unchanged
 - Write Speed Over Time no longer calls a drive full of random-looking data (one Burn In has just written over, or an encrypted one) a drive "with partitions with something on them": it says what it is
 - A Windows drive that Windows didn't close properly (it crashed, lost power, or was switched off while starting: usual for a Windows that won't start) can now be opened for fixing. Linux only changes an NTFS drive marked that way once the mark is cleared, so the tools that fix a Windows (Windows Won't Start, Windows Drivers and Services, Scan for Viruses and the rest) say why it won't open and offer to clear the mark (ntfs-3g's ntfsfix), then open it. One that Windows left hibernated (Fast Startup) still says to shut Windows down fully first, since clearing that would lose what Windows kept open
 

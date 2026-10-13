@@ -116,13 +116,7 @@ background. Colors that don't are swapped for DiskAnvil's own, and a palette wit
 used. The Theme Maker (View → Theme → Make a Theme) shows all of this as you pick. A theme from an
 add-on marked "Added outside" isn't used until you press I Added It.
 
-## Getting it into the list
-The list in Tools → Add-ons → Get Add-ons comes from
-[github.com/DannyS124/diskanvil-addons](https://github.com/DannyS124/diskanvil-addons). Open a pull request
-there with your `addons/<id>/addon.json`. Once it's merged it goes into the list.
-
-DiskAnvil only installs from that repository, only files pinned to a commit, and only if the file matches
-the checksum in the list. The list itself is signed with the maintainer's key, which isn't stored on GitHub,
-and DiskAnvil only uses it if the signature checks out. It still shows the commands and asks before
-installing, and again before each action first runs. Shells and script interpreters are only accepted in
-`look_only` actions there.
+## Sharing an add-on
+There's no online list of add-ons yet. To share one, send its `addon.json` (and any files next to it); the
+other person adds it with Tools → Add-ons → Install from File, and DiskAnvil shows each action's command and asks
+before it runs, the same as for any add-on. Only install add-ons from people you trust.
