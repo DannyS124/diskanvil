@@ -163,7 +163,7 @@
 <context>
     <name>FilesDialog</name>
     <message numerus="yes">
-        <location filename="../src/tools/filesdialog.cpp" line="383"/>
+        <location filename="../src/tools/filesdialog.cpp" line="398"/>
         <source>Delete %n item(s) for good? There&apos;s no recycle bin here.</source>
         <translation>
             <numerusform>Delete %n item for good? There's no recycle bin here.</numerusform>
@@ -171,7 +171,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/tools/filesdialog.cpp" line="391"/>
+        <location filename="../src/tools/filesdialog.cpp" line="406"/>
         <source>%n item(s) couldn&apos;t be deleted.</source>
         <translation>
             <numerusform>%n item couldn't be deleted.</numerusform>
