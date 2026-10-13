@@ -148,6 +148,7 @@ private:
     void straightenSpot(bool on);
     void straightened(const QPolygonF &corners);
     void stackFrames(int count, int scale, int how);
+    void redecodeJpeg(bool on);
 
     Show m_shown;
     QStackedWidget *m_pages;
@@ -178,6 +179,8 @@ private:
     qint64 m_spotAt = 0;        // (in ms)
     bool m_reshaped = false;    // straightened or stacked: no longer a piece of m_whole as it is
     QStringList m_steps;        // what was done since, for the note in what's saved
+    QImage m_asFound;           // while it's decoded again: the picture as the file decodes normally
+    QString m_redecodeStep;
     QTimer *m_enhanceTimer;
     std::shared_ptr<std::atomic<int>> m_enhanceRound; // a newer request stops the ones before it
 };

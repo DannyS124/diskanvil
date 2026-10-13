@@ -3,6 +3,7 @@
 #include "viewer.h"
 
 #include "enhance.h"
+#include "jpegexact.h"
 #include "filetypes.h"
 #include "format.h"
 #include "gpt.h"
@@ -780,6 +781,11 @@ public:
         m_invert = new QCheckBox(viewer::tr("Inverted (for a negative)"));
         m_deinterlace = new QCheckBox(viewer::tr("Deinterlace (comb lines from an older camera)"));
         m_deinterlace->setObjectName(QStringLiteral("deinterlace"));
+        m_redecode = new QCheckBox(viewer::tr("Decode the JPEG again (squares smoothed, within what it stores)"));
+        m_redecode->setObjectName(QStringLiteral("redecode"));
+        m_redecode->setToolTip(viewer::tr("A JPEG keeps each 8 by 8 square as rounded numbers. Decoded again, it's the smoothest picture "
+                                          "whose numbers round to exactly what the file has: the squares go, and nothing the file doesn't allow is made up"));
+        m_redecode->hide();
         m_fullRange = new QCheckBox(viewer::tr("Video levels to full (washed-out CCTV)"));
         m_fullRange->setObjectName(QStringLiteral("fullRange"));
         m_fullRange->setToolTip(viewer::tr("Video often keeps black at 16 and white at 235: stretched to 0 and 255, the grey haze goes"));
@@ -801,7 +807,7 @@ public:
         m_steady->setToolTip(viewer::tr("A shaky film is steadied in the slowed-down copy (ffmpeg's deshake)"));
         m_steady->hide();
         for (QWidget *w : {static_cast<QWidget *>(m_grain), static_cast<QWidget *>(m_levels), static_cast<QWidget *>(m_grey), static_cast<QWidget *>(m_invert),
-                           static_cast<QWidget *>(m_deinterlace), static_cast<QWidget *>(m_fullRange), static_cast<QWidget *>(m_field),
+                           static_cast<QWidget *>(m_redecode), static_cast<QWidget *>(m_deinterlace), static_cast<QWidget *>(m_fullRange), static_cast<QWidget *>(m_field),
                            static_cast<QWidget *>(m_channel), static_cast<QWidget *>(m_clipped), static_cast<QWidget *>(m_steady)})
             layout->addWidget(w);
         QObject::connect(m_grain, &QComboBox::currentIndexChanged, this, [this] { touched(); });
@@ -810,6 +816,7 @@ public:
         for (QComboBox *box : {m_field, m_channel, m_blurShape, m_deblurWay})
             QObject::connect(box, &QComboBox::currentIndexChanged, this, [this] { touched(); });
         QObject::connect(m_clipped, &QCheckBox::toggled, this, [this](bool on) { if (showClipped) showClipped(on); });
+        QObject::connect(m_redecode, &QCheckBox::toggled, this, [this](bool on) { if (redecode) redecode(on); });
         // A spot: a box drawn around part of the picture (a face, a number plate), which is then
         // shown filling the window and is what the tools work on and what's saved.
         auto *spotRow = new QHBoxLayout;
@@ -1072,6 +1079,15 @@ public:
     std::function<void(bool on)> straightenAsked;
     std::function<void(int frames, int scale, int how)> stackAsked;
     std::function<void(bool on)> showClipped;
+    std::function<void(bool on)> redecode;
+    // Offered for a JPEG (a picture as found, not a film's frame); unticked when another is shown.
+    void setRedecodable(bool can)
+    {
+        const QSignalBlocker quiet(m_redecode);
+        m_redecode->setChecked(false);
+        m_redecode->setVisible(can && jpegexact::available());
+    }
+    void setRedecodeBusy(bool busy) { m_redecode->setEnabled(!busy); }
     std::function<void(viewer::ProfileDo what, const QString &name, const QByteArray &file)> profileAsked;
 
 private:
@@ -1195,7 +1211,7 @@ private:
     QPushButton *m_pick, *m_whole, *m_straighten, *m_stack;
     QSlider *m_local, *m_smooth, *m_deblock, *m_homomorphic, *m_retinex, *m_nlm, *m_noise;
     QComboBox *m_blurShape, *m_deblurWay;
-    QCheckBox *m_fullRange, *m_clipped;
+    QCheckBox *m_fullRange, *m_clipped, *m_redecode;
     QComboBox *m_field, *m_channel, *m_stackHow;
     QCheckBox *m_deinterlace, *m_steady, *m_stackDouble;
     QSpinBox *m_stackCount;
@@ -2168,6 +2184,7 @@ Window::Window(QWidget *parent)
     m_picture->cornered = [this](const QPolygonF &corners) { straightened(corners); };
     m_enhance->stackAsked = [this](int frames, int scale, int how) { stackFrames(frames, scale, how); };
     m_enhance->showClipped = [this](bool on) { m_picture->setShowClipped(on); };
+    m_enhance->redecode = [this](bool on) { redecodeJpeg(on); };
     setAcceptDrops(true);
 }
 
@@ -2353,6 +2370,48 @@ void Window::stackFrames(int count, int scale, int how)
                 self->enhanceSoon();
             }, Qt::QueuedConnection);
         });
+    });
+}
+
+void Window::redecodeJpeg(bool on)
+{
+    if (!on) {
+        // Back to the picture as the file decodes normally.
+        if (!m_asFound.isNull()) {
+            m_picture->showImage(m_asFound);
+            m_asFound = QImage();
+        }
+        m_steps.removeAll(m_redecodeStep);
+        enhanceSoon();
+        return;
+    }
+    QFile file(m_shown.path);
+    if (!file.open(QIODevice::ReadOnly))
+        return;
+    const QByteArray bytes = file.read(64 * 1024 * 1024);
+    m_enhance->setRedecodeBusy(true);
+    m_enhance->setStatus(tr("Decoding it again within what it stores…"));
+    QPointer<Window> self(this);
+    const QString path = m_shown.path;
+    QThreadPool::globalInstance()->start([self, bytes, path] {
+        QString why;
+        const QImage decoded = jpegexact::decode(bytes, 30, &why);
+        QMetaObject::invokeMethod(qApp, [self, decoded, why, path] {
+            if (!self || self->m_shown.path != path)
+                return;
+            self->m_enhance->setRedecodeBusy(false);
+            if (decoded.isNull()) {
+                self->m_enhance->setStatus(why);
+                self->m_enhance->setRedecodable(true);
+                return;
+            }
+            self->m_asFound = self->m_picture->original();
+            self->m_picture->showImage(decoded);
+            self->m_redecodeStep = Window::tr("decoded again within what the JPEG stores (30 rounds)");
+            self->m_steps.prepend(self->m_redecodeStep);
+            self->m_enhance->setStatus(Window::tr("Decoded again: the squares are smoothed, within the numbers the file keeps."));
+            self->enhanceSoon();
+        }, Qt::QueuedConnection);
     });
 }
 
@@ -2631,6 +2690,8 @@ void Window::present(const Show &show)
     const bool canEnhance = (kind == Kind::Picture && !m_picture->animated()) || kind == Kind::Film;
     m_enhanceAction->setVisible(canEnhance);
     m_enhance->setForFilm(kind == Kind::Film);
+    m_asFound = QImage();
+    m_enhance->setRedecodable(kind == Kind::Picture && show.type >= 0 && filetypes::types()[show.type].id == QLatin1String("jpg"));
     if (!canEnhance)
         m_enhanceAction->setChecked(false);
 }

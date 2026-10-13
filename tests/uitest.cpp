@@ -4930,6 +4930,34 @@ void enhanceWindow()
                && window.findChild<QCheckBox *>(QStringLiteral("deinterlace")),
            QStringLiteral("viewer: local contrast, edge-keeping smoothing and deinterlacing are there"));
 
+    // A JPEG can be decoded again within what it stores, and what's saved says so.
+    {
+        QImage photo(160, 120, QImage::Format_RGB32);
+        for (int y = 0; y < 120; ++y)
+            for (int x = 0; x < 160; ++x)
+                photo.setPixel(x, y, qRgb((x * 3) % 256, (y * 2) % 256, 120));
+        const QString jpgPath = dir.path() + QStringLiteral("/squeezed.jpg");
+        photo.save(jpgPath, "JPEG", 10);
+        viewer::Show jpg = show;
+        jpg.path = jpgPath;
+        jpg.name = QStringLiteral("squeezed.jpg");
+        jpg.type = filetypes::typeForName(jpg.name);
+        jpg.facts.clear();
+        window.present(jpg);
+        action->setChecked(true);
+        auto *again = window.findChild<QCheckBox *>(QStringLiteral("redecode"));
+        report(again && again->isVisible(), QStringLiteral("viewer: a JPEG offers to be decoded again"));
+        if (again) {
+            again->setChecked(true);
+            waitUntil([] { return false; }, 3000); // it's decoded on a thread
+            png.clear();
+            window.findChild<QPushButton *>(QStringLiteral("saveEnhanced"))->click();
+            waitUntil([&] { return !png.isEmpty(); }, 20000);
+            saved.loadFromData(png, "PNG");
+            report(saved.text(QStringLiteral("Description")).contains(QLatin1String("decoded again within what the JPEG stores")),
+                   QStringLiteral("viewer: decoded again, and what's saved says so"), saved.text(QStringLiteral("Description")));
+        }
+    }
     // A small picture says it is, and has the Pixels switch.
     QImage thumb(64, 48, QImage::Format_RGB32);
     thumb.fill(qRgb(90, 120, 150));

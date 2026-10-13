@@ -9,6 +9,7 @@
 #include "testkit.h"
 
 #include "../src/lostfiles/enhance.h"
+#include "../src/lostfiles/jpegexact.h"
 #include "../src/lostfiles/exif.h"
 #include "../src/lostfiles/filetypes.h"
 #include "../src/usb/imagesource.h"
@@ -3885,6 +3886,46 @@ void enhanceTools()
         const QImage over = enhance::clippedOverlay(bright);
         report(qAlpha(over.pixel(0, 0)) > 0 && qAlpha(over.pixel(1, 0)) > 0 && qAlpha(over.pixel(2, 0)) == 0 && qAlpha(over.pixel(3, 0)) > 0,
                QStringLiteral("enhance: what's blown out or pure black is marked, the rest isn't"));
+    }
+
+    if (jpegexact::available()) {
+        // A picture squeezed hard into a JPEG: decoded again within what the file stores, nearer
+        // the original than an ordinary decode, and its squares' edges weaker.
+        QImage scene(128, 96, QImage::Format_RGB32);
+        for (int y = 0; y < 96; ++y)
+            for (int x = 0; x < 128; ++x) {
+                const double v = 128 + 70 * std::sin(x / 9.0) * std::cos(y / 13.0) + (x > 64 ? 30 : -30);
+                scene.setPixel(x, y, qRgb(std::clamp(int(v), 0, 255), std::clamp(int(v * 0.8), 0, 255), std::clamp(int(255 - v), 0, 255)));
+            }
+        QByteArray squeezed;
+        QBuffer buffer(&squeezed);
+        buffer.open(QIODevice::WriteOnly);
+        scene.save(&buffer, "JPEG", 8);
+        QImage ordinary;
+        ordinary.loadFromData(squeezed, "JPEG");
+        QString why;
+        const QImage again = jpegexact::decode(squeezed, 30, &why);
+        const auto off = [&scene](const QImage &im) {
+            double sum = 0;
+            for (int y = 0; y < 96; ++y)
+                for (int x = 0; x < 128; ++x)
+                    sum += std::abs(qGray(im.pixel(x, y)) - qGray(scene.pixel(x, y)));
+            return sum / (128 * 96);
+        };
+        const auto edges = [](const QImage &im) { // steps across the squares' edges, against steps inside them
+            double across = 0, inside = 0;
+            for (int y = 0; y < 96; ++y)
+                for (int x = 1; x < 128; ++x) {
+                    const double d = std::abs(qGray(im.pixel(x, y)) - qGray(im.pixel(x - 1, y)));
+                    (x % 8 == 0 ? across : inside) += d;
+                }
+            return (across / (96 * 15)) / std::max(0.01, inside / (96 * (127 - 15)));
+        };
+        report(!again.isNull() && again.size() == scene.size() && off(again) < off(ordinary) && edges(again) < edges(ordinary) * 0.8,
+               QStringLiteral("jpeg decoded again within what it stores: nearer the original, its squares fainter"),
+               why + QStringLiteral(" off by %1 ordinary, %2 again; edge ratio %3 to %4").arg(off(ordinary), 0, 'f', 2).arg(off(again), 0, 'f', 2)
+                         .arg(edges(ordinary), 0, 'f', 2).arg(edges(again), 0, 'f', 2));
+        report(jpegexact::decode("not a jpeg", 10, &why).isNull() && !why.isEmpty(), QStringLiteral("jpeg decoded again: what isn't one is refused, saying why"));
     }
 
     // Profiles: DiskAnvil's own, and files people save and pass on.

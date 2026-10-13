@@ -181,6 +181,7 @@ add_library(diskanvil-ui STATIC
     src/lostfiles/timelinedialog.cpp src/lostfiles/timelinedialog.h
     src/lostfiles/placesmap.cpp src/lostfiles/placesmap.h
     src/lostfiles/enhance.cpp src/lostfiles/enhance.h
+    src/lostfiles/jpegexact.cpp src/lostfiles/jpegexact.h
     src/viruses/activitydialog.cpp src/viruses/activitydialog.h
     src/lostfiles/placesdialog.cpp src/lostfiles/placesdialog.h
     src/lostfiles/preview.cpp src/lostfiles/preview.h
@@ -259,6 +260,15 @@ if(DISKANVIL_PDF)
     endif()
 endif()
 # Films and songs that play in Find Lost Files' viewer, when Qt Multimedia is there (releases have it).
+# A JPEG decoded again within what it stores (Enhance): libjpeg (libjpeg-turbo).
+find_package(JPEG QUIET)
+if(JPEG_FOUND)
+    target_link_libraries(diskanvil-ui PRIVATE JPEG::JPEG)
+    target_compile_definitions(diskanvil-ui PRIVATE DISKANVIL_JPEG)
+else()
+    message(WARNING "libjpeg wasn't found: Enhance can't decode a JPEG again within what it stores")
+endif()
+
 option(DISKANVIL_MEDIA "Play films and songs in Find Lost Files' viewer (needs Qt Multimedia)" ON)
 if(DISKANVIL_MEDIA)
     find_package(Qt6 6.8 QUIET COMPONENTS Multimedia MultimediaWidgets)
