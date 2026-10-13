@@ -138,6 +138,8 @@ back with their real names and folders, whatever kind they are.
 
 ## Screenshots
 
+![DiskAnvil's main window: each drive with its partitions, and a table of them all](docs/shots/main-window.png)
+
 <table>
 <tr>
 <td width="50%"><img src="docs/shots/windows-wont-start.png" alt="Windows Won't Start, with the registry files checked and System Restore's copies listed"><br><sub><b>Windows Won't Start</b>: a stuck update undone, a damaged registry file put back from System Restore</sub></td>
@@ -219,7 +221,7 @@ Most of it works the same as on Linux. The differences:
 <a id="diskanvil-live"></a>
 ## <img src="rescue/art/diskanvil-live-icon.svg" width="32" height="32" align="top" alt="">&nbsp; DiskAnvil Live
 
-![Everything on DiskAnvil Live](docs/diskanvil-live.png)
+![Everything on DiskAnvil Live](docs/shots/diskanvil-live.png)
 
 DiskAnvil Live is a small Linux system on a USB stick, with DiskAnvil and a few other repair tools. It starts any PC,
 new or old, even one whose own system won't start, and every tool is a click away.
