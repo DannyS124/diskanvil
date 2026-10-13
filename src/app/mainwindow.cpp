@@ -16,6 +16,7 @@
 #include "certificates.h"
 #include "closedsets.h"
 #include "writeblock.h"
+#include "writeprotectdialog.h"
 #include "remotehelpdialog.h"
 #include "netbootdialog.h"
 #include "liveonpcdialog.h"
@@ -664,6 +665,16 @@ void MainWindow::createActions()
         StickCheckDialog(m_udisks, d ? d->blockPath : QString(), toolParent()).exec();
     });
 
+    m_writeProtected = new QAction(themeIcon("object-locked", "document-encrypt"), tr("&Write-Protected Drive…"), this);
+    m_writeProtected->setObjectName(QStringLiteral("writeProtected"));
+    m_writeProtected->setToolTip(tr("Why a stick, card or drive won't let anything be saved to it, and the fix"));
+    connect(m_writeProtected, &QAction::triggered, this, [this] {
+        WriteProtectDialog dialog(m_udisks, toolParent());
+        if (const Disk *d = selectedDisk())
+            dialog.pick(d->blockPath);
+        dialog.exec();
+    });
+
     m_benchmark = new QAction(themeIcon("speedometer", "chronometer"), tr("&Benchmark…"), this);
     connect(m_benchmark, &QAction::triggered, this, [this] {
         if (const Disk *d = selectedDisk())
@@ -965,7 +976,7 @@ void MainWindow::createActions()
     action->addSeparator();
     action->addActions({m_newTable, m_inspect, m_recover, m_findFiles, m_wipe, m_sdCard, m_secureErase, m_detachImage});
     action->addSeparator();
-    action->addActions({m_health, m_badSectors, m_checkStick, m_benchmark, m_raidCheck});
+    action->addActions({m_health, m_badSectors, m_checkStick, m_writeProtected, m_benchmark, m_raidCheck});
     action->addSeparator();
     action->addActions({m_backup, m_restore, m_clonezilla, m_evidence, m_clone, m_newIds, m_rescue});
     action->addSeparator();
@@ -1866,6 +1877,7 @@ bool MainWindow::openTool(const QString &name)
                                              {QStringLiteral("rescue-usb"), m_rescueUsb},
                                              {QStringLiteral("live-on-pc"), m_liveOnPc},
                                              {QStringLiteral("check-stick"), m_checkStick},
+                                             {QStringLiteral("write-protected"), m_writeProtected},
                                              {QStringLiteral("lost-files"), m_findFiles},
                                              {QStringLiteral("virus-scan"), m_virusScan},
                                              {QStringLiteral("save-files"), m_saveFiles},
@@ -1946,6 +1958,8 @@ void MainWindow::buildContextMenu(QMenu *menu)
     add({m_clone, m_newIds, m_rescue, m_findFiles});
     if (!d->isSystem && (d->removable || d->bus == QLatin1String("usb")))
         add({m_writeImage, m_windowsUsb, m_rescueUsb, m_checkStick});
+    if (!d->isSystem && (d->readOnly || d->removable || d->sdCard || d->bus == QLatin1String("usb")))
+        add({m_writeProtected});
     add({m_newTable, m_wipe, m_secureErase});
     if (m_sdCard->isEnabled())
         add({m_sdCard});

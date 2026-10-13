@@ -329,6 +329,9 @@ QVector<HomeWindow::Tile> HomeWindow::allTiles() const
     add(QStringLiteral("checkstick"), QStringLiteral("diskanvil-live-checkstick"), QStringLiteral("drive-removable-media-usb"), tr("Check a USB Stick"),
         tr("Bad spots, and sticks that are smaller than they say"))
         .tool = QStringLiteral("check-stick");
+    add(QStringLiteral("writeprotected"), QStringLiteral("diskanvil-live-writeprotect"), QStringLiteral("object-locked"), tr("Write-Protected Drive"),
+        tr("A stick or card that won't let you save: why, and the fix"))
+        .tool = QStringLiteral("write-protected");
     add(QStringLiteral("copystick"), QStringLiteral("diskanvil-live-copystick"), QStringLiteral("media-flash"),
         stick ? tr("Copy This Stick") : tr("Make a DiskAnvil Live USB"),
         stick ? tr("Another DiskAnvil Live stick, made from this one") : tr("A rescue stick that starts any PC"))

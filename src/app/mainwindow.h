@@ -163,6 +163,7 @@ private:
     QAction *m_benchmark = nullptr;
     QAction *m_badSectors = nullptr;
     QAction *m_checkStick = nullptr;
+    QAction *m_writeProtected = nullptr;
     QAction *m_clone = nullptr;
     QAction *m_newIds = nullptr;
     QAction *m_backup = nullptr;

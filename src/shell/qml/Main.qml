@@ -34,6 +34,7 @@ WaylandCompositor {
     readonly property var more: [
         { id: "writeimage", icon: "diskanvil-live-writeimage", title: "Write an Image to USB", program: "diskanvil", args: ["--open", "write-image"] },
         { id: "checkstick", icon: "diskanvil-live-checkstick", title: "Check a USB Stick", program: "diskanvil", args: ["--open", "check-stick"] },
+        { id: "writeprotected", icon: "diskanvil-live-writeprotect", title: "Write-Protected Drive", program: "diskanvil", args: ["--open", "write-protected"] },
         { id: "copystick", icon: "diskanvil-live-copystick", title: "Copy This Stick", program: "diskanvil", args: ["--open", "rescue-usb"] },
         { id: "activity", icon: "diskanvil-live-logs", title: "What This PC Did", program: "diskanvil", args: ["--open", "activity"] },
         { id: "drivers", icon: "diskanvil-live-windowsfix", title: "Windows Drivers", program: "diskanvil", args: ["--open", "drivers"] },

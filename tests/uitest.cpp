@@ -16,6 +16,7 @@
 #include "../src/tools/remotehelpdialog.h"
 #include "../src/lostfiles/lookcloserdialog.h"
 #include "../src/tools/filesdialog.h"
+#include "../src/tools/writeprotectdialog.h"
 #include "../src/lostfiles/viewerhost.h"
 #include "../src/usb/liveonpc.h"
 #include "../src/usb/liveonpcdialog.h"
@@ -5200,6 +5201,66 @@ void filmTools()
 
 // Files, DiskAnvil Live's file window: copying, a second copy kept beside the first, moving,
 // deleting, and a folder that can't be changed.
+void writeProtectedWindow()
+{
+    // A pretend stick: Linux's read-only flag on it, and its partition open read-only. Nothing real is looked at or run.
+    UDisks udisks;
+    WriteProtectDialog dialog(&udisks);
+    writeprotect::State state;
+    state.device = QStringLiteral("/dev/sdz");
+    state.name = QStringLiteral("Test Stick");
+    state.kernelReadOnly = true;
+    state.drivesays = 0;
+    writeprotect::Part part;
+    part.device = QStringLiteral("/dev/sdz1");
+    part.name = QStringLiteral("STICK");
+    part.fsType = QStringLiteral("vfat");
+    part.mountedReadOnly = true;
+    state.parts << part;
+    dialog.setStateForTest(state);
+    QStringList ran;
+    dialog.runAsRoot = [&ran](const QStringList &command, QString *) {
+        ran = command;
+        return true;
+    };
+    dialog.show();
+    dialog.look();
+    QCoreApplication::processEvents();
+    auto *fixButton = dialog.findChild<QPushButton *>(QStringLiteral("fix0"));
+    report(dialog.findings().size() == 1 && fixButton && fixButton->isVisible() && fixButton->text() == QLatin1String("Clear the Flag"),
+           QStringLiteral("write-protected: the flag Linux has on it is found, with its fix"), QString::number(dialog.findings().size()));
+    if (fixButton)
+        fixButton->click();
+    QCoreApplication::processEvents();
+    report(ran.value(2).startsWith(QLatin1String("blockdev --setrw '/dev/sdz'")), QStringLiteral("write-protected: Clear the Flag runs blockdev as root"), ran.join(QLatin1Char(' ')));
+
+    // Flag cleared: now the partition open read-only is what's left.
+    state.kernelReadOnly = false;
+    dialog.setStateForTest(state);
+    dialog.look();
+    QCoreApplication::processEvents();
+    fixButton = dialog.findChild<QPushButton *>(QStringLiteral("fix0"));
+    report(dialog.findings().size() == 1 && fixButton && fixButton->text() == QLatin1String("Repair and Open Again"),
+           QStringLiteral("write-protected: then its partition open read-only, with Repair and Open Again"));
+
+    // A worn-out stick: no button that pretends to fix it.
+    state.drivesays = 1;
+    dialog.setStateForTest(state);
+    dialog.look();
+    QCoreApplication::processEvents();
+    report(dialog.findings().size() == 1 && !dialog.findChild<QPushButton *>(QStringLiteral("fix0")),
+           QStringLiteral("write-protected: a stick that locked itself gets the truth, and no fix button"));
+    if (qEnvironmentVariableIsSet("DISKANVIL_SHOTS"))
+        dialog.grab().save(qEnvironmentVariable("DISKANVIL_SHOTS") + QStringLiteral("/write-protected.png"));
+
+    state.drivesays = 0;
+    state.parts[0].mountedReadOnly = false;
+    dialog.setStateForTest(state);
+    dialog.look();
+    QCoreApplication::processEvents();
+    report(dialog.findings().isEmpty() && dialog.findChildren<QFrame *>().size() >= 1, QStringLiteral("write-protected: a writable one says so, and what else it can be"));
+}
+
 void filesWindow()
 {
     UDisks udisks;
@@ -6994,7 +7055,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"lookcloser", lookCloserWindow}, {"files", filesWindow}, {"enhance", enhanceWindow}, {"film", filmTools}, {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"lookcloser", lookCloserWindow}, {"files", filesWindow}, {"writeprotected", writeProtectedWindow}, {"enhance", enhanceWindow}, {"film", filmTools}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},

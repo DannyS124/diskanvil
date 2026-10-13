@@ -75,6 +75,7 @@ add_library(diskanvil-core STATIC
     src/drives/erasure.cpp src/drives/erasure.h
     src/drives/usbinfo.cpp src/drives/usbinfo.h
     src/drives/writeblock.cpp src/drives/writeblock.h
+    src/drives/writeprotect.cpp src/drives/writeprotect.h
     src/lostfiles/mediainfo.cpp src/lostfiles/mediainfo.h
     src/lostfiles/exif.cpp src/lostfiles/exif.h
     src/lostfiles/lookcopies.cpp src/lostfiles/lookcopies.h
@@ -178,6 +179,7 @@ add_library(diskanvil-ui STATIC
     src/lostfiles/viewerhost.cpp src/lostfiles/viewerhost.h
     src/lostfiles/lookcloserdialog.cpp src/lostfiles/lookcloserdialog.h
     src/tools/filesdialog.cpp src/tools/filesdialog.h
+    src/tools/writeprotectdialog.cpp src/tools/writeprotectdialog.h
     src/lostfiles/timelinedialog.cpp src/lostfiles/timelinedialog.h
     src/lostfiles/placesmap.cpp src/lostfiles/placesmap.h
     src/lostfiles/enhance.cpp src/lostfiles/enhance.h

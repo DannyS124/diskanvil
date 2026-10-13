@@ -7,9 +7,13 @@
 
 #include "testkit.h"
 
+#include "../src/drives/writeprotect.h"
 #include "../src/usb/stickcheck.h"
 
+#include <QDir>
+#include <QFile>
 #include <QRandomGenerator>
+#include <QTemporaryDir>
 
 #include <algorithm>
 #include <cstring>
@@ -119,6 +123,101 @@ const char *name(stickcheck::Mode mode)
 
 } // namespace
 
+namespace {
+
+void writeProtectTests()
+{
+    using namespace writeprotect;
+    const auto has = [](const QVector<Finding> &found, Fix fix) {
+        return std::any_of(found.cbegin(), found.cend(), [fix](const Finding &f) { return f.fix == fix; });
+    };
+    State stick;
+    stick.device = QStringLiteral("/dev/sdz");
+    stick.name = QStringLiteral("Test Stick");
+    Part p1;
+    p1.device = QStringLiteral("/dev/sdz1");
+    p1.name = QStringLiteral("STICK");
+    p1.fsType = QStringLiteral("vfat");
+    stick.parts << p1;
+
+    report(diagnose(stick).isEmpty() && !nothingFound(stick).isEmpty(), QStringLiteral("write-protected: a writable stick has nothing found, and says what else it can be"));
+
+    State worn = stick;
+    worn.drivesays = 1;
+    worn.kernelReadOnly = true;
+    worn.parts[0].mountedReadOnly = true;
+    QVector<Finding> found = diagnose(worn);
+    report(found.size() == 1 && found[0].fix == Fix::None && found[0].text.contains(QLatin1String("wearing out")),
+           QStringLiteral("write-protected: a stick that says so itself: only that, no fix offered, said honestly"), found.value(0).title);
+
+    State card = worn;
+    card.sdCard = true;
+    found = diagnose(card);
+    report(found.size() == 1 && found[0].title.contains(QLatin1String("lock switch")) && found[0].text.contains(QLatin1String("slide")),
+           QStringLiteral("write-protected: a card: its lock switch"));
+    State slot = stick;
+    slot.sdCard = slot.cardSlot = slot.kernelReadOnly = true;
+    report(diagnose(slot).value(0).title.contains(QLatin1String("lock switch")), QStringLiteral("write-protected: a card in the PC's own slot, read-only: its switch"));
+
+    State flagged = stick;
+    flagged.kernelReadOnly = true;
+    flagged.drivesays = 0;
+    found = diagnose(flagged);
+    report(found.size() == 1 && found[0].fix == Fix::ClearKernelFlag, QStringLiteral("write-protected: Linux's own read-only flag: cleared as root"));
+    const QStringList script = clearKernelFlagScript(flagged);
+    report(script.value(2) == QLatin1String("blockdev --setrw '/dev/sdz' '/dev/sdz1'"), QStringLiteral("write-protected: the flag cleared on the drive and its partitions"), script.value(2));
+    State odd = flagged;
+    odd.device = QStringLiteral("/dev/sd'z; reboot");
+    report(clearKernelFlagScript(odd).value(2).startsWith(QLatin1String("blockdev --setrw '/dev/sd'\\''z; reboot'")), QStringLiteral("write-protected: a device name can't run anything"));
+
+    State blocked = flagged;
+    blocked.writeBlock = true;
+    found = diagnose(blocked);
+    report(found.size() == 1 && found[0].fix == Fix::AllowWriteBlock, QStringLiteral("write-protected: DiskAnvil Live's write protection: let it through, nothing else said"));
+
+    State mounted = stick;
+    mounted.parts[0].mountedReadOnly = true;
+    found = diagnose(mounted);
+    report(found.size() == 1 && found[0].fix == Fix::RepairAndReopen && found[0].part == 0, QStringLiteral("write-protected: opened read-only: repaired and opened again"));
+    mounted.parts[0].fsType = QStringLiteral("ntfs");
+    report(diagnose(mounted).value(0).fix == Fix::Reopen && diagnose(mounted).value(0).text.contains(QLatin1String("Shift")),
+           QStringLiteral("write-protected: NTFS open read-only: Fast Startup explained"));
+    mounted.parts[0].fsType = QStringLiteral("iso9660");
+    report(diagnose(mounted).value(0).fix == Fix::None, QStringLiteral("write-protected: a disc image's file system: nothing to fix, said why"));
+
+    State windows = stick;
+    windows.windows = true;
+    windows.policyWriteProtect = windows.diskAttributeReadOnly = true;
+    windows.policyDenyWrite << QStringLiteral("Removable Disks: Deny write access");
+    windows.parts[0].attributeReadOnly = true;
+    windows.parts[0].mountedReadOnly = true;
+    found = diagnose(windows);
+    report(found.size() == 4 && has(found, Fix::ClearPolicy) && has(found, Fix::ClearDiskAttribute) && has(found, Fix::ClearVolumeAttribute)
+               && std::any_of(found.cbegin(), found.cend(), [](const Finding &f) { return f.fix == Fix::None && f.text.contains(QLatin1String("gpedit")); }),
+           QStringLiteral("write-protected: Windows: its policy, an administrator's, the disk's and the volume's marks"), QString::number(found.size()));
+
+    // Reading Linux's flags and mounts: from a /sys and a mount table made here.
+    QTemporaryDir dir;
+    QDir(dir.path()).mkpath(QStringLiteral("class/block/sdz"));
+    QDir(dir.path()).mkpath(QStringLiteral("class/block/sdz1"));
+    const auto write = [&dir](const QString &name, const QByteArray &text) {
+        QFile f(dir.path() + QLatin1Char('/') + name);
+        return f.open(QIODevice::WriteOnly) && f.write(text) == text.size();
+    };
+    write(QStringLiteral("class/block/sdz/ro"), "0\n");
+    write(QStringLiteral("class/block/sdz1/ro"), "1\n");
+    write(QStringLiteral("mountinfo"),
+          "22 1 8:1 / / rw,relatime shared:1 - ext4 /dev/sda1 rw\n"
+          "90 22 8:17 / /run/media/me/MY\\040STICK ro,nosuid,nodev,relatime shared:50 - vfat /dev/sdz1 rw,fmask=0022\n");
+    State read = stick;
+    readLinux(read, dir.path(), dir.path() + QStringLiteral("/mountinfo"));
+    report(!read.kernelReadOnly && read.parts[0].kernelReadOnly && read.parts[0].mountedReadOnly && read.parts[0].mountPoint == QLatin1String("/run/media/me/MY STICK"),
+           QStringLiteral("write-protected: Linux's flags and read-only mounts read"), read.parts[0].mountPoint);
+    report(askDrive(-1) == -1, QStringLiteral("write-protected: no drive to ask: not known, not guessed"));
+}
+
+} // namespace
+
 void stickCheckTests()
 {
     using stickcheck::Mode;
@@ -196,4 +295,5 @@ void stickCheckTests()
     }
     report(sane, QStringLiteral("120 random fakes and bad spots: no crash, never more than it claims"));
     report(exact, QStringLiteral("and a fake without bad spots is always found, to the MiB"));
+    writeProtectTests();
 }

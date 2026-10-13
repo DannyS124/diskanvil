@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Write-Protected Drive
+Comment=A stick or card that won't let you save: why, and the fix
+Exec=diskanvil --open write-protected
+Icon=diskanvil-live-writeprotect
+Categories=System;

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9ad8ff" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Write-Protected Drive: a stick with a padlock. -->
+  <path d="M5 3h6v5H5z"/>
+  <rect x="3" y="8" width="10" height="13" rx="2"/>
+  <rect x="14" y="14" width="7.5" height="6" rx="1" stroke="#ff3355"/>
+  <path d="M15.75 14v-2a2 2 0 0 1 4 0v2" stroke="#ff3355"/>
+</svg>
