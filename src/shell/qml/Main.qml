@@ -42,6 +42,7 @@ WaylandCompositor {
         { id: "burnin", icon: "diskanvil-live-burnin", title: "Burn In a New Drive", program: "diskanvil", args: ["--open", "burn-in"] },
         { id: "writespeed", icon: "diskanvil-live-writespeed", title: "Write Speed Over Time", program: "diskanvil", args: ["--open", "write-speed"] },
         { id: "opal", icon: "diskanvil-live-opal", title: "Self-Encrypting Drive", program: "diskanvil", args: ["--open", "self-encrypting"] },
+        { id: "hardware", icon: "diskanvil-live-hardware", title: "Hardware Check", program: "diskanvil", args: ["--open", "hardware"] },
         { id: "whycrash", icon: "diskanvil-live-whycrash", title: "Why Did It Crash?", program: "diskanvil", args: ["--open", "why-crash"] },
         { id: "drivers", icon: "diskanvil-live-windowsfix", title: "Windows Drivers", program: "diskanvil", args: ["--open", "drivers"] },
         { id: "bootmenu", icon: "diskanvil-live-firmware", title: "Boot Menu Repair", program: "diskanvil", args: ["--open", "boot-menu"] },

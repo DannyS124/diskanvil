@@ -23,6 +23,7 @@
 #include "burnindialog.h"
 #include "writecliffdialog.h"
 #include "opaldialog.h"
+#include "hardwaredialog.h"
 #include "writeprotectdialog.h"
 #include "remotehelpdialog.h"
 #include "netbootdialog.h"
@@ -890,6 +891,12 @@ void MainWindow::createActions()
         WriteCliffDialog(m_udisks, selected ? selected->blockPath : QString(), this).exec();
     });
 
+    m_hardware = new QAction(themeIcon("diskanvil-live-hardware", "computer"), tr("&Hardware Check…"), this);
+    m_hardware->setObjectName(QStringLiteral("hardware"));
+    m_hardware->setToolTip(tr("The rest of the PC: its processor worked hard with its temperature watched, its battery's wear, every key, "
+                              "the screen for dead pixels, the camera; and a report"));
+    connect(m_hardware, &QAction::triggered, this, [this] { HardwareDialog(this).exec(); });
+
     m_lookCloser = new QAction(themeIcon("diskanvil-live-lookcloser", "zoom-in"), tr("&Look Closer at Pictures and Films…"), this);
     m_lookCloser->setObjectName(QStringLiteral("lookCloser"));
     m_lookCloser->setToolTip(tr("Any picture or film in the viewer, with its tools: Enhance and its profiles, Pick a Spot, Straighten, "
@@ -1124,13 +1131,14 @@ void MainWindow::createActions()
         tools->addAction(m_stillOk);
         tools->addAction(m_burnIn);
         tools->addAction(m_writeSpeed);
+        tools->addAction(m_hardware);
         tools->addAction(m_lookCloser);
         tools->addAction(m_productKey);
         tools->addAction(m_certificates);
         tools->addSeparator();
 #ifdef Q_OS_WIN
         // Quick Fixes' tools, and add-ons (Linux commands), aren't in the Windows version yet.
-        tools->addActions({m_saveFiles, m_virusScan, m_bootMenu, m_drivers, m_activity, m_whyCrash, m_winStart, m_stillOk, m_burnIn, m_writeSpeed, m_lookCloser, m_winRe, m_productKey, m_certificates, m_usage, m_cleanup, m_optimize, m_snapshots});
+        tools->addActions({m_saveFiles, m_virusScan, m_bootMenu, m_drivers, m_activity, m_whyCrash, m_winStart, m_stillOk, m_burnIn, m_writeSpeed, m_hardware, m_lookCloser, m_winRe, m_productKey, m_certificates, m_usage, m_cleanup, m_optimize, m_snapshots});
         return;
 #endif
         tools->addAction(themeIcon("tools-wizard", "system-run"), tr("&Quick Fixes…"), this, [this] {
@@ -1980,6 +1988,7 @@ bool MainWindow::openTool(const QString &name)
                                              {QStringLiteral("burn-in"), m_burnIn},
                                              {QStringLiteral("write-speed"), m_writeSpeed},
                                              {QStringLiteral("self-encrypting"), m_opal},
+                                             {QStringLiteral("hardware"), m_hardware},
                                              {QStringLiteral("lost-files"), m_findFiles},
                                              {QStringLiteral("virus-scan"), m_virusScan},
                                              {QStringLiteral("save-files"), m_saveFiles},

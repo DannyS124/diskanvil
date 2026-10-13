@@ -274,6 +274,25 @@
     </message>
 </context>
 <context>
+    <name>HardwareDialog</name>
+    <message numerus="yes">
+        <location filename="../src/health/hardwaredialog.cpp" line="255"/>
+        <source>%n minute(s)</source>
+        <translation>
+            <numerusform>%n minute</numerusform>
+            <numerusform>%n minutes</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/health/hardwaredialog.cpp" line="407"/>
+        <source>%n key(s) pressed and seen</source>
+        <translation>
+            <numerusform>%n key pressed and seen</numerusform>
+            <numerusform>%n keys pressed and seen</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
     <name>HitFilesDialog</name>
     <message numerus="yes">
         <source>%n file(s) have blank parts in the copy (%1 of what wasn&apos;t read).</source>
@@ -423,7 +442,7 @@
 <context>
     <name>MainWindow</name>
     <message numerus="yes">
-        <location filename="../src/app/mainwindow.cpp" line="1546"/>
+        <location filename="../src/app/mainwindow.cpp" line="1554"/>
         <source>%n more drive(s) need a look; their health is in the Status column.</source>
         <translation>
             <numerusform>%n more drive need a look; their health is in the Status column.</numerusform>
@@ -431,7 +450,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/app/mainwindow.cpp" line="2860"/>
+        <location filename="../src/app/mainwindow.cpp" line="2869"/>
         <source>%n add-on command(s) still running. Stop them and quit?</source>
         <translation>
             <numerusform>%n add-on command still running. Stop them and quit?</numerusform>
@@ -1042,6 +1061,17 @@
         <translation>
             <numerusform>%n drive, all there</numerusform>
             <numerusform>%n drives, all there</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
+    <name>hardware</name>
+    <message numerus="yes">
+        <location filename="../src/health/hardware.cpp" line="327"/>
+        <source>%n charge cycle(s)</source>
+        <translation>
+            <numerusform>%n charge cycle</numerusform>
+            <numerusform>%n charge cycles</numerusform>
         </translation>
     </message>
 </context>

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9ad8ff" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Hardware Check: a chip with a pulse line across it. -->
+  <rect x="6" y="6" width="12" height="12" rx="2"/>
+  <path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/>
+  <path d="M8 12h2l1-2.5 2 5 1-2.5h2" stroke="#2bee8a"/>
+</svg>

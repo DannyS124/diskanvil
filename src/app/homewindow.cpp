@@ -335,6 +335,9 @@ QVector<HomeWindow::Tile> HomeWindow::allTiles() const
     add(QStringLiteral("opal"), QStringLiteral("diskanvil-live-opal"), QStringLiteral("document-encrypt"), tr("Self-Encrypting Drive"),
         tr("Locked second-hand drive: reset with the PSID on its label"))
         .tool = QStringLiteral("self-encrypting");
+    add(QStringLiteral("hardware"), QStringLiteral("diskanvil-live-hardware"), QStringLiteral("computer"), tr("Hardware Check"),
+        tr("Heat under load, battery wear, keys, screen, camera"))
+        .tool = QStringLiteral("hardware");
     add(QStringLiteral("testdisk"), QStringLiteral("diskanvil-live-testdisk"), QStringLiteral("drive-harddisk"), tr("Find Lost Partitions"),
         tr("Partitions that disappeared, and boot sectors (TestDisk)"))
         .desktopId = QStringLiteral("diskanvil-live-testdisk");

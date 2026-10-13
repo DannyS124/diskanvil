@@ -115,6 +115,7 @@ add_library(diskanvil-core STATIC
     src/tools/fingerprints.cpp src/tools/fingerprints.h
     src/health/burnin.cpp src/health/burnin.h
     src/health/writecliff.cpp src/health/writecliff.h
+    src/health/hardware.cpp src/health/hardware.h
     src/backup/newids.cpp src/backup/newids.h
     src/lostfiles/filetypes.cpp src/lostfiles/filetypes.h
     src/usb/checksums.cpp src/usb/checksums.h
@@ -196,6 +197,7 @@ add_library(diskanvil-ui STATIC
     src/health/burnindialog.cpp src/health/burnindialog.h
     src/health/writecliffdialog.cpp src/health/writecliffdialog.h
     src/drives/opaldialog.cpp src/drives/opaldialog.h
+    src/health/hardwaredialog.cpp src/health/hardwaredialog.h
     src/lostfiles/timelinedialog.cpp src/lostfiles/timelinedialog.h
     src/lostfiles/placesmap.cpp src/lostfiles/placesmap.h
     src/lostfiles/enhance.cpp src/lostfiles/enhance.h

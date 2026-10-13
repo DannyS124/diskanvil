@@ -24,6 +24,7 @@
 #include "../src/health/burnindialog.h"
 #include "../src/health/writecliffdialog.h"
 #include "../src/drives/opaldialog.h"
+#include "../src/health/hardwaredialog.h"
 #include "../src/tools/holdersdialog.h"
 #include "../src/lostfiles/lostscan.h"
 #include "../src/lostfiles/viewerhost.h"
@@ -5570,6 +5571,41 @@ void opalWindow()
     cleanUpLoop(udisks, loopPath);
 }
 
+// Hardware Check on this PC: what's in it, three seconds of every core busy (with its temperature
+// when the PC tells it), keys pressed lighting up, and the report.
+void hardwareWindow()
+{
+    HardwareDialog dialog;
+    bool done = false;
+    QObject::connect(&dialog, &HardwareDialog::stressDone, [&done] { done = true; });
+    dialog.show();
+    dialog.startStress(3);
+    waitUntil([&] { return done; }, 30000);
+    report(done && dialog.stress().completed && dialog.stress().samples.size() >= 2, QStringLiteral("hardware: the processor worked hard and watched"),
+           hardware::describe(dialog.stress()).left(120));
+    auto *tabs = dialog.findChild<QTabWidget *>(QStringLiteral("tabs"));
+    auto *keys = dialog.findChild<QWidget *>(QStringLiteral("keys"));
+    if (tabs)
+        tabs->setCurrentIndex(2);
+    for (const auto &[key, text] : {std::pair{Qt::Key_A, "a"}, std::pair{Qt::Key_Space, " "}, std::pair{Qt::Key_A, "a"}, std::pair{Qt::Key_Return, "\r"}}) {
+        QKeyEvent press(QEvent::KeyPress, key, Qt::NoModifier, QString::fromLatin1(text));
+        if (keys)
+            QCoreApplication::sendEvent(keys, &press);
+    }
+    report(dialog.keysPressed() == 3, QStringLiteral("hardware: each key pressed lights up once"), QString::number(dialog.keysPressed()));
+    const QString html = dialog.reportHtml();
+    report(html.contains(QLatin1String("Processor")) && html.contains(QLatin1String("3 keys pressed")) && html.contains(QLatin1String("Under load")),
+           QStringLiteral("hardware: the report has the PC, the load and the keys"));
+    if (qEnvironmentVariableIsSet("DISKANVIL_SHOTS")) {
+        if (tabs)
+            tabs->setCurrentIndex(0);
+        dialog.grab().save(qEnvironmentVariable("DISKANVIL_SHOTS") + QStringLiteral("/hardware.png"));
+        if (tabs)
+            tabs->setCurrentIndex(1);
+        dialog.grab().save(qEnvironmentVariable("DISKANVIL_SHOTS") + QStringLiteral("/hardware-cpu.png"));
+    }
+}
+
 void whyCrashWindow()
 {
     whycrash::Report r;
@@ -7496,7 +7532,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"lookcloser", lookCloserWindow}, {"files", filesWindow}, {"writeprotected", writeProtectedWindow}, {"hitfiles", hitFilesWindow}, {"whycrash", whyCrashWindow}, {"winstart", winStartWindow}, {"stillok", stillOkWindow}, {"burnin", burnInWindow}, {"writespeed", writeSpeedWindow}, {"opal", opalWindow}, {"holders", holdersWindow}, {"enhance", enhanceWindow}, {"film", filmTools}, {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"lookcloser", lookCloserWindow}, {"files", filesWindow}, {"writeprotected", writeProtectedWindow}, {"hitfiles", hitFilesWindow}, {"whycrash", whyCrashWindow}, {"winstart", winStartWindow}, {"stillok", stillOkWindow}, {"burnin", burnInWindow}, {"writespeed", writeSpeedWindow}, {"opal", opalWindow}, {"hardware", hardwareWindow}, {"holders", holdersWindow}, {"enhance", enhanceWindow}, {"film", filmTools}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},

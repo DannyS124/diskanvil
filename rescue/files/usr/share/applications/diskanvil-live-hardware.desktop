@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Hardware Check
+Comment=Heat under load, battery wear, keys, screen, camera
+Exec=diskanvil --open hardware
+Icon=diskanvil-live-hardware
+Categories=System;

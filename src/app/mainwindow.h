@@ -165,6 +165,7 @@ private:
     QAction *m_checkStick = nullptr;
     QAction *m_writeProtected = nullptr;
     QAction *m_opal = nullptr;
+    QAction *m_hardware = nullptr;
     QAction *m_whyCrash = nullptr;
     QAction *m_winStart = nullptr;
     QAction *m_stillOk = nullptr;

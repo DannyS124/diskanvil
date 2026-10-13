@@ -8,6 +8,7 @@
 
 #include "../src/health/burnin.h"
 #include "../src/health/writecliff.h"
+#include "../src/health/hardware.h"
 
 #include <unistd.h>
 
@@ -865,10 +866,73 @@ void writeCliff()
     }
 }
 
+// Hardware Check: a PC's parts read from made-up /proc and /sys files (a laptop's battery counted in
+// energy, another in charge, a mouse's left out, a desktop whose name is the maker's filler), the
+// processor's sensors found among the others, and what a stress run's numbers mean.
+void hardwareCheck()
+{
+    QTemporaryDir dir;
+    auto put = [&dir](const QString &path, const QByteArray &text) {
+        QDir().mkpath(QFileInfo(dir.filePath(path)).absolutePath());
+        QFile f(dir.filePath(path));
+        if (f.open(QIODevice::WriteOnly))
+            f.write(text);
+    };
+    put(QStringLiteral("cpuinfo"), "processor\t: 0\nmodel name\t: Test CPU 9000\nprocessor\t: 1\nmodel name\t: Test CPU 9000\n");
+    put(QStringLiteral("meminfo"), "MemTotal:       16314752 kB\nMemFree: 1 kB\n");
+    put(QStringLiteral("ps/BAT0/type"), "Battery\n");
+    put(QStringLiteral("ps/BAT0/energy_full_design"), "57000000\n");
+    put(QStringLiteral("ps/BAT0/energy_full"), "45600000\n");
+    put(QStringLiteral("ps/BAT0/cycle_count"), "312\n");
+    put(QStringLiteral("ps/BAT0/model_name"), "5B10W13930\n");
+    put(QStringLiteral("ps/BAT1/type"), "Battery\n");
+    put(QStringLiteral("ps/BAT1/charge_full_design"), "4000000\n");
+    put(QStringLiteral("ps/BAT1/charge_full"), "2000000\n");
+    put(QStringLiteral("ps/BAT1/voltage_min_design"), "11100000\n");
+    put(QStringLiteral("ps/BAT1/cycle_count"), "0\n");
+    put(QStringLiteral("ps/hidpp_battery_0/type"), "Battery\n");
+    put(QStringLiteral("ps/hidpp_battery_0/scope"), "Device\n");
+    put(QStringLiteral("ps/AC/type"), "Mains\n");
+    put(QStringLiteral("dmi/sys_vendor"), "To Be Filled By O.E.M.\n");
+    put(QStringLiteral("dmi/product_name"), "To Be Filled By O.E.M.\n");
+    put(QStringLiteral("dmi/board_vendor"), "ASRock\n");
+    put(QStringLiteral("dmi/board_name"), "B550M Pro4\n");
+    put(QStringLiteral("dmi/bios_version"), "P3.10\n");
+    put(QStringLiteral("dmi/bios_date"), "03/08/2023\n");
+    const hardware::Summary s = hardware::readFrom(dir.filePath(QStringLiteral("cpuinfo")), dir.filePath(QStringLiteral("meminfo")),
+                                                   dir.filePath(QStringLiteral("ps")), dir.filePath(QStringLiteral("dmi")));
+    report(s.cpu == QLatin1String("Test CPU 9000") && s.threads == 2 && s.memory == 16314752ull * 1024 && s.board == QLatin1String("ASRock B550M Pro4")
+               && s.firmware == QLatin1String("P3.10, from 03/08/2023"),
+           QStringLiteral("hardware: processor, memory, the board when the PC's name is filler, firmware"), s.board + QLatin1Char(' ') + s.firmware);
+    report(s.batteries.size() == 2 && s.batteries[0].wearPercent() == 20 && s.batteries[0].cycles == 312 && s.batteries[0].name.startsWith(QLatin1String("5B10W13930"))
+               && qAbs(s.batteries[1].designWh - 44.4) < 0.01 && s.batteries[1].wearPercent() == 50 && s.batteries[1].cycles == -1,
+           QStringLiteral("hardware: batteries in energy and in charge, their wear; a mouse's left out; a cycle count of 0 isn't one"),
+           QStringLiteral("%1 batteries").arg(s.batteries.size()));
+    put(QStringLiteral("hwmon/hwmon0/name"), "nvme\n");
+    put(QStringLiteral("hwmon/hwmon0/temp1_input"), "99000\n");
+    put(QStringLiteral("hwmon/hwmon1/name"), "k10temp\n");
+    put(QStringLiteral("hwmon/hwmon1/temp1_input"), "61250\n");
+    put(QStringLiteral("hwmon/hwmon1/temp3_input"), "58000\n");
+    report(qAbs(hardware::cpuTemperatureFrom(dir.filePath(QStringLiteral("hwmon"))) - 61.25) < 0.01,
+           QStringLiteral("hardware: the processor's own sensor, not the hotter SSD's"));
+
+    QVector<hardware::Sample> cool, cooking;
+    for (int i = 0; i < 60; ++i) {
+        cool << hardware::Sample{double(i), 50.0 + i / 6.0, 4200};
+        cooking << hardware::Sample{double(i), 70.0 + i / 2.0, i < 20 ? 3600.0 : 1800.0};
+    }
+    const hardware::StressResult fine = hardware::judge(cool, 40, 4500);
+    report(!fine.tooHot && !fine.throttled && qAbs(fine.maxCelsius - 59.83) < 0.1, QStringLiteral("hardware: a PC that stays cool and fast is fine"));
+    const hardware::StressResult bad = hardware::judge(cooking, 45, 4000);
+    report(bad.tooHot && bad.throttled && hardware::describe(bad).contains(QLatin1String("paste")),
+           QStringLiteral("hardware: one that gets far too hot and slows itself down is told to clean it and see to the paste"), hardware::describe(bad));
+}
+
 void healthTests()
 {
     burnInVerdict();
     writeCliff();
+    hardwareCheck();
     hiddenArea();
     triageAdvice();
     driveFacts();
