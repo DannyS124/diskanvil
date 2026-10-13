@@ -103,7 +103,7 @@
 <context>
     <name>BurnInDialog</name>
     <message numerus="yes">
-        <location filename="../src/health/burnindialog.cpp" line="282"/>
+        <location filename="../src/health/burnindialog.cpp" line="285"/>
         <source>%n counter(s) noted</source>
         <translation>
             <numerusform>%n counter noted</numerusform>
@@ -111,7 +111,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/health/burnindialog.cpp" line="302"/>
+        <location filename="../src/health/burnindialog.cpp" line="305"/>
         <source>%n counter(s) went up</source>
         <translation>
             <numerusform>%n counter went up</numerusform>
@@ -284,7 +284,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/health/hardwaredialog.cpp" line="407"/>
+        <location filename="../src/health/hardwaredialog.cpp" line="408"/>
         <source>%n key(s) pressed and seen</source>
         <translation>
             <numerusform>%n key pressed and seen</numerusform>
@@ -811,7 +811,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/drives/udisks.cpp" line="470"/>
+        <location filename="../src/drives/udisks.cpp" line="471"/>
         <source>The volume group %1 is missing %n of its drives. What was on them can&apos;t be read.</source>
         <translation>
             <numerusform>The volume group %1 is missing %n of its drives. What was on them can't be read.</numerusform>
@@ -1067,7 +1067,7 @@
 <context>
     <name>hardware</name>
     <message numerus="yes">
-        <location filename="../src/health/hardware.cpp" line="327"/>
+        <location filename="../src/health/hardware.cpp" line="332"/>
         <source>%n charge cycle(s)</source>
         <translation>
             <numerusform>%n charge cycle</numerusform>
