@@ -127,7 +127,7 @@ int main(int argc, char *argv[])
     const QCommandLineOption logOption(QStringLiteral("log"),
                                        QStringLiteral("Write what DiskAnvil does to <file>. DISKANVIL_LOG=<file> does the same."),
                                        QStringLiteral("file"));
-    const QString tools = QStringLiteral("what-happened, write-image, windows-usb, rescue-usb, live-on-pc, check-stick, write-protected, why-crash, windows-start, still-ok, burn-in, lost-files, virus-scan, save-files, remote-help, net-boot, product-key, drivers, activity, look-closer, files, boot-menu, linux-boot, make-room, certificates or open-sets");
+    const QString tools = QStringLiteral("what-happened, write-image, windows-usb, rescue-usb, live-on-pc, check-stick, write-protected, why-crash, windows-start, still-ok, burn-in, write-speed, lost-files, virus-scan, save-files, remote-help, net-boot, product-key, drivers, activity, look-closer, files, boot-menu, linux-boot, make-room, certificates or open-sets");
     const QCommandLineOption openOption(QStringLiteral("open"), QStringLiteral("Open just one tool: ") + tools + QLatin1Char('.'),
                                         QStringLiteral("tool"));
     const QCommandLineOption homeOption(QStringLiteral("home"), QStringLiteral("Be DiskAnvil Live's home screen (its desktop)."));

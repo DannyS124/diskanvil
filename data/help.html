@@ -325,6 +325,13 @@ errors, command timeouts and running too hot are a warning, since they usually p
 air. It takes hours, a day or more for a big hard drive, <b>erases the drive</b> (after its name is typed), and ends
 with a verdict and a PDF report. A drive that doesn't report its health (through some USB adapters) gets the writing
 and reading only, and the report says so.</p>
+<p><b>Write Speed Over Time</b> (Tools menu, and a tile in DiskAnvil Live): most SSDs, and many USB sticks and SMR hard
+drives, write into a fast cache first and slow down a lot once it's full, which is why a big copy starts fast and
+then crawls. This writes a lot at once, straight to the drive (past the computer's own cache) and with data that can't
+be compressed, and draws the speed as it goes. At the end it says how much went in fast (the cache), the speed before
+and after, and when the speed after is very low for an SSD, that it's a cheap or fake one. It writes into a test file
+in the drive's free space, deleted at the end (nothing on the drive is touched), or over a whole empty drive (after its
+name is typed). Write more than the cache to see the drop: some hold 50 GB or more.</p>
 <p><b>What This PC Did</b> (Tools menu): what system is on a drive and what it was used for, read from its own records
 without starting it. On Windows: the version, the PC's name and owner, when it was installed and last shut down, the USB
 drives plugged in (with their serial numbers and when), programs run (how often and when last), files and folders

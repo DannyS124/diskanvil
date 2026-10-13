@@ -329,6 +329,9 @@ QVector<HomeWindow::Tile> HomeWindow::allTiles() const
     add(QStringLiteral("burnin"), QStringLiteral("diskanvil-live-burnin"), QStringLiteral("drive-harddisk"), tr("Burn In a New Drive"),
         tr("A new drive worked hard once, before your files go on it"))
         .tool = QStringLiteral("burn-in");
+    add(QStringLiteral("writespeed"), QStringLiteral("diskanvil-live-writespeed"), QStringLiteral("speedometer"), tr("Write Speed Over Time"),
+        tr("An SSD's fast cache, and its real speed after it"))
+        .tool = QStringLiteral("write-speed");
     add(QStringLiteral("testdisk"), QStringLiteral("diskanvil-live-testdisk"), QStringLiteral("drive-harddisk"), tr("Find Lost Partitions"),
         tr("Partitions that disappeared, and boot sectors (TestDisk)"))
         .desktopId = QStringLiteral("diskanvil-live-testdisk");

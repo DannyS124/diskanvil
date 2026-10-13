@@ -271,6 +271,16 @@ int openFile(const QString &path, FileMode mode)
             h.release();
         return fd;
     }
+    case FileMode::WriteDirect: {
+        win::Handle h(CreateFileW(win::wide(QDir::toNativeSeparators(path)).c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_NEW,
+                                  FILE_FLAG_NO_BUFFERING | FILE_FLAG_WRITE_THROUGH, nullptr));
+        if (!h.valid())
+            return errno = errnoFor(GetLastError()), -1;
+        const int fd = _open_osfhandle(intptr_t(h.get()), _O_WRONLY | _O_BINARY);
+        if (fd >= 0)
+            h.release();
+        return fd;
+    }
     }
     return _wopen(win::wide(QDir::toNativeSeparators(path)).c_str(), flags, _S_IREAD | _S_IWRITE);
 }

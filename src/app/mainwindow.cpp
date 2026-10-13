@@ -21,6 +21,7 @@
 #include "winstartdialog.h"
 #include "fingerprintsdialog.h"
 #include "burnindialog.h"
+#include "writecliffdialog.h"
 #include "writeprotectdialog.h"
 #include "remotehelpdialog.h"
 #include "netbootdialog.h"
@@ -870,6 +871,15 @@ void MainWindow::createActions()
         BurnInDialog(m_udisks, selected ? selected->blockPath : QString(), this).exec();
     });
 
+    m_writeSpeed = new QAction(themeIcon("diskanvil-live-writespeed", "speedometer"), tr("&Write Speed Over Time…"), this);
+    m_writeSpeed->setObjectName(QStringLiteral("writeSpeed"));
+    m_writeSpeed->setToolTip(tr("How fast a drive keeps writing when given a lot at once: the size of an SSD's fast cache, and its "
+                                "real speed after it (cheap and fake drives show themselves)"));
+    connect(m_writeSpeed, &QAction::triggered, this, [this] {
+        const Disk *selected = selectedDisk();
+        WriteCliffDialog(m_udisks, selected ? selected->blockPath : QString(), this).exec();
+    });
+
     m_lookCloser = new QAction(themeIcon("diskanvil-live-lookcloser", "zoom-in"), tr("&Look Closer at Pictures and Films…"), this);
     m_lookCloser->setObjectName(QStringLiteral("lookCloser"));
     m_lookCloser->setToolTip(tr("Any picture or film in the viewer, with its tools: Enhance and its profiles, Pick a Spot, Straighten, "
@@ -1103,13 +1113,14 @@ void MainWindow::createActions()
         tools->addAction(m_winStart);
         tools->addAction(m_stillOk);
         tools->addAction(m_burnIn);
+        tools->addAction(m_writeSpeed);
         tools->addAction(m_lookCloser);
         tools->addAction(m_productKey);
         tools->addAction(m_certificates);
         tools->addSeparator();
 #ifdef Q_OS_WIN
         // Quick Fixes' tools, and add-ons (Linux commands), aren't in the Windows version yet.
-        tools->addActions({m_saveFiles, m_virusScan, m_bootMenu, m_drivers, m_activity, m_whyCrash, m_winStart, m_stillOk, m_burnIn, m_lookCloser, m_winRe, m_productKey, m_certificates, m_usage, m_cleanup, m_optimize, m_snapshots});
+        tools->addActions({m_saveFiles, m_virusScan, m_bootMenu, m_drivers, m_activity, m_whyCrash, m_winStart, m_stillOk, m_burnIn, m_writeSpeed, m_lookCloser, m_winRe, m_productKey, m_certificates, m_usage, m_cleanup, m_optimize, m_snapshots});
         return;
 #endif
         tools->addAction(themeIcon("tools-wizard", "system-run"), tr("&Quick Fixes…"), this, [this] {
@@ -1957,6 +1968,7 @@ bool MainWindow::openTool(const QString &name)
                                              {QStringLiteral("windows-start"), m_winStart},
                                              {QStringLiteral("still-ok"), m_stillOk},
                                              {QStringLiteral("burn-in"), m_burnIn},
+                                             {QStringLiteral("write-speed"), m_writeSpeed},
                                              {QStringLiteral("lost-files"), m_findFiles},
                                              {QStringLiteral("virus-scan"), m_virusScan},
                                              {QStringLiteral("save-files"), m_saveFiles},

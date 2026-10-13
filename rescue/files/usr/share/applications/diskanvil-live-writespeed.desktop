@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Write Speed Over Time
+Comment=An SSD's fast cache, and its real speed after it
+Exec=diskanvil --open write-speed
+Icon=diskanvil-live-writespeed
+Categories=System;

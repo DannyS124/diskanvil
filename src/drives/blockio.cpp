@@ -188,6 +188,7 @@ int openFile(const QString &path, FileMode mode)
     case FileMode::Update: flags |= O_RDWR | O_CREAT; break;
     case FileMode::CreateNew: flags |= O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW; break;
     case FileMode::ReadBack: flags |= O_RDONLY; break;
+    case FileMode::WriteDirect: flags |= O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_DIRECT; break;
     }
     const int fd = ::open(QFile::encodeName(path).constData(), flags, 0644);
     if (fd >= 0 && mode == FileMode::ReadBack)

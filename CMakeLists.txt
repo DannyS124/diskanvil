@@ -113,6 +113,7 @@ add_library(diskanvil-core STATIC
     src/viruses/winstart.cpp src/viruses/winstart.h
     src/tools/fingerprints.cpp src/tools/fingerprints.h
     src/health/burnin.cpp src/health/burnin.h
+    src/health/writecliff.cpp src/health/writecliff.h
     src/backup/newids.cpp src/backup/newids.h
     src/lostfiles/filetypes.cpp src/lostfiles/filetypes.h
     src/usb/checksums.cpp src/usb/checksums.h
@@ -192,6 +193,7 @@ add_library(diskanvil-ui STATIC
     src/viruses/winstartdialog.cpp src/viruses/winstartdialog.h
     src/tools/fingerprintsdialog.cpp src/tools/fingerprintsdialog.h
     src/health/burnindialog.cpp src/health/burnindialog.h
+    src/health/writecliffdialog.cpp src/health/writecliffdialog.h
     src/lostfiles/timelinedialog.cpp src/lostfiles/timelinedialog.h
     src/lostfiles/placesmap.cpp src/lostfiles/placesmap.h
     src/lostfiles/enhance.cpp src/lostfiles/enhance.h

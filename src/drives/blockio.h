@@ -50,6 +50,8 @@ enum class FileMode {
     CreateNew, // write; fails if anything (a symlink too) has that name already
     ReadBack,  // read what's on the drive itself, not what the cache kept: to check what was written
                // (and flushed). On Windows, reads have to go through readSome()/readFull() then.
+    WriteDirect, // write a new file straight to the drive, past the cache (O_DIRECT; Windows: no buffering,
+                 // write-through): aligned writes through writeAt() only. Fails if anything has that name.
 };
 int openFile(const QString &path, FileMode mode);
 

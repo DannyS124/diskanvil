@@ -22,6 +22,7 @@
 #include "../src/viruses/winstartdialog.h"
 #include "../src/tools/fingerprintsdialog.h"
 #include "../src/health/burnindialog.h"
+#include "../src/health/writecliffdialog.h"
 #include "../src/tools/holdersdialog.h"
 #include "../src/lostfiles/lostscan.h"
 #include "../src/lostfiles/viewerhost.h"
@@ -5432,6 +5433,60 @@ void burnInWindow()
     cleanUpLoop(udisks, loopPath);
 }
 
+// Write Speed Over Time into a test stick's free space (a 1.2 GB FAT image, mounted as the user):
+// 1 GB written and drawn, the test file gone, and the whole-drive way needing the name typed.
+void writeSpeedWindow()
+{
+    QDir().mkpath(QDir::homePath() + QStringLiteral("/Projects/diskforge-work/tmp"));
+    QTemporaryDir dir(QDir::homePath() + QStringLiteral("/Projects/diskforge-work/tmp/uitest-XXXXXX"));
+    const QString image = dir.filePath(QStringLiteral("ssd.img"));
+    sh(QStringLiteral("truncate"), {QStringLiteral("-s"), QStringLiteral("1200M"), image});
+    sh(QStringLiteral("mkfs.fat"), {QStringLiteral("-F"), QStringLiteral("32"), QStringLiteral("-n"), QStringLiteral("SPEEDTEST"), image});
+    const QString loopPath = userLoop(image);
+    report(!loopPath.isEmpty(), QStringLiteral("write speed: a loop device stands in for the drive"));
+    if (loopPath.isEmpty())
+        return;
+    UDisks udisks;
+    udisks.setInteractive(false);
+    const QString root = mountStick(udisks, loopPath, QStringLiteral("SPEEDTEST"));
+    report(!root.isEmpty(), QStringLiteral("write speed: its file system is open"));
+    WriteCliffDialog::allowLoopDevicesForTest = true;
+    {
+        WriteCliffDialog dialog(&udisks, loopPath);
+        bool ended = false, completed = false;
+        QObject::connect(&dialog, &WriteCliffDialog::ended, [&](bool c) {
+            ended = true;
+            completed = c;
+        });
+        dialog.show();
+        auto *start = dialog.findChild<QPushButton *>(QStringLiteral("start"));
+        auto *amount = dialog.findChild<QSpinBox *>(QStringLiteral("amount"));
+        auto *where = dialog.findChild<QLabel *>(QStringLiteral("where"));
+        auto *whole = dialog.findChild<QRadioButton *>(QStringLiteral("whole"));
+        auto *inFree = dialog.findChild<QRadioButton *>(QStringLiteral("inFree"));
+        auto *result = dialog.findChild<QLabel *>(QStringLiteral("result"));
+        report(start && start->isEnabled() && amount && amount->value() == 1 && where && where->text().contains(root),
+               QStringLiteral("write speed: into the free space of the open partition, 1 GB, no name to type"), where ? where->text().left(100) : QString());
+        if (whole) {
+            whole->setChecked(true);
+            report(start && !start->isEnabled(), QStringLiteral("write speed: over the whole drive, nothing starts before its name is typed"));
+            inFree->setChecked(true);
+        }
+        if (start)
+            start->click();
+        waitUntil([&] { return ended; }, 300000);
+        const QStringList left = QDir(root).entryList(QDir::Files | QDir::Hidden);
+        report(completed && dialog.points().size() >= 10 && dialog.points().last().written == 998244352ull && left.isEmpty() && result
+                   && (result->text().startsWith(QLatin1String("It kept")) || result->text().startsWith(QLatin1String("It wrote"))),
+               QStringLiteral("write speed: 1 GB written in slices, drawn, explained, the test file gone"),
+               QStringLiteral("%1 points, %2 left; %3").arg(dialog.points().size()).arg(left.join(QLatin1Char(','))).arg(result ? result->text().left(120) : QString()));
+        if (qEnvironmentVariableIsSet("DISKANVIL_SHOTS"))
+            dialog.grab().save(qEnvironmentVariable("DISKANVIL_SHOTS") + QStringLiteral("/write-speed.png"));
+    }
+    WriteCliffDialog::allowLoopDevicesForTest = false;
+    cleanUpLoop(udisks, loopPath);
+}
+
 void whyCrashWindow()
 {
     whycrash::Report r;
@@ -7358,7 +7413,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"lookcloser", lookCloserWindow}, {"files", filesWindow}, {"writeprotected", writeProtectedWindow}, {"hitfiles", hitFilesWindow}, {"whycrash", whyCrashWindow}, {"winstart", winStartWindow}, {"stillok", stillOkWindow}, {"burnin", burnInWindow}, {"holders", holdersWindow}, {"enhance", enhanceWindow}, {"film", filmTools}, {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"lookcloser", lookCloserWindow}, {"files", filesWindow}, {"writeprotected", writeProtectedWindow}, {"hitfiles", hitFilesWindow}, {"whycrash", whyCrashWindow}, {"winstart", winStartWindow}, {"stillok", stillOkWindow}, {"burnin", burnInWindow}, {"writespeed", writeSpeedWindow}, {"holders", holdersWindow}, {"enhance", enhanceWindow}, {"film", filmTools}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},

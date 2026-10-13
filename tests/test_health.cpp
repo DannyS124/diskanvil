@@ -7,6 +7,7 @@
 #include "testkit.h"
 
 #include "../src/health/burnin.h"
+#include "../src/health/writecliff.h"
 
 #include <unistd.h>
 
@@ -812,9 +813,62 @@ void burnInVerdict()
            QStringLiteral("burn-in: stopped part way is said to be unfinished"));
 }
 
+// Write Speed Over Time: where the speed fell (a cache filling), and not for one slow slice or a
+// steady drive; then a real run into a file, straight to the drive and, where the file system
+// can't do that, flushed instead, with the file gone afterwards.
+void writeCliff()
+{
+    using writecliff::Point;
+    auto run = [](const QVector<double> &speeds) {
+        QVector<Point> points;
+        quint64 written = 0;
+        for (double s : speeds) {
+            written += 1000000000;
+            points << Point{written, s};
+        }
+        return writecliff::analyse(points);
+    };
+    QVector<double> cached;
+    for (int i = 0; i < 100; ++i)
+        cached << (i < 24 ? 3200.0 + (i % 3) * 40 : 450.0 + (i % 5) * 20);
+    const writecliff::Finding f = run(cached);
+    report(f.cliff && f.cacheBytes == 24000000000ull && qAbs(f.fastMbps - 3240) < 50 && qAbs(f.slowMbps - 490) < 30,
+           QStringLiteral("write speed: a cache that fills after 24 GB is found, with the speed before and after"),
+           QStringLiteral("%1 %2 %3 %4").arg(f.cliff).arg(f.cacheBytes).arg(f.fastMbps).arg(f.slowMbps));
+    QVector<double> steady(80, 520.0);
+    steady[30] = 90;
+    steady[31] = 120;
+    report(!run(steady).cliff, QStringLiteral("write speed: a steady drive with a couple of slow moments has no cliff"));
+    QVector<double> jumpy;
+    for (int i = 0; i < 60; ++i)
+        jumpy << (i % 2 ? 900.0 : 300.0);
+    report(!run(jumpy).cliff, QStringLiteral("write speed: one that's up and down all the way has no cliff"));
+    report(writecliff::sliceFor(1000ull * 1000 * 1000 * 1000) == 5000000000ull / (8 * 1048576) * (8 * 1048576) + (5000000000ull % (8 * 1048576) ? 8 * 1048576 : 0)
+               && writecliff::sliceFor(100 * 1048576) == 64 * 1048576,
+           QStringLiteral("write speed: about 200 slices, never under 64 MiB"));
+
+    for (const QString &where : {QDir::homePath() + QStringLiteral("/.cache"), QDir::tempPath()}) {
+        QTemporaryDir dir(where + QStringLiteral("/diskanvil-test-XXXXXX"));
+        const QString file = dir.filePath(QStringLiteral("speed"));
+        writecliff::Writer writer(file, -1, 192ull * 1048576);
+        QVector<Point> points;
+        bool completed = false;
+        QString error;
+        QObject::connect(&writer, &writecliff::Writer::point, [&points](const Point &p) { points << p; });
+        QObject::connect(&writer, &writecliff::Writer::finished, [&](bool c, const QString &e) {
+            completed = c;
+            error = e;
+        });
+        writer.run();
+        report(completed && points.size() == 3 && points.last().written == 192ull * 1048576 && points.first().mbps > 1 && !QFile::exists(file),
+               QStringLiteral("write speed: 192 MiB written in %1 and timed in 3 slices, the file deleted").arg(where), error);
+    }
+}
+
 void healthTests()
 {
     burnInVerdict();
+    writeCliff();
     hiddenArea();
     triageAdvice();
     driveFacts();
