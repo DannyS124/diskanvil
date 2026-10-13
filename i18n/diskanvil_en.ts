@@ -161,9 +161,28 @@
     </message>
 </context>
 <context>
+    <name>LookCloserDialog</name>
+    <message numerus="yes">
+        <location filename="../src/lostfiles/lookcloserdialog.cpp" line="157"/>
+        <source>%n picture(s) and film(s) to look at.</source>
+        <translation>
+            <numerusform>%n picture and film to look at.</numerusform>
+            <numerusform>%n pictures and films to look at.</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/lostfiles/lookcloserdialog.cpp" line="159"/>
+        <source>%n file(s) that aren&apos;t pictures or films left out.</source>
+        <translation>
+            <numerusform>%n file that aren't pictures or films left out.</numerusform>
+            <numerusform>%n files that aren't pictures or films left out.</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
     <name>LostFilesDialog</name>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1440"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1447"/>
         <source>Windows kept %n earlier version(s) of this drive, the newest from %1. Files that have changed or gone since can come back from them.</source>
         <translation>
             <numerusform>Windows kept %n earlier version of this drive, the newest from %1. Files that have changed or gone since can come back from them.</numerusform>
@@ -185,7 +204,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1667"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1674"/>
         <source>%n file(s) end in %1</source>
         <translation>
             <numerusform>%n file end in %1</numerusform>
@@ -200,7 +219,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1483"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1490"/>
         <source>Changed or gone since the earlier versions: %n file(s), in the &quot;as it was on&quot; folders.</source>
         <translation>
             <numerusform>Changed or gone since the earlier versions: %n file, in the "as it was on" folders.</numerusform>
@@ -208,7 +227,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1537"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1544"/>
         <source>Done: nothing deleted was found on %1. Untick &quot;Only deleted files&quot; to see what wasn&apos;t deleted: %n file(s).</source>
         <translation>
             <numerusform>Done: nothing deleted was found on %1. Untick "Only deleted files" to see what wasn't deleted: %n file.</numerusform>
@@ -216,7 +235,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1692"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1699"/>
         <source>%n file(s) end in &lt;b&gt;%1&lt;/b&gt;, for example %2.</source>
         <translation>
             <numerusform>%n file end in &lt;b&gt;%1&lt;/b&gt;, for example %2.</numerusform>
@@ -224,7 +243,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1699"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1706"/>
         <source>Windows kept %n earlier version(s) of this drive: &lt;b&gt;Look in Them&lt;/b&gt;, above, shows the files as they were.</source>
         <translation>
             <numerusform>Windows kept %n earlier version of this drive: &lt;b&gt;Look in Them&lt;/b&gt;, above, shows the files as they were.</numerusform>
@@ -232,7 +251,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1703"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1710"/>
         <source>Many of these programs write a locked copy and delete the original. The originals of %n locked file(s) are among the deleted files found here: tick them and save them.</source>
         <translation>
             <numerusform>Many of these programs write a locked copy and delete the original. The originals of %n locked file are among the deleted files found here: tick them and save them.</numerusform>
@@ -240,7 +259,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1741"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1748"/>
         <source>Windows kept %n small picture(s) of photos and films, some maybe deleted: see &quot;Small pictures Windows kept&quot;.</source>
         <translation>
             <numerusform>Windows kept %n small picture of photos and films, some maybe deleted: see "Small pictures Windows kept".</numerusform>
@@ -248,7 +267,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1788"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1795"/>
         <source>&quot;%1&quot; was found in %n place(s): see &quot;Found by their words&quot;.</source>
         <translation>
             <numerusform>"%1" was found in %n place: see "Found by their words".</numerusform>
@@ -256,7 +275,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="2481"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="2422"/>
         <source>&quot;%1&quot; was saved again after it was made: its %n earlier version(s) are in &quot;Earlier versions&quot;.</source>
         <translation>
             <numerusform>"%1" was saved again after it was made: its %n earlier version are in "Earlier versions".</numerusform>
@@ -264,7 +283,6 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="2690"/>
         <source>Added %n profile(s): %1.</source>
         <translation>
             <numerusform>Added %n profile: %1.</numerusform>
@@ -275,7 +293,7 @@
 <context>
     <name>MainWindow</name>
     <message numerus="yes">
-        <location filename="../src/app/mainwindow.cpp" line="1407"/>
+        <location filename="../src/app/mainwindow.cpp" line="1420"/>
         <source>%n more drive(s) need a look; their health is in the Status column.</source>
         <translation>
             <numerusform>%n more drive need a look; their health is in the Status column.</numerusform>
@@ -283,7 +301,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/app/mainwindow.cpp" line="2706"/>
+        <location filename="../src/app/mainwindow.cpp" line="2720"/>
         <source>%n add-on command(s) still running. Stop them and quit?</source>
         <translation>
             <numerusform>%n add-on command still running. Stop them and quit?</numerusform>
@@ -660,6 +678,17 @@
         <translation>
             <numerusform>%n folder couldn't be opened (they belong to the system or other users), so the total may be a little low.</numerusform>
             <numerusform>%n folders couldn't be opened (they belong to the system or other users), so the total may be a little low.</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
+    <name>ViewerHost</name>
+    <message numerus="yes">
+        <location filename="../src/lostfiles/viewerhost.cpp" line="356"/>
+        <source>Added %n profile(s): %1.</source>
+        <translation>
+            <numerusform>Added %n profile: %1.</numerusform>
+            <numerusform>Added %n profiles: %1.</numerusform>
         </translation>
     </message>
 </context>

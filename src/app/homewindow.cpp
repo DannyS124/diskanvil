@@ -311,6 +311,9 @@ QVector<HomeWindow::Tile> HomeWindow::allTiles() const
     add(QStringLiteral("recover"), QStringLiteral("diskanvil-live-recover"), QStringLiteral("edit-find"), tr("Get Files Back"),
         tr("Deleted files, or files from a formatted or damaged drive"))
         .tool = QStringLiteral("lost-files");
+    add(QStringLiteral("lookcloser"), QStringLiteral("diskanvil-live-lookcloser"), QStringLiteral("zoom-in"), tr("Look Closer"),
+        tr("Pictures and films: enhance, pick a spot, stack frames"))
+        .tool = QStringLiteral("look-closer");
     add(QStringLiteral("viruses"), QStringLiteral("diskanvil-live-virus"), QStringLiteral("security-high"), tr("Scan for Viruses"),
         desktop ? tr("Windows' drive, while Windows can't hide anything") : tr("Known malware on a drive or in a folder"))
         .tool = QStringLiteral("virus-scan");

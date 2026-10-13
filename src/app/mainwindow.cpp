@@ -55,6 +55,7 @@
 #include "productkeydialog.h"
 #include "windowspicker.h"
 #include "activitydialog.h"
+#include "lookcloserdialog.h"
 #include "driversdialog.h"
 #include "theme.h"
 #include "testbootdialog.h"
@@ -786,6 +787,17 @@ void MainWindow::createActions()
             ActivityDialog(picker.root(), this).exec();
     });
 
+    m_lookCloser = new QAction(themeIcon("diskanvil-live-lookcloser", "zoom-in"), tr("&Look Closer at Pictures and Films…"), this);
+    m_lookCloser->setObjectName(QStringLiteral("lookCloser"));
+    m_lookCloser->setToolTip(tr("Any picture or film in the viewer, with its tools: Enhance and its profiles, Pick a Spot, Straighten, "
+                                "Stack Frames, any speed"));
+    connect(m_lookCloser, &QAction::triggered, this, [this] {
+        // Its own window, so it can stay open next to this one.
+        auto *look = new LookCloserDialog(this);
+        look->setAttribute(Qt::WA_DeleteOnClose);
+        look->show();
+    });
+
     m_productKey = new QAction(themeIcon("dialog-password", "document-encrypt"), tr("Windows Product &Key…"), this);
     m_productKey->setObjectName(QStringLiteral("productKey"));
     m_productKey->setToolTip(tr("The key in this PC's firmware, and the ones Windows installs here use: to have before reinstalling"));
@@ -986,12 +998,13 @@ void MainWindow::createActions()
         tools->addAction(m_linuxBoot);
         tools->addAction(m_drivers);
         tools->addAction(m_activity);
+        tools->addAction(m_lookCloser);
         tools->addAction(m_productKey);
         tools->addAction(m_certificates);
         tools->addSeparator();
 #ifdef Q_OS_WIN
         // Quick Fixes' tools, and add-ons (Linux commands), aren't in the Windows version yet.
-        tools->addActions({m_saveFiles, m_virusScan, m_bootMenu, m_drivers, m_activity, m_winRe, m_productKey, m_certificates, m_usage, m_cleanup, m_optimize, m_snapshots});
+        tools->addActions({m_saveFiles, m_virusScan, m_bootMenu, m_drivers, m_activity, m_lookCloser, m_winRe, m_productKey, m_certificates, m_usage, m_cleanup, m_optimize, m_snapshots});
         return;
 #endif
         tools->addAction(themeIcon("tools-wizard", "system-run"), tr("&Quick Fixes…"), this, [this] {
@@ -1841,6 +1854,7 @@ bool MainWindow::openTool(const QString &name)
                                              {QStringLiteral("net-boot"), m_netBoot},
                                              {QStringLiteral("product-key"), m_productKey},
                                              {QStringLiteral("drivers"), m_drivers}, {QStringLiteral("activity"), m_activity},
+                                             {QStringLiteral("look-closer"), m_lookCloser},
                                              {QStringLiteral("boot-menu"), m_bootMenu},
                                              {QStringLiteral("linux-boot"), m_linuxBoot},
                                              {QStringLiteral("make-room"), m_winRe},

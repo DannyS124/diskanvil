@@ -6,6 +6,7 @@
 #include "enhance.h"
 #include "jobui.h"
 #include "lostscan.h"
+#include "viewerhost.h"
 
 #include <QAbstractListModel>
 #include <QDialog>
@@ -15,9 +16,6 @@
 
 #include <memory>
 #include <optional>
-namespace viewer {
-enum class ProfileDo : qint32;
-}
 
 
 class QCheckBox;
@@ -217,10 +215,8 @@ private:
     // handed the next ones.
     void openViewer(int index);
     void viewerShow(int index);
-    void startViewer();
     void stopViewer();
-    void sendToViewer(const QByteArray &message);
-    void viewerSaid(const QByteArray &said);
+    void viewerAsked(viewer::Ask ask);
     // The viewer's changed copy of a file, saved where it's asked to be (never on the drive searched).
     void saveChangedCopy(int index, const QMap<quint64, quint8> &changes);
     // Repairs a copy of a found file (repair.h); the repaired copy joins the list. `reference`: a
@@ -232,14 +228,6 @@ private:
     void saveReport();
     // The fingerprints of the files picked, to copy.
     void showFingerprints(const QVector<int> &indexes);
-    // A picture the viewer made (enhanced, a film's frame), saved where the person says.
-    void savePicture(const QString &name, const QByteArray &png);
-    // The film shown in the viewer at another speed, with its light tools, made by ffmpeg.
-    void exportFilm(int index, double speed, const enhance::Settings &settings, qint64 durationMs);
-    // Enhance profiles, kept for the viewer: the list sent to it, and what it asks done.
-    void sendProfiles(const QString &note);
-    QString profilesFolder() const;
-    void profileAsked(viewer::ProfileDo what, const QString &name, const QByteArray &file, const QStringList &dropped);
     // The next or previous file in the list that has something to show, -1 when there's none.
     int neighbour(int index, int step) const;
     // The times the file system kept, as "label", "value" rows.
@@ -248,16 +236,20 @@ private:
 
 public:
     // For the tests: whether the viewer is running and has said it's ready, and what it shows.
-    bool viewerReady() const { return m_viewerReady; }
+    bool viewerReady() const { return m_host->ready(); }
     // For the tests: where the changed copy goes, instead of asking; and a message as if the
     // viewer had sent it.
-    void setChangedCopyTarget(const QString &path) { m_changedCopyTarget = path; }
+    void setChangedCopyTarget(const QString &path)
+    {
+        m_changedCopyTarget = path;
+        m_host->setSaveTarget(path);
+    }
     // The tests: where enhance profiles are kept, and the files "Add Profiles" picks.
-    void setProfilesFolder(const QString &folder) { m_profilesFolder = folder; }
-    void setProfileFilesToAdd(const QStringList &files) { m_profileFilesHook = files; }
+    void setProfilesFolder(const QString &folder) { m_host->setProfilesFolder(folder); }
+    void setProfileFilesToAdd(const QStringList &files) { m_host->setProfileFilesToAdd(files); }
     // For the tests: a source read through into a Rescue Copy image, as for a drive with Keep a Copy ticked.
     void scanReadThrough(std::shared_ptr<lost::Source> drive, const QString &title, const QString &image);
-    void hearFromViewer(const QByteArray &said) { viewerSaid(said); }
+    void hearFromViewer(const QByteArray &said) { m_host->hear(said); }
     void repairForTests(int index, const QString &reference = {}) { repairCopy(index, reference); }
     void findByWordsForTests(const QString &words) { findByWords(words); }
     bool searchingWords() const { return m_wordSearch != nullptr; }
@@ -284,6 +276,7 @@ private:
     QPushButton *m_look;
     // Results
     QLabel *m_status;
+    ViewerHost *m_host; // the viewer, run for this window
     QProgressBar *m_bar;
     QLabel *m_phase;
     PhaseProgress m_meter;
@@ -325,19 +318,11 @@ private:
     std::unique_ptr<lost::LookCopies> m_looks;
     QPoint m_dragFrom;       // where a press on a picked file was, to drag it out from
     QPushButton *m_viewButton = nullptr;
-    QProcess *m_viewer = nullptr;
-    QByteArray m_viewerHeard;        // what it said that isn't read yet
-    QList<QByteArray> m_viewerWaiting; // for it, until it's ready
-    QStringList m_viewerReadable;    // the folders its sandbox may read
-    bool m_viewerReady = false;
-    bool m_viewerSandboxed = true;   // false once the sandbox turned out not to work here
     int m_viewerIndex = -1;
     int m_viewerShown = -1;
     QHash<int, QStringList> m_facts; // what each file said about itself, once its preview did
     bool m_warnedDrop = false;
     QString m_changedCopyTarget;
-    QString m_profilesFolder;
-    QStringList m_profileFilesHook;
     bool m_repairing = false;
     QWidget *m_copiesBar = nullptr;
     QLabel *m_copiesText = nullptr;

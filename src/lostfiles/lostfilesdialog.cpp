@@ -27,6 +27,7 @@
 #include "rescuestick.h"
 #include "btrfsdialog.h"
 #include "viewer.h"
+#include "viewerhost.h"
 #include "udisks.h"
 #include "vdisk.h"
 
@@ -678,6 +679,7 @@ LostFilesDialog::LostFilesDialog(UDisks *udisks, const QString &preferredPath, Q
     , m_driveNote(new QLabel)
     , m_look(new QPushButton(tr("Look for Files")))
     , m_status(new QLabel)
+    , m_host(new ViewerHost(this))
     , m_bar(new QProgressBar)
     , m_phase(new QLabel)
     , m_meter(m_bar, m_phase)
@@ -702,6 +704,11 @@ LostFilesDialog::LostFilesDialog(UDisks *udisks, const QString &preferredPath, Q
     , m_hideSaved(new QPushButton(tr("Hide")))
     , m_model(new LostFilesModel(this))
 {
+    // The viewer: what it asks about the file shown comes here; saving what it makes is its host's.
+    connect(m_host, &ViewerHost::asked, this, &LostFilesDialog::viewerAsked);
+    connect(m_host, &ViewerHost::edited, this, [this](const QMap<quint64, quint8> &edits) { saveChangedCopy(m_viewerIndex, edits); });
+    connect(m_host, &ViewerHost::status, m_status, &QLabel::setText);
+    connect(m_host, &ViewerHost::closed, this, [this] { m_viewerIndex = -1; });
     setWindowTitle(tr("Find Lost Files"));
     setObjectName(QStringLiteral("lostFiles"));
     resize(1120, 720);
@@ -2225,80 +2232,14 @@ void LostFilesDialog::openViewer(int index)
 {
     if (index < 0 || index >= m_model->fileCount() || m_model->file(index).nameOnly)
         return;
-    if (!m_viewer)
-        startViewer();
     viewerShow(index);
-}
-
-void LostFilesDialog::startViewer()
-{
-    if (!m_looks)
-        m_looks = std::make_unique<lost::LookCopies>(m_diskDevice);
-    m_viewerReadable = m_looks->folders();
-    m_viewerReady = false;
-    m_viewerHeard.clear();
-    m_viewerWaiting.clear();
-    auto *process = new QProcess(this);
-    m_viewer = process;
-    process->setProcessChannelMode(QProcess::ForwardedErrorChannel);
-    connect(process, &QProcess::readyReadStandardOutput, this, [this, process] { viewerSaid(process->readAllStandardOutput()); });
-    connect(process, &QProcess::finished, this, [this, process] {
-        process->deleteLater();
-        if (process != m_viewer)
-            return;
-        const bool neverStarted = !m_viewerReady;
-        m_viewer = nullptr;
-        m_viewerReady = false;
-        // The sandbox didn't work here (some systems don't allow one): it runs without.
-        if (neverStarted && m_viewerSandboxed && m_viewerIndex >= 0) {
-            qCInfo(lcOps).noquote() << "Find Lost Files: the viewer couldn't start in its sandbox here; it runs without one";
-            m_viewerSandboxed = false;
-            openViewer(m_viewerIndex);
-        } else {
-            m_viewerIndex = -1;
-        }
-    });
-    const QStringList command = viewer::command(m_viewerSandboxed, m_viewerReadable);
-    process->start(command.first(), command.mid(1));
-    // It looks like DiskAnvil does.
-    viewer::Message look;
-    look.type = viewer::Message::Look;
-    look.style = QApplication::style()->name();
-    look.palette = QApplication::palette();
-    sendToViewer(viewer::encode(look));
-    sendProfiles(QString());
-    // A sandbox that hangs rather than failing is given up on after a while, the same way.
-    QTimer::singleShot(15000, process, [this, process] {
-        if (process == m_viewer && !m_viewerReady)
-            process->kill();
-    });
 }
 
 void LostFilesDialog::stopViewer()
 {
-    if (!m_viewer)
-        return;
-    QProcess *process = m_viewer;
-    m_viewer = nullptr;
-    m_viewerReady = false;
+    m_host->stop();
     m_viewerIndex = -1;
     m_viewerShown = -1;
-    process->disconnect(this);
-    // With nothing more to read, it closes by itself.
-    process->closeWriteChannel();
-    if (!process->waitForFinished(1500)) {
-        process->kill();
-        process->waitForFinished(1000);
-    }
-    process->deleteLater();
-}
-
-void LostFilesDialog::sendToViewer(const QByteArray &message)
-{
-    if (m_viewer && m_viewerReady)
-        m_viewer->write(message);
-    else
-        m_viewerWaiting << message;
 }
 
 void LostFilesDialog::saveReport()
@@ -2566,7 +2507,7 @@ void LostFilesDialog::repairCopy(int index, const QString &reference)
             m_view->setCurrentIndex(m_model->index(row));
             m_view->scrollTo(m_model->index(row));
         }
-        if (m_viewer && m_viewerIndex == index)
+        if (m_host->running() && m_viewerIndex == index)
             viewerShow(added);
     });
     worker->start();
@@ -2601,242 +2542,15 @@ void LostFilesDialog::saveChangedCopy(int index, const QMap<quint64, quint8> &ch
         QMessageBox::warning(this, windowTitle(), tr("The changed copy couldn't be saved: %1").arg(why));
 }
 
-void LostFilesDialog::savePicture(const QString &name, const QByteArray &png)
+void LostFilesDialog::viewerAsked(viewer::Ask ask)
 {
-    // Made in the viewer (enhanced, or a film's frame): its bytes are written where the person
-    // says, never read here.
-    if (png.isEmpty() || !png.startsWith("\x89PNG"))
-        return;
-    raise();
-    activateWindow();
-    const QString folder = m_savedTo.isEmpty() ? QStandardPaths::writableLocation(QStandardPaths::PicturesLocation) : QFileInfo(m_savedTo).absolutePath();
-    const QString target = m_changedCopyTarget.isEmpty()
-                               ? QFileDialog::getSaveFileName(this, tr("Save the Picture"), folder + QLatin1Char('/') + lost::cleanName(name),
-                                                              tr("PNG picture (*.png)"))
-                               : m_changedCopyTarget;
-    if (target.isEmpty())
-        return;
-    if (!m_diskDevice.isEmpty() && blockio::pathIsOnDisk(QFileInfo(target).absolutePath(), m_diskDevice)) {
-        QMessageBox::warning(this, windowTitle(),
-                             tr("That's on the drive being searched: saving there could overwrite the lost files. Pick a folder on another drive."));
-        return;
-    }
-    QSaveFile out(target);
-    if (out.open(QIODevice::WriteOnly) && out.write(png) == png.size() && out.commit())
-        m_status->setText(tr("Saved the picture as %1.").arg(QDir::toNativeSeparators(target)));
-    else
-        QMessageBox::warning(this, windowTitle(), tr("The picture couldn't be saved: %1").arg(out.errorString()));
-}
-
-void LostFilesDialog::sendProfiles(const QString &note)
-{
-    viewer::Message m;
-    m.type = viewer::Message::Profiles;
-    for (const enhance::Profile &p : enhance::savedProfiles(profilesFolder()))
-        m.profiles << enhance::profileToFile(p);
-    m.note = note;
-    sendToViewer(viewer::encode(m));
-}
-
-QString LostFilesDialog::profilesFolder() const
-{
-    return m_profilesFolder.isEmpty() ? enhance::profilesFolder() : m_profilesFolder;
-}
-
-void LostFilesDialog::profileAsked(viewer::ProfileDo what, const QString &name, const QByteArray &file, const QStringList &dropped)
-{
-    // Kept here, not in the viewer: it can't reach the home folder. What comes from it, or from a
-    // file, is checked the same way before it's kept.
-    const QString folder = profilesFolder();
-    QString why;
-    switch (what) {
-    case viewer::ProfileDo::Save: {
-        enhance::Profile p;
-        if (!enhance::profileFromFile(file, &p, &why))
-            return sendProfiles(why);
-        if (enhance::saveProfile(p, &why, folder).isEmpty())
-            return sendProfiles(tr("The profile couldn't be saved: %1").arg(why));
-        return sendProfiles(tr("Saved the profile \"%1\".").arg(p.name));
-    }
-    case viewer::ProfileDo::Remove:
-        return sendProfiles(enhance::removeProfile(name, folder) ? tr("Removed the profile \"%1\".").arg(name)
-                                                                  : tr("The profile \"%1\" couldn't be removed.").arg(name));
-    case viewer::ProfileDo::Import:
-    case viewer::ProfileDo::Dropped: {
-        QStringList files = dropped;
-        if (what == viewer::ProfileDo::Import) {
-            raise();
-            activateWindow();
-            files = m_profileFilesHook.isEmpty()
-                        ? QFileDialog::getOpenFileNames(this, tr("Add Enhance Profiles"), QStandardPaths::writableLocation(QStandardPaths::DownloadLocation),
-                                                        tr("Enhance profiles (*.%1 *.json)").arg(QLatin1String(enhance::kProfileSuffix)))
-                        : m_profileFilesHook;
-            if (files.isEmpty())
-                return;
-        }
-        QStringList added, refused;
-        for (const QString &path : std::as_const(files).mid(0, 50)) {
-            QFile f(path);
-            enhance::Profile p;
-            if (!f.open(QIODevice::ReadOnly) || !enhance::profileFromFile(f.read(64 * 1024 + 1), &p, &why)) {
-                refused << QStringLiteral("%1 (%2)").arg(QFileInfo(path).fileName(), f.isOpen() ? why : f.errorString());
-                continue;
-            }
-            if (enhance::saveProfile(p, &why, folder).isEmpty())
-                refused << QStringLiteral("%1 (%2)").arg(QFileInfo(path).fileName(), why);
-            else
-                added << p.name;
-        }
-        QString note = added.isEmpty() ? QString() : tr("Added %n profile(s): %1.", nullptr, int(added.size())).arg(added.join(QStringLiteral(", ")));
-        if (!refused.isEmpty())
-            note += (note.isEmpty() ? QString() : QStringLiteral(" ")) + tr("Not added: %1").arg(refused.join(QStringLiteral("; ")));
-        return sendProfiles(note);
-    }
-    case viewer::ProfileDo::Export: {
-        enhance::Profile p;
-        if (!enhance::profileFromFile(file, &p, &why))
-            return sendProfiles(why);
-        raise();
-        activateWindow();
-        const QString suggested = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation) + QLatin1Char('/') + lost::cleanName(p.name)
-                                + QLatin1Char('.') + QLatin1String(enhance::kProfileSuffix);
-        const QString target = m_changedCopyTarget.isEmpty()
-                                   ? QFileDialog::getSaveFileName(this, tr("Save the Profile as a File"), suggested,
-                                                                  tr("Enhance profile (*.%1)").arg(QLatin1String(enhance::kProfileSuffix)))
-                                   : m_changedCopyTarget;
-        if (target.isEmpty())
-            return;
-        QSaveFile out(target);
-        const QByteArray bytes = enhance::profileToFile(p);
-        if (out.open(QIODevice::WriteOnly) && out.write(bytes) == bytes.size() && out.commit())
-            return sendProfiles(tr("Saved \"%1\" as %2: give it to anyone with DiskAnvil, who drops it on the viewer to add it.")
-                                    .arg(p.name, QDir::toNativeSeparators(target)));
-        return sendProfiles(tr("The profile couldn't be saved: %1").arg(out.errorString()));
-    }
-    }
-}
-
-void LostFilesDialog::exportFilm(int index, double speed, const enhance::Settings &s, qint64 durationMs)
-{
-    const QString copy = m_looks && index >= 0 ? m_looks->made(index) : QString();
-    if (copy.isEmpty())
-        return;
-    raise();
-    activateWindow();
-#ifdef Q_OS_WIN
-    QString ffmpeg = host::windowsProgram(QStringLiteral("ffmpeg"));
-    if (ffmpeg == QLatin1String("ffmpeg"))
-        ffmpeg.clear();
-#else
-    QString ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
-#endif
-    // The Flatpak has no ffmpeg of its own: the PC's, when it's allowed to run it (as add-ons are).
-    const bool onHost = ffmpeg.isEmpty() && host::inFlatpak() && host::programExists(QStringLiteral("ffmpeg"));
-    if (onHost)
-        ffmpeg = QStringLiteral("ffmpeg");
-    if (ffmpeg.isEmpty()) {
-        QMessageBox::information(this, windowTitle(),
-                                 host::inFlatpak()
-                                     ? tr("Saving a film at another speed needs ffmpeg. The Flatpak uses this PC's, when ffmpeg is installed and the "
-                                          "Flatpak may run it:\nflatpak override --user --talk-name=org.freedesktop.Flatpak io.github.DannyS124.DiskAnvil\n"
-                                          "A frame can still be saved, and the film played at any speed.")
-                                     : tr("Saving a film at another speed needs ffmpeg, which isn't installed here. A frame can still be saved, "
-                                          "and the film played at any speed."));
-        return;
-    }
-    const lost::Found &f = m_model->file(index);
-    const QString folder = m_savedTo.isEmpty() ? QStandardPaths::writableLocation(QStandardPaths::MoviesLocation) : QFileInfo(m_savedTo).absolutePath();
-    QStringList how;
-    if (speed != 1)
-        how << tr("x%1").arg(QLocale().toString(speed));
-    if (!s.isDefault())
-        how << tr("enhanced");
-    const QString suggested = folder + QLatin1Char('/') + lost::cleanName(QFileInfo(f.name).completeBaseName())
-                            + (how.isEmpty() ? QString() : QStringLiteral(" (%1)").arg(how.join(QStringLiteral(", ")))) + QStringLiteral(".mp4");
-    const QString target = QFileDialog::getSaveFileName(this, tr("Save the Film"), suggested, tr("MP4 film (*.mp4)"));
-    if (target.isEmpty())
-        return;
-    if (!m_diskDevice.isEmpty() && blockio::pathIsOnDisk(QFileInfo(target).absolutePath(), m_diskDevice)) {
-        QMessageBox::warning(this, windowTitle(),
-                             tr("That's on the drive being searched: saving there could overwrite the lost files. Pick a folder on another drive."));
-        return;
-    }
-    // The PC's ffmpeg sees DiskAnvil's own cache folder (it's the same folder outside the Flatpak), not
-    // always where the film is going: it's made there, then moved.
-    const QString made = onHost ? QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + QStringLiteral("/film-%1.mp4").arg(QCoreApplication::applicationPid())
-                                : target;
-    QDir().mkpath(QFileInfo(made).absolutePath());
-    const QStringList command = host::command(QStringList{ffmpeg} + enhance::ffmpegArguments(copy, made, speed, s));
-
-    auto *process = new QProcess(this);
-    auto *wait = new QProgressDialog(tr("Making the film…"), tr("Stop"), 0, 1000, this);
-    wait->setWindowModality(Qt::WindowModal);
-    wait->setMinimumDuration(0);
-    const qint64 total = durationMs > 0 ? qint64(durationMs / speed) * 1000 : 0; // microseconds, at the new speed
-    connect(process, &QProcess::readyReadStandardOutput, wait, [process, wait, total] {
-        for (const QByteArray &line : process->readAllStandardOutput().split('\n')) {
-            if (line.startsWith("out_time_us=") && total > 0)
-                wait->setValue(int(std::clamp<qint64>(line.mid(12).toLongLong() * 1000 / total, 0, 999)));
-        }
-    });
-    connect(wait, &QProgressDialog::canceled, process, [process] { process->kill(); });
-    connect(process, &QProcess::finished, this, [this, process, wait, target, made](int code, QProcess::ExitStatus status) {
-        const bool cancelled = wait->wasCanceled();
-        wait->deleteLater();
-        process->deleteLater();
-        if (status == QProcess::NormalExit && code == 0) {
-            if (made != target) {
-                QFile::remove(target);
-                if (!QFile::rename(made, target) && !(QFile::copy(made, target) && QFile::remove(made))) {
-                    QMessageBox::warning(this, windowTitle(), tr("The film was made, but couldn't be moved to %1. It's in %2.").arg(target, made));
-                    return;
-                }
-            }
-            m_status->setText(tr("Saved the film as %1.").arg(QDir::toNativeSeparators(target)));
-            return;
-        }
-        QFile::remove(made);
-        if (!cancelled)
-            QMessageBox::warning(this, windowTitle(), tr("ffmpeg couldn't make the film: %1")
-                                                          .arg(QString::fromLocal8Bit(process->readAllStandardError()).trimmed().section(QLatin1Char('\n'), -2)));
-    });
-    process->start(command.first(), command.mid(1));
-}
-
-void LostFilesDialog::viewerSaid(const QByteArray &said)
-{
-    m_viewerHeard += said;
-    viewer::Message m;
-    bool bad = false;
-    while (viewer::decode(m_viewerHeard, m, &bad)) {
-        if (m.type == viewer::Message::Edited) {
-            saveChangedCopy(m_viewerIndex, m.edits);
-            continue;
-        }
-        if (m.type == viewer::Message::SavePicture) {
-            savePicture(m.pictureName, m.picture);
-            continue;
-        }
-        if (m.type == viewer::Message::ExportFilm) {
-            exportFilm(m_viewerIndex, m.speed, m.settings, m.durationMs);
-            continue;
-        }
-        if (m.type == viewer::Message::Profile) {
-            profileAsked(m.profileDo, m.profileName, m.profile, m.dropped);
-            continue;
-        }
-        if (m.type != viewer::Message::AskFor)
-            continue;
-        switch (m.ask) {
+    {
+        switch (ask) {
         case viewer::Ask::Ready:
-            m_viewerReady = true;
-            for (const QByteArray &waiting : std::as_const(m_viewerWaiting))
-                m_viewer->write(waiting);
-            m_viewerWaiting.clear();
             break;
         case viewer::Ask::Previous:
         case viewer::Ask::Next: {
-            const int to = neighbour(m_viewerIndex, m.ask == viewer::Ask::Next ? 1 : -1);
+            const int to = neighbour(m_viewerIndex, ask == viewer::Ask::Next ? 1 : -1);
             if (to < 0)
                 break;
             // The list here follows, so its preview and details are the same file.
@@ -2885,8 +2599,6 @@ void LostFilesDialog::viewerSaid(const QByteArray &said)
             break;
         }
     }
-    if (bad)
-        stopViewer();
 }
 
 void LostFilesDialog::viewerShow(int index)
@@ -2895,15 +2607,6 @@ void LostFilesDialog::viewerShow(int index)
     const QString copy = lookCopy(index);
     if (copy.isEmpty())
         return;
-    // A copy where its sandbox can't see it (a folder picked since it started): it starts again.
-    const bool seen = std::any_of(m_viewerReadable.cbegin(), m_viewerReadable.cend(),
-                                  [&copy](const QString &folder) { return copy.startsWith(folder + QLatin1Char('/')); });
-    if (!seen && m_viewer) {
-        stopViewer();
-        startViewer();
-    }
-    if (!m_viewer)
-        startViewer();
     viewer::Message m;
     m.type = viewer::Message::ShowFile;
     m.show.kind = viewer::kindFor(f.type, f.name);
@@ -2918,7 +2621,9 @@ void LostFilesDialog::viewerShow(int index)
     m.show.repairable = repair::knows(f.type) ? repair::what(f.type) : QString();
     m.show.facts = factsFor(index);
     m_viewerIndex = index;
-    sendToViewer(viewer::encode(m));
+    m_host->setGuardedDisk(m_diskDevice);
+    m_host->setSaveFolder(m_savedTo.isEmpty() ? QString() : QFileInfo(m_savedTo).absolutePath());
+    m_host->show(m.show, m_looks->folders());
 }
 
 int LostFilesDialog::neighbour(int index, int step) const
@@ -3049,12 +2754,8 @@ void LostFilesDialog::showPreviewResult(const QImage &image, const QString &text
     // What the file says about itself, under what the drive said (and in the viewer, when it
     // shows this one).
     m_facts.insert(m_previewIndex, facts);
-    if (m_viewer && m_viewerIndex == m_previewIndex) {
-        viewer::Message m;
-        m.type = viewer::Message::Facts;
-        m.show.facts = factsFor(m_previewIndex);
-        sendToViewer(viewer::encode(m));
-    }
+    if (m_host->running() && m_viewerIndex == m_previewIndex)
+        m_host->sendFacts(factsFor(m_previewIndex));
     if (!facts.isEmpty()) {
         QVector<QPair<QString, QString>> rows;
         for (const QString &fact : facts)

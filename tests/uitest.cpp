@@ -14,6 +14,8 @@
 #include "../src/viruses/wof.h"
 #include "../src/tools/remotehelp.h"
 #include "../src/tools/remotehelpdialog.h"
+#include "../src/lostfiles/lookcloserdialog.h"
+#include "../src/lostfiles/viewerhost.h"
 #include "../src/usb/liveonpc.h"
 #include "../src/usb/liveonpcdialog.h"
 #include "../src/tools/netboot.h"
@@ -5059,6 +5061,56 @@ void filmTools()
 #endif
 }
 
+// Look Closer: pictures and films anywhere, in the viewer, with Next and Previous through them.
+void lookCloserWindow()
+{
+    QTemporaryDir dir;
+    QImage photo(160, 120, QImage::Format_RGB32);
+    photo.fill(qRgb(30, 90, 160));
+    photo.save(dir.filePath(QStringLiteral("holiday.png")));
+    photo.save(dir.filePath(QStringLiteral("camera.jpg")));
+    QFile notes(dir.filePath(QStringLiteral("notes.txt")));
+    if (notes.open(QIODevice::WriteOnly))
+        notes.write("not a picture");
+    notes.close();
+    const QString ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
+    if (!ffmpeg.isEmpty())
+        QProcess::execute(ffmpeg, {QStringLiteral("-hide_banner"), QStringLiteral("-loglevel"), QStringLiteral("error"), QStringLiteral("-f"),
+                                   QStringLiteral("lavfi"), QStringLiteral("-i"), QStringLiteral("testsrc=duration=1:size=160x120:rate=10"),
+                                   QStringLiteral("-pix_fmt"), QStringLiteral("yuv420p"), dir.filePath(QStringLiteral("doorbell.mkv"))});
+    LookCloserDialog dialog;
+    dialog.show();
+    const int added = dialog.add({dir.path()});
+    report(added == (ffmpeg.isEmpty() ? 2 : 3), QStringLiteral("look closer: a folder's pictures and films are added, other files left out"),
+           QString::number(added));
+    // Shown in the viewer (its own program, in its sandbox), then the next one.
+    dialog.look(0);
+    waitUntil([&] { return dialog.host()->ready(); }, 20000);
+    viewer::Message next;
+    next.type = viewer::Message::AskFor;
+    next.ask = viewer::Ask::Next;
+    dialog.host()->hear(viewer::encode(next));
+    report(dialog.host()->ready() && dialog.shown() == 1, QStringLiteral("look closer: the viewer opens on one, and Next goes to the next"),
+           QStringLiteral("shown %1").arg(dialog.shown()));
+    // What the viewer makes is saved beside it, never over it.
+    QTemporaryDir elsewhere;
+    dialog.host()->setSaveTarget(elsewhere.filePath(QStringLiteral("made.png")));
+    QImage made(8, 8, QImage::Format_RGB32);
+    made.fill(Qt::red);
+    QByteArray png;
+    QBuffer buffer(&png);
+    buffer.open(QIODevice::WriteOnly);
+    made.save(&buffer, "PNG");
+    viewer::Message picture;
+    picture.type = viewer::Message::SavePicture;
+    picture.pictureName = QStringLiteral("made.png");
+    picture.picture = png;
+    dialog.host()->hear(viewer::encode(picture));
+    report(QFileInfo(elsewhere.filePath(QStringLiteral("made.png"))).size() == png.size() && QImage(dir.filePath(QStringLiteral("holiday.png"))).pixel(0, 0) == qRgb(30, 90, 160),
+           QStringLiteral("look closer: a picture made in the viewer is saved new; the one looked at is left as it was"));
+    dialog.host()->stop();
+}
+
 // What This PC Did on a Windows made of the test hives (tests/data/registry/activity.ps1).
 void activityWindow()
 {
@@ -6754,7 +6806,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"enhance", enhanceWindow}, {"film", filmTools}, {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"lookcloser", lookCloserWindow}, {"enhance", enhanceWindow}, {"film", filmTools}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},
