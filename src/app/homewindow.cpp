@@ -317,6 +317,9 @@ QVector<HomeWindow::Tile> HomeWindow::allTiles() const
     add(QStringLiteral("viruses"), QStringLiteral("diskanvil-live-virus"), QStringLiteral("security-high"), tr("Scan for Viruses"),
         desktop ? tr("Windows' drive, while Windows can't hide anything") : tr("Known malware on a drive or in a folder"))
         .tool = QStringLiteral("virus-scan");
+    add(QStringLiteral("whycrash"), QStringLiteral("diskanvil-live-whycrash"), QStringLiteral("dialog-warning"), tr("Why Did It Crash?"),
+        tr("A Windows that keeps blue-screening or restarting: why"))
+        .tool = QStringLiteral("why-crash");
     add(QStringLiteral("testdisk"), QStringLiteral("diskanvil-live-testdisk"), QStringLiteral("drive-harddisk"), tr("Find Lost Partitions"),
         tr("Partitions that disappeared, and boot sectors (TestDisk)"))
         .desktopId = QStringLiteral("diskanvil-live-testdisk");

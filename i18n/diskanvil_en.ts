@@ -329,7 +329,7 @@
 <context>
     <name>MainWindow</name>
     <message numerus="yes">
-        <location filename="../src/app/mainwindow.cpp" line="1450"/>
+        <location filename="../src/app/mainwindow.cpp" line="1462"/>
         <source>%n more drive(s) need a look; their health is in the Status column.</source>
         <translation>
             <numerusform>%n more drive need a look; their health is in the Status column.</numerusform>
@@ -337,7 +337,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/app/mainwindow.cpp" line="2754"/>
+        <location filename="../src/app/mainwindow.cpp" line="2767"/>
         <source>%n add-on command(s) still running. Stop them and quit?</source>
         <translation>
             <numerusform>%n add-on command still running. Stop them and quit?</numerusform>
@@ -1124,6 +1124,49 @@
         <translation>
             <numerusform>, the %n least sharp left out</numerusform>
             <numerusform>, the %n least sharp left out</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
+    <name>whycrash</name>
+    <message numerus="yes">
+        <location filename="../src/viruses/whycrash.cpp" line="286"/>
+        <source>%n second(s)</source>
+        <translation>
+            <numerusform>%n second</numerusform>
+            <numerusform>%n seconds</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/viruses/whycrash.cpp" line="287"/>
+        <source>%n minute(s)</source>
+        <translation>
+            <numerusform>%n minute</numerusform>
+            <numerusform>%n minutes</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/viruses/whycrash.cpp" line="447"/>
+        <source>%1 was involved in %n of them: most likely that driver. Update it from its maker (or roll it back if it started after an update).</source>
+        <translation>
+            <numerusform>%1 was involved in %n of them: most likely that driver. Update it from its maker (or roll it back if it started after an update).</numerusform>
+            <numerusform>%1 was involved in %n of them: most likely that driver. Update it from its maker (or roll it back if it started after an update).</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/viruses/whycrash.cpp" line="456"/>
+        <source>The disk had errors (%n logged): check it in Disk Health, and copy your files off first if it&apos;s failing.</source>
+        <translation>
+            <numerusform>The disk had errors (%n logged): check it in Disk Health, and copy your files off first if it's failing.</numerusform>
+            <numerusform>The disk had errors (%n logged): check it in Disk Health, and copy your files off first if it's failing.</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/viruses/whycrash.cpp" line="470"/>
+        <source>%n event(s) in the log were damaged and skipped.</source>
+        <translation>
+            <numerusform>%n event in the log were damaged and skipped.</numerusform>
+            <numerusform>%n events in the log were damaged and skipped.</numerusform>
         </translation>
     </message>
 </context>

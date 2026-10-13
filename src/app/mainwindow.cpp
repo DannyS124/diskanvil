@@ -16,6 +16,7 @@
 #include "certificates.h"
 #include "closedsets.h"
 #include "writeblock.h"
+#include "whycrashdialog.h"
 #include "writeprotectdialog.h"
 #include "remotehelpdialog.h"
 #include "netbootdialog.h"
@@ -799,6 +800,16 @@ void MainWindow::createActions()
             ActivityDialog(picker.root(), this).exec();
     });
 
+    m_whyCrash = new QAction(themeIcon("diskanvil-live-whycrash", "dialog-warning"), tr("Why Did It &Crash?…"), this);
+    m_whyCrash->setObjectName(QStringLiteral("whyCrash"));
+    m_whyCrash->setToolTip(tr("A Windows that keeps blue-screening or restarting: each crash explained from its own logs and crash dumps, "
+                              "the driver it was in, and what they have in common"));
+    connect(m_whyCrash, &QAction::triggered, this, [this] {
+        WindowsPicker picker(m_udisks, false, tr("Which Windows? One on a drive is mounted read-only to read its logs."), this);
+        if (picker.exec() == QDialog::Accepted)
+            WhyCrashDialog(picker.root(), this).exec();
+    });
+
     m_lookCloser = new QAction(themeIcon("diskanvil-live-lookcloser", "zoom-in"), tr("&Look Closer at Pictures and Films…"), this);
     m_lookCloser->setObjectName(QStringLiteral("lookCloser"));
     m_lookCloser->setToolTip(tr("Any picture or film in the viewer, with its tools: Enhance and its profiles, Pick a Spot, Straighten, "
@@ -1028,13 +1039,14 @@ void MainWindow::createActions()
         tools->addAction(m_linuxBoot);
         tools->addAction(m_drivers);
         tools->addAction(m_activity);
+        tools->addAction(m_whyCrash);
         tools->addAction(m_lookCloser);
         tools->addAction(m_productKey);
         tools->addAction(m_certificates);
         tools->addSeparator();
 #ifdef Q_OS_WIN
         // Quick Fixes' tools, and add-ons (Linux commands), aren't in the Windows version yet.
-        tools->addActions({m_saveFiles, m_virusScan, m_bootMenu, m_drivers, m_activity, m_lookCloser, m_winRe, m_productKey, m_certificates, m_usage, m_cleanup, m_optimize, m_snapshots});
+        tools->addActions({m_saveFiles, m_virusScan, m_bootMenu, m_drivers, m_activity, m_whyCrash, m_lookCloser, m_winRe, m_productKey, m_certificates, m_usage, m_cleanup, m_optimize, m_snapshots});
         return;
 #endif
         tools->addAction(themeIcon("tools-wizard", "system-run"), tr("&Quick Fixes…"), this, [this] {
@@ -1878,6 +1890,7 @@ bool MainWindow::openTool(const QString &name)
                                              {QStringLiteral("live-on-pc"), m_liveOnPc},
                                              {QStringLiteral("check-stick"), m_checkStick},
                                              {QStringLiteral("write-protected"), m_writeProtected},
+                                             {QStringLiteral("why-crash"), m_whyCrash},
                                              {QStringLiteral("lost-files"), m_findFiles},
                                              {QStringLiteral("virus-scan"), m_virusScan},
                                              {QStringLiteral("save-files"), m_saveFiles},

@@ -18,6 +18,7 @@
 #include "../src/tools/filesdialog.h"
 #include "../src/tools/writeprotectdialog.h"
 #include "../src/lostfiles/hitfilesdialog.h"
+#include "../src/viruses/whycrashdialog.h"
 #include "../src/lostfiles/lostscan.h"
 #include "../src/lostfiles/viewerhost.h"
 #include "../src/usb/liveonpc.h"
@@ -140,6 +141,7 @@
 #include <QMenuBar>
 #include <QPushButton>
 #include <QSpinBox>
+#include <QTextBrowser>
 #include <QTimeZone>
 #include <QTableView>
 #include <QRadioButton>
@@ -5203,6 +5205,45 @@ void filmTools()
 
 // Files, DiskAnvil Live's file window: copying, a second copy kept beside the first, moving,
 // deleting, and a folder that can't be changed.
+void whyCrashWindow()
+{
+    whycrash::Report r;
+    r.summary << QStringLiteral("Unexpected stops: 2 (blue screens: 1; sudden power-offs or hard freezes: 0).")
+              << QStringLiteral("testnet.sys was involved in 1 of them: most likely that driver.");
+    r.notes << QStringLiteral("Windows restarts by itself after a blue screen, which is why it may never have been seen.");
+    whycrash::Incident blue;
+    blue.kind = whycrash::Kind::BlueScreen;
+    blue.when = QDateTime(QDate(2026, 9, 20), QTime(21, 14), QTimeZone::UTC);
+    blue.title = QStringLiteral("Blue screen: DRIVER_IRQL_NOT_LESS_OR_EQUAL (0xD1)");
+    blue.explanation = QStringLiteral("A driver touched memory it wasn't allowed to at that moment.");
+    blue.driver = QStringLiteral("testnet.sys");
+    blue.blame = QStringLiteral("It crashed in the code of testnet.sys (Test Network Driver, Test Corp).");
+    blue.before << QStringLiteral("a disk read or write had to be retried (2 minutes before)");
+    blue.sources << QStringLiteral("crash dump 092026-1234-01.dmp");
+    whycrash::Incident button;
+    button.kind = whycrash::Kind::PowerButton;
+    button.when = QDateTime(QDate(2026, 10, 2), QTime(8, 2), QTimeZone::UTC);
+    button.title = QStringLiteral("The power button was held");
+    button.explanation = QStringLiteral("Someone held the power button to turn it off.");
+    r.incidents << button << blue;
+    WhyCrashDialog dialog(QStringLiteral("-"));
+    dialog.show();
+    dialog.showReport(r);
+    QCoreApplication::processEvents();
+    auto *list = dialog.findChild<QTreeWidget *>(QStringLiteral("incidents"));
+    report(list && list->topLevelItemCount() == 2 && list->topLevelItem(1)->text(2) == QLatin1String("testnet.sys"),
+           QStringLiteral("why did it crash: each stop listed, newest first, with its driver"));
+    list->setCurrentItem(list->topLevelItem(1));
+    QCoreApplication::processEvents();
+    const QString detail = dialog.findChild<QTextBrowser *>(QStringLiteral("detail"))->toPlainText();
+    report(detail.contains(QLatin1String("DRIVER_IRQL_NOT_LESS_OR_EQUAL")) && detail.contains(QLatin1String("Test Network Driver")) && detail.contains(QLatin1String("retried"))
+               && detail.contains(QLatin1String("092026-1234-01.dmp")),
+           QStringLiteral("why did it crash: the one picked explained, with what was logged before it and where it came from"));
+    report(dialog.findChild<QLabel *>(QStringLiteral("summary"))->text().contains(QLatin1String("most likely that driver")), QStringLiteral("why did it crash: what they have in common at the top"));
+    if (qEnvironmentVariableIsSet("DISKANVIL_SHOTS"))
+        dialog.grab().save(qEnvironmentVariable("DISKANVIL_SHOTS") + QStringLiteral("/why-crash.png"));
+}
+
 void hitFilesWindow()
 {
     // A copy of a FAT32 stick whose map says 1000 bytes of photo.jpg couldn't be read.
@@ -7090,7 +7131,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"lookcloser", lookCloserWindow}, {"files", filesWindow}, {"writeprotected", writeProtectedWindow}, {"hitfiles", hitFilesWindow}, {"enhance", enhanceWindow}, {"film", filmTools}, {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"lookcloser", lookCloserWindow}, {"files", filesWindow}, {"writeprotected", writeProtectedWindow}, {"hitfiles", hitFilesWindow}, {"whycrash", whyCrashWindow}, {"enhance", enhanceWindow}, {"film", filmTools}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},

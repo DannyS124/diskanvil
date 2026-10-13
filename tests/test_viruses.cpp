@@ -9,8 +9,16 @@
 
 #include "../src/drives/udisks.h"
 #include "../src/backup/savefiles.h"
+#include "../src/viruses/crashdump.h"
+#include "../src/viruses/evtx.h"
 #include "../src/viruses/virusscan.h"
+#include "../src/viruses/whycrash.h"
 #include "../src/viruses/wof.h"
+
+#include <QRandomGenerator>
+#include <QTimeZone>
+
+#include <cstring>
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -430,8 +438,247 @@ void compressed(const QString &dir)
 
 } // namespace
 
+// Little-endian bytes, put where they go.
+template<typename T>
+void put(QByteArray &b, qint64 at, T v)
+{
+    if (b.size() < at + qint64(sizeof(T)))
+        b.resize(at + sizeof(T), '\0');
+    std::memcpy(b.data() + at, &v, sizeof(T));
+}
+
+quint64 fileTimeOf(const QDateTime &t)
+{
+    return quint64(t.toMSecsSinceEpoch() + 11644473600000LL) * 10000;
+}
+
+// A small blue-screen dump of our own: stop code 0xD1 in testnet.sys.
+QByteArray makeDump(const QDateTime &when)
+{
+    QByteArray d(0x4000, '\0');
+    std::memcpy(d.data(), "PAGEDU64", 8);
+    put<quint32>(d, 0x0c, 22631);
+    put<quint32>(d, 0x30, 0x8664);
+    put<quint32>(d, 0x38, 0xd1);
+    put<quint64>(d, 0x40, 0x10);
+    put<quint64>(d, 0x48, 2);
+    put<quint64>(d, 0x50, 0);
+    put<quint64>(d, 0x58, 0xfffff80012341234ULL); // where: in testnet.sys
+    put<quint32>(d, 0xf98, 4);
+    put<quint64>(d, 0xfa8, fileTimeOf(when));
+    constexpr qint64 t = 0x2000;
+    put<quint32>(d, t + 0x08, 0x3ff0);
+    std::memcpy(d.data() + 0x3ff0, "TRGD", 4);
+    put<quint32>(d, t + 0x30, 0x2100); // the drivers
+    put<quint32>(d, t + 0x34, 2);
+    const auto driver = [&d](int i, const QString &path, quint64 base, quint32 size, qint64 nameAt) {
+        const qint64 e = 0x2100 + 0x90 * i;
+        put<quint32>(d, e, quint32(nameAt));
+        put<quint64>(d, e + 0x38, base);
+        put<quint32>(d, e + 0x48, size);
+        put<quint32>(d, nameAt, quint32(path.size()));
+        for (int c = 0; c < path.size(); ++c)
+            put<quint16>(d, nameAt + 4 + 2 * c, path[c].unicode());
+    };
+    driver(0, QStringLiteral("\\SystemRoot\\system32\\ntoskrnl.exe"), 0xfffff80000000000ULL, 0x1000000, 0x2300);
+    driver(1, QStringLiteral("\\SystemRoot\\System32\\drivers\\testnet.sys"), 0xfffff80012340000ULL, 0x20000, 0x2400);
+    return d;
+}
+
+// An event log of our own, the way Windows keeps them: a template with substitutions, here two
+// Kernel-Power 41 events (one a blue screen 0xD1, one the power button held).
+QByteArray makeLog(const QDateTime &blueAt, const QDateTime &buttonAt)
+{
+    QByteArray chunk(65536, '\0');
+    std::memcpy(chunk.data(), "ElfChnk\0", 8);
+    int at = 512;
+    const auto u8 = [&](quint8 v) { put<quint8>(chunk, at, v); at += 1; };
+    const auto u16 = [&](quint16 v) { put<quint16>(chunk, at, v); at += 2; };
+    const auto u32 = [&](quint32 v) { put<quint32>(chunk, at, v); at += 4; };
+    const auto u64 = [&](quint64 v) { put<quint64>(chunk, at, v); at += 8; };
+    const auto name = [&](const QString &n) { // inline: u32 next, u16 hash, u16 length, the letters, NUL
+        u32(0);
+        u16(0);
+        u16(quint16(n.size()));
+        for (QChar c : n)
+            u16(c.unicode());
+        u16(0);
+    };
+    const auto open = [&](const QString &n, bool attributes) {
+        u8(attributes ? 0x41 : 0x01);
+        u16(0xffff);
+        u32(0);
+        u32(quint32(at + 4));
+        name(n);
+        if (attributes)
+            u32(0);
+    };
+    const auto attribute = [&](const QString &n, quint16 index, quint8 type) {
+        u8(0x06);
+        u32(quint32(at + 4));
+        name(n);
+        u8(0x0d);
+        u16(index);
+        u8(type);
+    };
+    const auto textAttribute = [&](const QString &n, const QString &value) {
+        u8(0x06);
+        u32(quint32(at + 4));
+        name(n);
+        u8(0x05);
+        u8(0x01);
+        u16(quint16(value.size()));
+        for (QChar c : value)
+            u16(c.unicode());
+    };
+    const auto substituted = [&](const QString &n, quint16 index, quint8 type) {
+        open(n, false);
+        u8(0x02);
+        u8(0x0d);
+        u16(index);
+        u8(type);
+        u8(0x04);
+    };
+    const auto record = [&](quint64 id, const QDateTime &when, quint32 code, quint64 button) {
+        const int start = at;
+        u32(0x2a2a);
+        u32(0); // size, filled in below
+        u64(id);
+        u64(fileTimeOf(when));
+        u8(0x0f), u8(1), u8(1), u8(0);
+        u8(0x0c), u8(1), u32(1);
+        u32(quint32(at + 4)); // the definition follows here
+        u32(0);
+        for (int i = 0; i < 16; ++i)
+            u8(0);
+        const int sizeAt = at;
+        u32(0);
+        const int body = at;
+        u8(0x0f), u8(1), u8(1), u8(0);
+        open(QStringLiteral("Event"), false);
+        u8(0x02);
+        open(QStringLiteral("System"), false);
+        u8(0x02);
+        open(QStringLiteral("Provider"), true);
+        attribute(QStringLiteral("Name"), 0, 0x01);
+        u8(0x03);
+        substituted(QStringLiteral("EventID"), 1, 0x06);
+        substituted(QStringLiteral("Level"), 2, 0x04);
+        open(QStringLiteral("TimeCreated"), true);
+        attribute(QStringLiteral("SystemTime"), 3, 0x11);
+        u8(0x03);
+        substituted(QStringLiteral("EventRecordID"), 4, 0x0a);
+        u8(0x04);
+        open(QStringLiteral("EventData"), false);
+        u8(0x02);
+        open(QStringLiteral("Data"), true);
+        textAttribute(QStringLiteral("Name"), QStringLiteral("BugcheckCode"));
+        u8(0x02), u8(0x0d), u16(5), u8(0x08), u8(0x04);
+        open(QStringLiteral("Data"), true);
+        textAttribute(QStringLiteral("Name"), QStringLiteral("PowerButtonTimestamp"));
+        u8(0x02), u8(0x0d), u16(6), u8(0x0a), u8(0x04);
+        u8(0x04);
+        u8(0x04);
+        u8(0x00);
+        put<quint32>(chunk, sizeAt, quint32(at - body));
+        // The values.
+        const QString provider = QStringLiteral("Microsoft-Windows-Kernel-Power");
+        const QVector<QPair<quint16, quint8>> sizes = {{quint16(provider.size() * 2), 0x01}, {2, 0x06}, {1, 0x04}, {8, 0x11}, {8, 0x0a}, {4, 0x08}, {8, 0x0a}};
+        u32(quint32(sizes.size()));
+        for (const auto &[size, type] : sizes)
+            u16(size), u8(type), u8(0);
+        for (QChar c : provider)
+            u16(c.unicode());
+        u16(41);
+        u8(1);
+        u64(fileTimeOf(when));
+        u64(id);
+        u32(code);
+        u64(button);
+        u32(0); // the copy of the size
+        put<quint32>(chunk, start + 4, quint32(at - start));
+        put<quint32>(chunk, at - 4, quint32(at - start));
+    };
+    record(100, blueAt.addSecs(120), 209, 0);
+    record(101, buttonAt.addSecs(90), 0, fileTimeOf(buttonAt));
+    put<quint32>(chunk, 48, quint32(at));
+    QByteArray file(4096, '\0');
+    std::memcpy(file.data(), "ElfFile\0", 8);
+    return file + chunk;
+}
+
+void whyCrash()
+{
+    const QDateTime blueAt(QDate(2026, 9, 20), QTime(21, 14, 3), QTimeZone::UTC);
+    const QDateTime buttonAt(QDate(2026, 10, 2), QTime(8, 2, 40), QTimeZone::UTC);
+    const crashdump::Dump dump = crashdump::read(makeDump(blueAt));
+    report(dump.ok && dump.code == 0xd1 && dump.time == blueAt && dump.build == 22631 && dump.drivers.size() == 2 && dump.complete,
+           QStringLiteral("crash dump: the stop code, when and the drivers are read"), QString::number(dump.code, 16));
+    report(crashdump::where(dump, dump.parameters[3]) == QLatin1String("testnet.sys+0x1234"), QStringLiteral("crash dump: an address is named by its driver"),
+           crashdump::where(dump, dump.parameters[3]));
+    const evtx::Log log = evtx::read(makeLog(blueAt, buttonAt));
+    report(log.events.size() == 2 && log.events[0].provider == QLatin1String("Microsoft-Windows-Kernel-Power") && log.events[0].id == 41
+               && log.events[0].value(QStringLiteral("BugcheckCode")) == QLatin1String("209") && log.events[0].time == blueAt.addSecs(120)
+               && log.events[1].value(QStringLiteral("PowerButtonTimestamp")).toULongLong() == fileTimeOf(buttonAt),
+           QStringLiteral("event log: a template's events read, with their values"),
+           log.events.isEmpty() ? log.problem : log.events[0].provider + QLatin1Char(' ') + log.events[0].value(QStringLiteral("BugcheckCode")));
+    whycrash::Records records;
+    records.system = log;
+    records.dumps.push_back({QStringLiteral("092026-1234-01.dmp"), dump});
+    records.crashDumpEnabled = 0;
+    records.describeDriver = [](const QString &path) { return path.endsWith(QLatin1String("testnet.sys")) ? QStringLiteral("Test Network Driver, Test Corp") : QString(); };
+    const whycrash::Report r = whycrash::explain(records);
+    const whycrash::Incident *blue = nullptr, *button = nullptr;
+    for (const whycrash::Incident &i : r.incidents) {
+        if (i.kind == whycrash::Kind::BlueScreen)
+            blue = &i;
+        if (i.kind == whycrash::Kind::PowerButton)
+            button = &i;
+    }
+    report(r.incidents.size() == 2 && blue && button && r.incidents.first().kind == whycrash::Kind::PowerButton,
+           QStringLiteral("why did it crash: a blue screen and a held power button, newest first"), QString::number(r.incidents.size()));
+    report(blue && blue->title.contains(QLatin1String("DRIVER_IRQL_NOT_LESS_OR_EQUAL")) && blue->driver == QLatin1String("testnet.sys")
+               && blue->blame.contains(QLatin1String("Test Network Driver")) && !blue->sources.filter(QLatin1String("092026-1234-01.dmp")).isEmpty(),
+           QStringLiteral("why did it crash: the blue screen's driver named from its dump, with what it is and where that came from"),
+           blue ? blue->blame : QString());
+    report(r.summary.join(QLatin1Char(' ')).contains(QLatin1String("testnet.sys")) && r.notes.join(QLatin1Char(' ')).contains(QLatin1String("CrashDumpEnabled")),
+           QStringLiteral("why did it crash: what they have in common, and a setting that hides crashes"), r.summary.join(QLatin1String(" | ")));
+    whycrash::Records nothing;
+    report(whycrash::explain(nothing).incidents.isEmpty() && !whycrash::explain(nothing).notes.isEmpty(), QStringLiteral("why did it crash: no log: said, not guessed"));
+    const QString werText = QStringLiteral("Version=1\r\nEventType=BlueScreen\r\nEventTime=133500000000000000\r\nSig[0].Name=BCCode\r\nSig[0].Value=9f\r\nSig[1].Value=3\r\n");
+    const QByteArray wer = QByteArrayLiteral("\xff\xfe") + QByteArray(reinterpret_cast<const char *>(werText.utf16()), werText.size() * 2);
+    const whycrash::Records::Wer w = whycrash::parseWer(wer);
+    report(w.type == QLatin1String("BlueScreen") && w.code == 0x9f && w.parameters[0] == 3 && w.when.isValid(), QStringLiteral("why did it crash: a Windows Error Reporting note read"));
+    // Damaged files: never trusted, never a crash.
+    QRandomGenerator random(77);
+    bool survived = true;
+    const QByteArray goodLog = makeLog(blueAt, buttonAt), goodDump = makeDump(blueAt);
+    for (int i = 0; i < 400; ++i) {
+        QByteArray l = goodLog, d = goodDump;
+        for (int k = 0; k < 1 + i % 40; ++k) {
+            l[4096 + 512 + int(random.bounded(2000))] = char(random.bounded(256));
+            d[int(random.bounded(d.size()))] = char(random.bounded(256));
+        }
+        if (i % 7 == 0)
+            l.truncate(4096 + 512 + int(random.bounded(65000)));
+        const evtx::Log rl = evtx::read(l);
+        const crashdump::Dump rd = crashdump::read(d);
+        survived = survived && rl.events.size() <= 2;
+        Q_UNUSED(rd)
+    }
+    report(survived, QStringLiteral("why did it crash: 400 damaged logs and dumps read without a crash"));
+    // Real ones, when they're here (not in the repo: Windows' own files).
+    const QString samples = qEnvironmentVariable("DISKANVIL_CRASH_SAMPLES");
+    if (!samples.isEmpty() && QFileInfo::exists(samples + QStringLiteral("/system.evtx"))) {
+        QFile f(samples + QStringLiteral("/system.evtx"));
+        const evtx::Log real = f.open(QIODevice::ReadOnly) ? evtx::read(f.readAll()) : evtx::Log();
+        report(real.events.size() > 1000 && real.broken == 0, QStringLiteral("event log: a real System log read whole"), QString::number(real.events.size()));
+    }
+}
+
 void virusTests()
 {
+    whyCrash();
     QTemporaryDir dir;
     parsing();
     scanning(dir.path());

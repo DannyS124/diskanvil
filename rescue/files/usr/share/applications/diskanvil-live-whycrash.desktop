@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Why Did It Crash?
+Comment=A Windows that keeps blue-screening or restarting: why
+Exec=diskanvil --open why-crash
+Icon=diskanvil-live-whycrash
+Categories=System;

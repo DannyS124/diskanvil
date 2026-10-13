@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9ad8ff" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Why Did It Crash?: a screen with a jagged line and a question mark. -->
+  <rect x="2.5" y="4" width="19" height="13" rx="2"/>
+  <path d="M8 21h8M12 17v4"/>
+  <path d="M5.5 12l2.5-3 2 3 2.5-4" stroke="#ff3355"/>
+  <path d="M15.5 8.5a1.75 1.75 0 1 1 2.5 1.6c-.5.25-.75.6-.75 1.1M17.25 13.25v.01" stroke="#00e5ff"/>
+</svg>

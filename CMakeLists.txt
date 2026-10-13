@@ -108,6 +108,7 @@ add_library(diskanvil-core STATIC
     src/viruses/peinfo.cpp src/viruses/peinfo.h
     src/viruses/wof.cpp src/viruses/wof.h
     src/viruses/activity.cpp src/viruses/activity.h
+    src/viruses/evtx.cpp src/viruses/evtx.h src/viruses/crashdump.cpp src/viruses/crashdump.h src/viruses/whycrash.cpp src/viruses/whycrash.h
     src/backup/newids.cpp src/backup/newids.h
     src/lostfiles/filetypes.cpp src/lostfiles/filetypes.h
     src/usb/checksums.cpp src/usb/checksums.h
@@ -182,6 +183,7 @@ add_library(diskanvil-ui STATIC
     src/tools/filesdialog.cpp src/tools/filesdialog.h
     src/tools/writeprotectdialog.cpp src/tools/writeprotectdialog.h
     src/lostfiles/hitfilesdialog.cpp src/lostfiles/hitfilesdialog.h
+    src/viruses/whycrashdialog.cpp src/viruses/whycrashdialog.h
     src/lostfiles/timelinedialog.cpp src/lostfiles/timelinedialog.h
     src/lostfiles/placesmap.cpp src/lostfiles/placesmap.h
     src/lostfiles/enhance.cpp src/lostfiles/enhance.h
