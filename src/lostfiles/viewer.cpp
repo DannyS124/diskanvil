@@ -1549,6 +1549,8 @@ public:
 #ifdef DISKANVIL_MEDIA
         m_player = new QMediaPlayer(this);
         m_audio = new QAudioOutput(this);
+        // The tests play films without a sound (DISKANVIL_MUTE): nobody wants a test beeping at them.
+        m_audio->setMuted(qEnvironmentVariableIsSet("DISKANVIL_MUTE"));
         m_video = new FrameView;
         m_sink = new QVideoSink(this);
         m_player->setAudioOutput(m_audio);

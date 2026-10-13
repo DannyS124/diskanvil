@@ -6988,6 +6988,8 @@ int userScenarios(const QStringList &only)
 
 int main(int argc, char *argv[])
 {
+    // Films the tests play are silent (the viewer it starts, its own program, inherits this).
+    qputenv("DISKANVIL_MUTE", "1");
     // Find Lost Files starts this program as its preview helper, as it would DiskAnvil itself.
     if (argc == 2 && QByteArray(argv[1]) == "--preview-helper") {
         qputenv("QT_QPA_PLATFORM", "offscreen");
