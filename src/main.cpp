@@ -10,8 +10,10 @@
 #include "translations.h"
 #include "udisks.h"
 #include "viewer.h"
+#include "writeprotect.h"
 
 #include <QApplication>
+#include <cstdio>
 #include <QGuiApplication>
 #include <QCommandLineParser>
 #include <QIcon>
@@ -62,6 +64,11 @@ void dump(const QVector<Disk> &disks)
 
 int main(int argc, char *argv[])
 {
+    // Write-Protected Drive asking a drive whether it's write-protected, as root on DiskAnvil Live.
+    if (argc == 3 && QByteArray(argv[1]) == writeprotect::kAskOption) {
+        std::printf("%d\n", writeprotect::askDevice(QString::fromLocal8Bit(argv[2])));
+        return 0;
+    }
     // Find Lost Files' preview helper (preview.h): no window, no screen, just answers.
     if (argc == 2 && QByteArray(argv[1]) == "--preview-helper") {
         qputenv("QT_QPA_PLATFORM", "offscreen");

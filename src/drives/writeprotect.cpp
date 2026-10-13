@@ -8,8 +8,12 @@
 #include <QFileInfo>
 #include <QHash>
 
+#include <QRegularExpression>
+
 #ifdef Q_OS_LINUX
 #include <cstring>
+#include <fcntl.h>
+#include <unistd.h>
 #include <scsi/sg.h>
 #include <sys/ioctl.h>
 #endif
@@ -43,8 +47,18 @@ QString shellQuote(const QString &s)
 QVector<Finding> diagnose(const State &s)
 {
     QVector<Finding> out;
-    // The drive itself first: nothing on the PC can get past it.
-    if (s.drivesays == 1 || (s.cardSlot && s.kernelReadOnly)) {
+    if (s.windows && s.policyClearedBefore && s.drivesays == 1) {
+        Finding f;
+        f.title = tr("Unplug it and plug it in again");
+        f.text = tr("Windows only reads its write-protect setting when a drive is plugged in, so it still treats this one as "
+                    "write-protected. Unplug it, plug it in again, and look again.");
+        out << f;
+        return out;
+    }
+    // The drive itself first: nothing on the PC can get past it. Linux's flag that stays after being
+    // cleared is the drive's own answer too (the kernel sets it again from the drive).
+    const bool flagStayed = s.flagClearedBefore && s.kernelReadOnly && s.drivesays != 0;
+    if (s.drivesays == 1 || flagStayed || (s.cardSlot && s.kernelReadOnly)) {
         Finding f;
         if (s.sdCard) {
             f.title = tr("The card's lock switch is on");
@@ -229,6 +243,24 @@ void readLinux(State &s, const QString &sysRoot, const QString &mountInfo)
             p.mountedReadOnly = m->second;
         }
     }
+}
+
+int askDevice(const QString &device)
+{
+#ifdef Q_OS_LINUX
+    static const QRegularExpression scsiDisk(QStringLiteral("^/dev/sd[a-z]{1,3}$"));
+    if (!scsiDisk.match(device).hasMatch())
+        return -1;
+    const int fd = ::open(QFile::encodeName(device).constData(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+    if (fd < 0)
+        return -1;
+    const int says = askDrive(fd);
+    ::close(fd);
+    return says;
+#else
+    Q_UNUSED(device)
+    return -1;
+#endif
 }
 
 QStringList clearKernelFlagScript(const State &s)

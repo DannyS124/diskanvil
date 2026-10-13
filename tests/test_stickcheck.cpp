@@ -170,6 +170,18 @@ void writeProtectTests()
     odd.device = QStringLiteral("/dev/sd'z; reboot");
     report(clearKernelFlagScript(odd).value(2).startsWith(QLatin1String("blockdev --setrw '/dev/sd'\\''z; reboot'")), QStringLiteral("write-protected: a device name can't run anything"));
 
+    State stayed = flagged;
+    stayed.drivesays = -1;
+    stayed.flagClearedBefore = true;
+    found = diagnose(stayed);
+    report(found.size() == 1 && found[0].fix == Fix::None && found[0].text.contains(QLatin1String("wearing out")),
+           QStringLiteral("write-protected: Linux's flag back after being cleared: it's the drive, said so"));
+    State replug = stick;
+    replug.windows = replug.policyClearedBefore = true;
+    replug.drivesays = 1;
+    report(diagnose(replug).value(0).title.contains(QLatin1String("Unplug")), QStringLiteral("write-protected: Windows' policy just switched off: unplug and plug in, not \"worn out\""));
+    report(askDevice(QStringLiteral("/etc/passwd")) == -1 && askDevice(QStringLiteral("/dev/sda; x")) == -1, QStringLiteral("write-protected: only a /dev/sdX is ever opened to ask"));
+
     State blocked = flagged;
     blocked.writeBlock = true;
     found = diagnose(blocked);

@@ -51,4 +51,6 @@ private:
     std::optional<writeprotect::State> m_testState;
     std::function<void(bool ok, const QString &message)> m_afterOperation;
     QString m_waitingFor; // a repair's volume, then opened again
+    QStringList m_flagCleared;   // drives whose Linux flag was cleared here
+    QStringList m_policyCleared; // drives looked at when Windows' policy was switched off here
 };

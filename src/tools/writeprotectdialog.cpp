@@ -5,12 +5,12 @@
 
 #include "format.h"
 #include "hostprocess.h"
-#include "jobui.h"
 #include "rescuestick.h"
 #include "udisks.h"
 #include "writeblock.h"
 
 #include <QApplication>
+#include <QCoreApplication>
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QFileInfo>
@@ -27,7 +27,6 @@
 #include <unistd.h>
 #endif
 
-#include "blockio.h"
 
 using writeprotect::Finding;
 using writeprotect::Fix;
@@ -190,6 +189,7 @@ void WriteProtectDialog::look()
 #ifdef Q_OS_WIN
     s.device = disk->blockPath;
     s.diskNumber = s.device.section(QStringLiteral("PhysicalDrive"), 1).toInt();
+    s.policyClearedBefore = m_policyCleared.contains(s.device);
     QApplication::setOverrideCursor(Qt::WaitCursor);
     writeprotect::readWindows(s);
     QApplication::restoreOverrideCursor();
@@ -197,16 +197,22 @@ void WriteProtectDialog::look()
 #else
     writeprotect::readLinux(s);
     s.writeBlock = writeblock::available() && writeblock::isOn() && !writeblock::allowed().contains(QFileInfo(s.device).fileName());
-    // The drive's own answer, through an fd that changes nothing (it isn't even unmounted).
-    QPointer<WriteProtectDialog> self(this);
-    openBlockThen(m_udisks, this, disk->blockPath, UDisks::OpenMode::Peek, [self, s](int fd) mutable {
-        if (fd >= 0) {
-            s.drivesays = writeprotect::askDrive(fd);
-            blockio::close(fd);
+    s.flagClearedBefore = m_flagCleared.contains(s.device);
+    // The drive's own answer: straight from it when this user may read it, or as root on DiskAnvil
+    // Live (its sudo needs no password). Never a password or an error just to look: without the
+    // answer, a flag that comes back after being cleared says the same.
+    s.drivesays = writeprotect::askDevice(s.device);
+    if (s.drivesays < 0 && rescue::runningInRescue()) {
+        QProcess ask;
+        ask.start(QStringLiteral("sudo"), {QStringLiteral("-n"), QCoreApplication::applicationFilePath(), QString::fromLatin1(writeprotect::kAskOption), s.device});
+        if (ask.waitForFinished(15000) && ask.exitCode() == 0) {
+            bool ok = false;
+            const int says = ask.readAllStandardOutput().trimmed().toInt(&ok);
+            if (ok)
+                s.drivesays = says;
         }
-        if (self)
-            self->showFindings(s);
-    });
+    }
+    showFindings(s);
 #endif
 }
 
@@ -282,6 +288,8 @@ void WriteProtectDialog::fix(int index)
     }
     case Fix::ClearKernelFlag:
         ok = runAsRoot(writeprotect::clearKernelFlagScript(m_state), &said);
+        if (ok)
+            m_flagCleared << m_state.device;
         break;
     case Fix::RepairAndReopen:
         reopen(part.objectPath, true);
@@ -293,8 +301,10 @@ void WriteProtectDialog::fix(int index)
     case Fix::ClearPolicy:
         said = writeprotect::clearPolicy();
         ok = said.isEmpty();
-        if (ok)
+        if (ok) {
             said = tr("Switched off. Unplug the drive and plug it in again, then look again.");
+            m_policyCleared << m_state.device;
+        }
         break;
     case Fix::ClearDiskAttribute:
         said = writeprotect::clearDiskAttribute(m_state.diskNumber);

@@ -46,6 +46,10 @@ struct State {
     int diskNumber = -1;                // Windows
     QVector<Part> parts;
     bool windows = false;
+    // What was done before in this window: the flag cleared (when Linux still has it read-only after
+    // that, the drive is what's refusing), the Windows policy switched off (it counts once replugged).
+    bool flagClearedBefore = false;
+    bool policyClearedBefore = false;
 };
 
 enum class Fix {
@@ -76,6 +80,12 @@ QString nothingFound(const State &state);
 // Linux: the drive's answer to MODE SENSE (the "write protect" bit), from an fd open on it;
 // -1 when it isn't a SCSI or USB drive or didn't answer.
 int askDrive(int fd);
+// The same for a device by its path, opened just for this (it needs the right to read it: root, or
+// the disk group); -1 when it can't be. Only /dev/sdX: nothing else is opened.
+int askDevice(const QString &device);
+// DiskAnvil's own way of asking as root (DiskAnvil Live's sudo): `diskanvil --drive-write-protect
+// /dev/sdb` prints 1, 0 or -1.
+inline constexpr char kAskOption[] = "--drive-write-protect";
 // Linux: the flags and mounts read from /sys and /proc. `sysRoot` and `mountInfo` are for the
 // tests ("/sys", "/proc/self/mountinfo").
 void readLinux(State &state, const QString &sysRoot = QStringLiteral("/sys"), const QString &mountInfo = QStringLiteral("/proc/self/mountinfo"));
