@@ -19,6 +19,7 @@ Item {
     readonly property var parentWindow: toplevel && toplevel.parentToplevel ? comp.windows.find(w => w.toplevel === toplevel.parentToplevel) : null
     property real pid: shellSurface && shellSurface.surface && shellSurface.surface.client ? shellSurface.surface.client.processId : 0
     property bool maximized: false
+    property bool fullScreen: false     // the program asked for the whole screen: no frame, over the bar
     property rect before
     readonly property bool focused: comp.active === win
     readonly property string icon: appId.indexOf("terminal") >= 0 ? "utilities-terminal"
@@ -70,6 +71,19 @@ Item {
         function onMaximizedChanged() { if (win.toplevel.maximized !== win.maximized) win.toggleMaximise() }
         function onSetMinimized() { win.minimise() }
         function onSetMaximized() { if (!win.maximized) win.toggleMaximise() }
+        function onSetFullscreen() {
+            if (win.fullScreen) return
+            win.before = Qt.rect(win.x, win.y, win.width, win.height)
+            win.fullScreen = true
+            win.x = 0; win.y = -win.bar
+            win.toplevel.sendFullscreen(Qt.size(win.parent.width, win.parent.height))
+        }
+        function onUnsetFullscreen() {
+            if (!win.fullScreen) return
+            win.fullScreen = false
+            win.x = win.before.x; win.y = win.before.y
+            win.toplevel.sendUnmaximized(Qt.size(win.before.width, win.before.height - win.bar))
+        }
         function onUnsetMaximized() { if (win.maximized) win.toggleMaximise() }
     }
 

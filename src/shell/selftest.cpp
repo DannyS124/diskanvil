@@ -93,8 +93,8 @@ int runSelfTest(QQmlApplicationEngine &engine)
     QQuickItem *main = windows().first();
     QTest::qWait(1500); // its size settles
     const QRectF placed = rect(main);
-    report(placed.top() >= 36 && dock && placed.bottom() <= dock->mapToScene(QPointF(0, 0)).y() + 1 && active() == main,
-           "it's placed between the bar and the dock, and has the keys",
+    report(placed.top() >= 36 && placed.bottom() <= screen->height() && active() == main,
+           "it's placed under the bar, on the screen, and has the keys",
            QStringLiteral("%1,%2 %3x%4, the one in front %5").arg(placed.x()).arg(placed.y()).arg(placed.width()).arg(placed.height())
                .arg(active() == main ? QStringLiteral("is it") : active() ? QStringLiteral("is another") : QStringLiteral("is none")));
     // Moved by its title.
@@ -114,6 +114,21 @@ int runSelfTest(QQmlApplicationEngine &engine)
     doubleClick(before.topLeft() + QPointF(before.width() / 2, 15));
     const bool maxed = waitUntil([&] { return main->x() == 0 && main->y() == 36 && qAbs(main->width() - screen->width()) < 2; }, 5000);
     report(maxed, "a double-click on its title fills the room", QStringLiteral("%1,%2 %3x%4").arg(main->x()).arg(main->y()).arg(main->width()).arg(main->height()));
+    // The dock goes out of the way of a window over it, comes back at the bottom edge, and goes again.
+    QQuickItem *dockBar = nullptr, *arrow = nullptr;
+    for (QQuickItem *i : screen->findChildren<QQuickItem *>()) {
+        if (i->objectName() == QLatin1String("dock"))
+            dockBar = i;
+        else if (i->objectName() == QLatin1String("pointerArrow"))
+            arrow = i;
+    }
+    const auto dockOut = [&] { return dockBar && dockBar->y() >= screen->height() - 2; };
+    const auto dockIn = [&] { return dockBar && dockBar->y() + dockBar->height() <= screen->height() - 10; };
+    report(waitUntil(dockOut, 2000), "the dock goes out of the way of a maximised window");
+    QTest::mouseMove(screen, QPoint(screen->width() / 2, screen->height() - 1));
+    report(waitUntil(dockIn, 2000), "the mouse at the bottom edge brings it back");
+    QTest::mouseMove(screen, QPoint(screen->width() / 2, screen->height() / 2));
+    report(waitUntil(dockOut, 3000), "and it goes again when the mouse leaves it");
     doubleClick(QPointF(screen->width() / 2.0, 36 + 15));
     const bool back = waitUntil([&] { return qAbs(main->x() - before.x()) < 3 && qAbs(main->width() - before.width()) < 3; }, 5000);
     report(back, "and another puts it back where it was",
@@ -148,6 +163,11 @@ int runSelfTest(QQmlApplicationEngine &engine)
         const QRectF s = rect(second);
         click(QPointF(s.right() - 6 - 15, s.top() + 17));
         report(waitUntil([&] { return windows().size() == 1; }, 10000), "the close button closes the program");
+        // Our own pointer again (not the closed program's), wherever the mouse is.
+        QTest::mouseMove(screen, QPoint(screen->width() / 2, screen->height() / 3));
+        QTest::mouseMove(screen, QPoint(20, 20));
+        if (arrow && qEnvironmentVariableIsSet("DISKANVIL_SHELL_POINTER"))
+            report(waitUntil([&] { return arrow->isVisible(); }, 2000), "after a program closes, the pointer is ours again (not gone)");
     }
     // The power menu and the grid of everything.
     QQuickItem *power = nullptr, *powerButton = nullptr, *grid = nullptr;

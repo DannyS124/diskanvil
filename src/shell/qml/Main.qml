@@ -47,6 +47,28 @@ WaylandCompositor {
         { id: "readme", icon: "diskanvil-live-readme", title: "Read Me", program: "qterminal", args: ["-e", "less /usr/local/share/diskanvil-live/README.txt"] }
     ]
     property var started: ({})   // dock item id → process number
+    // The pointer's shape is the program's only while the mouse is over one of its windows.
+    readonly property bool clientPointer: cursorItem !== null && cursorItem.surface !== null && cursorItem.surface.hasContent && overProgram
+    // Over what a program draws (not its frame, the bar or the dock, which are ours).
+    readonly property bool overProgram: {
+        const p = shell.pointer
+        if (topBarItem && topBarItem.visible && p.y < topBarItem.height) return false
+        if (dockItem && dockShown && p.y >= dockItem.y && p.x >= dockItem.x && p.x <= dockItem.x + dockItem.width) return false
+        const under = windows.filter(w => w.visible && p.x >= w.x && p.x < w.x + w.width && p.y >= w.y && p.y < w.y + w.height)
+        if (!under.length) return false
+        const top = under.reduce((a, b) => a.z > b.z ? a : b)
+        return p.y >= top.y + (top.fullScreen ? 0 : top.bar)
+    }
+    property Item topBarItem: null
+    property Item dockItem: null
+    property Item cursorItem: null
+    // The dock: out of the way while a window is over it (or one is full screen), back when the
+    // mouse goes to the bottom edge, or when nothing is in its way.
+    readonly property bool dockCovered: windows.some(w => w.visible && (w.fullScreen || w.y + w.height > screenHeight - 110))
+    property real screenHeight: 1000
+    property bool dockWanted: false
+    readonly property bool dockShown: !dockCovered || dockWanted
+    readonly property bool anyFullScreen: windows.some(w => w.visible && w.fullScreen)
     property bool gridOpen: false   // the grid of everything
     property bool powerOpen: false  // the power menu
 
@@ -98,7 +120,8 @@ WaylandCompositor {
         id: output
         sizeFollowsWindow: true
         // What a maximised window fills: between the bar and the dock.
-        availableGeometry: Qt.rect(0, 36, screen.width, screen.height - 36 - 116)
+        // (The dock hides when a window is over it, so they get the whole screen below the bar.)
+        availableGeometry: Qt.rect(0, 36, screen.width, screen.height - 36)
         window: Window {
             id: screen
             width: 1600; height: 1000
@@ -107,6 +130,8 @@ WaylandCompositor {
             visibility: shell.fullScreen ? Window.FullScreen : Window.AutomaticVisibility
             color: pal.bg
             title: "DiskAnvil Live"
+            onHeightChanged: comp.screenHeight = height
+            Component.onCompleted: comp.screenHeight = height
 
             Image { anchors.fill: parent; source: "qrc:/shell/art/desktop.svg"; sourceSize: Qt.size(width, height); fillMode: Image.PreserveAspectCrop; asynchronous: true }
 
@@ -114,8 +139,19 @@ WaylandCompositor {
             Item { id: area; x: output.availableGeometry.x; y: output.availableGeometry.y; width: output.availableGeometry.width; height: output.availableGeometry.height }
             Item { id: desk; anchors.fill: parent }
 
-            TopBar { id: topBar; comp: comp; z: 100000 }
-            Dock { id: dock; comp: comp; z: 100000 }
+            TopBar { id: topBar; comp: comp; z: 100000; visible: !comp.anyFullScreen; Component.onCompleted: comp.topBarItem = topBar }
+            // The bottom edge: the mouse there brings the dock back; it goes again a moment after leaving it.
+            Connections {
+                target: shell
+                function onPointerChanged() {
+                    const near = shell.pointer.y >= screen.height - 3 || (comp.dockShown && shell.pointer.y >= screen.height - 100
+                                 && shell.pointer.x >= dock.x - 20 && shell.pointer.x <= dock.x + dock.width + 20)
+                    if (near) { dockLeave.stop(); comp.dockWanted = true }
+                    else if (comp.dockWanted && !dockLeave.running) dockLeave.start()
+                }
+            }
+            Timer { id: dockLeave; interval: 700; onTriggered: comp.dockWanted = false }
+            Dock { id: dock; comp: comp; z: 100000; shown: comp.dockShown; Component.onCompleted: comp.dockItem = dock }
             AppGrid { id: grid; comp: comp; z: 100001 }
             PowerMenu { id: powerMenu; comp: comp; z: 100001 }
 
@@ -125,14 +161,17 @@ WaylandCompositor {
             // asks for (an I-beam over text, arrows on an edge), or our arrow.
             WaylandCursorItem {
                 id: cursor
+                Component.onCompleted: comp.cursorItem = cursor
                 seat: comp.defaultSeat
                 inputEventsEnabled: false
-                visible: shell.drawsPointer && surface !== null
+                // A program's own shape only over that program; it goes with it when it closes.
+                visible: shell.drawsPointer && comp.clientPointer
                 x: shell.pointer.x - hotspotX; y: shell.pointer.y - hotspotY
                 z: 1000000
             }
             Image {
-                visible: shell.drawsPointer && cursor.surface === null
+                objectName: "pointerArrow"
+                visible: shell.drawsPointer && !comp.clientPointer
                 source: "qrc:/shell/art/pointer.svg"; sourceSize: Qt.size(24, 24)
                 x: shell.pointer.x; y: shell.pointer.y; z: 1000000
             }

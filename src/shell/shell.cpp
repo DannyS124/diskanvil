@@ -74,7 +74,7 @@ qint64 Shell::launch(const QString &program, const QStringList &arguments)
 bool Shell::drawsPointer() const
 {
     const QString platform = QGuiApplication::platformName();
-    return platform == QLatin1String("linuxfb") || platform == QLatin1String("eglfs");
+    return platform == QLatin1String("linuxfb") || platform == QLatin1String("eglfs") || qEnvironmentVariableIsSet("DISKANVIL_SHELL_POINTER");
 }
 
 bool Shell::running(qint64 pid) const

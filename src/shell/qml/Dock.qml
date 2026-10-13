@@ -9,7 +9,11 @@ Rectangle {
     id: dock
     property var comp
     anchors.horizontalCenter: parent.horizontalCenter
-    anchors.bottom: parent.bottom; anchors.bottomMargin: 14
+    property bool shown: true
+    objectName: "dock"
+    // Slides below the screen's edge when it's out of the way.
+    y: parent.height - (shown ? height + 14 : -4)
+    Behavior on y { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
     height: 78; width: row.width + 28; radius: 22
     color: "#e60d1426"; border.color: comp.pal.line
 

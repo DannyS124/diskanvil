@@ -97,7 +97,7 @@ case "$cmd" in
     run_tests window-user env QT_QPA_PLATFORM=offscreen ./build/diskanvil-uitest --user
     # DiskAnvil Live's screen, used with real DiskAnvil windows in it (a socket folder of its own).
     shell_run=$(mktemp -d); chmod 700 "$shell_run"
-    run_tests shell env PATH="$PWD/build:$PATH" XDG_RUNTIME_DIR="$shell_run" QT_QPA_PLATFORM=offscreen ./build/diskanvil-shell --selftest
+    run_tests shell env DISKANVIL_SHELL_POINTER=1 PATH="$PWD/build:$PATH" XDG_RUNTIME_DIR="$shell_run" QT_QPA_PLATFORM=offscreen ./build/diskanvil-shell --selftest
     rm -rf "$shell_run"
     # As root: test devices made with losetup and dmsetup.
     run_tests disks sudo ./build/diskanvil-selftest
