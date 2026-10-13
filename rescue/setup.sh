@@ -22,7 +22,8 @@ echo diskanvil-live > /etc/hostname
 # (files/etc) don't ask either.
 useradd --create-home --shell /bin/bash --comment "DiskAnvil Live" rescue
 passwd --delete rescue >/dev/null
-for group in sudo netdev plugdev; do
+# video and input: the screen (diskanvil-shell draws straight to it) and the mouse and keyboard.
+for group in sudo netdev plugdev video input; do
     if getent group "$group" >/dev/null; then usermod -aG "$group" rescue; fi
 done
 chmod 0440 /etc/sudoers.d/diskanvil-live
