@@ -116,6 +116,7 @@ while true; do
     echo
     echo "  ${bold}number${off} join   ${bold}h${off} a hidden network   ${bold}d${off} disconnect   ${bold}r${off} look again   ${bold}q${off} close"
     read -r -p "  ${neon}>${off} " choice || exit 0
+    password=
     case $choice in
     q|Q) exit 0 ;;
     r|R|'') continue ;;
@@ -154,7 +155,10 @@ while true; do
         sleep 2
     else
         echo "  ${red}✗ $ssid wasn't joined.${off} $(grep -m1 -o 'Error:.*' /tmp/diskanvil-wifi.$$ | sed 's/^Error: //')"
-        grep -qi 'secrets\|password\|802-11-wireless-security' /tmp/diskanvil-wifi.$$ && echo "  ${dim}Is the password right?${off}"
+        # A locked network that wasn't joined: a wrong password usually looks like this.
+        if [ -n "${password:-}" ] || grep -qi 'secrets\|password\|802-11-wireless-security' /tmp/diskanvil-wifi.$$; then
+            echo "  ${dim}Is the password right? Letters must be the same case.${off}"
+        fi
         nmcli -t -f NAME connection show | grep -qxF "$ssid" && nmcli connection delete "$ssid" >/dev/null 2>&1
         read -r -p "  Press Enter. " _ || exit 0
     fi

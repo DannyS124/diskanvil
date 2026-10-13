@@ -3,6 +3,8 @@
 
 #include "theme.h"
 
+#include "rescuestick.h"
+
 #include <QApplication>
 #include <QCoreApplication>
 #include <QEvent>
@@ -348,6 +350,10 @@ void Theme::apply(const AddonTheme &raw)
     // Windows has no icon theme to borrow from: DiskAnvil's own, dark or light like the windows.
     QIcon::setThemeName(QApplication::palette().color(QPalette::Window).lightness() < 128 ? QStringLiteral("DiskAnvil-Dark")
                                                                                          : QStringLiteral("DiskAnvil-Light"));
+#else
+    // DiskAnvil Live has no desktop to borrow one from: the stick's own icons (Breeze Dark under them).
+    if (rescue::runningInRescue() && QIcon::themeName() != QLatin1String("DiskAnvil-Live"))
+        QIcon::setThemeName(QStringLiteral("DiskAnvil-Live"));
 #endif
     emit changed();
 }
