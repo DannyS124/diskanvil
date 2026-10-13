@@ -4855,7 +4855,11 @@ void enhanceWindow()
     {
         QMimeData data;
         data.setUrls({QUrl::fromLocalFile(given), QUrl::fromLocalFile(dir.path() + QStringLiteral("/photo.jpg"))});
+#if QT_VERSION >= QT_VERSION_CHECK(6, 12, 0)
         QDragEnterEvent enter(QPointF(10, 10), Qt::CopyAction, &data, Qt::LeftButton, Qt::NoModifier);
+#else
+        QDragEnterEvent enter(QPoint(10, 10), Qt::CopyAction, &data, Qt::LeftButton, Qt::NoModifier);
+#endif
         QCoreApplication::sendEvent(&window, &enter);
         QDropEvent drop(QPointF(10, 10), Qt::CopyAction, &data, Qt::LeftButton, Qt::NoModifier);
         QCoreApplication::sendEvent(&window, &drop);

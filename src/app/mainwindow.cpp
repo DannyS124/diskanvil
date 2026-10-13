@@ -792,7 +792,12 @@ void MainWindow::createActions()
     m_lookCloser->setToolTip(tr("Any picture or film in the viewer, with its tools: Enhance and its profiles, Pick a Spot, Straighten, "
                                 "Stack Frames, any speed"));
     connect(m_lookCloser, &QAction::triggered, this, [this] {
-        // Its own window, so it can stay open next to this one.
+        // Its own window, so it can stay open next to this one. Opened on its own (a tile on
+        // DiskAnvil Live's home screen, --open), it's all there is: DiskAnvil closes with it.
+        if (!isVisible()) {
+            LookCloserDialog(this).exec();
+            return;
+        }
         auto *look = new LookCloserDialog(this);
         look->setAttribute(Qt::WA_DeleteOnClose);
         look->show();
