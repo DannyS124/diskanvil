@@ -213,6 +213,35 @@ to a fraction of a pixel and put together, so the grain, different in each frame
 more clearly than in any one frame; Twice the size builds it bigger from what the frames hold between them (shift and
 add). Steady it, in a film's saved copy, takes out the camera's shake. Enlarging uses Lanczos, the sharpest of the usual
 ways. Local contrast isn't in a film's saved copy (ffmpeg has nothing like it); a frame saved has it.</p>
+<p><b>More of what forensic labs use</b> (the same kinds as Amped FIVE, the tool police video units use; each step
+written into what's saved, and nothing made up, as SWGDE and ASTM E2825 ask):</p>
+<ul>
+<li><b>Played right first:</b> Video levels to full (CCTV that keeps black at 16 and white at 235 looks washed out);
+one field of an interlaced frame with its lines doubled; the picture's proper shape (4:3, 16:9, twice as tall or
+wide); a wide lens's bend taken out (Wide lens bend, or Fit to a Straight Line: click three points along something
+that should be straight).</li>
+<li><b>A JPEG decoded again:</b> the smoothest picture whose stored numbers round to exactly what the file has. The
+squares of a hard-squeezed JPEG or a thumbnail go, and saved as a JPEG with the same tables it would give the same
+numbers back. JPEG squares is a quicker smoothing of the same.</li>
+<li><b>Blur:</b> out of focus as a lens's disc (the true shape) or soft; taken out step by step (Richardson-Lucy) or in
+one go (Wiener, best on big blurs: raise its grain allowance if speckle or rings appear).</li>
+<li><b>Grain:</b> non-local means (each point from the patches that look like it: the best of the free ways),
+smoothing that keeps edges, or the middle value.</li>
+<li><b>Light:</b> Uneven light (a homomorphic filter: a backlit face in a doorway), Retinex (the dark parts as an eye
+adjusts to them), local contrast. Show what's blown out marks in red what's pure white and in blue what's pure black:
+nothing can be brought back there.</li>
+<li><b>One channel:</b> only red, green, blue, brightness, Cb, Cr, hue, saturation or value, or the one with the most
+contrast in this picture. Writing and plates often stand out in one.</li>
+<li><b>Frames:</b> Stack Frames puts the frames around a paused one together: the average (the most grain taken out),
+the middle value or the average without outliers (a passer-by in a few frames is left out), the sharpest only. Once a
+number plate or sign is straightened, Stack Frames (Following It) follows its four corners from frame to frame,
+straightens each frame and stacks them: what really helps a plate. It works on flat things; on a face it isn't safe,
+and the result shouldn't be read as one.</li>
+</ul>
+<p><b>What it can't do:</b> nothing can bring back detail that was never recorded. Stacking cuts grain by about the
+square root of the frames used and adds at most a little resolution, on things that keep still; de-blurring fails on
+pictures squeezed very hard; blown-out parts hold nothing. "Enhance" in films is made up; so is "AI" enlarging, which
+invents detail (a court threw out AI-enhanced video in 2024). DiskAnvil doesn't do it.</p>
 <p><b>Enhance profiles:</b> the list at the top of Enhance sets everything at once. DiskAnvil's own: Too dark, Out of
 focus, Moved while it was taken, Faded old photo, Night camera, Grainy, Scanned page and Film negative. Set things your
 way and use Profiles → Save as a Profile to keep them under a name. Profiles → Save This Profile as a File makes a small
