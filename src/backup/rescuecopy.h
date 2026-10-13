@@ -46,6 +46,8 @@ public:
     const QVector<Block> &blocks() const { return m_blocks; }
     quint64 size() const { return m_size; }
     quint64 total(char status) const;
+    // How many of the bytes from `pos` for `length` weren't read (anything but Finished).
+    quint64 missing(quint64 pos, quint64 length) const;
     bool done() const { return total(NonTried) + total(NonTrimmed) + total(NonScraped) == 0; }
 
     quint64 currentPos = 0;

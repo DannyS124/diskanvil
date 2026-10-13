@@ -112,6 +112,11 @@ read into an image file (or onto another drive): the easy parts first, then it g
 stop it and start it again later with the same file; it carries on where it stopped. Do this before running any
 repairs on a failing drive. Then open the image with File → Open Disk Image and copy your files off. Under "Go easy on
 the drive" it can pause when the drive gets too hot, rest after a run of read errors, or read slower.</p>
+<p><b>Which files did the bad spots hit?</b> When a Rescue Copy couldn't read everything, Which Files Were Hit? (next
+to Start) reads the copy's file systems (FAT, exFAT and NTFS) and lists each file with parts that couldn't be read, and
+how much of each is missing; everything else came off whole. The list can be saved next to the copy. Deleted FAT files
+whose pieces are a guess, and files Windows keeps compressed, are marked. ext4 and other file systems can't be listed
+yet: it says so.</p>
 <p><b>Copy a whole drive:</b> right-click the drive, Clone Drive, for example to move to a bigger SSD. Empty
 space isn't copied, and on a bigger drive the last partition can grow into the extra space. Pick "replaces the old
 drive" if the old one is going away (it's an exact copy), or "keep using both" so the copy gets its own IDs. You

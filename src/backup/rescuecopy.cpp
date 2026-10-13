@@ -33,6 +33,21 @@ int RescueMap::indexAt(quint64 pos) const
     return int(it - m_blocks.cbegin()) - 1;
 }
 
+quint64 RescueMap::missing(quint64 pos, quint64 length) const
+{
+    const quint64 end = std::min(pos + length, m_size);
+    quint64 out = 0;
+    for (int i = std::max(0, indexAt(pos)); i < m_blocks.size() && m_blocks[i].pos < end; ++i) {
+        const Block &b = m_blocks[i];
+        if (b.status == Finished)
+            continue;
+        const quint64 from = std::max(pos, b.pos), to = std::min(end, b.end());
+        if (to > from)
+            out += to - from;
+    }
+    return out;
+}
+
 char RescueMap::statusAt(quint64 pos) const
 {
     const int i = indexAt(pos);

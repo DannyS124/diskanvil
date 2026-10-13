@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Danny S
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "hitfilesdialog.h"
+#include "lostsource.h"
 #include "copydialogs.h"
 
 #include "applog.h"
@@ -990,6 +992,11 @@ RescueDialog::RescueDialog(UDisks *udisks, const QString &sourceBlockPath, QWidg
         else
             start();
     });
+    m_hitFiles = box->addButton(tr("Which Files Were Hit?"), QDialogButtonBox::ActionRole);
+    m_hitFiles->setObjectName(QStringLiteral("hitFiles"));
+    m_hitFiles->setToolTip(tr("The files with parts that couldn't be read, and how much of each"));
+    m_hitFiles->hide();
+    connect(m_hitFiles, &QPushButton::clicked, this, &RescueDialog::showHitFiles);
     connect(box, &QDialogButtonBox::rejected, this, &RescueDialog::reject);
     layout->addWidget(box);
 
@@ -1101,6 +1108,36 @@ void RescueDialog::showBlocks(const QVector<RescueMap::Block> &blocks)
     m_map->refresh();
 }
 
+void RescueDialog::showHitFiles()
+{
+    const Disk *source = m_udisks->diskByPath(m_source);
+    RescueMap map;
+    QString error;
+    if (!source || !map.load(mapPath(), source->size, &error)) {
+        QMessageBox::warning(this, tr("Which Files Were Hit?"), tr("The rescue's map couldn't be read: %1").arg(error));
+        return;
+    }
+    if (m_toFile->isChecked()) {
+        const QString file = m_file->text().trimmed();
+        auto copy = lost::Source::fromImage(file, &error);
+        if (!copy) {
+            QMessageBox::warning(this, tr("Which Files Were Hit?"), tr("The copy couldn't be opened: %1").arg(error));
+            return;
+        }
+        HitFilesDialog(copy, map, QFileInfo(file).fileName(), file + QStringLiteral(" - damaged files.txt"), this).exec();
+        return;
+    }
+    // The drive it was copied to, read-only.
+    const QString target = m_targets->currentData().toString();
+    const Disk *t = m_udisks->diskByPath(target);
+    const QString name = t ? diskTitle(*t) : target;
+    openBlockThen(m_udisks, this, target, UDisks::OpenMode::Benchmark, [this, map, name](int fd) {
+        if (fd < 0)
+            return;
+        HitFilesDialog(lost::Source::fromFd(fd, true), map, name, QDir::homePath() + QStringLiteral("/Rescue/damaged files.txt"), this).exec();
+    });
+}
+
 void RescueDialog::showSavedMap()
 {
     const Disk *source = m_udisks->diskByPath(m_source);
@@ -1120,6 +1157,7 @@ void RescueDialog::showSavedMap()
         return;
     }
     showBlocks(saved.blocks());
+    m_hitFiles->setVisible(!m_running && saved.missing(0, saved.size()) > 0 && saved.total(RescueMap::Finished) > 0);
     m_resume->setText(saved.done() ? tr("This rescue already finished. Starting again retries nothing; the copy is complete as far as it goes.")
                                    : tr("A rescue was started before and got %1. It carries on where it stopped.")
                                          .arg(formatSize(saved.total(RescueMap::Finished))));
@@ -1191,6 +1229,8 @@ void RescueDialog::setRunning(bool running)
     for (QWidget *w : std::initializer_list<QWidget *>{m_toFile, m_toDrive, m_file, m_browse, m_targets, m_confirm})
         w->setEnabled(!running);
     m_start->setText(running ? tr("Stop") : tr("Start"));
+    if (running)
+        m_hitFiles->hide();
 }
 
 void RescueDialog::reject()

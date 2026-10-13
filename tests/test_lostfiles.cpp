@@ -15,6 +15,8 @@
 #include "../src/usb/imagesource.h"
 #include "../src/lostfiles/lookcopies.h"
 #include "../src/lostfiles/lostfs.h"
+#include "../src/backup/rescuecopy.h"
+#include "../src/lostfiles/hitfiles.h"
 #include "../src/lostfiles/lostscan.h"
 #include "../src/lostfiles/lostsource.h"
 #include "../src/lostfiles/mediainfo.h"
@@ -4072,8 +4074,55 @@ void placeNames()
     report(places::readRings(bad).isEmpty() && places::readRings("nonsense").isEmpty(), QStringLiteral("places: a damaged map file reads as nothing"));
 }
 
+// Which files the bad spots hit: a rescue map with unread bytes inside one file, and in free space.
+void hitFiles()
+{
+    RescueMap small(1000);
+    small.set(0, 1000, RescueMap::Finished);
+    small.set(100, 50, RescueMap::Bad);
+    small.set(400, 10, RescueMap::NonTried);
+    report(small.missing(0, 1000) == 60 && small.missing(120, 300) == 40 && small.missing(150, 250) == 0 && small.missing(990, 100) == 0,
+           QStringLiteral("rescue map: the bytes not read in a stretch are counted"));
+    const QString data = QStringLiteral(SOURCE_DIR "/tests/data/lostfs/");
+    for (const QString &name : {QStringLiteral("fat32"), QStringLiteral("ntfs")}) {
+        const QByteArray image = unpackImage(data + name + QStringLiteral(".img.zst"));
+        auto source = lost::Source::fromMemory(image);
+        const QVector<lost::Found> found = quickScan(source);
+        const auto kept = std::find_if(found.cbegin(), found.cend(), [](const lost::Found &f) { return f.name == QLatin1String("photo.jpg") && !f.deleted && !f.extents.isEmpty(); });
+        if (kept == found.cend()) {
+            report(false, QStringLiteral("%1: a file to hit").arg(name));
+            continue;
+        }
+        RescueMap map(quint64(image.size()));
+        map.set(0, map.size(), RescueMap::Finished);
+        std::atomic<bool> cancel{false};
+        report(hitfiles::find(*source, map, cancel).hits.isEmpty(), QStringLiteral("%1: a copy read whole: no file hit").arg(name));
+        // 1000 bytes in the middle of photo.jpg, and 4 KB in the image's last stretch (free space).
+        const lost::Extent first = kept->extents.first();
+        map.set(first.start + 512, 1000, RescueMap::Bad);
+        map.set(map.size() - 8192, 4096, RescueMap::Bad);
+        const hitfiles::Report r = hitfiles::find(*source, map, cancel);
+        const bool onlyIt = std::all_of(r.hits.cbegin(), r.hits.cend(), [](const hitfiles::Hit &h) { return h.deleted || h.path.endsWith(QLatin1String("/photo.jpg")); });
+        const auto hit = std::find_if(r.hits.cbegin(), r.hits.cend(), [](const hitfiles::Hit &h) { return h.path.endsWith(QLatin1String("/photo.jpg")); });
+        report(hit != r.hits.cend() && hit->missing == 1000 && onlyIt && r.inFiles == 1000 && r.missing == 5096 && r.volumes.size() == 1,
+               QStringLiteral("%1: the file with unread bytes is named, with how much, and free space hits nothing").arg(name),
+               hit == r.hits.cend() ? QStringLiteral("not found") : QStringLiteral("%1, %2 of %3 in files").arg(hit->missing).arg(r.inFiles).arg(r.missing));
+        const QString text = hitfiles::asText(r, QStringLiteral("copy.img"));
+        report(text.contains(QLatin1String("photo.jpg")) && text.contains(QLatin1String("came off whole: 1")), QStringLiteral("%1: the list as text").arg(name));
+    }
+    // Not a file system it can read: said, not guessed.
+    auto blank = lost::Source::fromMemory(QByteArray(1 << 20, '\0'));
+    RescueMap map(1 << 20);
+    map.set(0, 1 << 20, RescueMap::Finished);
+    map.set(4096, 4096, RescueMap::Bad);
+    std::atomic<bool> cancel{false};
+    const hitfiles::Report none = hitfiles::find(*blank, map, cancel);
+    report(none.hits.isEmpty() && none.unread.size() == 1 && none.missing == 4096, QStringLiteral("hit files: no file system it can read is said so"), none.unread.value(0));
+}
+
 void lostFilesTests()
 {
+    hitFiles();
     previewQueue();
     viewerMessages();
     lookCopies();

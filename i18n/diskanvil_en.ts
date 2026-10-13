@@ -114,7 +114,7 @@
 <context>
     <name>CloneDialog</name>
     <message numerus="yes">
-        <location filename="../src/backup/copydialogs.cpp" line="239"/>
+        <location filename="../src/backup/copydialogs.cpp" line="241"/>
         <source>Copies %n partition(s), %1 in all. Takes %2.</source>
         <translation>
             <numerusform>Copies %n partition, %1 in all. Takes %2.</numerusform>
@@ -176,6 +176,23 @@
         <translation>
             <numerusform>%n item couldn't be deleted.</numerusform>
             <numerusform>%n items couldn't be deleted.</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
+    <name>HitFilesDialog</name>
+    <message numerus="yes">
+        <source>%n file(s) have blank parts in the copy (%1 of what wasn&apos;t read).</source>
+        <translation>
+            <numerusform>%n file have blank parts in the copy (%1 of what wasn't read).</numerusform>
+            <numerusform>%n files have blank parts in the copy (%1 of what wasn't read).</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <source>%n other file(s) came off whole.</source>
+        <translation>
+            <numerusform>%n other file came off whole.</numerusform>
+            <numerusform>%n other files came off whole.</numerusform>
         </translation>
     </message>
 </context>
@@ -589,7 +606,7 @@
 <context>
     <name>RescueCopy</name>
     <message numerus="yes">
-        <location filename="../src/backup/rescuecopy.cpp" line="247"/>
+        <location filename="../src/backup/rescuecopy.cpp" line="262"/>
         <source>Resting for %n second(s) after %1 read errors in a row</source>
         <translation>
             <numerusform>Resting for %n second after %1 read errors in a row</numerusform>
@@ -920,6 +937,17 @@
         <translation>
             <numerusform>%n drive, all there</numerusform>
             <numerusform>%n drives, all there</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
+    <name>hitfiles</name>
+    <message numerus="yes">
+        <location filename="../src/lostfiles/hitfiles.cpp" line="76"/>
+        <source>Reading %1: %n file(s) hit so far</source>
+        <translation>
+            <numerusform>Reading %1: %n file hit so far</numerusform>
+            <numerusform>Reading %1: %n files hit so far</numerusform>
         </translation>
     </message>
 </context>

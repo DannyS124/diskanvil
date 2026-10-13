@@ -17,6 +17,8 @@
 #include "../src/lostfiles/lookcloserdialog.h"
 #include "../src/tools/filesdialog.h"
 #include "../src/tools/writeprotectdialog.h"
+#include "../src/lostfiles/hitfilesdialog.h"
+#include "../src/lostfiles/lostscan.h"
 #include "../src/lostfiles/viewerhost.h"
 #include "../src/usb/liveonpc.h"
 #include "../src/usb/liveonpcdialog.h"
@@ -5201,6 +5203,39 @@ void filmTools()
 
 // Files, DiskAnvil Live's file window: copying, a second copy kept beside the first, moving,
 // deleting, and a folder that can't be changed.
+void hitFilesWindow()
+{
+    // A copy of a FAT32 stick whose map says 1000 bytes of photo.jpg couldn't be read.
+    QString error;
+    const std::unique_ptr<ImageSource> packed = ImageSource::open(QStringLiteral(SOURCE_DIR "/tests/data/lostfs/fat32.img.zst"), &error);
+    QByteArray image;
+    QByteArray buffer(1 << 20, Qt::Uninitialized);
+    for (qint64 n; packed && (n = packed->read(buffer.data(), buffer.size())) > 0;)
+        image += buffer.left(n);
+    auto copy = lost::Source::fromMemory(image);
+    std::atomic<bool> cancel{false};
+    hitfiles::Report all;
+    RescueMap map(quint64(image.size()));
+    map.set(0, map.size(), RescueMap::Finished);
+    lost::QuickScan scan(copy);
+    QVector<lost::Found> found;
+    QObject::connect(&scan, &lost::QuickScan::found, [&found](const QVector<lost::Found> &files) { found += files; });
+    scan.run();
+    for (const lost::Found &f : found)
+        if (f.name == QLatin1String("photo.jpg") && !f.deleted && !f.extents.isEmpty())
+            map.set(f.extents.first().start + 100, 1000, RescueMap::Bad);
+    HitFilesDialog dialog(copy, map, QStringLiteral("stick.img"), QDir::tempPath() + QStringLiteral("/list.txt"));
+    dialog.show();
+    waitUntil([&dialog] { return dialog.done(); }, 30000);
+    auto *list = dialog.findChild<QTreeWidget *>(QStringLiteral("hits"));
+    report(dialog.done() && list && list->topLevelItemCount() == 1 && list->topLevelItem(0)->text(0).endsWith(QLatin1String("photo.jpg"))
+               && list->topLevelItem(0)->text(2) == formatSize(1000),
+           QStringLiteral("hit files: the one file with unread parts is listed, with how much"),
+           list && list->topLevelItemCount() ? list->topLevelItem(0)->text(0) + QLatin1Char(' ') + list->topLevelItem(0)->text(2) : QStringLiteral("none"));
+    const QString summary = dialog.findChild<QLabel *>()->text();
+    report(summary.contains(QLatin1String("came off whole")), QStringLiteral("hit files: the rest is said to have come off whole"), summary);
+}
+
 void writeProtectedWindow()
 {
     // A pretend stick: Linux's read-only flag on it, and its partition open read-only. Nothing real is looked at or run.
@@ -7055,7 +7090,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"lookcloser", lookCloserWindow}, {"files", filesWindow}, {"writeprotected", writeProtectedWindow}, {"enhance", enhanceWindow}, {"film", filmTools}, {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"lookcloser", lookCloserWindow}, {"files", filesWindow}, {"writeprotected", writeProtectedWindow}, {"hitfiles", hitFilesWindow}, {"enhance", enhanceWindow}, {"film", filmTools}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},

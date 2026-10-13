@@ -191,7 +191,9 @@ private:
     QLabel *m_warning;
     QLineEdit *m_confirm;
     QPushButton *m_start;
+    QPushButton *m_hitFiles; // which files the unread parts were in, once there's a map with some
     QThread *m_thread = nullptr;
     RescueCopy *m_job = nullptr;
+    void showHitFiles();
     bool m_running = false;
 };

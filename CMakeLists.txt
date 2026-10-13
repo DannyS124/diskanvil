@@ -62,6 +62,7 @@ add_library(diskanvil-core STATIC
     src/lostfiles/lostscan.cpp src/lostfiles/lostscan.h
     src/lostfiles/timeline.cpp src/lostfiles/timeline.h
     src/lostfiles/lostfs.cpp src/lostfiles/lostfs.h src/lostfiles/lostntfs.cpp src/lostfiles/lostraw.h
+    src/lostfiles/hitfiles.cpp src/lostfiles/hitfiles.h
     src/lostfiles/unpack.cpp src/lostfiles/unpack.h
     src/lostfiles/places.cpp src/lostfiles/places.h
     src/lostfiles/foundreport.cpp src/lostfiles/foundreport.h
@@ -180,6 +181,7 @@ add_library(diskanvil-ui STATIC
     src/lostfiles/lookcloserdialog.cpp src/lostfiles/lookcloserdialog.h
     src/tools/filesdialog.cpp src/tools/filesdialog.h
     src/tools/writeprotectdialog.cpp src/tools/writeprotectdialog.h
+    src/lostfiles/hitfilesdialog.cpp src/lostfiles/hitfilesdialog.h
     src/lostfiles/timelinedialog.cpp src/lostfiles/timelinedialog.h
     src/lostfiles/placesmap.cpp src/lostfiles/placesmap.h
     src/lostfiles/enhance.cpp src/lostfiles/enhance.h
