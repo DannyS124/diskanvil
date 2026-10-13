@@ -55,6 +55,7 @@
 #include "productkeydialog.h"
 #include "windowspicker.h"
 #include "activitydialog.h"
+#include "filesdialog.h"
 #include "lookcloserdialog.h"
 #include "driversdialog.h"
 #include "theme.h"
@@ -801,6 +802,19 @@ void MainWindow::createActions()
         auto *look = new LookCloserDialog(this);
         look->setAttribute(Qt::WA_DeleteOnClose);
         look->show();
+    });
+
+    m_files = new QAction(themeIcon("system-file-manager", "folder"), tr("&Files…"), this);
+    m_files->setObjectName(QStringLiteral("files"));
+    m_files->setToolTip(tr("DiskAnvil Live's file window: drives and folders, copy, move, rename, delete"));
+    connect(m_files, &QAction::triggered, this, [this] {
+        if (!isVisible()) { // opened on its own (the dock's Files): DiskAnvil closes with it
+            FilesDialog(m_udisks, this).exec();
+            return;
+        }
+        auto *files = new FilesDialog(m_udisks, this);
+        files->setAttribute(Qt::WA_DeleteOnClose);
+        files->show();
     });
 
     m_productKey = new QAction(themeIcon("dialog-password", "document-encrypt"), tr("Windows Product &Key…"), this);
@@ -1860,6 +1874,7 @@ bool MainWindow::openTool(const QString &name)
                                              {QStringLiteral("product-key"), m_productKey},
                                              {QStringLiteral("drivers"), m_drivers}, {QStringLiteral("activity"), m_activity},
                                              {QStringLiteral("look-closer"), m_lookCloser},
+                                             {QStringLiteral("files"), m_files},
                                              {QStringLiteral("boot-menu"), m_bootMenu},
                                              {QStringLiteral("linux-boot"), m_linuxBoot},
                                              {QStringLiteral("make-room"), m_winRe},

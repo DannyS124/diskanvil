@@ -74,6 +74,7 @@ private:
     QAction *m_drivers = nullptr;
     QAction *m_activity = nullptr;
     QAction *m_lookCloser = nullptr;
+    QAction *m_files = nullptr; // DiskAnvil Live's file window (the dock's Files): a PC has its own
     QAction *m_saveFiles = nullptr;
     QAction *m_bootMenu = nullptr;
     QAction *m_linuxBoot = nullptr;

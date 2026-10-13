@@ -15,6 +15,7 @@
 #include "../src/tools/remotehelp.h"
 #include "../src/tools/remotehelpdialog.h"
 #include "../src/lostfiles/lookcloserdialog.h"
+#include "../src/tools/filesdialog.h"
 #include "../src/lostfiles/viewerhost.h"
 #include "../src/usb/liveonpc.h"
 #include "../src/usb/liveonpcdialog.h"
@@ -5065,6 +5066,51 @@ void filmTools()
 #endif
 }
 
+// Files, DiskAnvil Live's file window: copying, a second copy kept beside the first, moving,
+// deleting, and a folder that can't be changed.
+void filesWindow()
+{
+    UDisks udisks;
+    QTemporaryDir a, b;
+    QDir(a.path()).mkpath(QStringLiteral("album/2024"));
+    for (const QString &name : {QStringLiteral("album/2024/photo.jpg"), QStringLiteral("notes.txt")}) {
+        QFile f(a.filePath(name));
+        if (f.open(QIODevice::WriteOnly))
+            f.write(QByteArray(300000, 'x'));
+    }
+    FilesDialog files(&udisks);
+    files.setAnswerYes(true);
+    files.go(a.path());
+    files.copyPaths({a.filePath(QStringLiteral("album")), a.filePath(QStringLiteral("notes.txt"))}, false);
+    files.go(b.path());
+    const bool first = files.paste();
+    report(first && QFileInfo(b.filePath(QStringLiteral("album/2024/photo.jpg"))).size() == 300000 && QFileInfo::exists(b.filePath(QStringLiteral("notes.txt"))),
+           QStringLiteral("files: a folder and a file are copied, everything in them too"));
+    files.paste();
+    report(QFileInfo::exists(b.filePath(QStringLiteral("notes (2).txt"))) && QFileInfo::exists(b.filePath(QStringLiteral("album (2)/2024/photo.jpg"))),
+           QStringLiteral("files: copied again, the second copy is kept beside the first (nothing overwritten)"));
+    QDir(b.path()).mkdir(QStringLiteral("moved"));
+    files.copyPaths({b.filePath(QStringLiteral("notes (2).txt"))}, true);
+    files.go(b.filePath(QStringLiteral("moved")));
+    files.paste();
+    report(QFileInfo::exists(b.filePath(QStringLiteral("moved/notes (2).txt"))) && !QFileInfo::exists(b.filePath(QStringLiteral("notes (2).txt"))),
+           QStringLiteral("files: moved, it's only where it went"));
+    // Into itself is refused.
+    files.copyPaths({b.filePath(QStringLiteral("album"))}, false);
+    files.go(b.filePath(QStringLiteral("album/2024")));
+    report(!files.paste(), QStringLiteral("files: a folder isn't copied into itself"));
+    // A folder that can't be changed: nothing that would change it is offered.
+    QDir(b.path()).mkdir(QStringLiteral("locked"));
+    QFile::setPermissions(b.filePath(QStringLiteral("locked")), QFileDevice::ReadOwner | QFileDevice::ExeOwner);
+    files.go(b.filePath(QStringLiteral("locked")));
+    QAction *newFolder = nullptr;
+    for (QAction *act : files.findChildren<QAction *>())
+        if (act->text() == QLatin1String("New Folder"))
+            newFolder = act;
+    report(newFolder && !newFolder->isEnabled() && files.findChild<QLabel *>() , QStringLiteral("files: in a folder that can't be changed, New Folder isn't offered"));
+    QFile::setPermissions(b.filePath(QStringLiteral("locked")), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+}
+
 // Look Closer: pictures and films anywhere, in the viewer, with Next and Previous through them.
 void lookCloserWindow()
 {
@@ -6816,7 +6862,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"lookcloser", lookCloserWindow}, {"enhance", enhanceWindow}, {"film", filmTools}, {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"lookcloser", lookCloserWindow}, {"files", filesWindow}, {"enhance", enhanceWindow}, {"film", filmTools}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},

@@ -161,6 +161,25 @@
     </message>
 </context>
 <context>
+    <name>FilesDialog</name>
+    <message numerus="yes">
+        <location filename="../src/tools/filesdialog.cpp" line="383"/>
+        <source>Delete %n item(s) for good? There&apos;s no recycle bin here.</source>
+        <translation>
+            <numerusform>Delete %n item for good? There's no recycle bin here.</numerusform>
+            <numerusform>Delete %n items for good? There's no recycle bin here.</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/tools/filesdialog.cpp" line="391"/>
+        <source>%n item(s) couldn&apos;t be deleted.</source>
+        <translation>
+            <numerusform>%n item couldn't be deleted.</numerusform>
+            <numerusform>%n items couldn't be deleted.</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
     <name>LookCloserDialog</name>
     <message numerus="yes">
         <location filename="../src/lostfiles/lookcloserdialog.cpp" line="157"/>
@@ -293,7 +312,7 @@
 <context>
     <name>MainWindow</name>
     <message numerus="yes">
-        <location filename="../src/app/mainwindow.cpp" line="1420"/>
+        <location filename="../src/app/mainwindow.cpp" line="1439"/>
         <source>%n more drive(s) need a look; their health is in the Status column.</source>
         <translation>
             <numerusform>%n more drive need a look; their health is in the Status column.</numerusform>
@@ -301,7 +320,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/app/mainwindow.cpp" line="2720"/>
+        <location filename="../src/app/mainwindow.cpp" line="2740"/>
         <source>%n add-on command(s) still running. Stop them and quit?</source>
         <translation>
             <numerusform>%n add-on command still running. Stop them and quit?</numerusform>
