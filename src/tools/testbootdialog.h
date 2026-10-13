@@ -28,6 +28,7 @@ public:
 
 private:
     void start();
+    void memoryChanged();
 
     UDisks *m_udisks;
     Disk m_disk;
@@ -38,4 +39,6 @@ private:
     QSpinBox *m_memory;
     QLabel *m_note;
     QPushButton *m_start;
+    QString m_baseNote; // what's said about the drive, before what's said about memory
+    qint64 m_free = -1; // MiB free on the PC when the window opened
 };

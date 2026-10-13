@@ -31,6 +31,10 @@ QString qemu();
 // UEFI's firmware for it (OVMF): its code, and the settings file to start from.
 bool ovmf(QString *code, QString *vars);
 bool kvm(); // whether the PC's own virtualization can be used (fast) or it's emulated (slow)
+// Memory free for it now, MiB (what can be used without pushing other programs out); -1 not known.
+qint64 freeMemoryMiB();
+// What to give it by default: half of what's free, 1 to 4 GiB, in steps of 512 MiB.
+int suggestedMemoryMiB(qint64 freeMiB);
 
 // QEMU's format name for an image file, from what's in it.
 QString formatOf(const QString &path);

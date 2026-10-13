@@ -64,9 +64,11 @@ TestBootDialog::TestBootDialog(UDisks *udisks, const Disk *disk, const QString &
         uefi = looksUefi(first);
     }
     (uefi ? m_uefi : m_bios)->setChecked(true);
+    // Half of what's free now, so the PC itself keeps enough to run on.
+    m_free = testboot::freeMemoryMiB();
     m_memory->setRange(512, 16384);
     m_memory->setSingleStep(512);
-    m_memory->setValue(2048);
+    m_memory->setValue(testboot::suggestedMemoryMiB(m_free));
     m_memory->setSuffix(tr(" MB"));
     m_note->setWordWrap(true);
     m_note->setObjectName(QStringLiteral("note"));
@@ -84,7 +86,24 @@ TestBootDialog::TestBootDialog(UDisks *udisks, const Disk *disk, const QString &
         mounted = mounted || !v.mounts().isEmpty();
     if (mounted)
         notes << tr("Some of its partitions are in use here: what starts in the window may look damaged. The drive itself isn't changed.");
-    m_note->setText(notes.join(QStringLiteral("<br>")));
+    // Something to start: a UEFI system partition, a BIOS boot partition, a partition marked to
+    // start from, or one with a system's own file system on it. A drive with only data partitions
+    // (exFAT, FAT) would only show the firmware with nothing to do.
+    if (m_isDisk && !m_disk.volumes.isEmpty()) {
+        static const QStringList systems = {QStringLiteral("ntfs"), QStringLiteral("ext2"), QStringLiteral("ext3"), QStringLiteral("ext4"),
+                                            QStringLiteral("btrfs"), QStringLiteral("xfs"), QStringLiteral("f2fs"), QStringLiteral("crypto_LUKS"),
+                                            QStringLiteral("LVM2_member"), QStringLiteral("BitLocker"), QStringLiteral("iso9660")};
+        bool startable = false;
+        for (const Volume &v : m_disk.volumes)
+            startable = startable || v.isEfi || (v.partFlags & 0x80) || systems.contains(v.effectiveFsType())
+                     || v.partType.compare(QLatin1String("21686148-6449-6e6f-744e-656564454649"), Qt::CaseInsensitive) == 0;
+        if (!startable)
+            notes << redText(tr("This drive doesn't look like it has a system on it to start: its partitions only hold files (no "
+                                "Windows or Linux, no UEFI system partition). The window would likely just show the firmware with "
+                                "nothing to do. Is it the right drive? It can still be tried."));
+    }
+    m_baseNote = notes.join(QStringLiteral("<br>"));
+    m_note->setText(m_baseNote);
 
     auto *firmware = new QVBoxLayout;
     firmware->addWidget(m_uefi);
@@ -95,6 +114,7 @@ TestBootDialog::TestBootDialog(UDisks *udisks, const Disk *disk, const QString &
     auto *close = new QPushButton(tr("Close"));
     connect(close, &QPushButton::clicked, this, &QDialog::accept);
     connect(m_start, &QPushButton::clicked, this, &TestBootDialog::start);
+    connect(m_memory, &QSpinBox::valueChanged, this, &TestBootDialog::memoryChanged);
     auto *buttons = new QHBoxLayout;
     buttons->addStretch();
     buttons->addWidget(m_start);
@@ -107,7 +127,23 @@ TestBootDialog::TestBootDialog(UDisks *udisks, const Disk *disk, const QString &
     layout->addLayout(form);
     layout->addWidget(m_note);
     layout->addLayout(buttons);
+    memoryChanged();
     resize(520, sizeHint().height());
+}
+
+void TestBootDialog::memoryChanged()
+{
+    // More than the PC has free pushes everything else out to swap, and the whole PC crawls.
+    QString text = m_baseNote;
+    const bool tooMuch = m_free >= 0 && m_memory->value() > m_free - 512;
+    if (m_free >= 0)
+        text += (text.isEmpty() ? QString() : QStringLiteral("<br>"))
+              + (tooMuch ? redText(tr("This PC has only %1 free right now: giving it %2 would slow the whole PC to a crawl. Give it less, or "
+                                      "close some programs first.")
+                                       .arg(formatSize(quint64(m_free) * 1024 * 1024), formatSize(quint64(m_memory->value()) * 1024 * 1024)))
+                         : tr("%1 free on this PC now.").arg(formatSize(quint64(m_free) * 1024 * 1024)).toHtmlEscaped());
+    m_note->setText(text);
+    m_start->setEnabled(!tooMuch && !testboot::qemu().isEmpty());
 }
 
 void TestBootDialog::start()

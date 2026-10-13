@@ -3007,6 +3007,17 @@ void testBootWindow()
         dialog.show();
         auto *bios = dialog.findChildren<QRadioButton *>().value(1);
         report(bios && bios->isChecked(), QStringLiteral("test boot: an MBR drive is started the BIOS way"));
+        auto *memory = dialog.findChild<QSpinBox *>();
+        const qint64 free = testboot::freeMemoryMiB();
+        report(memory && memory->value() == testboot::suggestedMemoryMiB(free) && memory->value() >= 1024 && memory->value() <= 4096,
+               QStringLiteral("test boot: memory from what's free (half of it, 1 to 4 GiB)"), QStringLiteral("%1 of %2 MiB free").arg(memory ? memory->value() : 0).arg(free));
+        if (memory && free > 2048) {
+            memory->setValue(int(free + 512));
+            report(!dialog.findChild<QPushButton *>(QStringLiteral("start"))->isEnabled()
+                       && dialog.findChild<QLabel *>(QStringLiteral("note"))->text().contains(QLatin1String("slow the whole PC")),
+                   QStringLiteral("test boot: more memory than the PC has free can't be given, and it says why"));
+            memory->setValue(testboot::suggestedMemoryMiB(free));
+        }
         dialog.findChild<QPushButton *>(QStringLiteral("start"))->click();
         auto *note = dialog.findChild<QLabel *>(QStringLiteral("note"));
         QByteArray said;
@@ -3035,6 +3046,36 @@ void testBootWindow()
     cleanUpLoop(udisks, loopPath);
 }
 
+
+// Try Starting It on a drive that only holds files (one exFAT partition, like a data drive): it
+// says there's likely nothing to start, before anything is started.
+void testBootDataDrive()
+{
+    if (testboot::qemu().isEmpty())
+        return;
+    QTemporaryDir dir;
+    const QString image = dir.filePath(QStringLiteral("data.img"));
+    sh(QStringLiteral("truncate"), {QStringLiteral("-s"), QStringLiteral("64M"), image});
+    sh(QStringLiteral("sh"), {QStringLiteral("-c"), QStringLiteral("printf 'label: dos\nstart=2048, type=7\n' | sfdisk -q '%1'").arg(image)});
+    const QString loopPath = userLoop(image);
+    if (loopPath.isEmpty())
+        return report(false, QStringLiteral("test boot: a loop device holds a data drive"));
+    UDisks udisks;
+    udisks.setInteractive(false);
+    const Disk *disk = nullptr;
+    waitUntil([&] {
+        udisks.refresh();
+        disk = udisks.diskByPath(loopPath);
+        return disk && !disk->volumes.isEmpty();
+    }, 15000);
+    if (disk) {
+        TestBootDialog dialog(&udisks, disk, QString());
+        auto *note = dialog.findChild<QLabel *>(QStringLiteral("note"));
+        report(note && note->text().contains(QLatin1String("doesn't look like it has a system")),
+               QStringLiteral("test boot: a drive with only files on it is said to likely have nothing to start"), note ? note->text().left(120) : QString());
+    }
+    cleanUpLoop(udisks, loopPath);
+}
 // Start Other PCs from This One: the HTTP server hands out live/ and nothing else; the helper
 // (dry run, stand-in files and address) writes the right menu and dnsmasq command; the window
 // lists the PCs as dnsmasq (a stand-in) and the server see them, and Stop ends it.
@@ -7532,7 +7573,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"lookcloser", lookCloserWindow}, {"files", filesWindow}, {"writeprotected", writeProtectedWindow}, {"hitfiles", hitFilesWindow}, {"whycrash", whyCrashWindow}, {"winstart", winStartWindow}, {"stillok", stillOkWindow}, {"burnin", burnInWindow}, {"writespeed", writeSpeedWindow}, {"opal", opalWindow}, {"hardware", hardwareWindow}, {"holders", holdersWindow}, {"enhance", enhanceWindow}, {"film", filmTools}, {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"testbootdata", testBootDataDrive}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"lookcloser", lookCloserWindow}, {"files", filesWindow}, {"writeprotected", writeProtectedWindow}, {"hitfiles", hitFilesWindow}, {"whycrash", whyCrashWindow}, {"winstart", winStartWindow}, {"stillok", stillOkWindow}, {"burnin", burnInWindow}, {"writespeed", writeSpeedWindow}, {"opal", opalWindow}, {"hardware", hardwareWindow}, {"holders", holdersWindow}, {"enhance", enhanceWindow}, {"film", filmTools}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},

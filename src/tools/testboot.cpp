@@ -13,9 +13,16 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 
+#include <algorithm>
+
 #ifndef Q_OS_WIN
 #include <fcntl.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+#else
+#include <windows.h>
 #endif
 
 namespace testboot {
@@ -112,6 +119,30 @@ QStringList arguments(const Options &o, const QString &ovmfCode, const QString &
     return args;
 }
 
+qint64 freeMemoryMiB()
+{
+#ifdef Q_OS_WIN
+    MEMORYSTATUSEX m {};
+    m.dwLength = sizeof m;
+    return GlobalMemoryStatusEx(&m) ? qint64(m.ullAvailPhys / (1024 * 1024)) : -1;
+#else
+    QFile f(QStringLiteral("/proc/meminfo"));
+    if (!f.open(QIODevice::ReadOnly))
+        return -1;
+    for (const QByteArray &line : f.readAll().split('\n'))
+        if (line.startsWith("MemAvailable:"))
+            return line.mid(13).trimmed().split(' ').value(0).toLongLong() / 1024;
+    return -1;
+#endif
+}
+
+int suggestedMemoryMiB(qint64 freeMiB)
+{
+    if (freeMiB < 0)
+        return 2048;
+    return int(std::clamp<qint64>(freeMiB / 2 / 512 * 512, 1024, 4096));
+}
+
 QProcess *start(const Options &given, QObject *parent, QString *error)
 {
     Options o = given;
@@ -155,6 +186,16 @@ QProcess *start(const Options &given, QObject *parent, QString *error)
     }
 #endif
     QObject::connect(process, &QProcess::finished, process, [dir] { delete dir; });
+    // Below everything else, for the processor and the drives, so the PC itself stays responsive
+    // while Windows starts in it (it reads a lot at once).
+#ifdef Q_OS_WIN
+    process->setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments *args) { args->flags |= BELOW_NORMAL_PRIORITY_CLASS; });
+#else
+    process->setChildProcessModifier([] {
+        ::setpriority(PRIO_PROCESS, 0, 10);
+        ::syscall(SYS_ioprio_set, 1 /* IOPRIO_WHO_PROCESS */, 0, (2 << 13) | 7 /* best effort, lowest */);
+    });
+#endif
     process->start(program, arguments(o, code, varsCopy, kvm()));
     const bool started = process->waitForStarted(10000);
 #ifndef Q_OS_WIN
