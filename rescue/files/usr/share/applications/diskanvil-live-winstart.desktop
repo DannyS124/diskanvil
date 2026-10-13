@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Windows Won't Start
+Comment=Stuck on an update, or a damaged registry file
+Exec=diskanvil --open windows-start
+Icon=diskanvil-live-winstart
+Categories=System;

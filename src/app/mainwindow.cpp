@@ -18,6 +18,7 @@
 #include "writeblock.h"
 #include "holdersdialog.h"
 #include "whycrashdialog.h"
+#include "winstartdialog.h"
 #include "writeprotectdialog.h"
 #include "remotehelpdialog.h"
 #include "netbootdialog.h"
@@ -835,6 +836,23 @@ void MainWindow::createActions()
             WhyCrashDialog(picker.root(), this).exec();
     });
 
+    m_winStart = new QAction(themeIcon("diskanvil-live-winstart", "system-reboot"), tr("Windows Won't &Start…"), this);
+    m_winStart->setObjectName(QStringLiteral("winStart"));
+    m_winStart->setToolTip(tr("A Windows stuck on an update (\"Undoing changes\" for ever), or with a damaged registry file: the update "
+                              "undone, the registry file put back from an earlier day"));
+    connect(m_winStart, &QAction::triggered, this, [this] {
+        WindowsPicker picker(m_udisks, true, tr("Which Windows? It's mounted so it can be fixed."), this);
+        if (picker.exec() != QDialog::Accepted)
+            return;
+        if (picker.running()) {
+            QMessageBox::information(this, tr("Windows Won't Start"),
+                                     tr("This Windows is running, so it started: these fixes are for a Windows on another drive, or "
+                                        "for this one from DiskAnvil Live."));
+            return;
+        }
+        WinStartDialog(m_udisks, picker.root(), this).exec();
+    });
+
     m_lookCloser = new QAction(themeIcon("diskanvil-live-lookcloser", "zoom-in"), tr("&Look Closer at Pictures and Films…"), this);
     m_lookCloser->setObjectName(QStringLiteral("lookCloser"));
     m_lookCloser->setToolTip(tr("Any picture or film in the viewer, with its tools: Enhance and its profiles, Pick a Spot, Straighten, "
@@ -1065,13 +1083,14 @@ void MainWindow::createActions()
         tools->addAction(m_drivers);
         tools->addAction(m_activity);
         tools->addAction(m_whyCrash);
+        tools->addAction(m_winStart);
         tools->addAction(m_lookCloser);
         tools->addAction(m_productKey);
         tools->addAction(m_certificates);
         tools->addSeparator();
 #ifdef Q_OS_WIN
         // Quick Fixes' tools, and add-ons (Linux commands), aren't in the Windows version yet.
-        tools->addActions({m_saveFiles, m_virusScan, m_bootMenu, m_drivers, m_activity, m_whyCrash, m_lookCloser, m_winRe, m_productKey, m_certificates, m_usage, m_cleanup, m_optimize, m_snapshots});
+        tools->addActions({m_saveFiles, m_virusScan, m_bootMenu, m_drivers, m_activity, m_whyCrash, m_winStart, m_lookCloser, m_winRe, m_productKey, m_certificates, m_usage, m_cleanup, m_optimize, m_snapshots});
         return;
 #endif
         tools->addAction(themeIcon("tools-wizard", "system-run"), tr("&Quick Fixes…"), this, [this] {
@@ -1916,6 +1935,7 @@ bool MainWindow::openTool(const QString &name)
                                              {QStringLiteral("check-stick"), m_checkStick},
                                              {QStringLiteral("write-protected"), m_writeProtected},
                                              {QStringLiteral("why-crash"), m_whyCrash},
+                                             {QStringLiteral("windows-start"), m_winStart},
                                              {QStringLiteral("lost-files"), m_findFiles},
                                              {QStringLiteral("virus-scan"), m_virusScan},
                                              {QStringLiteral("save-files"), m_saveFiles},

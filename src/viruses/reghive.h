@@ -66,7 +66,10 @@ public:
     // missing or damaged): it's read as it is, and may be out of date.
     bool maybeBehind() const { return m_behind; }
     // Changes can be written: Windows closed this hive properly and nothing came from the logs.
-    bool canWrite() const { return m_clean && m_recovered == 0; }
+    bool canWrite() const { return (m_clean && m_recovered == 0) || m_whole; }
+    // A hive the logs brought up to date can still be changed, when it's then written out whole
+    // with saveWhole() (its old logs set aside: they'd be put back onto it). False when it's behind.
+    bool changeWhole();
 
     Key root() const { return m_root; }
     // A key under `from` (the root if 0), by its path: names with "\" between them, any case.
@@ -87,6 +90,8 @@ public:
     bool removeValue(Key key, const QString &name, QString *error);
     // Writes the changed parts back to `path`, the file it was opened from.
     bool save(const QString &path, QString *error);
+    // The whole hive as it is now, up to date and closed properly, to a new file at `path`.
+    bool saveWhole(const QString &path, QString *error) const;
     const QByteArray &bytes() const { return m_data; } // the whole hive as it is now (the tests)
 
     // Damaged structures met while reading (a broken list, a record out of bounds...).
@@ -113,6 +118,7 @@ private:
     Key m_root = 0;
     bool m_clean = false;
     bool m_behind = false;
+    bool m_whole = false;
     int m_recovered = 0;
     mutable int m_problems = 0;
     QVector<QPair<quint32, quint32>> m_changed; // file offset, size

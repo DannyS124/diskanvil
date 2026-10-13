@@ -320,6 +320,9 @@ QVector<HomeWindow::Tile> HomeWindow::allTiles() const
     add(QStringLiteral("whycrash"), QStringLiteral("diskanvil-live-whycrash"), QStringLiteral("dialog-warning"), tr("Why Did It Crash?"),
         tr("A Windows that keeps blue-screening or restarting: why"))
         .tool = QStringLiteral("why-crash");
+    add(QStringLiteral("winstart"), QStringLiteral("diskanvil-live-winstart"), QStringLiteral("system-reboot"), tr("Windows Won't Start"),
+        tr("Stuck on an update, or a damaged registry file"))
+        .tool = QStringLiteral("windows-start");
     add(QStringLiteral("testdisk"), QStringLiteral("diskanvil-live-testdisk"), QStringLiteral("drive-harddisk"), tr("Find Lost Partitions"),
         tr("Partitions that disappeared, and boot sectors (TestDisk)"))
         .desktopId = QStringLiteral("diskanvil-live-testdisk");

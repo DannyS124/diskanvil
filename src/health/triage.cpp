@@ -185,8 +185,10 @@ Advice advise(Symptom symptom, const Drive &d)
                       "your bookmarks).")
                 << tr("Then see to Windows: if the PC says there's no system to start, Boot Menu Entries shows whether Windows' "
                       "entry is gone or moved; if it stopped starting just after something was installed, Windows Drivers and "
-                      "Services shows the newest drivers, and switches the suspect off.");
-        a.tools << QStringLiteral("rescue-usb") << QStringLiteral("save-files") << QStringLiteral("boot-menu") << QStringLiteral("drivers");
+                      "Services shows the newest drivers, and switches the suspect off; if it's stuck on an update (\"Undoing changes\") or says a "
+                      "registry file is damaged, Windows Won't Start undoes the update or puts the file back from an earlier day.");
+        a.tools << QStringLiteral("rescue-usb") << QStringLiteral("save-files") << QStringLiteral("boot-menu") << QStringLiteral("drivers")
+                << QStringLiteral("windows-start");
         break;
     }
     return a;

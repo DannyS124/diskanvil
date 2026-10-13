@@ -38,6 +38,7 @@
 #include "../src/lostfiles/viewer.h"
 #include "../src/lostfiles/vdisk.h"
 #include "../src/lostfiles/vshadow.h"
+#include "../src/viruses/winstart.h"
 
 #include <QBuffer>
 #include <QCryptographicHash>
@@ -4120,6 +4121,30 @@ void hitFiles()
     report(none.hits.isEmpty() && none.unread.size() == 1 && none.missing == 4096, QStringLiteral("hit files: no file system it can read is said so"), none.unread.value(0));
 }
 
+// Windows Won't Start's earlier registry files come out of shadow copies by the file's NTFS
+// record: notes.txt stands in for a hive here, and each copy gives back what Windows read.
+void shadowFileByRecord()
+{
+    const QString data = QStringLiteral(SOURCE_DIR "/tests/data/lostfs/");
+    const SparseImage image = SparseImage::unpackImage(data + QStringLiteral("ntfs-shadow.img.zst"));
+    const auto source = image.source();
+    QString why;
+    quint64 record = 0;
+    if (const auto copy = vss::open(source, {0, source->size()}, 0, &why)) {
+        for (quint64 r = 16; r < 4096 && !record; ++r)
+            if (lost::ntfsFile(copy, r, QStringLiteral("notes.txt"), &why))
+                record = r;
+    }
+    QString problem;
+    const QVector<winstart::EarlierCopy> copies = winstart::shadowCopies(source, {{QStringLiteral("notes.txt"), record}}, &problem);
+    QStringList got;
+    for (const winstart::EarlierCopy &c : copies)
+        got << QString::fromLatin1(QCryptographicHash::hash(c.read(&why), QCryptographicHash::Sha256).toHex().left(12));
+    // Newest first.
+    report(record > 0 && got == QStringList{QStringLiteral("7bc91f55580a"), QStringLiteral("c6b6687f042b")},
+           QStringLiteral("windows won't start: a file read from each shadow copy by its record, newest first"), got.join(QLatin1Char(' ')));
+}
+
 void lostFilesTests()
 {
     hitFiles();
@@ -4136,6 +4161,7 @@ void lostFilesTests()
     fileSystems(dir.path());
     fileSystemFuzz();
     shadowCopies();
+    shadowFileByRecord();
     shadowCopyFuzz();
     virtualDisks();
     virtualDiskFuzz();

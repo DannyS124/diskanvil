@@ -19,6 +19,7 @@
 #include "../src/tools/writeprotectdialog.h"
 #include "../src/lostfiles/hitfilesdialog.h"
 #include "../src/viruses/whycrashdialog.h"
+#include "../src/viruses/winstartdialog.h"
 #include "../src/tools/holdersdialog.h"
 #include "../src/lostfiles/lostscan.h"
 #include "../src/lostfiles/viewerhost.h"
@@ -5244,6 +5245,77 @@ void holdersWindow()
         dialog.grab().save(qEnvironmentVariable("DISKANVIL_SHOTS") + QStringLiteral("/holders.png"));
 }
 
+// Windows Won't Start on a pretend Windows drive: the waiting update seen and undone, the damaged
+// SOFTWARE marked and put back from RegBack, the damaged one kept aside.
+void winStartWindow()
+{
+    QTemporaryDir dir;
+    const QString data = QStringLiteral(SOURCE_DIR "/tests/data/registry/");
+    const QString root = dir.filePath(QStringLiteral("drive"));
+    const auto put = [](const QString &path, const QByteArray &bytes) {
+        QDir().mkpath(QFileInfo(path).absolutePath());
+        QFile f(path);
+        return f.open(QIODevice::WriteOnly) && f.write(bytes) == bytes.size();
+    };
+    const auto read = [](const QString &path) {
+        QFile f(path);
+        return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
+    };
+    QByteArray broken = read(data + QStringLiteral("software.hiv"));
+    for (qsizetype i = 4096 + 32; i < broken.size(); i += 61)
+        broken[i] = char(broken[i] ^ 0x5A);
+    put(root + QStringLiteral("/Windows/WinSxS/pending.xml"), "<PendingTransaction><Transactions><Poq><CreateFile/><DeleteFile/></Poq></Transactions></PendingTransaction>");
+    put(root + QStringLiteral("/Windows/System32/config/COMPONENTS"), read(data + QStringLiteral("components.hiv")));
+    put(root + QStringLiteral("/Windows/System32/config/SOFTWARE"), broken);
+    put(root + QStringLiteral("/Windows/System32/config/SYSTEM"), read(data + QStringLiteral("system.hiv")));
+    put(root + QStringLiteral("/Windows/System32/config/RegBack/SOFTWARE"), read(data + QStringLiteral("software.hiv")));
+    QStringList boxes;
+    Answerer answerer;
+    answerer.answer = [&](QWidget *modal) {
+        if (auto *box = qobject_cast<QMessageBox *>(modal)) {
+            boxes << box->text();
+            if (QAbstractButton *yes = box->button(QMessageBox::Yes))
+                yes->click();
+            else
+                box->accept();
+            return true;
+        }
+        return false;
+    };
+    WinStartDialog dialog(nullptr, root);
+    int looked = 0;
+    QObject::connect(&dialog, &WinStartDialog::looked, [&looked] { ++looked; });
+    dialog.show();
+    waitUntil([&] { return looked > 0; }, 30000);
+    auto *update = dialog.findChild<QLabel *>(QStringLiteral("update"));
+    auto *undo = dialog.findChild<QPushButton *>(QStringLiteral("undo"));
+    auto *hives = dialog.findChild<QTreeWidget *>(QStringLiteral("hives"));
+    auto *copies = dialog.findChild<QListWidget *>(QStringLiteral("copies"));
+    report(update && update->text().contains(QLatin1String("2 step")) && undo && undo->isEnabled(),
+           QStringLiteral("windows won't start: the waiting update is shown, and can be undone"), update ? update->text().left(90) : QString());
+    report(hives && hives->currentItem() && hives->currentItem()->text(0) == QLatin1String("SOFTWARE") && hives->currentItem()->text(1).startsWith(QLatin1String("It can't be read"))
+               && copies && copies->count() == 1,
+           QStringLiteral("windows won't start: the damaged SOFTWARE is picked, with RegBack's copy"),
+           hives && hives->currentItem() ? hives->currentItem()->text(1).left(60) : QString());
+    if (qEnvironmentVariableIsSet("DISKANVIL_SHOTS"))
+        dialog.grab().save(qEnvironmentVariable("DISKANVIL_SHOTS") + QStringLiteral("/windows-wont-start.png"));
+    if (undo)
+        undo->click();
+    waitUntil([&] { return looked > 1; }, 30000);
+    report(update && update->text().startsWith(QLatin1String("No update")) && !QFile::exists(root + QStringLiteral("/Windows/WinSxS/pending.xml")),
+           QStringLiteral("windows won't start: undone through the window"), update ? update->text().left(60) : QString());
+    if (copies && copies->count() == 1) {
+        copies->setCurrentRow(0);
+        if (auto *back = dialog.findChild<QPushButton *>(QStringLiteral("putBack")))
+            back->click();
+    }
+    waitUntil([&] { return looked > 2; }, 30000);
+    const QStringList aside = QDir(root + QStringLiteral("/Windows/System32/config")).entryList({QStringLiteral("SOFTWARE.before-diskanvil-*")}, QDir::Files);
+    report(hives && hives->topLevelItemCount() > 1 && hives->topLevelItem(1)->text(1) == QLatin1String("Fine") && aside.size() == 1,
+           QStringLiteral("windows won't start: SOFTWARE put back through the window, the damaged one kept"),
+           (hives && hives->topLevelItemCount() > 1 ? hives->topLevelItem(1)->text(1) : QString()) + QLatin1Char(' ') + boxes.join(QStringLiteral(" | ")).left(200));
+}
+
 void whyCrashWindow()
 {
     whycrash::Report r;
@@ -7170,7 +7242,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"lookcloser", lookCloserWindow}, {"files", filesWindow}, {"writeprotected", writeProtectedWindow}, {"hitfiles", hitFilesWindow}, {"whycrash", whyCrashWindow}, {"holders", holdersWindow}, {"enhance", enhanceWindow}, {"film", filmTools}, {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"lookcloser", lookCloserWindow}, {"files", filesWindow}, {"writeprotected", writeProtectedWindow}, {"hitfiles", hitFilesWindow}, {"whycrash", whyCrashWindow}, {"winstart", winStartWindow}, {"holders", holdersWindow}, {"enhance", enhanceWindow}, {"film", filmTools}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},

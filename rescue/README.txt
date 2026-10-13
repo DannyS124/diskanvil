@@ -48,6 +48,7 @@ Make a Windows USB      a stick that installs Windows 10 or 11
 Check a USB Stick       bad spots, and sticks that are smaller than they say
 Write-Protected Drive   a stick or card that won't let you save: why, and the fix
 Why Did It Crash?       a Windows that keeps blue-screening or restarting: why
+Windows Won't Start     stuck on an update, or a damaged registry file
 Copy This Stick         another stick like this one. After "Copy to memory" the stick
                         isn't mounted: mount it in DiskAnvil first
 Programs                Files, Web Browser, Terminal, Task Manager, Text Editor, Save Logs

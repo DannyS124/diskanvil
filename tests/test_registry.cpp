@@ -10,6 +10,7 @@
 #include "testkit.h"
 
 #include "../src/viruses/reghive.h"
+#include "../src/viruses/winstart.h"
 
 #include <QDir>
 #include <QFile>
@@ -316,6 +317,120 @@ void realHives()
     }
 }
 
+void writeAll(const QString &path, const QByteArray &bytes)
+{
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QFile f(path);
+    if (f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        f.write(bytes);
+}
+
+// Windows Won't Start: a stuck update undone (pending.xml set aside, COMPONENTS' pointers to it
+// taken out, from a hive Windows closed, from one only its log brings up to date, and refused
+// for one that's behind), the registry files checked, and one put back from RegBack.
+void winStart(const QString &top)
+{
+    const QByteArray components = readAll(kData + QStringLiteral("components.hiv"));
+    const QByteArray pending = "<?xml version='1.0' encoding='utf-8'?>\n<PendingTransaction Version=\"3.1\"><Transactions>"
+                               "<Checkpoint/><Poq><HardlinkFile source=\"a\" destination=\"b\"/><CreateFile path=\"c\"/>"
+                               "<DeleteFile path=\"d\"/></Poq></Transactions></PendingTransaction>\n";
+    auto windows = [&](const QString &name, const QByteArray &hive, const QVector<QByteArray> &logs) {
+        const QString root = top + QLatin1Char('/') + name;
+        writeAll(root + QStringLiteral("/Windows/WinSxS/pending.xml"), pending);
+        writeAll(root + QStringLiteral("/Windows/System32/config/COMPONENTS"), hive);
+        for (int i = 0; i < logs.size(); ++i)
+            writeAll(root + QStringLiteral("/Windows/System32/config/COMPONENTS.LOG%1").arg(i + 1), logs[i]);
+        writeAll(root + QStringLiteral("/windows/system32/config/SOFTWARE"), readAll(kData + QStringLiteral("software.hiv")));
+        return root;
+    };
+    auto pointersLeft = [](const QString &file, QString *rest) {
+        reg::Hive h;
+        QString error;
+        if (!h.open(file, &error))
+            return -1;
+        int n = 0;
+        for (const QString &p : {QStringLiteral("PendingXmlIdentifier"), QStringLiteral("NextQueueEntryIndex"), QStringLiteral("AdvancedInstallersNeedResolving")})
+            n += h.value(h.root(), p).has_value();
+        const auto v = h.value(h.key(QStringLiteral("CanonicalData\\Catalogs")), QStringLiteral("x"));
+        *rest = h.value(h.root(), QStringLiteral("StoreFormatVersion")).value_or(reg::Value()).text() + QLatin1Char(' ')
+              + (v ? v->text() : QString()) + QLatin1Char(' ') + QString::number(h.problems()) + (h.canWrite() ? QStringLiteral(" closed") : QString());
+        return n;
+    };
+
+    // Closed properly.
+    const QString clean = windows(QStringLiteral("clean"), components, {});
+    const winstart::StuckUpdate s = winstart::findStuckUpdate(clean);
+    report(s.stuck && s.pointers.size() == 3 && s.actions == 3 && s.problem.isEmpty(),
+           QStringLiteral("windows won't start: a waiting update is seen, with what points at it"),
+           QStringLiteral("%1 %2 %3").arg(s.pointers.join(QLatin1Char(','))).arg(s.actions).arg(s.problem));
+    QStringList done;
+    QString error, rest;
+    const bool undone = winstart::undoStuckUpdate(clean, &done, &error);
+    const QStringList kept = QDir(clean + QStringLiteral("/Windows/WinSxS")).entryList(QDir::Files);
+    const QStringList config = QDir(clean + QStringLiteral("/Windows/System32/config")).entryList({QStringLiteral("COMPONENTS*")}, QDir::Files);
+    report(undone && kept.size() == 1 && kept[0].startsWith(QLatin1String("pending.xml.before-diskanvil-")) && config.size() == 2
+               && pointersLeft(clean + QStringLiteral("/Windows/System32/config/COMPONENTS"), &rest) == 0 && rest == QLatin1String("0.0.0.6 7 0 closed"),
+           QStringLiteral("windows won't start: undone, pending.xml and COMPONENTS kept, the pointers out, the rest as it was"),
+           error + QLatin1Char(' ') + kept.join(QLatin1Char(',')) + QLatin1Char(' ') + rest);
+    report(!winstart::findStuckUpdate(clean).stuck, QStringLiteral("windows won't start: nothing's waiting afterwards"));
+
+    // Not closed, but its log has everything: written out whole, its logs set aside.
+    QByteArray dirty = components;
+    setBase(dirty, 21, 20, 0);
+    QByteArray log = components.left(512);
+    setBase(log, 30, 30, 6);
+    log += logEntry(components, {0}, 30);
+    const QString fromLog = windows(QStringLiteral("fromlog"), dirty, {log});
+    done.clear();
+    const bool wholeOk = winstart::undoStuckUpdate(fromLog, &done, &error);
+    const QStringList logsNow = QDir(fromLog + QStringLiteral("/Windows/System32/config")).entryList({QStringLiteral("COMPONENTS.LOG1"), QStringLiteral("COMPONENTS.LOG2")}, QDir::Files);
+    report(wholeOk && logsNow.isEmpty() && pointersLeft(fromLog + QStringLiteral("/Windows/System32/config/COMPONENTS"), &rest) == 0
+               && rest == QLatin1String("0.0.0.6 7 0 closed"),
+           QStringLiteral("windows won't start: a COMPONENTS its log brings up to date is written out whole, closed, its log set aside"),
+           error + QLatin1Char(' ') + rest + QLatin1Char(' ') + done.join(QStringLiteral("; ")));
+
+    // Not closed, and no log: nothing is changed, and Microsoft's way is given.
+    const QString behind = windows(QStringLiteral("behind"), dirty, {});
+    error.clear();
+    const bool refused = !winstart::undoStuckUpdate(behind, &done, &error);
+    report(refused && error.contains(QLatin1String("revertpendingactions")) && QFile::exists(behind + QStringLiteral("/Windows/WinSxS/pending.xml")),
+           QStringLiteral("windows won't start: a COMPONENTS that's behind isn't touched, and DISM's way is given"), error.left(80));
+
+    report(winstart::dismArguments(QStringLiteral("E:/")) == QStringList{QStringLiteral("/Image:E:\\"), QStringLiteral("/Cleanup-Image"), QStringLiteral("/RevertPendingActions")},
+           QStringLiteral("windows won't start: DISM is pointed at that Windows"));
+
+    // The registry files: fine, damaged, missing; RegBack's copies (an empty one isn't one); one put back.
+    const QString hives = top + QStringLiteral("/hives");
+    const QString cfg = hives + QStringLiteral("/Windows/System32/config/");
+    const QByteArray system = readAll(kData + QStringLiteral("system.hiv"));
+    QByteArray broken = readAll(kData + QStringLiteral("software.hiv"));
+    for (qsizetype i = 4096 + 32; i < broken.size(); i += 61)
+        broken[i] = char(broken[i] ^ 0x5A);
+    writeAll(cfg + QStringLiteral("SYSTEM"), system);
+    writeAll(cfg + QStringLiteral("SOFTWARE"), broken);
+    writeAll(cfg + QStringLiteral("SOFTWARE.LOG1"), QByteArray(512, '\0'));
+    writeAll(cfg + QStringLiteral("DEFAULT"), QByteArray());
+    writeAll(cfg + QStringLiteral("RegBack/SOFTWARE"), readAll(kData + QStringLiteral("software.hiv")));
+    writeAll(cfg + QStringLiteral("RegBack/SYSTEM"), QByteArray());
+    const QVector<winstart::HiveCheck> checks = winstart::checkHives(hives);
+    QStringList states;
+    for (const winstart::HiveCheck &c : checks)
+        states << c.name + QLatin1Char('=') + QString::number(int(c.state));
+    report(states == QStringList{QStringLiteral("SYSTEM=0"), QStringLiteral("SOFTWARE=3"), QStringLiteral("SAM=4"), QStringLiteral("SECURITY=4"), QStringLiteral("DEFAULT=3")},
+           QStringLiteral("windows won't start: each registry file checked: fine, damaged, missing, empty"), states.join(QLatin1Char(' ')));
+    const QVector<winstart::EarlierCopy> regBack = winstart::regBackCopies(hives);
+    report(regBack.size() == 1 && regBack[0].hive == QLatin1String("SOFTWARE"), QStringLiteral("windows won't start: RegBack's copies, not its empty ones"));
+    done.clear();
+    error.clear();
+    report(!winstart::putBack(hives, QStringLiteral("SYSTEM"), broken, &done, &error) && QFile(cfg + QStringLiteral("SYSTEM")).size() == system.size(),
+           QStringLiteral("windows won't start: a damaged copy isn't put back"), error.left(60));
+    const bool back = !regBack.isEmpty() && winstart::putBack(hives, QStringLiteral("SOFTWARE"), regBack[0].read(&error), &done, &error);
+    const QStringList set = QDir(cfg).entryList({QStringLiteral("SOFTWARE.*")}, QDir::Files);
+    report(back && winstart::checkHive(cfg + QStringLiteral("SOFTWARE"), QStringLiteral("SOFTWARE")).state == winstart::HiveState::Fine && set.size() == 2
+               && set.filter(QStringLiteral("before-diskanvil")).size() == 2,
+           QStringLiteral("windows won't start: SOFTWARE put back from RegBack, the damaged one and its log kept aside"), set.join(QLatin1Char(',')) + error);
+}
+
 } // namespace
 
 void registryTests()
@@ -326,4 +441,5 @@ void registryTests()
     logs();
     damaged();
     realHives();
+    winStart(dir.path());
 }

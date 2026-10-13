@@ -276,6 +276,7 @@ bool Hive::load(QByteArray hive, const QVector<QByteArray> &logs, QString *error
     m_root = 0;
     m_recovered = 0;
     m_behind = false;
+    m_whole = false;
     m_problems = 0;
     m_changed.clear();
     if (m_data.size() < kBase || !m_data.startsWith("regf")) {
@@ -706,6 +707,28 @@ bool Hive::save(const QString &path, QString *error)
         return false;
     }
     m_changed.clear();
+    return true;
+}
+
+bool Hive::changeWhole()
+{
+    if (m_behind || !validBase(m_data))
+        return false;
+    m_whole = true;
+    return true;
+}
+
+bool Hive::saveWhole(const QString &path, QString *error) const
+{
+    QByteArray out = m_data.left(kBase + qsizetype(m_binsSize));
+    char *base = out.data();
+    put32(base + 8, u32(base + 4)); // closed properly: both sequence numbers the same
+    put32(base + 508, checksum(base));
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::NewOnly) || f.write(out) != out.size() || !blockio::flushFile(f)) {
+        *error = f.errorString();
+        return false;
+    }
     return true;
 }
 

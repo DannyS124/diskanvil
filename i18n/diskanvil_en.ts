@@ -329,7 +329,7 @@
 <context>
     <name>MainWindow</name>
     <message numerus="yes">
-        <location filename="../src/app/mainwindow.cpp" line="1487"/>
+        <location filename="../src/app/mainwindow.cpp" line="1506"/>
         <source>%n more drive(s) need a look; their health is in the Status column.</source>
         <translation>
             <numerusform>%n more drive need a look; their health is in the Status column.</numerusform>
@@ -337,7 +337,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/app/mainwindow.cpp" line="2796"/>
+        <location filename="../src/app/mainwindow.cpp" line="2816"/>
         <source>%n add-on command(s) still running. Stop them and quit?</source>
         <translation>
             <numerusform>%n add-on command still running. Stop them and quit?</numerusform>
@@ -908,6 +908,17 @@
     </message>
 </context>
 <context>
+    <name>WinStartDialog</name>
+    <message numerus="yes">
+        <location filename="../src/viruses/winstartdialog.cpp" line="151"/>
+        <source>: %n step(s) listed since %1</source>
+        <translation>
+            <numerusform>: %n step listed since %1</numerusform>
+            <numerusform>: %n steps listed since %1</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
     <name>activity</name>
     <message numerus="yes">
         <location filename="../src/viruses/activity.cpp" line="184"/>
@@ -1167,6 +1178,17 @@
         <translation>
             <numerusform>%n event in the log were damaged and skipped.</numerusform>
             <numerusform>%n events in the log were damaged and skipped.</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
+    <name>winstart</name>
+    <message numerus="yes">
+        <location filename="../src/viruses/winstart.cpp" line="97"/>
+        <source>It&apos;s damaged: %n broken record(s) were found in it.</source>
+        <translation>
+            <numerusform>It's damaged: %n broken record were found in it.</numerusform>
+            <numerusform>It's damaged: %n broken records were found in it.</numerusform>
         </translation>
     </message>
 </context>
