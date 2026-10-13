@@ -49,6 +49,7 @@ Check a USB Stick       bad spots, and sticks that are smaller than they say
 Write-Protected Drive   a stick or card that won't let you save: why, and the fix
 Why Did It Crash?       a Windows that keeps blue-screening or restarting: why
 Windows Won't Start     stuck on an update, or a damaged registry file
+Are My Files Still OK?  photos and papers checked for going bad over the years
 Copy This Stick         another stick like this one. After "Copy to memory" the stick
                         isn't mounted: mount it in DiskAnvil first
 Programs                Files, Web Browser, Terminal, Task Manager, Text Editor, Save Logs

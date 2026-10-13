@@ -180,6 +180,81 @@
     </message>
 </context>
 <context>
+    <name>FingerprintsDialog</name>
+    <message numerus="yes">
+        <location filename="../src/tools/fingerprintsdialog.cpp" line="115"/>
+        <source>Fingerprints of %n file(s) were recorded on %1. Check Now compares them with the files as they are.</source>
+        <translation>
+            <numerusform>Fingerprints of %n file were recorded on %1. Check Now compares them with the files as they are.</numerusform>
+            <numerusform>Fingerprints of %n files were recorded on %1. Check Now compares them with the files as they are.</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/tools/fingerprintsdialog.cpp" line="136"/>
+        <source>%n file(s) went bad. Recording again takes them as they are now, damage and all: put good copies back first. Record again anyway?</source>
+        <translation>
+            <numerusform>%n file went bad. Recording again takes them as they are now, damage and all: put good copies back first. Record again anyway?</numerusform>
+            <numerusform>%n files went bad. Recording again takes them as they are now, damage and all: put good copies back first. Record again anyway?</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/tools/fingerprintsdialog.cpp" line="225"/>
+        <source>%n file(s) couldn&apos;t be read, so they have none: they&apos;re listed below.</source>
+        <translation>
+            <numerusform>%n file couldn't be read, so they have none: they're listed below.</numerusform>
+            <numerusform>%n files couldn't be read, so they have none: they're listed below.</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/tools/fingerprintsdialog.cpp" line="229"/>
+        <source>%n file(s) the same</source>
+        <translation>
+            <numerusform>%n file the same</numerusform>
+            <numerusform>%n files the same</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/tools/fingerprintsdialog.cpp" line="231"/>
+        <source>%n damaged</source>
+        <translation>
+            <numerusform>%n damaged</numerusform>
+            <numerusform>%n damaged</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/tools/fingerprintsdialog.cpp" line="233"/>
+        <source>%n can&apos;t be read</source>
+        <translation>
+            <numerusform>%n can't be read</numerusform>
+            <numerusform>%n can't be read</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/tools/fingerprintsdialog.cpp" line="235"/>
+        <source>%n missing</source>
+        <translation>
+            <numerusform>%n missing</numerusform>
+            <numerusform>%n missing</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/tools/fingerprintsdialog.cpp" line="237"/>
+        <source>%n changed by being saved since</source>
+        <translation>
+            <numerusform>%n changed by being saved since</numerusform>
+            <numerusform>%n changed by being saved since</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/tools/fingerprintsdialog.cpp" line="239"/>
+        <source>%n new</source>
+        <translation>
+            <numerusform>%n new</numerusform>
+            <numerusform>%n new</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
     <name>HitFilesDialog</name>
     <message numerus="yes">
         <source>%n file(s) have blank parts in the copy (%1 of what wasn&apos;t read).</source>
@@ -329,7 +404,7 @@
 <context>
     <name>MainWindow</name>
     <message numerus="yes">
-        <location filename="../src/app/mainwindow.cpp" line="1506"/>
+        <location filename="../src/app/mainwindow.cpp" line="1514"/>
         <source>%n more drive(s) need a look; their health is in the Status column.</source>
         <translation>
             <numerusform>%n more drive need a look; their health is in the Status column.</numerusform>
@@ -337,7 +412,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/app/mainwindow.cpp" line="2816"/>
+        <location filename="../src/app/mainwindow.cpp" line="2825"/>
         <source>%n add-on command(s) still running. Stop them and quit?</source>
         <translation>
             <numerusform>%n add-on command still running. Stop them and quit?</numerusform>

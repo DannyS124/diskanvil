@@ -308,6 +308,14 @@ REGISTRY_ERROR): SYSTEM, SOFTWARE, SAM, SECURITY and DEFAULT are each checked, a
 an earlier day, from Windows' own RegBack copies (Windows stopped making them in 2018 unless told to) or from System
 Restore's shadow copies. That undoes what changed since, so only do it for one that's damaged. Nothing is deleted:
 whatever is changed is kept next to itself, renamed <tt>.before-diskanvil-&lt;date&gt;</tt>.</p>
+<p><b>Are My Files Still OK?</b> (Tools menu, and a tile in DiskAnvil Live): photos, videos and papers kept for years
+can go bad without anyone touching them: a failing drive, a bad copy, "bit rot". The file is still there with the
+same date, but what's in it changed. Record Fingerprints reads every file in a folder once and keeps a SHA-256
+fingerprint of each in the folder itself, as <tt>DiskAnvil fingerprints.sha256</tt> (the format sha256sum reads, so
+<tt>sha256sum -c</tt> checks it too); a folder that can't be written to has them kept in DiskAnvil's own folder.
+Check Now later says, worst first, which files are damaged (changed though their date didn't: nobody saved them),
+can't be read, are missing, were changed by being saved since, or are new. Several damaged at once usually means the
+drive is failing. Put damaged files back from another copy before recording again.</p>
 <p><b>What This PC Did</b> (Tools menu): what system is on a drive and what it was used for, read from its own records
 without starting it. On Windows: the version, the PC's name and owner, when it was installed and last shut down, the USB
 drives plugged in (with their serial numbers and when), programs run (how often and when last), files and folders

@@ -20,6 +20,7 @@
 #include "../src/lostfiles/hitfilesdialog.h"
 #include "../src/viruses/whycrashdialog.h"
 #include "../src/viruses/winstartdialog.h"
+#include "../src/tools/fingerprintsdialog.h"
 #include "../src/tools/holdersdialog.h"
 #include "../src/lostfiles/lostscan.h"
 #include "../src/lostfiles/viewerhost.h"
@@ -5316,6 +5317,53 @@ void winStartWindow()
            (hives && hives->topLevelItemCount() > 1 ? hives->topLevelItem(1)->text(1) : QString()) + QLatin1Char(' ') + boxes.join(QStringLiteral(" | ")).left(200));
 }
 
+// Are My Files Still OK? on a folder: fingerprints recorded through the window, a file damaged
+// with its date kept, and Check Now putting it first, in red.
+void stillOkWindow()
+{
+    QTemporaryDir dir;
+    const QString top = dir.filePath(QStringLiteral("Pictures"));
+    QDir().mkpath(top);
+    const QDateTime old = QDateTime::currentDateTime().addDays(-100);
+    for (const char *name : {"a.jpg", "b.jpg", "c.jpg"}) {
+        QFile f(top + QLatin1Char('/') + QLatin1String(name));
+        f.open(QIODevice::WriteOnly);
+        f.write(QByteArray(name).repeated(5000));
+        f.close();
+        f.open(QIODevice::ReadWrite);
+        f.setFileTime(old, QFileDevice::FileModificationTime);
+    }
+    FingerprintsDialog dialog(top);
+    int ran = 0;
+    QObject::connect(&dialog, &FingerprintsDialog::ran, [&ran] { ++ran; });
+    dialog.show();
+    auto *check = dialog.findChild<QPushButton *>(QStringLiteral("check"));
+    auto *record = dialog.findChild<QPushButton *>(QStringLiteral("record"));
+    report(record && record->isEnabled() && check && !check->isEnabled(), QStringLiteral("still ok: a new folder can only be recorded"));
+    if (record)
+        record->click();
+    waitUntil([&] { return ran > 0; }, 30000);
+    {
+        QFile f(top + QStringLiteral("/b.jpg"));
+        f.open(QIODevice::ReadWrite);
+        f.seek(100);
+        f.write("!");
+        f.close();
+        f.open(QIODevice::ReadWrite);
+        f.setFileTime(old, QFileDevice::FileModificationTime);
+    }
+    if (check)
+        check->click();
+    waitUntil([&] { return ran > 1; }, 30000);
+    auto *results = dialog.findChild<QTreeWidget *>(QStringLiteral("results"));
+    auto *state = dialog.findChild<QLabel *>(QStringLiteral("state"));
+    report(results && results->topLevelItemCount() == 1 && results->topLevelItem(0)->text(1) == QLatin1String("b.jpg")
+               && results->topLevelItem(0)->text(0) == QLatin1String("Damaged") && state && state->text().startsWith(QLatin1String("2 files the same, 1 damaged")),
+           QStringLiteral("still ok: the damaged file is found, the others the same"), state ? state->text().left(80) : QString());
+    if (qEnvironmentVariableIsSet("DISKANVIL_SHOTS"))
+        dialog.grab().save(qEnvironmentVariable("DISKANVIL_SHOTS") + QStringLiteral("/still-ok.png"));
+}
+
 void whyCrashWindow()
 {
     whycrash::Report r;
@@ -7242,7 +7290,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"lookcloser", lookCloserWindow}, {"files", filesWindow}, {"writeprotected", writeProtectedWindow}, {"hitfiles", hitFilesWindow}, {"whycrash", whyCrashWindow}, {"winstart", winStartWindow}, {"holders", holdersWindow}, {"enhance", enhanceWindow}, {"film", filmTools}, {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"lookcloser", lookCloserWindow}, {"files", filesWindow}, {"writeprotected", writeProtectedWindow}, {"hitfiles", hitFilesWindow}, {"whycrash", whyCrashWindow}, {"winstart", winStartWindow}, {"stillok", stillOkWindow}, {"holders", holdersWindow}, {"enhance", enhanceWindow}, {"film", filmTools}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},
