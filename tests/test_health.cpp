@@ -6,6 +6,8 @@
 
 #include "testkit.h"
 
+#include "../src/health/burnin.h"
+
 #include <unistd.h>
 
 #include "../src/health/btrfscheck.h"
@@ -766,8 +768,53 @@ void usbConnection()
     }
 }
 
+// Burn In a New Drive's verdict: counters compared from before to after (ATA by number, NVMe by
+// UDisks' key), what's bad and what only points at the cable.
+void burnInVerdict()
+{
+    auto ata = [](int id, qint64 raw) {
+        SmartAttribute a;
+        a.id = id;
+        a.rawValue = raw;
+        return a;
+    };
+    auto nvme = [](const char *key, qint64 raw) {
+        SmartAttribute a;
+        a.key = QString::fromLatin1(key);
+        a.rawValue = raw;
+        return a;
+    };
+    const QVector<SmartAttribute> before = {ata(5, 0), ata(197, 0), ata(199, 3), ata(9, 10), ata(194, 30)};
+    QVector<SmartAttribute> after = {ata(5, 0), ata(197, 0), ata(199, 3), ata(9, 40), ata(194, 45)};
+    burnin::Report r;
+    r.completed = true;
+    for (int i = 0; i < burnin::kSteps; ++i)
+        r.steps << burnin::StepResult{burnin::Step(i), burnin::StepResult::Outcome::Passed, {}, {}, {}};
+    r.changes = burnin::compare(before, after);
+    report(r.changes.isEmpty() && burnin::verdict(r) == burnin::Verdict::Passed,
+           QStringLiteral("burn-in: hours and temperature going up aren't counted, and it passes"));
+    after[2] = ata(199, 9);
+    r.changes = burnin::compare(before, after);
+    report(r.changes.size() == 1 && burnin::verdict(r) == burnin::Verdict::Warning, QStringLiteral("burn-in: new cable errors are a warning, not a fail"));
+    after[0] = ata(5, 8);
+    r.changes = burnin::compare(before, after);
+    report(r.changes.size() == 2 && burnin::verdict(r) == burnin::Verdict::Failed && r.changes[0].before == 0 && r.changes[0].after == 8,
+           QStringLiteral("burn-in: a new drive gaining reallocated sectors fails"));
+    r.changes = burnin::compare({nvme("media_errors", 0), nvme("avail_spare", 100), nvme("num_err_log_entries", 2)},
+                                {nvme("media_errors", 0), nvme("avail_spare", 97), nvme("num_err_log_entries", 5)});
+    report(r.changes.size() == 2 && burnin::verdict(r) == burnin::Verdict::Failed, QStringLiteral("burn-in: an NVMe drive's spare dropping fails; error log entries are only noted"));
+    r.changes.clear();
+    r.wrongData = 1;
+    report(burnin::verdict(r) == burnin::Verdict::Failed, QStringLiteral("burn-in: data that came back wrong fails"));
+    r.wrongData = 0;
+    r.completed = false;
+    report(burnin::verdict(r) == burnin::Verdict::NotFinished && burnin::html(r).contains(QLatin1String("Not finished")),
+           QStringLiteral("burn-in: stopped part way is said to be unfinished"));
+}
+
 void healthTests()
 {
+    burnInVerdict();
     hiddenArea();
     triageAdvice();
     driveFacts();

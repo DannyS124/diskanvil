@@ -21,6 +21,7 @@
 #include "../src/viruses/whycrashdialog.h"
 #include "../src/viruses/winstartdialog.h"
 #include "../src/tools/fingerprintsdialog.h"
+#include "../src/health/burnindialog.h"
 #include "../src/tools/holdersdialog.h"
 #include "../src/lostfiles/lostscan.h"
 #include "../src/lostfiles/viewerhost.h"
@@ -5364,6 +5365,73 @@ void stillOkWindow()
         dialog.grab().save(qEnvironmentVariable("DISKANVIL_SHOTS") + QStringLiteral("/still-ok.png"));
 }
 
+// Burn In a New Drive on a loop device: nothing starts before the name is typed; as root it runs
+// every step (the health ones skipped: a loop device has none) and passes, with a PDF.
+void burnInWindow()
+{
+    const bool asRoot = geteuid() == 0;
+    QTemporaryDir dir;
+    const QString image = dir.filePath(QStringLiteral("new.img"));
+    sh(QStringLiteral("truncate"), {QStringLiteral("-s"), QStringLiteral("64M"), image});
+    QFile backing(image);
+    QString loopPath;
+    if (backing.open(QIODevice::ReadWrite)) {
+        QDBusMessage call = QDBusMessage::createMethodCall(QStringLiteral("org.freedesktop.UDisks2"), QStringLiteral("/org/freedesktop/UDisks2/Manager"),
+                                                           QStringLiteral("org.freedesktop.UDisks2.Manager"), QStringLiteral("LoopSetup"));
+        call << QVariant::fromValue(QDBusUnixFileDescriptor(backing.handle())) << QVariantMap{{QStringLiteral("auth.no_user_interaction"), true}};
+        loopPath = QDBusConnection::systemBus().call(call, QDBus::Block, 30000).arguments().value(0).value<QDBusObjectPath>().path();
+        backing.close();
+    }
+    report(!loopPath.isEmpty(), QStringLiteral("burn-in: a loop device stands in for a new drive"));
+    if (loopPath.isEmpty())
+        return;
+    UDisks udisks;
+    udisks.setInteractive(false);
+    const Disk *drive = nullptr;
+    waitUntil([&] {
+        udisks.refresh();
+        drive = udisks.diskByPath(loopPath);
+        return drive != nullptr;
+    }, 15000);
+    const QString device = drive ? drive->device : QString();
+    BurnInDialog::allowLoopDevicesForTest = true;
+    {
+        BurnInDialog dialog(&udisks, loopPath);
+        bool ended = false;
+        QObject::connect(&dialog, &BurnInDialog::ended, [&ended] { ended = true; });
+        dialog.show();
+        auto *confirm = dialog.findChild<QLineEdit *>(QStringLiteral("confirm"));
+        auto *start = dialog.findChild<QPushButton *>(QStringLiteral("start"));
+        auto *result = dialog.findChild<QLabel *>(QStringLiteral("result"));
+        report(start && !start->isEnabled(), QStringLiteral("burn-in: nothing starts before the device name is typed"));
+        if (confirm)
+            confirm->setText(shortDevice(device));
+        if (start)
+            start->click();
+        waitUntil([&] { return ended; }, 300000);
+        const burnin::Report &r = dialog.report();
+        QStringList outcomes;
+        for (const burnin::StepResult &st : r.steps)
+            outcomes << QString::number(int(st.outcome));
+        if (asRoot)
+            report(r.completed && burnin::verdict(r) == burnin::Verdict::Passed && outcomes == QStringList{QStringLiteral("3"), QStringLiteral("3"), QStringLiteral("1"), QStringLiteral("3"), QStringLiteral("3")}
+                       && result && result->text().startsWith(QLatin1String("Passed")),
+                   QStringLiteral("burn-in: every byte written and read back, the health steps skipped, and it passes"),
+                   outcomes.join(QLatin1Char(',')) + QLatin1Char(' ') + (result ? result->text().left(100) : QString()));
+        else
+            report(burnin::verdict(r) == burnin::Verdict::Failed && r.steps.value(2).outcome == burnin::StepResult::Outcome::Failed,
+                   QStringLiteral("burn-in: as the user, the drive can't be opened for writing and it says so"), outcomes.join(QLatin1Char(',')));
+        QString error;
+        const QString pdf = dir.filePath(QStringLiteral("burnin.pdf"));
+        report(pdfreport::save(burnin::html(r), pdf, QStringLiteral("Burn-in report"), &error) && QFileInfo(pdf).size() > 1000,
+               QStringLiteral("burn-in: the report saves as a PDF"), error);
+        if (qEnvironmentVariableIsSet("DISKANVIL_SHOTS"))
+            dialog.grab().save(qEnvironmentVariable("DISKANVIL_SHOTS") + QStringLiteral("/burn-in.png"));
+    }
+    BurnInDialog::allowLoopDevicesForTest = false;
+    cleanUpLoop(udisks, loopPath);
+}
+
 void whyCrashWindow()
 {
     whycrash::Report r;
@@ -7290,7 +7358,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"lookcloser", lookCloserWindow}, {"files", filesWindow}, {"writeprotected", writeProtectedWindow}, {"hitfiles", hitFilesWindow}, {"whycrash", whyCrashWindow}, {"winstart", winStartWindow}, {"stillok", stillOkWindow}, {"holders", holdersWindow}, {"enhance", enhanceWindow}, {"film", filmTools}, {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"lookcloser", lookCloserWindow}, {"files", filesWindow}, {"writeprotected", writeProtectedWindow}, {"hitfiles", hitFilesWindow}, {"whycrash", whyCrashWindow}, {"winstart", winStartWindow}, {"stillok", stillOkWindow}, {"burnin", burnInWindow}, {"holders", holdersWindow}, {"enhance", enhanceWindow}, {"film", filmTools}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},
@@ -7338,7 +7406,7 @@ int main(int argc, char *argv[])
     }
     // As root, the ones that make their own loop device can run by themselves.
     if (!only.isEmpty()) {
-        const QVector<QPair<const char *, void (*)()>> alone = {{"stickcheck", stickCheck}, {"sdcard", sdCardFormat}, {"refresh", slowAreaRefresh}, {"stopwipe", stopWipe}, {"luksheader", luksHeaderThroughWindow}, {"nas", nasDrives}, {"tryrepair", tryRepairFirst}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"wipecert", wipeCertificate}, {"evidence", evidenceWindow}, {"writeblock", writeBlockMode}};
+        const QVector<QPair<const char *, void (*)()>> alone = {{"stickcheck", stickCheck}, {"burnin", burnInWindow}, {"sdcard", sdCardFormat}, {"refresh", slowAreaRefresh}, {"stopwipe", stopWipe}, {"luksheader", luksHeaderThroughWindow}, {"nas", nasDrives}, {"tryrepair", tryRepairFirst}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"wipecert", wipeCertificate}, {"evidence", evidenceWindow}, {"writeblock", writeBlockMode}};
         for (const auto &[name, run] : alone) {
             if (only.contains(QLatin1String(name)))
                 run();

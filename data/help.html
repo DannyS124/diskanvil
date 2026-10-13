@@ -316,6 +316,15 @@ fingerprint of each in the folder itself, as <tt>DiskAnvil fingerprints.sha256</
 Check Now later says, worst first, which files are damaged (changed though their date didn't: nobody saved them),
 can't be read, are missing, were changed by being saved since, or are new. Several damaged at once usually means the
 drive is failing. Put damaged files back from another copy before recording again.</p>
+<p><b>Burn In a New Drive</b> (Tools menu, and a tile in DiskAnvil Live): what people who keep a lot of data do with
+every new, "shucked" or second-hand drive before trusting it. The drive's own short self-test; every byte written and
+read back (Check a USB Stick's full check, so a fake drive that holds less than it says is caught too; tick the box to
+do it twice, the second time with every bit flipped); its long self-test; then its health counters compared with
+before. Sectors reallocated, pending or uncorrectable, NVMe media errors or spare space dropping fail it; cable (CRC)
+errors, command timeouts and running too hot are a warning, since they usually point at the cable, the power or the
+air. It takes hours, a day or more for a big hard drive, <b>erases the drive</b> (after its name is typed), and ends
+with a verdict and a PDF report. A drive that doesn't report its health (through some USB adapters) gets the writing
+and reading only, and the report says so.</p>
 <p><b>What This PC Did</b> (Tools menu): what system is on a drive and what it was used for, read from its own records
 without starting it. On Windows: the version, the PC's name and owner, when it was installed and last shut down, the USB
 drives plugged in (with their serial numbers and when), programs run (how often and when last), files and folders

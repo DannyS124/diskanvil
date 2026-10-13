@@ -234,8 +234,10 @@ QVector<SmartAttribute> UDisks::smartAttributes(const Disk &disk)
     QVariantMap a;
     reply.arguments().constFirst().value<QDBusArgument>() >> a;
     auto add = [&out, &a](const char *key, const QString &name, const std::function<QString(const QVariant &)> &fmt) {
-        if (a.contains(QLatin1String(key)))
-            out.push_back({0, name, -1, -1, -1, fmt(a.value(QLatin1String(key))), false});
+        if (a.contains(QLatin1String(key))) {
+            const QVariant v = a.value(QLatin1String(key));
+            out.push_back({0, name, -1, -1, -1, fmt(v), v.toLongLong(), false, QString::fromLatin1(key)});
+        }
     };
     auto number = [](const QVariant &v) { return QStringLiteral("%L1").arg(v.toLongLong()); };
     auto percent = [](const QVariant &v) { return QStringLiteral("%1%").arg(v.toInt()); };

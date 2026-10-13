@@ -50,6 +50,7 @@ Write-Protected Drive   a stick or card that won't let you save: why, and the fi
 Why Did It Crash?       a Windows that keeps blue-screening or restarting: why
 Windows Won't Start     stuck on an update, or a damaged registry file
 Are My Files Still OK?  photos and papers checked for going bad over the years
+Burn In a New Drive     a new drive worked hard once, before your files go on it
 Copy This Stick         another stick like this one. After "Copy to memory" the stick
                         isn't mounted: mount it in DiskAnvil first
 Programs                Files, Web Browser, Terminal, Task Manager, Text Editor, Save Logs

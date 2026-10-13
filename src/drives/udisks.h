@@ -224,6 +224,7 @@ struct SmartAttribute {
     QString raw; // already decoded for display
     qint64 rawValue = -1; // sector counts, decoded
     bool failing = false;
+    QString key; // NVMe: UDisks' name for it ("media_errors"), the same in every language
 };
 
 // Volume or unallocated range, in disk order.

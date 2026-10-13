@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Burn In a New Drive
+Comment=A new drive worked hard once, before your files go on it
+Exec=diskanvil --open burn-in
+Icon=diskanvil-live-burnin
+Categories=System;

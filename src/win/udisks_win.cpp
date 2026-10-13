@@ -2197,18 +2197,20 @@ QVector<SmartAttribute> UDisks::smartAttributes(const Disk &disk)
     // An NVMe drive's: the same rows Linux shows.
     const smart::NvmeHealth n = smart::nvmeHealth(raw->log);
     QVector<SmartAttribute> out;
-    auto add = [&out](const QString &name, const QString &value) { out.push_back({0, name, -1, -1, -1, value, -1, false}); };
-    add(tr("Available spare"), QStringLiteral("%1%").arg(n.availableSpare));
-    add(tr("Spare threshold"), QStringLiteral("%1%").arg(n.spareThreshold));
-    add(tr("Life used"), QStringLiteral("%1%").arg(n.percentUsed));
-    add(tr("Data read"), formatSize(n.bytesRead));
-    add(tr("Data written"), formatSize(n.bytesWritten));
-    add(tr("Power cycles"), QStringLiteral("%L1").arg(n.powerCycles));
-    add(tr("Unsafe shutdowns"), QStringLiteral("%L1").arg(n.unsafeShutdowns));
-    add(tr("Media errors"), QStringLiteral("%L1").arg(n.mediaErrors));
-    add(tr("Error log entries"), QStringLiteral("%L1").arg(n.errorLogEntries));
-    add(tr("Minutes above warning temperature"), QStringLiteral("%L1").arg(n.warningTempMinutes));
-    add(tr("Minutes above critical temperature"), QStringLiteral("%L1").arg(n.criticalTempMinutes));
+    auto add = [&out](const QString &name, const QString &value, const char *key = "", qint64 number = -1) {
+        out.push_back({0, name, -1, -1, -1, value, number, false, QString::fromLatin1(key)});
+    };
+    add(tr("Available spare"), QStringLiteral("%1%").arg(n.availableSpare), "avail_spare", n.availableSpare);
+    add(tr("Spare threshold"), QStringLiteral("%1%").arg(n.spareThreshold), "spare_thresh", n.spareThreshold);
+    add(tr("Life used"), QStringLiteral("%1%").arg(n.percentUsed), "percent_used", n.percentUsed);
+    add(tr("Data read"), formatSize(n.bytesRead), "total_data_read", qint64(n.bytesRead));
+    add(tr("Data written"), formatSize(n.bytesWritten), "total_data_written", qint64(n.bytesWritten));
+    add(tr("Power cycles"), QStringLiteral("%L1").arg(n.powerCycles), "power_cycles", qint64(n.powerCycles));
+    add(tr("Unsafe shutdowns"), QStringLiteral("%L1").arg(n.unsafeShutdowns), "unsafe_shutdowns", qint64(n.unsafeShutdowns));
+    add(tr("Media errors"), QStringLiteral("%L1").arg(n.mediaErrors), "media_errors", qint64(n.mediaErrors));
+    add(tr("Error log entries"), QStringLiteral("%L1").arg(n.errorLogEntries), "num_err_log_entries", qint64(n.errorLogEntries));
+    add(tr("Minutes above warning temperature"), QStringLiteral("%L1").arg(n.warningTempMinutes), "warning_temp_time", n.warningTempMinutes);
+    add(tr("Minutes above critical temperature"), QStringLiteral("%L1").arg(n.criticalTempMinutes), "critical_temp_time", n.criticalTempMinutes);
     QStringList sensors;
     for (const double c : n.sensorsC)
         sensors << QStringLiteral("%1 °C").arg(qRound(c));

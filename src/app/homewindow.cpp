@@ -326,6 +326,9 @@ QVector<HomeWindow::Tile> HomeWindow::allTiles() const
     add(QStringLiteral("stillok"), QStringLiteral("diskanvil-live-stillok"), QStringLiteral("security-high"), tr("Are My Files Still OK?"),
         tr("Photos and papers checked for going bad over the years"))
         .tool = QStringLiteral("still-ok");
+    add(QStringLiteral("burnin"), QStringLiteral("diskanvil-live-burnin"), QStringLiteral("drive-harddisk"), tr("Burn In a New Drive"),
+        tr("A new drive worked hard once, before your files go on it"))
+        .tool = QStringLiteral("burn-in");
     add(QStringLiteral("testdisk"), QStringLiteral("diskanvil-live-testdisk"), QStringLiteral("drive-harddisk"), tr("Find Lost Partitions"),
         tr("Partitions that disappeared, and boot sectors (TestDisk)"))
         .desktopId = QStringLiteral("diskanvil-live-testdisk");

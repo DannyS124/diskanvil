@@ -101,6 +101,25 @@
     </message>
 </context>
 <context>
+    <name>BurnInDialog</name>
+    <message numerus="yes">
+        <location filename="../src/health/burnindialog.cpp" line="282"/>
+        <source>%n counter(s) noted</source>
+        <translation>
+            <numerusform>%n counter noted</numerusform>
+            <numerusform>%n counters noted</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/health/burnindialog.cpp" line="302"/>
+        <source>%n counter(s) went up</source>
+        <translation>
+            <numerusform>%n counter went up</numerusform>
+            <numerusform>%n counters went up</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
     <name>CleanupDialog</name>
     <message numerus="yes">
         <location filename="../src/tools/systemtools.cpp" line="447"/>
@@ -404,7 +423,7 @@
 <context>
     <name>MainWindow</name>
     <message numerus="yes">
-        <location filename="../src/app/mainwindow.cpp" line="1514"/>
+        <location filename="../src/app/mainwindow.cpp" line="1525"/>
         <source>%n more drive(s) need a look; their health is in the Status column.</source>
         <translation>
             <numerusform>%n more drive need a look; their health is in the Status column.</numerusform>
@@ -412,7 +431,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/app/mainwindow.cpp" line="2825"/>
+        <location filename="../src/app/mainwindow.cpp" line="2837"/>
         <source>%n add-on command(s) still running. Stop them and quit?</source>
         <translation>
             <numerusform>%n add-on command still running. Stop them and quit?</numerusform>

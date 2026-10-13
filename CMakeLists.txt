@@ -112,6 +112,7 @@ add_library(diskanvil-core STATIC
     src/viruses/evtx.cpp src/viruses/evtx.h src/viruses/crashdump.cpp src/viruses/crashdump.h src/viruses/whycrash.cpp src/viruses/whycrash.h
     src/viruses/winstart.cpp src/viruses/winstart.h
     src/tools/fingerprints.cpp src/tools/fingerprints.h
+    src/health/burnin.cpp src/health/burnin.h
     src/backup/newids.cpp src/backup/newids.h
     src/lostfiles/filetypes.cpp src/lostfiles/filetypes.h
     src/usb/checksums.cpp src/usb/checksums.h
@@ -190,6 +191,7 @@ add_library(diskanvil-ui STATIC
     src/viruses/whycrashdialog.cpp src/viruses/whycrashdialog.h
     src/viruses/winstartdialog.cpp src/viruses/winstartdialog.h
     src/tools/fingerprintsdialog.cpp src/tools/fingerprintsdialog.h
+    src/health/burnindialog.cpp src/health/burnindialog.h
     src/lostfiles/timelinedialog.cpp src/lostfiles/timelinedialog.h
     src/lostfiles/placesmap.cpp src/lostfiles/placesmap.h
     src/lostfiles/enhance.cpp src/lostfiles/enhance.h
