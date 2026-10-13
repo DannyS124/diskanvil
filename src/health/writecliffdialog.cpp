@@ -258,9 +258,13 @@ void WriteCliffDialog::updateState()
             where = tr("The test file goes in %1 (%2 free). It's deleted at the end.").arg(QDir::toNativeSeparators(folder), formatSize(free)).toHtmlEscaped();
         }
     } else if (d) {
-        bool used = false;
-        for (const Volume &v : d->volumes)
-            used |= v.hasFilesystem || v.encrypted || !v.mounts().isEmpty();
+        // What's on it now: file systems, or just random-looking data (an encrypted drive, or one a
+        // test like Burn In wrote over, which UDisks can't tell apart).
+        bool used = false, random = false;
+        for (const Volume &v : d->volumes) {
+            random |= v.fsType == QLatin1String("crypto_unknown");
+            used |= (v.hasFilesystem || v.encrypted || !v.mounts().isEmpty()) && v.fsType != QLatin1String("crypto_unknown");
+        }
         const QString name = shortDevice(d->device);
         room = d->size;
         if (d->isSystem) {
@@ -270,6 +274,9 @@ void WriteCliffDialog::updateState()
             where = QStringLiteral("<b>%1</b>").arg(tr("Everything on %1 will be erased.").arg(name).toHtmlEscaped());
             if (used)
                 where += QStringLiteral(" ") + tr("It has partitions with something on them: make sure there's nothing you need.").toHtmlEscaped();
+            else if (random)
+                where += QStringLiteral(" ") + tr("What's on it looks like random data: an encrypted drive, or one a test like Burn In wrote "
+                                                  "over. Make sure there's nothing you need.").toHtmlEscaped();
             where += QStringLiteral("<br>") + tr("Type <b>%1</b> to confirm:").arg(name.toHtmlEscaped());
             m_confirm->setPlaceholderText(name);
             ok = ok && m_confirm->text().trimmed() == name;
