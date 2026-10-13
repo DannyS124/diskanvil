@@ -8,3 +8,7 @@ packaging/arch/*.pkg.tar.*
 packaging/staging/
 packaging/deb/out/
 rescue/out/
+
+# Crash dumps: they hold what was in memory (never committed)
+core
+core.[0-9]*
