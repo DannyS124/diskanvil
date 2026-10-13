@@ -849,6 +849,7 @@ void writeCliff()
            QStringLiteral("write speed: about 200 slices, never under 64 MiB"));
 
     for (const QString &where : {QDir::homePath() + QStringLiteral("/.cache"), QDir::tempPath()}) {
+        QDir().mkpath(where);
         QTemporaryDir dir(where + QStringLiteral("/diskanvil-test-XXXXXX"));
         const QString file = dir.filePath(QStringLiteral("speed"));
         writecliff::Writer writer(file, -1, 192ull * 1048576);
