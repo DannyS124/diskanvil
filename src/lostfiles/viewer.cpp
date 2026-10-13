@@ -45,6 +45,7 @@
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSlider>
+#include <QSpinBox>
 #include <QSplitter>
 #include <QStandardPaths>
 #include <QStackedWidget>
@@ -165,7 +166,8 @@ QByteArray encode(const Message &m)
         break;
     case Message::ExportFilm:
         s << m.speed << m.durationMs << qint32(m.settings.brightness) << qint32(m.settings.contrast) << qint32(m.settings.shadows)
-          << qint32(m.settings.sharpen) << m.settings.grey << m.settings.invert;
+          << qint32(m.settings.sharpen) << m.settings.grey << m.settings.invert << qint32(m.settings.smooth) << m.settings.deinterlace
+          << m.settings.steady;
         break;
     case Message::Profiles:
         s << quint32(m.profiles.size());
@@ -241,8 +243,10 @@ bool decode(QByteArray &buffer, Message &m, bool *bad)
         s >> m.pictureName >> m.picture;
         break;
     case Message::ExportFilm: {
-        qint32 brightness = 0, contrast = 0, shadows = 0, sharpen = 0;
-        s >> m.speed >> m.durationMs >> brightness >> contrast >> shadows >> sharpen >> m.settings.grey >> m.settings.invert;
+        qint32 brightness = 0, contrast = 0, shadows = 0, sharpen = 0, smooth = 0;
+        s >> m.speed >> m.durationMs >> brightness >> contrast >> shadows >> sharpen >> m.settings.grey >> m.settings.invert >> smooth
+          >> m.settings.deinterlace >> m.settings.steady;
+        m.settings.smooth = std::clamp(smooth, 0, 100);
         // From another process: kept to what the panel can set.
         m.speed = std::isfinite(m.speed) ? std::clamp(m.speed, 0.1, 2.0) : 1.0;
         m.settings.brightness = std::clamp(brightness, -100, 100);
@@ -373,6 +377,15 @@ public:
         viewport()->update();
     }
     std::function<void(const QRect &spot)> picked;
+    // Straightening: four corners clicked on the picture, clockwise from the top left.
+    void setCornering(bool on)
+    {
+        m_cornering = on;
+        m_corners.clear();
+        viewport()->setCursor(on ? Qt::CrossCursor : Qt::OpenHandCursor);
+        viewport()->update();
+    }
+    std::function<void(const QPolygonF &corners)> cornered;
 
     // Enhancing: the picture as it was found, and what's shown instead of it.
     const QImage &original() const { return m_image; }
@@ -427,6 +440,17 @@ protected:
             p.setPen(QPen(palette().color(QPalette::Highlight), 2));
             p.drawLine(m_line);
         }
+        if (m_cornering && !m_corners.isEmpty()) {
+            p.setRenderHint(QPainter::Antialiasing);
+            p.setPen(QPen(palette().color(QPalette::Highlight), 2));
+            QPolygonF shown;
+            const QRectF at = target();
+            for (const QPointF &c : std::as_const(m_corners))
+                shown << at.topLeft() + c * m_zoom;
+            p.drawPolyline(shown);
+            for (const QPointF &c : std::as_const(shown))
+                p.drawEllipse(c, 4, 4);
+        }
         if (m_picking && !m_box.isNull()) {
             // The rest dimmed, the spot outlined.
             QPainterPath outside;
@@ -462,6 +486,18 @@ protected:
     {
         if (event->button() == Qt::LeftButton && m_measuring) {
             m_line = QLineF(event->position(), event->position());
+            return;
+        }
+        if (event->button() == Qt::LeftButton && m_cornering) {
+            const QPointF in = (event->position() - target().topLeft()) / m_zoom;
+            m_corners << QPointF(std::clamp(in.x(), 0.0, double(m_image.width())), std::clamp(in.y(), 0.0, double(m_image.height())));
+            viewport()->update();
+            if (m_corners.size() == 4) {
+                const QPolygonF corners = m_corners;
+                setCornering(false);
+                if (cornered)
+                    cornered(corners);
+            }
             return;
         }
         if (event->button() == Qt::LeftButton && m_picking) {
@@ -590,6 +626,8 @@ private:
     bool m_measuring = false;
     QLineF m_line;
     bool m_picking = false;
+    bool m_cornering = false;
+    QPolygonF m_corners;
     bool m_spot = false;
     QPointF m_boxFrom;
     QRectF m_box;
@@ -659,7 +697,11 @@ public:
         m_brightness = slider(viewer::tr("Lighter"), -100, 100, QStringLiteral("brightness"));
         m_contrast = slider(viewer::tr("Contrast"), -100, 100, QStringLiteral("contrast"));
         m_shadows = slider(viewer::tr("Dark parts"), 0, 100, QStringLiteral("shadows"));
+        m_local = slider(viewer::tr("Local contrast"), 0, 100, QStringLiteral("localContrast"));
+        m_local->setToolTip(viewer::tr("Detail brought out in the dark and the light parts each on its own (CLAHE), as forensic video tools do"));
         m_sharpen = slider(viewer::tr("Sharpen"), 0, 100, QStringLiteral("sharpen"));
+        m_smooth = slider(viewer::tr("Smooth grain"), 0, 100, QStringLiteral("smooth"));
+        m_smooth->setToolTip(viewer::tr("Grain evened out while edges stay sharp (a bilateral filter)"));
         m_focus = slider(viewer::tr("Out of focus"), 0, 15, QStringLiteral("focus"));
         m_motion = slider(viewer::tr("Moved"), 0, 60, QStringLiteral("motion"));
         m_angle = slider(viewer::tr("Which way"), 0, 179, QStringLiteral("angle"));
@@ -676,10 +718,17 @@ public:
         m_levels = new QCheckBox(viewer::tr("Stretch levels (darkest black, lightest white)"));
         m_grey = new QCheckBox(viewer::tr("Black and white"));
         m_invert = new QCheckBox(viewer::tr("Inverted (for a negative)"));
-        for (QWidget *w : {static_cast<QWidget *>(m_grain), static_cast<QWidget *>(m_levels), static_cast<QWidget *>(m_grey), static_cast<QWidget *>(m_invert)})
+        m_deinterlace = new QCheckBox(viewer::tr("Deinterlace (comb lines from an older camera)"));
+        m_deinterlace->setObjectName(QStringLiteral("deinterlace"));
+        m_steady = new QCheckBox(viewer::tr("Steady it (in the copy saved)"));
+        m_steady->setObjectName(QStringLiteral("steady"));
+        m_steady->setToolTip(viewer::tr("A shaky film is steadied in the slowed-down copy (ffmpeg's deshake)"));
+        m_steady->hide();
+        for (QWidget *w : {static_cast<QWidget *>(m_grain), static_cast<QWidget *>(m_levels), static_cast<QWidget *>(m_grey), static_cast<QWidget *>(m_invert),
+                           static_cast<QWidget *>(m_deinterlace), static_cast<QWidget *>(m_steady)})
             layout->addWidget(w);
         QObject::connect(m_grain, &QComboBox::currentIndexChanged, this, [this] { touched(); });
-        for (QCheckBox *box : {m_levels, m_grey, m_invert})
+        for (QCheckBox *box : {m_levels, m_grey, m_invert, m_deinterlace, m_steady})
             QObject::connect(box, &QCheckBox::toggled, this, [this] { touched(); });
         // A spot: a box drawn around part of the picture (a face, a number plate), which is then
         // shown filling the window and is what the tools work on and what's saved.
@@ -695,8 +744,37 @@ public:
         spotRow->addWidget(m_pick);
         spotRow->addWidget(m_whole);
         layout->addLayout(spotRow);
+        m_straighten = new QPushButton(viewer::tr("Straighten"));
+        m_straighten->setObjectName(QStringLiteral("straighten"));
+        m_straighten->setCheckable(true);
+        m_straighten->setToolTip(viewer::tr("Click the four corners of something seen at an angle (a number plate, a sign, a page), clockwise from "
+                                            "its top left: it's made square-on"));
+        layout->addWidget(m_straighten);
+        // Stacking: the frames around a paused one, lined up on the spot and put together.
+        m_stackBox = new QWidget;
+        auto *stackRow = new QHBoxLayout(m_stackBox);
+        stackRow->setContentsMargins(0, 0, 0, 0);
+        m_stackCount = new QSpinBox;
+        m_stackCount->setObjectName(QStringLiteral("stackCount"));
+        m_stackCount->setRange(3, 60);
+        m_stackCount->setValue(15);
+        m_stackCount->setSuffix(viewer::tr(" frames"));
+        m_stackDouble = new QCheckBox(viewer::tr("Twice the size"));
+        m_stackDouble->setObjectName(QStringLiteral("stackDouble"));
+        m_stackDouble->setToolTip(viewer::tr("Made twice as big from what the frames hold between them (shift and add), not from one frame"));
+        m_stack = new QPushButton(viewer::tr("Stack Frames"));
+        m_stack->setObjectName(QStringLiteral("stackFrames"));
+        m_stack->setToolTip(viewer::tr("The frames around this one, lined up on the spot and put together: the grain evens out, and what "
+                                       "keeps still (a number plate, a face) shows more clearly than in any one frame"));
+        stackRow->addWidget(m_stackCount);
+        stackRow->addWidget(m_stackDouble);
+        stackRow->addWidget(m_stack, 1);
+        layout->addWidget(m_stackBox);
+        m_stackBox->hide();
         QObject::connect(m_pick, &QPushButton::toggled, this, [this](bool on) { if (pick) pick(on); });
         QObject::connect(m_whole, &QPushButton::clicked, this, [this] { if (whole) whole(); });
+        QObject::connect(m_straighten, &QPushButton::toggled, this, [this](bool on) { if (straightenAsked) straightenAsked(on); });
+        QObject::connect(m_stack, &QPushButton::clicked, this, [this] { if (stackAsked) stackAsked(m_stackCount->value(), m_stackDouble->isChecked() ? 2 : 1); });
         auto *buttons = new QHBoxLayout;
         m_compare = new QPushButton(viewer::tr("Hold to Compare"));
         m_compare->setToolTip(viewer::tr("Shows the picture as it was found while it's held down"));
@@ -740,6 +818,10 @@ public:
         s.motion = m_motion->isEnabled() ? m_motion->value() : 0;
         s.motionAngle = m_angle->value();
         s.denoise = m_grain->isEnabled() ? m_grain->currentIndex() : 0;
+        s.smooth = m_smooth->isEnabled() ? m_smooth->value() : 0;
+        s.localContrast = m_local->value();
+        s.deinterlace = m_deinterlace->isChecked();
+        s.steady = m_steady->isVisible() && m_steady->isChecked();
         s.autoLevels = m_levels->isChecked();
         s.grey = m_grey->isChecked();
         s.invert = m_invert->isChecked();
@@ -760,6 +842,10 @@ public:
         m_levels->setChecked(s.autoLevels);
         m_grey->setChecked(s.grey);
         m_invert->setChecked(s.invert);
+        m_smooth->setValue(s.smooth);
+        m_local->setValue(s.localContrast);
+        m_deinterlace->setChecked(s.deinterlace);
+        m_steady->setChecked(s.steady);
         m_quiet = false;
         if (changed)
             changed();
@@ -804,7 +890,12 @@ public:
         m_whole->setEnabled(shown);
         const QSignalBlocker quiet(m_pick);
         m_pick->setChecked(false);
+        const QSignalBlocker quietToo(m_straighten);
+        m_straighten->setChecked(false);
     }
+    // Stacking is for a spot in a paused film's frame.
+    void setStackable(bool can) { m_stackBox->setVisible(can); }
+    void setStacking(bool busy) { m_stack->setEnabled(!busy); }
 
     void reset()
     {
@@ -813,7 +904,7 @@ public:
         for (QSlider *s : std::as_const(m_rows))
             s->setValue(0);
         m_grain->setCurrentIndex(0);
-        for (QCheckBox *box : {m_levels, m_grey, m_invert})
+        for (QCheckBox *box : {m_levels, m_grey, m_invert, m_deinterlace, m_steady})
             box->setChecked(false);
         m_bigger->setCurrentIndex(0);
         m_measure->setChecked(false);
@@ -838,8 +929,10 @@ public:
     void setForFilm(bool film)
     {
         for (QWidget *w : {static_cast<QWidget *>(m_focus), static_cast<QWidget *>(m_motion), static_cast<QWidget *>(m_angle),
-                           static_cast<QWidget *>(m_grain), static_cast<QWidget *>(m_measure), static_cast<QWidget *>(m_bigger)})
+                           static_cast<QWidget *>(m_grain), static_cast<QWidget *>(m_measure), static_cast<QWidget *>(m_bigger),
+                           static_cast<QWidget *>(m_smooth), static_cast<QWidget *>(m_straighten)})
             w->setEnabled(!film);
+        m_steady->setVisible(film);
         m_save->setText(film ? viewer::tr("Save This Frame…") : viewer::tr("Save as a New Picture…"));
         m_export->setVisible(film);
         m_pick->setText(film ? viewer::tr("Pick a Spot in This Frame") : viewer::tr("Pick a Spot"));
@@ -855,6 +948,8 @@ public:
     std::function<void()> exportFilm;
     std::function<void(bool on)> pick;
     std::function<void()> whole;
+    std::function<void(bool on)> straightenAsked;
+    std::function<void(int frames, int scale)> stackAsked;
     std::function<void(viewer::ProfileDo what, const QString &name, const QByteArray &file)> profileAsked;
 
 private:
@@ -975,7 +1070,11 @@ private:
     QLabel *m_profileNote;
     QAction *m_saveProfile, *m_removeProfile, *m_importProfile, *m_exportProfile;
     QVector<enhance::Profile> m_builtIn, m_saved;
-    QPushButton *m_pick, *m_whole;
+    QPushButton *m_pick, *m_whole, *m_straighten, *m_stack;
+    QSlider *m_local, *m_smooth;
+    QCheckBox *m_deinterlace, *m_steady, *m_stackDouble;
+    QSpinBox *m_stackCount;
+    QWidget *m_stackBox;
     QVector<QSlider *> m_rows;
     QSlider *m_brightness, *m_contrast, *m_shadows, *m_sharpen, *m_focus, *m_motion, *m_angle;
     QComboBox *m_grain, *m_bigger;
@@ -1277,12 +1376,25 @@ public:
         // Each frame as it comes, worked on at the size it's shown when it's being enhanced.
         QObject::connect(m_sink, &QVideoSink::videoFrameChanged, this, [this](const QVideoFrame &frame) {
             m_last = frame;
+            if (m_collecting && frame.isValid()) {
+                const qint64 at = frame.startTime() / 1000;
+                if (m_collectedAt.isEmpty() || at > m_collectedAt.last()) {
+                    m_collected << QVideoFrame(frame).toImage();
+                    m_collectedAt << at;
+                }
+                if (m_collected.size() >= m_collectCount)
+                    finishCollecting();
+            }
             showFrame();
         });
         QObject::connect(m_player, &QMediaPlayer::playbackStateChanged, this, [this] { showState(); });
         // At the end it goes back to the start, paused, showing the first picture (not an empty screen).
         QObject::connect(m_player, &QMediaPlayer::mediaStatusChanged, this, [this](QMediaPlayer::MediaStatus status) {
             if (status == QMediaPlayer::EndOfMedia) {
+                if (m_collecting) {
+                    finishCollecting();
+                    return;
+                }
                 m_player->setPosition(0);
                 m_player->pause();
             }
@@ -1398,6 +1510,34 @@ public:
 #endif
     }
 
+    // `count` frames of the film one after another around `around` (ms), as it has them, for
+    // stacking: played through from a little before, each new frame kept. `done` hears them and
+    // which one is nearest `around`; it's left paused there again.
+    void collectFrames(qint64 around, int count, const std::function<void(const QVector<QImage> &, int)> &done)
+    {
+#ifdef DISKANVIL_MEDIA
+        double rate = m_player->metaData().value(QMediaMetaData::VideoFrameRate).toDouble();
+        if (rate < 1 || rate > 1000)
+            rate = 30;
+        m_collected.clear();
+        m_collectedAt.clear();
+        m_collectAround = around;
+        m_collectCount = count;
+        m_collectDone = done;
+        m_collectRate = m_player->playbackRate();
+        m_collecting = true;
+        m_player->setPlaybackRate(0.5); // slower than it plays, so no frame is skipped
+        m_player->setPosition(std::max<qint64>(0, around - qint64(std::lround(count / 2 * 1000.0 / rate))));
+        m_player->play();
+        QTimer::singleShot(60000, this, [this] { finishCollecting(); });
+#else
+        Q_UNUSED(around)
+        Q_UNUSED(count)
+        done({}, -1);
+#endif
+    }
+    bool collecting() const { return m_collecting; }
+
     // The frame on the screen now as the film has it, nothing applied.
     QImage rawFrame() const
     {
@@ -1502,6 +1642,27 @@ private:
         m_time->setText(clock(m_player->position()) + QStringLiteral(" / ") + clock(m_player->duration()));
     }
 
+    void finishCollecting()
+    {
+        if (!m_collecting)
+            return;
+        m_collecting = false;
+        m_player->pause();
+        m_player->setPlaybackRate(m_collectRate);
+        m_player->setPosition(m_collectAround);
+        int nearest = -1;
+        for (int i = 0; i < m_collectedAt.size(); ++i) {
+            if (nearest < 0 || std::abs(m_collectedAt[i] - m_collectAround) < std::abs(m_collectedAt[nearest] - m_collectAround))
+                nearest = i;
+        }
+        const auto done = std::move(m_collectDone);
+        const QVector<QImage> frames = std::move(m_collected);
+        m_collected.clear();
+        m_collectedAt.clear();
+        if (done)
+            done(frames, nearest);
+    }
+
     void showFrame()
     {
         if (!m_last.isValid())
@@ -1522,7 +1683,14 @@ private:
     QVideoSink *m_sink = nullptr;
     FrameView *m_video = nullptr;
     QVideoFrame m_last;
+    QVector<QImage> m_collected;
+    QVector<qint64> m_collectedAt;
+    qint64 m_collectAround = 0;
+    int m_collectCount = 0;
+    double m_collectRate = 1;
+    std::function<void(const QVector<QImage> &, int)> m_collectDone;
 #endif
+    bool m_collecting = false;
     enhance::Settings m_settings;
     QStackedWidget *m_screen;
     QLabel *m_cover;
@@ -1862,6 +2030,13 @@ Window::Window(QWidget *parent)
     m_enhance->pick = [this](bool on) { pickSpot(on); };
     m_enhance->whole = [this] { showWhole(); };
     m_picture->picked = [this](const QRect &spot) { showSpot(spot); };
+    m_enhance->straightenAsked = [this](bool on) {
+        if (on && m_shown.kind == Kind::Film && !m_spotFromFilm && !freezeFrame())
+            return;
+        straightenSpot(on);
+    };
+    m_picture->cornered = [this](const QPolygonF &corners) { straightened(corners); };
+    m_enhance->stackAsked = [this](int frames, int scale) { stackFrames(frames, scale); };
     setAcceptDrops(true);
 }
 
@@ -1904,32 +2079,39 @@ void Window::dropEvent(QDropEvent *event)
     Q_EMIT profileAsked(ProfileDo::Dropped, {}, {}, files.mid(0, 50));
 }
 
+bool Window::freezeFrame()
+{
+    // The frame on the screen, paused, becomes a still picture to work on (and the slow tools work on it).
+    if (m_media->playing())
+        m_media->playPause();
+    const QImage frame = m_media->rawFrame();
+    if (frame.isNull()) {
+        m_enhance->setStatus(tr("Play the film to the moment you want, then pick a spot in it."));
+        m_enhance->setSpotShown(false);
+        return false;
+    }
+    m_spotAt = m_media->position();
+    m_spotWhen = QStringLiteral("%1m%2s%3").arg(m_spotAt / 60000).arg(m_spotAt / 1000 % 60, 2, 10, QLatin1Char('0')).arg(m_spotAt % 1000, 3, 10, QLatin1Char('0'));
+    m_spotFromFilm = true;
+    m_whole = frame;
+    m_picture->showImage(frame);
+    m_pages->setCurrentWidget(m_picture);
+    m_enhance->setForFilm(false);
+    m_enhance->setSpotShown(true);
+    m_enhance->setStackable(true);
+    enhanceSoon();
+    return true;
+}
+
 void Window::pickSpot(bool on)
 {
+    m_picture->setCornering(false);
     if (!on) {
         m_picture->setPicking(false);
         return;
     }
-    if (m_shown.kind == Kind::Film && !m_spotFromFilm) {
-        // The frame on the screen, paused, becomes a still picture to pick in (and the slow tools work on it).
-        if (m_media->playing())
-            m_media->playPause();
-        const QImage frame = m_media->rawFrame();
-        if (frame.isNull()) {
-            m_enhance->setStatus(tr("Play the film to the moment you want, then pick a spot in it."));
-            m_enhance->setSpotShown(false);
-            return;
-        }
-        const qint64 at = m_media->position();
-        m_spotWhen = QStringLiteral("%1m%2s%3").arg(at / 60000).arg(at / 1000 % 60, 2, 10, QLatin1Char('0')).arg(at % 1000, 3, 10, QLatin1Char('0'));
-        m_spotFromFilm = true;
-        m_whole = frame;
-        m_picture->showImage(frame);
-        m_pages->setCurrentWidget(m_picture);
-        m_enhance->setForFilm(false);
-        m_enhance->setSpotShown(true);
-        enhanceSoon();
-    }
+    if (m_shown.kind == Kind::Film && !m_spotFromFilm && !freezeFrame())
+        return;
     if (m_whole.isNull())
         m_whole = m_picture->original();
     m_picture->setPicking(true);
@@ -1940,25 +2122,115 @@ void Window::showSpot(QRect spot)
 {
     if (m_whole.isNull())
         return;
-    // A spot picked inside a spot is part of the one before.
-    if (!m_spot.isNull())
-        spot.translate(m_spot.topLeft());
-    m_spot = spot.intersected(m_whole.rect());
     m_picture->setPicking(false);
-    m_picture->showSpot(m_whole, m_spot);
+    if (m_reshaped) {
+        // After straightening or stacking: a spot of that.
+        const QImage now = m_picture->original();
+        spot = spot.intersected(now.rect());
+        m_steps << tr("then the spot of %1 × %2 pixels from %3, %4 of that").arg(spot.width()).arg(spot.height()).arg(spot.x()).arg(spot.y());
+        m_picture->showSpot(now, spot);
+    } else {
+        // A spot picked inside a spot is part of the one before.
+        if (!m_spot.isNull())
+            spot.translate(m_spot.topLeft());
+        m_spot = spot.intersected(m_whole.rect());
+        spot = m_spot;
+        m_picture->showSpot(m_whole, m_spot);
+    }
     m_enhance->setSpotShown(true);
     // Saved bigger: as big as fits in 4 times, about as big as the screen shows it.
-    const int longest = std::max(m_spot.width(), m_spot.height());
+    const int longest = std::max(spot.width(), spot.height());
     m_enhance->setBigger(longest >= 900 ? 1 : longest >= 450 ? 2 : longest >= 300 ? 3 : 4);
     m_enhance->setStatus(tr("The spot: %1 × %2 pixels, from %3, %4 in. It's shown bigger, smoothly: what's there, nothing made up.")
-                             .arg(m_spot.width()).arg(m_spot.height()).arg(m_spot.x()).arg(m_spot.y()));
+                             .arg(spot.width()).arg(spot.height()).arg(spot.x()).arg(spot.y())
+                         + (m_spotFromFilm && !m_reshaped ? QLatin1Char(' ') + tr("Stack Frames puts the frames around it together.") : QString()));
     enhanceSoon();
+}
+
+void Window::straightenSpot(bool on)
+{
+    m_picture->setPicking(false);
+    if (!on) {
+        m_picture->setCornering(false);
+        return;
+    }
+    if (m_whole.isNull())
+        m_whole = m_picture->original();
+    m_picture->setCornering(true);
+    m_enhance->setStatus(tr("Click its four corners: top left, top right, bottom right, bottom left."));
+}
+
+void Window::straightened(const QPolygonF &corners)
+{
+    const QImage flat = enhance::straighten(m_picture->original(), corners);
+    m_enhance->setSpotShown(true);
+    if (flat.isNull()) {
+        m_enhance->setStatus(tr("Those corners don't make a shape that can be straightened: click them again, going round it."));
+        return;
+    }
+    m_reshaped = true;
+    m_enhance->setStackable(false);
+    m_steps << tr("straightened (four corners made square-on)");
+    m_picture->showSpot(flat, flat.rect());
+    m_enhance->setStatus(tr("Straightened: %1 × %2 pixels, square-on.").arg(flat.width()).arg(flat.height()));
+    enhanceSoon();
+}
+
+void Window::stackFrames(int count, int scale)
+{
+    if (!m_spotFromFilm || m_reshaped || m_media->collecting())
+        return;
+    const QRect region = m_spot.isNull() ? m_whole.rect() : m_spot;
+    m_enhance->setStacking(true);
+    m_enhance->setStatus(tr("Collecting %n frame(s) around this one…", nullptr, count));
+    QPointer<Window> self(this);
+    m_media->collectFrames(m_spotAt, count, [self, region, scale, count](const QVector<QImage> &frames, int nearest) {
+        if (!self)
+            return;
+        if (frames.size() < 2 || nearest < 0) {
+            self->m_enhance->setStacking(false);
+            self->m_enhance->setStatus(Window::tr("The frames around it couldn't be read."));
+            return;
+        }
+        QVector<QImage> spots;
+        for (const QImage &f : frames)
+            spots << f.copy(region);
+        self->m_enhance->setStatus(Window::tr("Lining up %n frame(s) and putting them together…", nullptr, int(spots.size())));
+        const std::shared_ptr<std::atomic<int>> current = self->m_enhanceRound;
+        const int round = current->load();
+        QThreadPool::globalInstance()->start([self, spots, nearest, scale, current, round, count] {
+            QVector<QPointF> moved;
+            const QImage stacked = enhance::stack(spots, nearest, scale, false, &moved, [current, round](int) { return current->load() == round; });
+            QMetaObject::invokeMethod(qApp, [self, stacked, used = int(spots.size()), scale, count] {
+                if (!self)
+                    return;
+                self->m_enhance->setStacking(false);
+                if (stacked.isNull()) {
+                    self->m_enhance->setStatus(QString());
+                    return;
+                }
+                self->m_reshaped = true;
+                self->m_enhance->setStackable(false);
+                self->m_steps << (scale > 1 ? Window::tr("%1 frames around it lined up and put together, twice the size (shift and add)").arg(used)
+                                            : Window::tr("%1 frames around it lined up and averaged").arg(used));
+                self->m_picture->showSpot(stacked, stacked.rect());
+                self->m_enhance->setBigger(scale > 1 ? 2 : 4);
+                self->m_enhance->setStatus(used < count ? Window::tr("Stacked %1 frames (the film had no more there).").arg(used)
+                                                        : Window::tr("Stacked %1 frames: the grain evened out.").arg(used));
+                self->enhanceSoon();
+            }, Qt::QueuedConnection);
+        });
+    });
 }
 
 void Window::showWhole()
 {
     ++*m_enhanceRound;
     m_picture->setPicking(false);
+    m_picture->setCornering(false);
+    m_reshaped = false;
+    m_steps.clear();
+    m_enhance->setStackable(false);
     if (m_spotFromFilm) {
         // Back to the film where it was paused.
         m_spotFromFilm = false;
@@ -2059,16 +2331,17 @@ void Window::saveEnhanced(int factor)
         --factor;
     m_enhance->setStatus(tr("Making the picture to save…"));
     const QString base = QFileInfo(m_shown.name).completeBaseName() + (m_spotFromFilm ? tr(" frame %1").arg(m_spotWhen) : QString());
-    const QString name = base + (m_spot.isNull() ? QString() : tr(" (spot)")) + (settings.isDefault() ? QString() : tr(" (enhanced)"))
+    const QString name = base + (m_spot.isNull() && m_steps.isEmpty() ? QString() : tr(" (spot)")) + (settings.isDefault() ? QString() : tr(" (enhanced)"))
                        + (factor > 1 ? tr(" (x%1)").arg(factor) : QString()) + QStringLiteral(".png");
     QStringList done;
     if (m_spotFromFilm)
         done << tr("the frame %1 in").arg(m_spotWhen);
     if (!m_spot.isNull())
         done << tr("only the spot of %1 × %2 pixels from %3, %4").arg(m_spot.width()).arg(m_spot.height()).arg(m_spot.x()).arg(m_spot.y());
+    done << m_steps;
     done << settings.describe();
     if (factor > 1)
-        done << tr("made %1 times as big (bicubic)").arg(factor);
+        done << tr("made %1 times as big (Lanczos)").arg(factor);
     const QString note = tr("Made by DiskAnvil's viewer from \"%1\": %2.").arg(m_shown.name, done.isEmpty() ? tr("nothing changed") : done.join(QStringLiteral(", ")));
     QPointer<Window> self(this);
     QThreadPool::globalInstance()->start([self, original, settings, factor, name, note] {
@@ -2109,6 +2382,9 @@ void Window::present(const Show &show)
     m_whole = QImage();
     m_spot = QRect();
     m_spotFromFilm = false;
+    m_reshaped = false;
+    m_steps.clear();
+    m_enhance->setStackable(false);
     ++*m_enhanceRound;
     m_enhance->reset();
     m_picture->clear();

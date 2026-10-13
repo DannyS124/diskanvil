@@ -10,9 +10,11 @@
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QStandardPaths>
+#include <QTransform>
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <numbers>
 #include <thread>
@@ -173,13 +175,17 @@ Plane median(const Plane &in, int radius)
 
 bool Settings::isDefault() const
 {
-    return brightness == 0 && contrast == 0 && shadows == 0 && !autoLevels && denoise == 0 && sharpen == 0 && focus == 0 && motion == 0 && !grey
-        && !invert;
+    return brightness == 0 && contrast == 0 && shadows == 0 && !autoLevels && denoise == 0 && smooth == 0 && localContrast == 0 && !deinterlace
+        && sharpen == 0 && focus == 0 && motion == 0 && !grey && !invert;
 }
 
 QStringList Settings::describe() const
 {
     QStringList out;
+    if (deinterlace)
+        out << tr("deinterlaced");
+    if (smooth > 0)
+        out << tr("grain smoothed with the edges kept (%1%)").arg(smooth);
     if (denoise > 0)
         out << tr("grain smoothed (%1)").arg(denoise);
     if (focus > 0)
@@ -188,6 +194,8 @@ QStringList Settings::describe() const
         out << tr("movement blur of %1 px at %2° taken out (%3 rounds)").arg(motion).arg(motionAngle).arg(rounds);
     if (sharpen > 0)
         out << tr("sharpened %1%").arg(sharpen);
+    if (localContrast > 0)
+        out << tr("local contrast %1% (CLAHE)").arg(localContrast);
     if (autoLevels)
         out << tr("levels stretched");
     if (brightness != 0)
@@ -200,8 +208,173 @@ QStringList Settings::describe() const
         out << tr("black and white");
     if (invert)
         out << tr("inverted");
+    if (steady)
+        out << tr("steadied");
     return out;
 }
+
+namespace {
+
+// An old camera's picture is two half-pictures, the odd lines a moment after the even ones: with
+// movement they comb. The odd lines are made again from the even ones around them.
+void deinterlace(Plane &p)
+{
+    for (int y = 1; y < p.h; y += 2) {
+        for (int x = 0; x < p.w; ++x)
+            p(x, y) = (p.at(x, y - 1) + p.at(x, y + 1)) / 2;
+    }
+}
+
+// Each point the average of those around it, weighted by how near they are and by how alike in
+// brightness: grain is evened out, while an edge (a big step in brightness) is left sharp.
+void bilateral(std::array<Plane, 3> &c, const Plane &light, int strength)
+{
+    const int r = 1 + strength / 25;                 // 1 to 5 pixels around
+    const float space = 2 * (0.5f + r / 2.0f) * (0.5f + r / 2.0f);
+    const float range = 2 * std::pow(0.02f + strength / 100.0f * 0.13f, 2.0f);
+    std::vector<float> near(size_t((2 * r + 1) * (2 * r + 1)));
+    for (int j = -r; j <= r; ++j)
+        for (int i = -r; i <= r; ++i)
+            near[size_t((j + r) * (2 * r + 1) + i + r)] = std::exp(-(i * i + j * j) / space);
+    const std::array<Plane, 3> in = c;
+    rows(light.h, [&](int y0, int y1) {
+        for (int y = y0; y < y1; ++y) {
+            for (int x = 0; x < light.w; ++x) {
+                const float here = light.at(x, y);
+                float sum[3] = {0, 0, 0}, total = 0;
+                for (int j = -r; j <= r; ++j) {
+                    for (int i = -r; i <= r; ++i) {
+                        const float d = light.at(x + i, y + j) - here;
+                        const float wt = near[size_t((j + r) * (2 * r + 1) + i + r)] * std::exp(-d * d / range);
+                        for (int k = 0; k < 3; ++k)
+                            sum[k] += wt * in[size_t(k)].at(x + i, y + j);
+                        total += wt;
+                    }
+                }
+                for (int k = 0; k < 3; ++k)
+                    c[size_t(k)](x, y) = sum[k] / total;
+            }
+        }
+    });
+}
+
+// Contrast-limited adaptive histogram equalisation, on the brightness: the picture in 8 by 8
+// tiles, each one's levels spread over black to white (limited, so flat parts' grain isn't blown
+// up), and each point blended from the four tiles nearest it so there are no seams.
+Plane clahe(const Plane &light, int strength)
+{
+    constexpr int tiles = 8, bins = 256;
+    const int tw = std::max(1, (light.w + tiles - 1) / tiles), th = std::max(1, (light.h + tiles - 1) / tiles);
+    const float limit = 2.0f + strength / 100.0f * 8.0f; // times an even share
+    std::vector<std::array<float, bins>> map(size_t(tiles * tiles));
+    for (int ty = 0; ty < tiles; ++ty) {
+        for (int tx = 0; tx < tiles; ++tx) {
+            std::array<float, bins> count{};
+            int n = 0;
+            for (int y = ty * th; y < std::min(light.h, (ty + 1) * th); ++y)
+                for (int x = tx * tw; x < std::min(light.w, (tx + 1) * tw); ++x, ++n)
+                    count[size_t(std::clamp(int(light.at(x, y) * (bins - 1) + 0.5f), 0, bins - 1))] += 1;
+            std::array<float, bins> &m = map[size_t(ty * tiles + tx)];
+            if (n == 0) {
+                for (int b = 0; b < bins; ++b)
+                    m[size_t(b)] = b / float(bins - 1);
+                continue;
+            }
+            // What's over the limit is shared out evenly.
+            const float most = limit * n / bins;
+            float over = 0;
+            for (float &v : count) {
+                if (v > most) {
+                    over += v - most;
+                    v = most;
+                }
+            }
+            float sum = 0;
+            for (int b = 0; b < bins; ++b) {
+                sum += count[size_t(b)] + over / bins;
+                m[size_t(b)] = sum / n;
+            }
+        }
+    }
+    Plane out{light.w, light.h, std::vector<float>(light.v.size())};
+    rows(light.h, [&](int y0, int y1) {
+        for (int y = y0; y < y1; ++y) {
+            const float fy = std::clamp((y + 0.5f) / th - 0.5f, 0.0f, tiles - 1.0f);
+            const int ty = std::min(int(fy), tiles - 2 < 0 ? 0 : tiles - 2);
+            const float wy = fy - ty;
+            for (int x = 0; x < light.w; ++x) {
+                const float fx = std::clamp((x + 0.5f) / tw - 0.5f, 0.0f, tiles - 1.0f);
+                const int tx = std::min(int(fx), tiles - 2);
+                const float wx = fx - tx;
+                const size_t b = size_t(std::clamp(int(light.at(x, y) * (bins - 1) + 0.5f), 0, bins - 1));
+                const float top = map[size_t(ty * tiles + tx)][b] * (1 - wx) + map[size_t(ty * tiles + tx + 1)][b] * wx;
+                const float bottom = map[size_t((ty + 1) * tiles + tx)][b] * (1 - wx) + map[size_t((ty + 1) * tiles + tx + 1)][b] * wx;
+                out(x, y) = top * (1 - wy) + bottom * wy;
+            }
+        }
+    });
+    return out;
+}
+
+Plane lightOf(const std::array<Plane, 3> &c)
+{
+    Plane y{c[0].w, c[0].h, std::vector<float>(c[0].v.size())};
+    for (size_t i = 0; i < y.v.size(); ++i)
+        y.v[i] = 0.299f * c[0].v[i] + 0.587f * c[1].v[i] + 0.114f * c[2].v[i];
+    return y;
+}
+
+// Lanczos with three lobes: the sharpest of the usual ways to go between pixels.
+float lanczos(float t)
+{
+    t = std::abs(t);
+    if (t < 1e-5f)
+        return 1;
+    if (t >= 3)
+        return 0;
+    const float pt = float(std::numbers::pi) * t;
+    return 3 * std::sin(pt) * std::sin(pt / 3) / (pt * pt);
+}
+
+// A point between pixels of `src`, from the 6 by 6 around it (Lanczos), clamped to what's there.
+QRgb sample(const QImage &src, float sx, float sy)
+{
+    const int w = src.width(), h = src.height();
+    const int ix = int(std::floor(sx)), iy = int(std::floor(sy));
+    float r = 0, g = 0, b = 0, a = 0, total = 0;
+    float lo[4] = {255, 255, 255, 255}, hi[4] = {0, 0, 0, 0};
+    for (int j = -2; j <= 3; ++j) {
+        const float wy = lanczos(sy - float(iy + j));
+        if (wy == 0)
+            continue;
+        const QRgb *line = reinterpret_cast<const QRgb *>(src.constScanLine(std::clamp(iy + j, 0, h - 1)));
+        for (int i = -2; i <= 3; ++i) {
+            const float wt = wy * lanczos(sx - float(ix + i));
+            if (wt == 0)
+                continue;
+            const QRgb p = line[std::clamp(ix + i, 0, w - 1)];
+            r += wt * qRed(p);
+            g += wt * qGreen(p);
+            b += wt * qBlue(p);
+            a += wt * qAlpha(p);
+            total += wt;
+            if (std::abs(i - (sx - ix)) < 1.5f && std::abs(j - (sy - iy)) < 1.5f) {
+                const float v[4] = {float(qRed(p)), float(qGreen(p)), float(qBlue(p)), float(qAlpha(p))};
+                for (int k = 0; k < 4; ++k) {
+                    lo[k] = std::min(lo[k], v[k]);
+                    hi[k] = std::max(hi[k], v[k]);
+                }
+            }
+        }
+    }
+    if (total == 0)
+        return 0;
+    // Kept between the pixels nearest it: no bright or dark halo beside an edge (Lanczos rings).
+    const auto keep = [&](float v, int k) { return std::clamp(qRound(std::clamp(v / total, lo[k], hi[k])), 0, 255); };
+    return qRgba(keep(r, 0), keep(g, 1), keep(b, 2), keep(a, 3));
+}
+
+} // namespace
 
 QVector<Profile> builtInProfiles()
 {
@@ -222,8 +395,15 @@ QVector<Profile> builtInProfiles()
              [](Settings &s) { s.motion = 10; s.sharpen = 10; }),
         make(tr("Faded old photo"), tr("A print gone pale: the levels stretched, more contrast, sharpened a little."),
              [](Settings &s) { s.autoLevels = true; s.contrast = 25; s.sharpen = 15; }),
-        make(tr("Night camera"), tr("A security or dashboard camera at night: lighter, the dark parts lifted, grain smoothed, sharpened."),
-             [](Settings &s) { s.brightness = 20; s.shadows = 60; s.contrast = 15; s.denoise = 2; s.sharpen = 20; }),
+        make(tr("Night camera"), tr("A security or dashboard camera at night: lighter, the dark parts lifted, the detail in them brought out, "
+                                    "grain smoothed with the edges kept, sharpened."),
+             [](Settings &s) { s.brightness = 15; s.shadows = 50; s.localContrast = 50; s.smooth = 50; s.sharpen = 20; }),
+        make(tr("Old security camera"), tr("Grainy footage from an older camera, with comb lines when things move: deinterlaced, grain smoothed "
+                                           "with the edges kept, local contrast, sharpened. Pick a spot and stack frames for more."),
+             [](Settings &s) { s.deinterlace = true; s.smooth = 40; s.localContrast = 40; s.sharpen = 25; }),
+        make(tr("Number plate or sign"), tr("Letters to read: detail brought out where it's dark or bright, sharpened hard, black and white. Pick "
+                                            "a spot around it; Straighten if it's at an angle."),
+             [](Settings &s) { s.localContrast = 70; s.sharpen = 45; s.grey = true; s.autoLevels = true; }),
         make(tr("Grainy"), tr("Speckled from a high ISO or a cheap camera: grain smoothed, then sharpened a little."),
              [](Settings &s) { s.denoise = 2; s.sharpen = 10; }),
         make(tr("Scanned page"), tr("A document or receipt: black and white, the levels stretched, strong contrast, sharpened, so the writing stands out."),
@@ -241,7 +421,9 @@ QByteArray profileToFile(const Profile &p)
                          {QStringLiteral("denoise"), s.denoise},       {QStringLiteral("sharpen"), s.sharpen},
                          {QStringLiteral("focus"), s.focus},           {QStringLiteral("motion"), s.motion},
                          {QStringLiteral("motionAngle"), s.motionAngle}, {QStringLiteral("grey"), s.grey},
-                         {QStringLiteral("invert"), s.invert}};
+                         {QStringLiteral("invert"), s.invert},         {QStringLiteral("smooth"), s.smooth},
+                         {QStringLiteral("localContrast"), s.localContrast}, {QStringLiteral("deinterlace"), s.deinterlace},
+                         {QStringLiteral("steady"), s.steady}};
     QJsonObject o{{QStringLiteral("diskanvil-enhance-profile"), 1}, {QStringLiteral("name"), p.name}, {QStringLiteral("settings"), settings}};
     if (!p.description.isEmpty())
         o.insert(QStringLiteral("description"), p.description);
@@ -293,6 +475,10 @@ bool profileFromFile(const QByteArray &file, Profile *p, QString *why)
     s.autoLevels = j.value(QStringLiteral("autoLevels")).toBool();
     s.grey = j.value(QStringLiteral("grey")).toBool();
     s.invert = j.value(QStringLiteral("invert")).toBool();
+    s.smooth = number("smooth", 0, 100);
+    s.localContrast = number("localContrast", 0, 100);
+    s.deinterlace = j.value(QStringLiteral("deinterlace")).toBool();
+    s.steady = j.value(QStringLiteral("steady")).toBool();
     *p = out;
     return true;
 }
@@ -388,17 +574,24 @@ QImage apply(const QImage &in, const Settings &s, const std::function<bool(int p
         return stopped;
     };
 
+    if (s.deinterlace) {
+        for (Plane &p : c)
+            deinterlace(p);
+    }
     if (s.denoise > 0) {
         for (Plane &p : c)
             p = median(p, s.denoise);
+        if (step(10))
+            return {};
+    }
+    if (s.smooth > 0) {
+        bilateral(c, lightOf(c), std::clamp(s.smooth, 0, 100));
         if (step(15))
             return {};
     }
     // Blur taken out of the brightness only (where the detail is), then given back to each colour.
     if (s.focus > 0 || s.motion > 0) {
-        Plane y{w, h, std::vector<float>(size_t(w) * size_t(h))};
-        for (size_t i = 0; i < y.v.size(); ++i)
-            y.v[i] = 0.299f * c[0].v[i] + 0.587f * c[1].v[i] + 0.114f * c[2].v[i];
+        const Plane y = lightOf(c);
         Plane sharp = y;
         const int rounds = std::clamp(s.rounds, 1, 60);
         if (s.focus > 0) {
@@ -429,6 +622,19 @@ QImage apply(const QImage &in, const Settings &s, const std::function<bool(int p
                 p.v[i] += amount * (p.v[i] - soft.v[i]);
         }
         if (step(80))
+            return {};
+    }
+    if (s.localContrast > 0) {
+        // On the brightness, given back to each colour as it changed.
+        const Plane light = lightOf(c);
+        const Plane spread = clahe(light, std::clamp(s.localContrast, 0, 100));
+        const float amount = 0.4f + s.localContrast / 100.0f * 0.6f;
+        for (size_t i = 0; i < light.v.size(); ++i) {
+            const float delta = (spread.v[i] - light.v[i]) * amount;
+            for (Plane &p : c)
+                p.v[i] += delta;
+        }
+        if (step(85))
             return {};
     }
     if (s.autoLevels) {
@@ -491,7 +697,14 @@ QImage apply(const QImage &in, const Settings &s, const std::function<bool(int p
 QStringList ffmpegArguments(const QString &in, const QString &out, double speed, const Settings &s)
 {
     speed = std::clamp(speed, 0.1, 2.0);
-    QStringList video{QStringLiteral("setpts=PTS/%1").arg(speed, 0, 'f', 3)};
+    QStringList video;
+    if (s.deinterlace)
+        video << QStringLiteral("yadif");
+    if (s.steady)
+        video << QStringLiteral("deshake");
+    if (s.smooth > 0)
+        video << QStringLiteral("hqdn3d=%1").arg(1 + s.smooth / 100.0 * 7, 0, 'f', 1);
+    video << QStringLiteral("setpts=PTS/%1").arg(speed, 0, 'f', 3);
     if (s.brightness != 0 || s.contrast != 0 || s.shadows != 0) {
         const double contrast = s.contrast >= 0 ? 1 + s.contrast / 50.0 : 1 + s.contrast / 100.0;
         video << QStringLiteral("eq=brightness=%1:contrast=%2:gamma=%3").arg(s.brightness / 250.0, 0, 'f', 3).arg(contrast, 0, 'f', 3).arg(1 + s.shadows / 66.0, 0, 'f', 3);
@@ -520,47 +733,203 @@ QImage enlarge(const QImage &in, int factor)
     if (in.isNull() || factor == 1)
         return in;
     const QImage src = in.convertToFormat(QImage::Format_ARGB32);
-    const int w = src.width(), h = src.height(), W = w * factor, H = h * factor;
-    // Catmull-Rom: through the pixels that are there, smoothly between them.
-    const auto weight = [](float t) {
-        t = std::abs(t);
-        if (t < 1)
-            return 1.5f * t * t * t - 2.5f * t * t + 1;
-        if (t < 2)
-            return -0.5f * t * t * t + 2.5f * t * t - 4 * t + 2;
-        return 0.0f;
-    };
-    const auto pixel = [&src, w, h](int x, int y) {
-        return reinterpret_cast<const QRgb *>(src.constScanLine(std::clamp(y, 0, h - 1)))[std::clamp(x, 0, w - 1)];
-    };
+    const int W = src.width() * factor, H = src.height() * factor;
     QImage out(W, H, QImage::Format_ARGB32);
     if (out.isNull())
         return in;
     rows(H, [&](int y0, int y1) {
         for (int Y = y0; Y < y1; ++Y) {
             const float sy = (Y + 0.5f) / factor - 0.5f;
-            const int iy = int(std::floor(sy));
             QRgb *line = reinterpret_cast<QRgb *>(out.scanLine(Y));
-            for (int X = 0; X < W; ++X) {
-                const float sx = (X + 0.5f) / factor - 0.5f;
-                const int ix = int(std::floor(sx));
-                float r = 0, g = 0, b = 0, a = 0;
-                for (int j = -1; j <= 2; ++j) {
-                    const float wy = weight(sy - float(iy + j));
-                    for (int i = -1; i <= 2; ++i) {
-                        const float wt = wy * weight(sx - float(ix + i));
-                        const QRgb p = pixel(ix + i, iy + j);
-                        r += wt * qRed(p);
-                        g += wt * qGreen(p);
-                        b += wt * qBlue(p);
-                        a += wt * qAlpha(p);
-                    }
-                }
-                line[X] = qRgba(std::clamp(qRound(r), 0, 255), std::clamp(qRound(g), 0, 255), std::clamp(qRound(b), 0, 255), std::clamp(qRound(a), 0, 255));
+            for (int X = 0; X < W; ++X)
+                line[X] = sample(src, (X + 0.5f) / factor - 0.5f, sy);
+        }
+    });
+    return out;
+}
+
+QImage straighten(const QImage &in, const QPolygonF &corners)
+{
+    if (in.isNull() || corners.size() != 4)
+        return {};
+    // As wide as its longer top or bottom, as tall as its longer side.
+    const auto length = [](QPointF a, QPointF b) { return std::hypot(a.x() - b.x(), a.y() - b.y()); };
+    const int W = int(std::lround(std::max(length(corners[0], corners[1]), length(corners[3], corners[2]))));
+    const int H = int(std::lround(std::max(length(corners[0], corners[3]), length(corners[1], corners[2]))));
+    if (W < 2 || H < 2 || qint64(W) * H > 100000000LL)
+        return {};
+    QTransform back;
+    const QPolygonF square{QPointF(0, 0), QPointF(W, 0), QPointF(W, H), QPointF(0, H)};
+    if (!QTransform::quadToQuad(square, corners, back))
+        return {};
+    const QImage src = in.convertToFormat(QImage::Format_ARGB32);
+    QImage out(W, H, QImage::Format_ARGB32);
+    rows(H, [&](int y0, int y1) {
+        for (int y = y0; y < y1; ++y) {
+            QRgb *line = reinterpret_cast<QRgb *>(out.scanLine(y));
+            for (int x = 0; x < W; ++x) {
+                const QPointF at = back.map(QPointF(x + 0.5, y + 0.5));
+                line[x] = sample(src, float(at.x() - 0.5), float(at.y() - 0.5));
             }
         }
     });
     return out;
+}
+
+namespace {
+
+// How far `moving` is from `fixed` (both brightness, the same size): the shift, to a tenth of a
+// pixel, that makes them most alike in the middle of the picture. A search over whole pixels on
+// a quarter-size copy, then whole pixels near it, then a parabola through the best and its
+// neighbours for the fraction.
+QPointF lineUp(const Plane &fixed, const Plane &moving)
+{
+    const int w = fixed.w, h = fixed.h;
+    const int margin = std::max(2, std::min(w, h) / 6);
+    const auto differs = [&](double dx, double dy, int step) {
+        double sum = 0;
+        int n = 0;
+        const int ix = int(std::floor(dx)), iy = int(std::floor(dy));
+        const float tx = float(dx - ix), ty = float(dy - iy);
+        for (int y = margin; y < h - margin; y += step) {
+            for (int x = margin; x < w - margin; x += step) {
+                const float m = (moving.at(x + ix, y + iy) * (1 - tx) + moving.at(x + ix + 1, y + iy) * tx) * (1 - ty)
+                              + (moving.at(x + ix, y + iy + 1) * (1 - tx) + moving.at(x + ix + 1, y + iy + 1) * tx) * ty;
+                const float d = m - fixed.at(x, y);
+                sum += d * d;
+                ++n;
+            }
+        }
+        return n ? sum / n : 1e9;
+    };
+    const int reach = std::max(2, margin - 1);
+    const int coarse = std::max(1, std::min(w, h) / 120);
+    int bx = 0, by = 0;
+    double best = 1e18;
+    for (int dy = -reach; dy <= reach; dy += coarse) {
+        for (int dx = -reach; dx <= reach; dx += coarse) {
+            const double d = differs(dx, dy, std::max(1, coarse * 2));
+            if (d < best) {
+                best = d;
+                bx = dx;
+                by = dy;
+            }
+        }
+    }
+    for (int round = 0; round < 2; ++round) {
+        int nx = bx, ny = by;
+        best = differs(bx, by, 1);
+        for (int dy = -coarse; dy <= coarse; ++dy) {
+            for (int dx = -coarse; dx <= coarse; ++dx) {
+                const double d = differs(bx + dx, by + dy, 1);
+                if (d < best) {
+                    best = d;
+                    nx = bx + dx;
+                    ny = by + dy;
+                }
+            }
+        }
+        bx = nx;
+        by = ny;
+    }
+    // The fraction: a finer and finer search around the best whole pixel.
+    const int every = std::max(1, std::min(w, h) / 300);
+    double fx = bx, fy = by;
+    for (const double stride : {0.25, 0.05}) {
+        double nx = fx, ny = fy;
+        best = differs(fx, fy, every);
+        const int steps = stride > 0.1 ? 2 : 4;
+        for (int j = -steps; j <= steps; ++j) {
+            for (int i = -steps; i <= steps; ++i) {
+                const double d = differs(fx + i * stride, fy + j * stride, every);
+                if (d < best) {
+                    best = d;
+                    nx = fx + i * stride;
+                    ny = fy + j * stride;
+                }
+            }
+        }
+        fx = nx;
+        fy = ny;
+    }
+    return {fx, fy};
+}
+
+Plane lightOf(const QImage &image)
+{
+    const QImage src = image.convertToFormat(QImage::Format_ARGB32);
+    Plane p{src.width(), src.height(), std::vector<float>(size_t(src.width()) * size_t(src.height()))};
+    for (int y = 0; y < src.height(); ++y) {
+        const QRgb *line = reinterpret_cast<const QRgb *>(src.constScanLine(y));
+        for (int x = 0; x < src.width(); ++x)
+            p(x, y) = qGray(line[x]) / 255.0f;
+    }
+    return p;
+}
+
+} // namespace
+
+QImage stack(const QVector<QImage> &frames, int reference, int scale, bool middle, QVector<QPointF> *shifts, const std::function<bool(int percent)> &progress)
+{
+    if (frames.isEmpty() || reference < 0 || reference >= frames.size())
+        return {};
+    const QSize size = frames[reference].size();
+    QVector<QImage> same;
+    for (const QImage &f : frames) {
+        if (f.size() == size)
+            same << f.convertToFormat(QImage::Format_ARGB32);
+    }
+    if (same.isEmpty())
+        return {};
+    reference = std::min(reference, int(same.size()) - 1);
+    scale = std::clamp(scale, 1, 2);
+    // How far each one is from the reference.
+    const Plane fixed = lightOf(same[reference]);
+    QVector<QPointF> moved(same.size());
+    for (int i = 0; i < same.size(); ++i) {
+        if (i != reference)
+            moved[i] = lineUp(fixed, lightOf(same[i]));
+        if (progress && !progress(i * 50 / int(same.size())))
+            return {};
+    }
+    if (shifts)
+        *shifts = moved;
+    // Each point of the result, from every frame at the same place in what was filmed.
+    const int W = size.width() * scale, H = size.height() * scale;
+    QImage out(W, H, QImage::Format_ARGB32);
+    if (out.isNull())
+        return {};
+    std::atomic<bool> stopped = false;
+    rows(H, [&](int y0, int y1) {
+        std::vector<int> r(size_t(same.size())), g(r), b(r);
+        for (int Y = y0; Y < y1 && !stopped; ++Y) {
+            QRgb *line = reinterpret_cast<QRgb *>(out.scanLine(Y));
+            const float sy = (Y + 0.5f) / scale - 0.5f;
+            for (int X = 0; X < W; ++X) {
+                const float sx = (X + 0.5f) / scale - 0.5f;
+                for (int i = 0; i < same.size(); ++i) {
+                    const QRgb p = sample(same[i], sx + float(moved[i].x()), sy + float(moved[i].y()));
+                    r[size_t(i)] = qRed(p);
+                    g[size_t(i)] = qGreen(p);
+                    b[size_t(i)] = qBlue(p);
+                }
+                const auto combine = [middle](std::vector<int> &v) {
+                    if (middle) {
+                        std::nth_element(v.begin(), v.begin() + std::ptrdiff_t(v.size() / 2), v.end());
+                        return v[v.size() / 2];
+                    }
+                    int sum = 0;
+                    for (int x : v)
+                        sum += x;
+                    return (sum + int(v.size()) / 2) / int(v.size());
+                };
+                line[X] = qRgb(combine(r), combine(g), combine(b));
+            }
+            if (progress && y0 == 0 && !progress(50 + Y * 50 / std::max(1, y1)))
+                stopped = true;
+        }
+    });
+    return stopped ? QImage() : out;
 }
 
 } // namespace enhance

@@ -199,6 +199,15 @@ part is shown, filling the window, and the tools and Save work on it (saved up t
 the picture it was). Pick again inside it to go closer; Whole Picture goes back. In a film, pause where you want and
 press Pick a Spot in This Frame: the frame becomes a still picture to pick in, with all the tools, and Back to the Film
 returns. Making a spot bigger shows what's there more clearly; it can't bring back detail that was never recorded.</p>
+<p><b>The forensic tools:</b> the same kinds police video labs use, all keeping a note in what's saved of every step.
+Local contrast (CLAHE) brings out detail in the dark and the light parts each on its own. Smooth grain evens out the
+camera's speckle while edges stay sharp. Deinterlace takes out the comb lines an older camera leaves when things move.
+Straighten: click the four corners of something seen at an angle (a number plate, a sign, a page), clockwise from its
+top left, and it's made square-on. Stack Frames, for a spot in a paused film: the frames around it are lined up on it
+to a fraction of a pixel and put together, so the grain, different in each frame, evens out and what keeps still shows
+more clearly than in any one frame; Twice the size builds it bigger from what the frames hold between them (shift and
+add). Steady it, in a film's saved copy, takes out the camera's shake. Enlarging uses Lanczos, the sharpest of the usual
+ways. Local contrast isn't in a film's saved copy (ffmpeg has nothing like it); a frame saved has it.</p>
 <p><b>Enhance profiles:</b> the list at the top of Enhance sets everything at once. DiskAnvil's own: Too dark, Out of
 focus, Moved while it was taken, Faded old photo, Night camera, Grainy, Scanned page and Film negative. Set things your
 way and use Profiles → Save as a Profile to keep them under a name. Profiles → Save This Profile as a File makes a small

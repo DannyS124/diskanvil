@@ -10,6 +10,7 @@
 // and they never make detail up (no "AI" enlarging, which invents it).
 
 #include <QImage>
+#include <QPolygonF>
 #include <QStringList>
 #include <QVector>
 
@@ -23,6 +24,10 @@ struct Settings {
     int shadows = 0;    // 0 to 100: the dark parts lifted
     bool autoLevels = false; // the darkest bit black and the lightest white
     int denoise = 0;    // 0 off, 1 a little, 2 more: grain smoothed (a median filter)
+    int smooth = 0;     // 0 to 100: grain smoothed with the edges kept (a bilateral filter)
+    int localContrast = 0; // 0 to 100: detail brought out in the dark and light parts each on its own (CLAHE)
+    bool deinterlace = false; // an old camera's two half-pictures (the comb lines) made into one
+    bool steady = false;      // a film saved steadied (ffmpeg's deshake); it doesn't change a picture
     int sharpen = 0;    // 0 to 100 (an unsharp mask)
     int focus = 0;      // 0 off, else how far out of focus it is, in pixels (1 to 15)
     int motion = 0;     // 0 off, else how far it moved while it was taken, in pixels (2 to 60)
@@ -38,8 +43,18 @@ struct Settings {
 // The picture with the settings applied. `progress` hears how far it is (0 to 100) and stops it
 // by returning false (then the result is empty).
 QImage apply(const QImage &in, const Settings &settings, const std::function<bool(int percent)> &progress = {});
-// Bigger by a whole factor (2, 3 or 4), smoothly (bicubic): what's there, larger, nothing made up.
+// Bigger by a whole factor (2, 3 or 4), smoothly (Lanczos): what's there, larger, nothing made up.
 QImage enlarge(const QImage &in, int factor);
+// Something seen at an angle (a number plate, a sign, a page) made square-on: the four corners
+// picked on it, clockwise from its top left, become a rectangle as wide and tall as its sides.
+QImage straighten(const QImage &in, const QPolygonF &corners);
+// Frames of a film showing the same thing, lined up on the one at `reference` and put together:
+// the camera's noise, different in each, evens out, and lined up to a fraction of a pixel they
+// can show more than any one of them (shift and add). `scale` 2 makes it twice as big from what the
+// frames hold; `middle` takes each point's middle value (a passer-by in a few frames is left out)
+// rather than the average. `shifts` hears how far each frame was moved to line up.
+QImage stack(const QVector<QImage> &frames, int reference, int scale, bool middle, QVector<QPointF> *shifts = nullptr,
+             const std::function<bool(int percent)> &progress = {});
 
 // A profile: the settings kept under a name, to use again. DiskAnvil comes with some for what
 // usually goes wrong (too dark, out of focus, a faded print...); people save their own and pass

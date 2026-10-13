@@ -1008,7 +1008,7 @@
 <context>
     <name>viewer</name>
     <message numerus="yes">
-        <location filename="../src/lostfiles/viewer.cpp" line="1594"/>
+        <location filename="../src/lostfiles/viewer.cpp" line="1762"/>
         <source>%n byte(s) changed</source>
         <translation>
             <numerusform>%n byte changed</numerusform>
@@ -1016,11 +1016,30 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/viewer.cpp" line="1674"/>
+        <location filename="../src/lostfiles/viewer.cpp" line="1842"/>
         <source>%n part(s) damaged, in red: pick one to see where it is.</source>
         <translation>
             <numerusform>%n part damaged, in red: pick one to see where it is.</numerusform>
             <numerusform>%n parts damaged, in red: pick one to see where it is.</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
+    <name>viewer::Window</name>
+    <message numerus="yes">
+        <location filename="../src/lostfiles/viewer.cpp" line="2185"/>
+        <source>Collecting %n frame(s) around this one…</source>
+        <translation>
+            <numerusform>Collecting %n frame around this one…</numerusform>
+            <numerusform>Collecting %n frames around this one…</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/lostfiles/viewer.cpp" line="2198"/>
+        <source>Lining up %n frame(s) and putting them together…</source>
+        <translation>
+            <numerusform>Lining up %n frame and putting them together…</numerusform>
+            <numerusform>Lining up %n frames and putting them together…</numerusform>
         </translation>
     </message>
 </context>

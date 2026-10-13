@@ -4896,6 +4896,32 @@ void enhanceWindow()
     saved.loadFromData(png, "PNG");
     report(saved.size() == stripes.size() && !name.contains(QLatin1String("spot")), QStringLiteral("viewer: Whole Picture goes back to all of it"),
            QStringLiteral("%1 %2x%3").arg(name).arg(saved.width()).arg(saved.height()));
+    // Straighten: four corners clicked, clockwise from the top left, made square-on.
+    window.findChild<QPushButton *>(QStringLiteral("straighten"))->setChecked(true);
+    QCoreApplication::processEvents();
+    if (picture) {
+        QWidget *port = picture->viewport();
+        const QPointF corner((port->width() - stripes.width()) / 2.0, (port->height() - stripes.height()) / 2.0);
+        for (const QPointF at : {QPointF(20, 30), QPointF(220, 10), QPointF(240, 150), QPointF(10, 170)}) {
+            QMouseEvent press(QEvent::MouseButtonPress, corner + at, port->mapToGlobal(corner + at), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(port, &press);
+            QMouseEvent release(QEvent::MouseButtonRelease, corner + at, port->mapToGlobal(corner + at), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(port, &release);
+        }
+    }
+    QCoreApplication::processEvents();
+    png.clear();
+    window.findChild<QComboBox *>(QStringLiteral("profiles"))->setCurrentIndex(0);
+    window.findChild<QPushButton *>(QStringLiteral("saveEnhanced"))->click();
+    waitUntil([&] { return !png.isEmpty(); }, 20000);
+    saved.loadFromData(png, "PNG");
+    report(saved.text(QStringLiteral("Description")).contains(QLatin1String("straightened")) && saved.width() > 200 && saved.height() > 130,
+           QStringLiteral("viewer: Straighten makes what was picked by its corners square-on, and says so in what's saved"),
+           QStringLiteral("%1x%2: %3").arg(saved.width()).arg(saved.height()).arg(saved.text(QStringLiteral("Description"))));
+    window.findChild<QPushButton *>(QStringLiteral("wholePicture"))->click();
+    report(window.findChild<QSlider *>(QStringLiteral("localContrast")) && window.findChild<QSlider *>(QStringLiteral("smooth"))
+               && window.findChild<QCheckBox *>(QStringLiteral("deinterlace")),
+           QStringLiteral("viewer: local contrast, edge-keeping smoothing and deinterlacing are there"));
 
     show.kind = viewer::Kind::Words;
     window.present(show);
@@ -5010,6 +5036,22 @@ void filmTools()
                && frame.text(QStringLiteral("Description")).contains(QLatin1String("in, only the spot")),
            QStringLiteral("film tools: a spot picked in the paused frame is saved on its own, bigger, saying when and where"),
            QStringLiteral("%1 %2x%3: %4").arg(name).arg(frame.width()).arg(frame.height()).arg(frame.text(QStringLiteral("Description"))));
+    // Stacking the frames around it: collected from the film, lined up, put together.
+    auto *stackCount = window.findChild<QSpinBox *>(QStringLiteral("stackCount"));
+    auto *stackButton = window.findChild<QPushButton *>(QStringLiteral("stackFrames"));
+    report(stackButton && stackButton->isVisible(), QStringLiteral("film tools: Stack Frames is offered for a spot in a paused frame"));
+    if (stackButton) {
+        stackCount->setValue(7);
+        stackButton->click();
+        waitUntil([&] { return stackButton->isEnabled() && !stackButton->isVisible(); }, 60000);
+        png.clear();
+        window.findChild<QPushButton *>(QStringLiteral("saveEnhanced"))->click();
+        waitUntil([&] { return !png.isEmpty(); }, 10000);
+        frame.loadFromData(png, "PNG");
+        const QString note = frame.text(QStringLiteral("Description"));
+        report(note.contains(QLatin1String("frames around it lined up and averaged")) && note.contains(QLatin1String("only the spot")),
+               QStringLiteral("film tools: the frames around the spot are stacked, and what's saved says how many"), note);
+    }
     window.findChild<QPushButton *>(QStringLiteral("wholePicture"))->click();
     QCoreApplication::processEvents();
     report(!picture->isVisible() && !window.findChild<QSlider *>(QStringLiteral("focus"))->isEnabled(),

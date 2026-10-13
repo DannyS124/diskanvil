@@ -41,6 +41,7 @@
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QTransform>
 #include <QImage>
 #include <QMutex>
 #include <QImageReader>
@@ -3554,6 +3555,160 @@ void enhanceTools()
     report(stopped.isNull(), QStringLiteral("enhance: it can be stopped part way"));
     report(focus.describe().join(QStringLiteral("; ")).contains(QLatin1String("4 px")), QStringLiteral("enhance: what was done, in words"),
            focus.describe().join(QStringLiteral("; ")));
+
+    // The tools from the forensic video world: local contrast, smoothing that keeps edges,
+    // deinterlacing, straightening, and frames stacked.
+    {
+        // A dark picture with faint detail in it: local contrast brings it out more than it was.
+        QImage dim(128, 128, QImage::Format_RGB32);
+        for (int y = 0; y < 128; ++y)
+            for (int x = 0; x < 128; ++x)
+                dim.setPixel(x, y, x < 64 ? qRgb(10 + y / 3 + (x / 4 % 2) * 6, 10 + y / 3 + (x / 4 % 2) * 6, 10 + y / 3 + (x / 4 % 2) * 6) : qRgb(220, 220, 220));
+        enhance::Settings local;
+        local.localContrast = 60;
+        const QImage spread = enhance::apply(dim, local);
+        const int before = qGray(dim.pixel(5, 60)) - qGray(dim.pixel(1, 60)), after = qGray(spread.pixel(5, 60)) - qGray(spread.pixel(1, 60));
+        report(after > before * 2, QStringLiteral("enhance: local contrast brings out faint detail in the dark part"),
+               QStringLiteral("a step of %1 became %2").arg(before).arg(after));
+    }
+    {
+        // Grain on two flat halves: smoothed, while the edge between them stays a sharp step.
+        QImage grainy(96, 64, QImage::Format_RGB32);
+        QRandomGenerator noise(7);
+        for (int y = 0; y < 64; ++y)
+            for (int x = 0; x < 96; ++x) {
+                const int v = std::clamp((x < 48 ? 60 : 190) + int(noise.bounded(31)) - 15, 0, 255);
+                grainy.setPixel(x, y, qRgb(v, v, v));
+            }
+        enhance::Settings keep;
+        keep.smooth = 70;
+        const QImage smooth = enhance::apply(grainy, keep);
+        const auto spread = [](const QImage &im, int x0) {
+            double sum = 0, sq = 0;
+            int n = 0;
+            for (int y = 8; y < 56; ++y)
+                for (int x = x0; x < x0 + 30; ++x, ++n) {
+                    const int v = qGray(im.pixel(x, y));
+                    sum += v;
+                    sq += v * v;
+                }
+            return std::sqrt(sq / n - (sum / n) * (sum / n));
+        };
+        const int edge = qGray(smooth.pixel(49, 32)) - qGray(smooth.pixel(46, 32));
+        report(spread(smooth, 5) < spread(grainy, 5) / 2 && edge > 100, QStringLiteral("enhance: grain smoothed, the edge kept sharp"),
+               QStringLiteral("grain %1 to %2, edge step %3").arg(spread(grainy, 5), 0, 'f', 1).arg(spread(smooth, 5), 0, 'f', 1).arg(edge));
+    }
+    {
+        // Comb lines: the odd lines from a moment later, made again from the even ones.
+        QImage comb(32, 32, QImage::Format_RGB32);
+        for (int y = 0; y < 32; ++y)
+            for (int x = 0; x < 32; ++x)
+                comb.setPixel(x, y, (y % 2 ? x + 4 : x) < 16 ? qRgb(0, 0, 0) : qRgb(255, 255, 255));
+        enhance::Settings both;
+        both.deinterlace = true;
+        const QImage one = enhance::apply(comb, both);
+        bool straight = true;
+        for (int y = 1; y < 31; ++y)
+            straight = straight && qGray(one.pixel(17, y)) == 255 && qGray(one.pixel(14, y)) == 0;
+        report(straight, QStringLiteral("enhance: deinterlacing takes the comb lines out"));
+    }
+    {
+        // A plate seen at an angle: its four corners picked, it comes back square-on.
+        QImage plate(200, 60, QImage::Format_RGB32);
+        plate.fill(Qt::white);
+        {
+            QPainter p(&plate);
+            p.fillRect(20, 15, 30, 30, Qt::black);
+            p.fillRect(150, 15, 30, 30, Qt::black);
+        }
+        const QPolygonF corners{QPointF(40, 30), QPointF(250, 60), QPointF(240, 150), QPointF(30, 110)};
+        QTransform to;
+        QTransform::quadToQuad(QPolygonF{QPointF(0, 0), QPointF(200, 0), QPointF(200, 60), QPointF(0, 60)}, corners, to);
+        QImage seen(300, 200, QImage::Format_RGB32);
+        seen.fill(Qt::gray);
+        {
+            QPainter p(&seen);
+            p.setRenderHint(QPainter::SmoothPixmapTransform);
+            p.setTransform(to);
+            p.drawImage(0, 0, plate);
+        }
+        const QImage flat = enhance::straighten(seen, corners);
+        const bool square = flat.width() > 190 && flat.height() > 60 && qGray(flat.pixel(flat.width() * 35 / 200, flat.height() / 2)) < 80
+                         && qGray(flat.pixel(flat.width() * 100 / 200, flat.height() / 2)) > 180
+                         && qGray(flat.pixel(flat.width() * 165 / 200, flat.height() / 2)) < 80;
+        report(square, QStringLiteral("enhance: a plate seen at an angle is straightened from its four corners"),
+               QStringLiteral("%1x%2").arg(flat.width()).arg(flat.height()));
+    }
+    {
+        // Frames of the same thing, each moved a little and noisy: stacked they line up, the
+        // noise evens out, and at twice the size they hold more than one frame made bigger.
+        QImage truth(128, 96, QImage::Format_RGB32);
+        QRandomGenerator dots(3);
+        for (int y = 0; y < 96; ++y)
+            for (int x = 0; x < 128; ++x) {
+                truth.setPixel(x, y, qRgb(120, 120, 120));
+            }
+        // Blocks of all sizes, nowhere the same: nothing that lines up wrongly by repeating.
+        for (int i = 0; i < 60; ++i) {
+            const int bx = int(dots.bounded(120)), by = int(dots.bounded(88)), bw = 2 + int(dots.bounded(14)), bh = 2 + int(dots.bounded(14));
+            const int v = 40 + int(dots.bounded(200));
+            for (int y = by; y < std::min(96, by + bh); ++y)
+                for (int x = bx; x < std::min(128, bx + bw); ++x)
+                    truth.setPixel(x, y, qRgb(v, v, v));
+        }
+        QVector<QImage> frames;
+        QVector<QPointF> moves;
+        QImage noiseless(64, 48, QImage::Format_RGB32); // the first frame as it would be with no grain
+        QRandomGenerator jitter(11);
+        for (int i = 0; i < 12; ++i) {
+            const QPointF move(jitter.bounded(6.0) - 3, jitter.bounded(6.0) - 3);
+            moves << move;
+            // Filmed at half the detail, moved, with grain.
+            // Smoothly between the scene's points (as a lens does), so a move of any fraction is just that.
+            const auto scene = [&truth](double tx, double ty) {
+                const int ix = int(std::floor(tx)), iy = int(std::floor(ty));
+                const double fx = tx - ix, fy = ty - iy;
+                const auto at = [&truth](int x, int y) { return qGray(truth.pixel(std::clamp(x, 0, 127), std::clamp(y, 0, 95))); };
+                return (at(ix, iy) * (1 - fx) + at(ix + 1, iy) * fx) * (1 - fy) + (at(ix, iy + 1) * (1 - fx) + at(ix + 1, iy + 1) * fx) * fy;
+            };
+            QImage frame(64, 48, QImage::Format_RGB32);
+            for (int y = 0; y < 48; ++y)
+                for (int x = 0; x < 64; ++x) {
+                    double sum = 0;
+                    for (int j = 0; j < 2; ++j)
+                        for (int k = 0; k < 2; ++k)
+                            sum += scene(x * 2 + k + move.x() * 2, y * 2 + j + move.y() * 2);
+                    const int clean = std::clamp(int(sum / 4), 0, 255);
+                    const int v = std::clamp(clean + int(jitter.bounded(41)) - 20, 0, 255);
+                    frame.setPixel(x, y, qRgb(v, v, v));
+                    if (i == 0)
+                        noiseless.setPixel(x, y, qRgb(clean, clean, clean));
+                }
+            frames << frame;
+        }
+        QVector<QPointF> found;
+        const QImage stacked = enhance::stack(frames, 0, 2, false, &found);
+        const QImage same = enhance::stack(frames, 0, 1, false);
+        const QImage &clean = noiseless;
+        const auto off = [&clean](const QImage &im) {
+            double sum = 0;
+            int n = 0;
+            for (int y = 8; y < 40; ++y)
+                for (int x = 8; x < 56; ++x, ++n)
+                    sum += std::abs(qGray(im.pixel(x, y)) - qGray(clean.pixel(x, y)));
+            return sum / n;
+        };
+        bool lined = found.size() == 12;
+        for (int i = 1; i < found.size() && lined; ++i)
+            lined = std::abs(found[i].x() - (moves[0].x() - moves[i].x())) < 0.4 && std::abs(found[i].y() - (moves[0].y() - moves[i].y())) < 0.4;
+        QStringList pairs;
+        for (int i = 1; i < std::min(4, int(found.size())); ++i)
+            pairs << QStringLiteral("%1,%2 for %3,%4").arg(found[i].x(), 0, 'f', 2).arg(found[i].y(), 0, 'f', 2)
+                         .arg(moves[0].x() - moves[i].x(), 0, 'f', 2).arg(moves[0].y() - moves[i].y(), 0, 'f', 2);
+        report(lined, QStringLiteral("enhance: stacked frames are lined up to a fraction of a pixel"), pairs.join(QStringLiteral("; ")));
+        report(stacked.size() == QSize(128, 96) && off(same) < off(frames[0]) * 0.5, QStringLiteral("enhance: stacked, the grain evens out: far nearer the frame without it than one frame is"),
+               QStringLiteral("grain of %1 in one frame, %2 stacked").arg(off(frames[0]), 0, 'f', 1).arg(off(same), 0, 'f', 1));
+    }
 
     // Profiles: DiskAnvil's own, and files people save and pass on.
     const QVector<enhance::Profile> own = enhance::builtInProfiles();

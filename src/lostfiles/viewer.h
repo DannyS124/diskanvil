@@ -144,6 +144,10 @@ private:
     void pickSpot(bool on);
     void showSpot(QRect spot);
     void showWhole();
+    bool freezeFrame(); // a film's frame on the screen made a still picture to work on
+    void straightenSpot(bool on);
+    void straightened(const QPolygonF &corners);
+    void stackFrames(int count, int scale);
 
     Show m_shown;
     QStackedWidget *m_pages;
@@ -170,6 +174,9 @@ private:
     QRect m_spot;               // the spot shown, in its pixels; empty for the whole
     bool m_spotFromFilm = false; // the film's frame is being worked on as a still
     QString m_spotWhen;         // and where in the film it is
+    qint64 m_spotAt = 0;        // (in ms)
+    bool m_reshaped = false;    // straightened or stacked: no longer a piece of m_whole as it is
+    QStringList m_steps;        // what was done since, for the note in what's saved
     QTimer *m_enhanceTimer;
     std::shared_ptr<std::atomic<int>> m_enhanceRound; // a newer request stops the ones before it
 };
