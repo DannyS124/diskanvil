@@ -924,6 +924,11 @@ void hardwareCheck()
     }
     const hardware::StressResult fine = hardware::judge(cool, 40, 4500);
     report(!fine.tooHot && !fine.throttled && qAbs(fine.maxCelsius - 59.83) < 0.1, QStringLiteral("hardware: a PC that stays cool and fast is fine"));
+    QVector<hardware::Sample> blind(30, hardware::Sample{1, -1, -1});
+    hardware::StressResult unknown = hardware::judge(blind, -1, -1);
+    unknown.completed = true;
+    report(hardware::describe(unknown).startsWith(QLatin1String("This PC tells neither")) && !hardware::describe(unknown).contains(QLatin1String("cool")),
+           QStringLiteral("hardware: a PC that tells neither its temperature nor its speed isn't called cool"), hardware::describe(unknown));
     const hardware::StressResult bad = hardware::judge(cooking, 45, 4000);
     report(bad.tooHot && bad.throttled && hardware::describe(bad).contains(QLatin1String("paste")),
            QStringLiteral("hardware: one that gets far too hot and slows itself down is told to clean it and see to the paste"), hardware::describe(bad));

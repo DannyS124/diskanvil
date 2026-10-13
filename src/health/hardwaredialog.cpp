@@ -294,7 +294,8 @@ void HardwareDialog::startStress(int seconds)
             now << tr("%1 °C").arg(qRound(s.celsius));
         if (s.mhz > 0)
             now << tr("%1 MHz").arg(qRound(s.mhz));
-        m_stressText->setText(tr("Working… %1").arg(now.join(QStringLiteral(", "))));
+        m_stressText->setText(now.isEmpty() ? tr("Working… (this PC doesn't tell its processor's temperature or speed)")
+                                            : tr("Working… %1").arg(now.join(QStringLiteral(", "))));
     });
     connect(job, &hardware::Stress::finished, this, &HardwareDialog::stressFinished);
     m_thread = startOnThread(this, job);

@@ -258,6 +258,11 @@ StressResult judge(QVector<Sample> samples, double idleCelsius, double maxMhz)
 QString describe(const StressResult &r)
 {
     QStringList out;
+    const bool speed = r.startMhz > 0 && r.endMhz > 0;
+    if (r.maxCelsius <= 0 && !speed)
+        return tr("This PC tells neither its processor's temperature nor its speed (a virtual machine does neither; on Windows many PCs "
+                  "don't), so all that can be said is that it kept working under full load%1.")
+            .arg(r.completed ? QString() : tr(" while it ran"));
     if (r.maxCelsius > 0)
         out << tr("Its temperature went from %1 °C to %2 °C under full load.").arg(qRound(r.idleCelsius)).arg(qRound(r.maxCelsius));
     else
@@ -272,7 +277,7 @@ QString describe(const StressResult &r)
     else if (r.throttled)
         out << tr("It slowed down a lot as it warmed up: its cooling or its power is holding it back.");
     else if (r.completed)
-        out << tr("That's fine: it kept cool enough and kept its speed.");
+        out << (r.maxCelsius > 0 ? tr("That's fine: it kept cool enough and kept its speed.") : tr("It kept its speed."));
     return out.join(QLatin1Char(' '));
 }
 
