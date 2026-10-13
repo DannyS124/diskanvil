@@ -28,6 +28,16 @@ struct Settings {
     int localContrast = 0; // 0 to 100: detail brought out in the dark and light parts each on its own (CLAHE)
     bool deinterlace = false; // an old camera's two half-pictures (the comb lines) made into one
     int deblock = 0;          // 0 to 100: the 8 by 8 squares heavy JPEG squeezing leaves, evened out
+    // Played right (the forensic first step): a video's "limited" 16-235 levels stretched to the
+    // full 0-255 (washed-out CCTV); and one of the two half-pictures of an interlaced frame, its
+    // lines doubled (1 the first, 2 the second), when the two show different moments.
+    bool fullRange = false;
+    int field = 0;
+    int homomorphic = 0;      // 0 to 100: uneven light evened out (backlit doorways), detail kept
+    int retinex = 0;          // 0 to 100: dark parts brought up as the eye would see them (multi-scale Retinex)
+    // One part of the colour on its own, as a grey picture: writing often stands out in one.
+    enum Channel { AllColour = 0, Red, Green, Blue, Brightness, BlueDifference, RedDifference, Hue, Saturation, Value, MostContrast };
+    int channel = AllColour;
     bool steady = false;      // a film saved steadied (ffmpeg's deshake); it doesn't change a picture
     int sharpen = 0;    // 0 to 100 (an unsharp mask)
     int focus = 0;      // 0 off, else how far out of focus it is, in pixels (1 to 15)
@@ -56,8 +66,16 @@ QImage straighten(const QImage &in, const QPolygonF &corners);
 // can show more than any one of them (shift and add). `scale` 2 makes it twice as big from what the
 // frames hold; `middle` takes each point's middle value (a passer-by in a few frames is left out)
 // rather than the average. `shifts` hears how far each frame was moved to line up.
-QImage stack(const QVector<QImage> &frames, int reference, int scale, bool middle, QVector<QPointF> *shifts = nullptr,
+// How stacked frames are put together: the average; each point's middle value (what's in most of
+// the frames: a passer-by in a few is left out); or the average of those not far off the rest.
+enum class Combine { Average = 0, Middle, AverageWithoutOutliers };
+QImage stack(const QVector<QImage> &frames, int reference, int scale, Combine how, QVector<QPointF> *shifts = nullptr,
              const std::function<bool(int percent)> &progress = {});
+// What's blown out (pure white, in red) and pure black (in blue) over the picture: there's nothing
+// left to bring out there.
+QImage clippedOverlay(const QImage &picture);
+// A channel's name, for the note saved with a picture.
+QString channelName(int channel);
 
 // A profile: the settings kept under a name, to use again. DiskAnvil comes with some for what
 // usually goes wrong (too dark, out of focus, a faded print...); people save their own and pass

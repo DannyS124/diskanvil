@@ -3687,8 +3687,8 @@ void enhanceTools()
             frames << frame;
         }
         QVector<QPointF> found;
-        const QImage stacked = enhance::stack(frames, 0, 2, false, &found);
-        const QImage same = enhance::stack(frames, 0, 1, false);
+        const QImage stacked = enhance::stack(frames, 0, 2, enhance::Combine::Average, &found);
+        const QImage same = enhance::stack(frames, 0, 1, enhance::Combine::Average);
         const QImage &clean = noiseless;
         const auto off = [&clean](const QImage &im) {
             double sum = 0;
@@ -3734,6 +3734,98 @@ void enhanceTools()
                    && qGray(big.pixel(20, 15)) < qGray(big.pixel(15, 15)),
                QStringLiteral("enhance: a tiny picture made bigger to any size, smoothly (no squares)"));
         report(enhance::enlarge(tiny, 8).size() == QSize(32, 32), QStringLiteral("enhance: saved up to eight times as big"));
+    }
+
+    {
+        // Played right: video's 16-235 to 0-255; one field, lines doubled.
+        QImage video(16, 8, QImage::Format_RGB32);
+        for (int y = 0; y < 8; ++y)
+            for (int x = 0; x < 16; ++x)
+                video.setPixel(x, y, x < 8 ? qRgb(16, 16, 16) : qRgb(235, 235, 235));
+        enhance::Settings range;
+        range.fullRange = true;
+        const QImage full = enhance::apply(video, range);
+        report(qGray(full.pixel(2, 2)) <= 1 && qGray(full.pixel(12, 2)) >= 254, QStringLiteral("enhance: video levels 16-235 stretched to the full range"));
+        QImage interlaced(8, 8, QImage::Format_RGB32);
+        for (int y = 0; y < 8; ++y)
+            for (int x = 0; x < 8; ++x)
+                interlaced.setPixel(x, y, y % 2 ? qRgb(0, 0, 0) : qRgb(200, 200, 200));
+        enhance::Settings first;
+        first.field = 1;
+        const QImage one = enhance::apply(interlaced, first);
+        bool doubled = true;
+        for (int y = 0; y < 8; ++y)
+            doubled = doubled && qGray(one.pixel(3, y)) == 200;
+        report(doubled, QStringLiteral("enhance: one field on its own, its lines doubled"));
+    }
+    {
+        // Uneven light: a dark half with faint detail and a bright half; brought up, detail kept.
+        QImage lit(128, 64, QImage::Format_RGB32);
+        for (int y = 0; y < 64; ++y)
+            for (int x = 0; x < 128; ++x) {
+                const int base = x < 64 ? 18 : 220, detail = (x / 4 % 2) * (x < 64 ? 6 : 20);
+                lit.setPixel(x, y, qRgb(base + detail, base + detail, base + detail));
+            }
+        for (const auto &[name, setting] : {std::pair{QStringLiteral("uneven light (homomorphic)"), 0}, std::pair{QStringLiteral("Retinex"), 1}}) {
+            enhance::Settings s;
+            (setting == 0 ? s.homomorphic : s.retinex) = 80;
+            const QImage out = enhance::apply(lit, s);
+            const int darkBefore = qGray(lit.pixel(20, 30)), darkAfter = qGray(out.pixel(20, 30));
+            const int stepBefore = qGray(lit.pixel(4, 30)) - qGray(lit.pixel(0, 30)), stepAfter = qGray(out.pixel(4, 30)) - qGray(out.pixel(0, 30));
+            report(darkAfter > darkBefore + 10 && stepAfter > stepBefore, QStringLiteral("enhance: %1 brings the dark half up, its detail clearer").arg(name),
+                   QStringLiteral("dark %1 to %2, detail step %3 to %4").arg(darkBefore).arg(darkAfter).arg(stepBefore).arg(stepAfter));
+        }
+    }
+    {
+        // Channels: red text on a grey that's the same brightness shows only in some.
+        QImage sign(32, 16, QImage::Format_RGB32);
+        sign.fill(qRgb(120, 120, 120));
+        for (int x = 8; x < 24; ++x)
+            for (int y = 5; y < 11; ++y)
+                sign.setPixel(x, y, qRgb(200, 85, 85)); // about as bright as the grey
+        enhance::Settings red;
+        red.channel = enhance::Settings::Red;
+        enhance::Settings most;
+        most.channel = enhance::Settings::MostContrast;
+        enhance::Settings bright;
+        bright.channel = enhance::Settings::Brightness;
+        const QImage r = enhance::apply(sign, red), m = enhance::apply(sign, most), y = enhance::apply(sign, bright);
+        const int redGap = std::abs(qGray(r.pixel(15, 7)) - qGray(r.pixel(2, 2))), mostGap = std::abs(qGray(m.pixel(15, 7)) - qGray(m.pixel(2, 2)));
+        report(redGap > 200 && mostGap > 200 && qRed(r.pixel(2, 2)) == qGreen(r.pixel(2, 2)),
+               QStringLiteral("enhance: one channel (red, or the most contrast) shows what the colour hides"), QStringLiteral("red %1, most %2").arg(redGap).arg(mostGap));
+        report(enhance::Settings().isDefault() && !red.isDefault() && red.describe().join(QLatin1Char(' ')).contains(QLatin1String("red")),
+               QStringLiteral("enhance: the channel is said in what's saved"));
+    }
+    {
+        // Robust stacking: one frame with a passer-by across it is left out by the middle value.
+        QImage scene(48, 32, QImage::Format_RGB32);
+        QRandomGenerator dots(5);
+        for (int y = 0; y < 32; ++y)
+            for (int x = 0; x < 48; ++x) {
+                const int v = 60 + int(dots.bounded(140));
+                scene.setPixel(x, y, qRgb(v, v, v));
+            }
+        QVector<QImage> frames(7, scene);
+        QImage passer = scene;
+        for (int y = 10; y < 22; ++y)
+            for (int x = 20; x < 28; ++x)
+                passer.setPixel(x, y, qRgb(255, 0, 0));
+        frames[3] = passer;
+        const QImage mean = enhance::stack(frames, 0, 1, enhance::Combine::Average);
+        const QImage middle = enhance::stack(frames, 0, 1, enhance::Combine::Middle);
+        const QImage clipped = enhance::stack(frames, 0, 1, enhance::Combine::AverageWithoutOutliers);
+        const auto redness = [](const QImage &im) { return qRed(im.pixel(24, 16)) - qGreen(im.pixel(24, 16)); };
+        report(redness(mean) > 20 && std::abs(redness(middle)) <= 2 && std::abs(redness(clipped)) <= 4,
+               QStringLiteral("enhance: a passer-by in one frame smears the average, the middle value and the average without outliers leave it out"),
+               QStringLiteral("red over green: average %1, middle %2, without outliers %3").arg(redness(mean)).arg(redness(middle)).arg(redness(clipped)));
+        QImage bright(4, 1, QImage::Format_RGB32);
+        bright.setPixel(0, 0, qRgb(255, 255, 255));
+        bright.setPixel(1, 0, qRgb(0, 0, 0));
+        bright.setPixel(2, 0, qRgb(128, 128, 128));
+        bright.setPixel(3, 0, qRgb(255, 40, 40));
+        const QImage over = enhance::clippedOverlay(bright);
+        report(qAlpha(over.pixel(0, 0)) > 0 && qAlpha(over.pixel(1, 0)) > 0 && qAlpha(over.pixel(2, 0)) == 0 && qAlpha(over.pixel(3, 0)) > 0,
+               QStringLiteral("enhance: what's blown out or pure black is marked, the rest isn't"));
     }
 
     // Profiles: DiskAnvil's own, and files people save and pass on.

@@ -147,7 +147,7 @@ private:
     bool freezeFrame(); // a film's frame on the screen made a still picture to work on
     void straightenSpot(bool on);
     void straightened(const QPolygonF &corners);
-    void stackFrames(int count, int scale);
+    void stackFrames(int count, int scale, int how);
 
     Show m_shown;
     QStackedWidget *m_pages;

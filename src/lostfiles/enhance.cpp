@@ -175,13 +175,17 @@ Plane median(const Plane &in, int radius)
 
 bool Settings::isDefault() const
 {
-    return deblock == 0 && brightness == 0 && contrast == 0 && shadows == 0 && !autoLevels && denoise == 0 && smooth == 0 && localContrast == 0 && !deinterlace
+    return !fullRange && field == 0 && homomorphic == 0 && retinex == 0 && channel == AllColour && deblock == 0 && brightness == 0 && contrast == 0 && shadows == 0 && !autoLevels && denoise == 0 && smooth == 0 && localContrast == 0 && !deinterlace
         && sharpen == 0 && focus == 0 && motion == 0 && !grey && !invert;
 }
 
 QStringList Settings::describe() const
 {
     QStringList out;
+    if (fullRange)
+        out << tr("video levels 16-235 stretched to the full range");
+    if (field == 1 || field == 2)
+        out << tr("only the %1 half-picture (field), its lines doubled").arg(field == 1 ? tr("first") : tr("second"));
     if (deinterlace)
         out << tr("deinterlaced");
     if (deblock > 0)
@@ -196,6 +200,10 @@ QStringList Settings::describe() const
         out << tr("movement blur of %1 px at %2° taken out (%3 rounds)").arg(motion).arg(motionAngle).arg(rounds);
     if (sharpen > 0)
         out << tr("sharpened %1%").arg(sharpen);
+    if (homomorphic > 0)
+        out << tr("uneven light evened out %1% (homomorphic filter)").arg(homomorphic);
+    if (retinex > 0)
+        out << tr("multi-scale Retinex %1%").arg(retinex);
     if (localContrast > 0)
         out << tr("local contrast %1% (CLAHE)").arg(localContrast);
     if (autoLevels)
@@ -206,6 +214,8 @@ QStringList Settings::describe() const
         out << tr("contrast %1%2").arg(contrast > 0 ? QStringLiteral("+") : QString()).arg(contrast);
     if (shadows > 0)
         out << tr("dark parts lifted %1%").arg(shadows);
+    if (channel != AllColour)
+        out << tr("only its %1, as grey").arg(channelName(channel));
     if (grey)
         out << tr("black and white");
     if (invert)
@@ -225,6 +235,77 @@ void deinterlace(Plane &p)
         for (int x = 0; x < p.w; ++x)
             p(x, y) = (p.at(x, y - 1) + p.at(x, y + 1)) / 2;
     }
+}
+
+// A Gaussian blur wide enough to take in the light of a whole area: worked out on a smaller copy
+// (a wide blur loses nothing that way) and made big again.
+Plane wideBlur(const Plane &in, double sigma)
+{
+    const int f = std::max(1, int(sigma / 4));
+    if (f == 1)
+        return gaussian(in, sigma);
+    Plane small{(in.w + f - 1) / f, (in.h + f - 1) / f, {}};
+    small.v.assign(size_t(small.w) * size_t(small.h), 0);
+    for (int y = 0; y < small.h; ++y)
+        for (int x = 0; x < small.w; ++x) {
+            float sum = 0;
+            int n = 0;
+            for (int j = 0; j < f && y * f + j < in.h; ++j)
+                for (int i = 0; i < f && x * f + i < in.w; ++i, ++n)
+                    sum += in.at(x * f + i, y * f + j);
+            small(x, y) = sum / float(std::max(1, n));
+        }
+    const Plane blurred = gaussian(small, sigma / f);
+    Plane out{in.w, in.h, std::vector<float>(in.v.size())};
+    for (int y = 0; y < in.h; ++y)
+        for (int x = 0; x < in.w; ++x) {
+            const float sx = (x + 0.5f) / f - 0.5f, sy = (y + 0.5f) / f - 0.5f;
+            const int ix = int(std::floor(sx)), iy = int(std::floor(sy));
+            const float tx = sx - ix, ty = sy - iy;
+            out(x, y) = (blurred.at(ix, iy) * (1 - tx) + blurred.at(ix + 1, iy) * tx) * (1 - ty) + (blurred.at(ix, iy + 1) * (1 - tx) + blurred.at(ix + 1, iy + 1) * tx) * ty;
+        }
+    return out;
+}
+
+// The brightness as light falling on things times what they reflect: the light (the wide blur, in
+// logs) turned down, what's lit turned up. A backlit doorway's face comes out of the dark.
+Plane homomorphicFilter(const Plane &light, int strength)
+{
+    const float amount = strength / 100.0f;
+    Plane logs{light.w, light.h, std::vector<float>(light.v.size())};
+    for (size_t i = 0; i < logs.v.size(); ++i)
+        logs.v[i] = std::log(std::max(light.v[i], 1e-3f));
+    const Plane lighting = wideBlur(logs, std::max(light.w, light.h) / 30.0);
+    const float low = 1 - 0.6f * amount, high = 1 + 0.8f * amount;
+    Plane out{light.w, light.h, std::vector<float>(light.v.size())};
+    for (size_t i = 0; i < out.v.size(); ++i)
+        out.v[i] = std::exp(low * lighting.v[i] + high * (logs.v[i] - lighting.v[i]));
+    return out;
+}
+
+// Multi-scale Retinex (Jobson, Rahman and Woodell): each point against the light around it at three
+// distances, averaged, then spread over black to white (the darkest and lightest 1% left out).
+Plane retinexFilter(const Plane &light)
+{
+    const double size = std::max(light.w, light.h);
+    Plane logs{light.w, light.h, std::vector<float>(light.v.size())};
+    for (size_t i = 0; i < logs.v.size(); ++i)
+        logs.v[i] = std::log(std::max(light.v[i], 1e-3f));
+    Plane sum{light.w, light.h, std::vector<float>(light.v.size(), 0)};
+    for (const double scale : {size / 60, size / 12, size / 4}) {
+        const Plane around = wideBlur(light, std::max(1.5, scale));
+        for (size_t i = 0; i < sum.v.size(); ++i)
+            sum.v[i] += (logs.v[i] - std::log(std::max(around.v[i], 1e-3f))) / 3;
+    }
+    std::vector<float> sorted = sum.v;
+    const size_t lo = sorted.size() / 100, hi = sorted.size() - 1 - sorted.size() / 100;
+    std::nth_element(sorted.begin(), sorted.begin() + std::ptrdiff_t(lo), sorted.end());
+    const float bottom = sorted[lo];
+    std::nth_element(sorted.begin(), sorted.begin() + std::ptrdiff_t(hi), sorted.end());
+    const float top = sorted[hi];
+    for (float &v : sum.v)
+        v = std::clamp((v - bottom) / std::max(top - bottom, 1e-4f), 0.0f, 1.0f);
+    return sum;
 }
 
 // JPEG squeezes a picture in 8 by 8 squares; squeezed hard, their edges show. Where the step
@@ -450,7 +531,10 @@ QByteArray profileToFile(const Profile &p)
                          {QStringLiteral("motionAngle"), s.motionAngle}, {QStringLiteral("grey"), s.grey},
                          {QStringLiteral("invert"), s.invert},         {QStringLiteral("smooth"), s.smooth},
                          {QStringLiteral("localContrast"), s.localContrast}, {QStringLiteral("deinterlace"), s.deinterlace},
-                         {QStringLiteral("steady"), s.steady},         {QStringLiteral("deblock"), s.deblock}};
+                         {QStringLiteral("steady"), s.steady},         {QStringLiteral("deblock"), s.deblock},
+                         {QStringLiteral("homomorphic"), s.homomorphic}, {QStringLiteral("retinex"), s.retinex},
+                         {QStringLiteral("channel"), s.channel},       {QStringLiteral("field"), s.field},
+                         {QStringLiteral("fullRange"), s.fullRange}};
     QJsonObject o{{QStringLiteral("diskanvil-enhance-profile"), 1}, {QStringLiteral("name"), p.name}, {QStringLiteral("settings"), settings}};
     if (!p.description.isEmpty())
         o.insert(QStringLiteral("description"), p.description);
@@ -504,6 +588,11 @@ bool profileFromFile(const QByteArray &file, Profile *p, QString *why)
     s.invert = j.value(QStringLiteral("invert")).toBool();
     s.smooth = number("smooth", 0, 100);
     s.deblock = number("deblock", 0, 100);
+    s.homomorphic = number("homomorphic", 0, 100);
+    s.retinex = number("retinex", 0, 100);
+    s.channel = number("channel", 0, Settings::MostContrast);
+    s.field = number("field", 0, 2);
+    s.fullRange = j.value(QStringLiteral("fullRange")).toBool();
     s.localContrast = number("localContrast", 0, 100);
     s.deinterlace = j.value(QStringLiteral("deinterlace")).toBool();
     s.steady = j.value(QStringLiteral("steady")).toBool();
@@ -602,6 +691,23 @@ QImage apply(const QImage &in, const Settings &s, const std::function<bool(int p
         return stopped;
     };
 
+    if (s.fullRange) {
+        // 16 is black and 235 white in a video's limited range: stretched to the full range.
+        for (Plane &p : c)
+            for (float &v : p.v)
+                v = (v - 16 / 255.0f) / (219 / 255.0f);
+    }
+    if (s.field == 1 || s.field == 2) {
+        // One half-picture, every other line, each line shown twice.
+        const int keep = s.field - 1;
+        for (Plane &p : c)
+            for (int y = 0; y < p.h; ++y) {
+                const int from = std::clamp(y - ((y - keep) % 2 + 2) % 2, 0, p.h - 1);
+                if (from != y)
+                    for (int x = 0; x < p.w; ++x)
+                        p(x, y) = p(x, from);
+            }
+    }
     if (s.deinterlace) {
         for (Plane &p : c)
             deinterlace(p);
@@ -658,6 +764,26 @@ QImage apply(const QImage &in, const Settings &s, const std::function<bool(int p
         if (step(80))
             return {};
     }
+    if (s.homomorphic > 0 || s.retinex > 0) {
+        // On the brightness; each colour keeps its share of it.
+        const Plane light = lightOf(c);
+        Plane shaped = light;
+        if (s.homomorphic > 0)
+            shaped = homomorphicFilter(shaped, std::clamp(s.homomorphic, 0, 100));
+        if (s.retinex > 0) {
+            const Plane r = retinexFilter(shaped);
+            const float amount = std::clamp(s.retinex, 0, 100) / 100.0f;
+            for (size_t i = 0; i < shaped.v.size(); ++i)
+                shaped.v[i] = shaped.v[i] * (1 - amount) + r.v[i] * amount;
+        }
+        for (size_t i = 0; i < light.v.size(); ++i) {
+            const float ratio = std::min(shaped.v[i] / std::max(light.v[i], 1e-3f), 20.0f);
+            for (Plane &p : c)
+                p.v[i] = std::clamp(p.v[i] * ratio, 0.0f, 1.0f);
+        }
+        if (step(83))
+            return {};
+    }
     if (s.localContrast > 0) {
         // On the brightness, given back to each colour as it changed.
         const Plane light = lightOf(c);
@@ -690,6 +816,72 @@ QImage apply(const QImage &in, const Settings &s, const std::function<bool(int p
                 for (float &v : p.v)
                     v = (v - low) / span;
             }
+        }
+    }
+    if (s.channel != Settings::AllColour) {
+        // One part of the colour, as grey, spread over black to white.
+        Plane one{w, h, std::vector<float>(size_t(w) * size_t(h))};
+        float axis[3] = {0.299f, 0.587f, 0.114f};
+        if (s.channel == Settings::MostContrast) {
+            // The direction in colour the picture varies most along (its first principal component).
+            double mean[3] = {0, 0, 0}, cov[3][3] = {};
+            const size_t n = one.v.size();
+            for (size_t i = 0; i < n; ++i)
+                for (int k = 0; k < 3; ++k)
+                    mean[k] += c[size_t(k)].v[i] / double(n);
+            for (size_t i = 0; i < n; ++i)
+                for (int a = 0; a < 3; ++a)
+                    for (int b = 0; b < 3; ++b)
+                        cov[a][b] += (c[size_t(a)].v[i] - mean[a]) * (c[size_t(b)].v[i] - mean[b]);
+            double vec[3] = {1, 1, 1};
+            for (int round = 0; round < 50; ++round) {
+                double next[3] = {0, 0, 0}, len = 0;
+                for (int a = 0; a < 3; ++a) {
+                    for (int b = 0; b < 3; ++b)
+                        next[a] += cov[a][b] * vec[b];
+                    len += next[a] * next[a];
+                }
+                len = std::sqrt(len);
+                if (len < 1e-12)
+                    break;
+                for (int a = 0; a < 3; ++a)
+                    vec[a] = next[a] / len;
+            }
+            for (int k = 0; k < 3; ++k)
+                axis[k] = float(vec[k]);
+        }
+        for (size_t i = 0; i < one.v.size(); ++i) {
+            const float r = c[0].v[i], g = c[1].v[i], b = c[2].v[i];
+            const float mx = std::max({r, g, b}), mn = std::min({r, g, b});
+            float v = 0;
+            switch (s.channel) {
+            case Settings::Red: v = r; break;
+            case Settings::Green: v = g; break;
+            case Settings::Blue: v = b; break;
+            case Settings::Brightness: v = 0.299f * r + 0.587f * g + 0.114f * b; break;
+            case Settings::BlueDifference: v = 0.5f - 0.168736f * r - 0.331264f * g + 0.5f * b; break;
+            case Settings::RedDifference: v = 0.5f + 0.5f * r - 0.418688f * g - 0.081312f * b; break;
+            case Settings::Hue: {
+                float hue = 0;
+                if (mx > mn) {
+                    if (mx == r) hue = std::fmod((g - b) / (mx - mn), 6.0f);
+                    else if (mx == g) hue = (b - r) / (mx - mn) + 2;
+                    else hue = (r - g) / (mx - mn) + 4;
+                }
+                v = (hue < 0 ? hue + 6 : hue) / 6;
+                break;
+            }
+            case Settings::Saturation: v = mx > 0 ? (mx - mn) / mx : 0; break;
+            case Settings::Value: v = mx; break;
+            default: v = axis[0] * r + axis[1] * g + axis[2] * b; break;
+            }
+            one.v[i] = v;
+        }
+        const auto [lo, hi] = std::minmax_element(one.v.begin(), one.v.end());
+        const float low = *lo, span = std::max(*hi - *lo, 1e-4f);
+        for (size_t i = 0; i < one.v.size(); ++i) {
+            const float v = (one.v[i] - low) / span;
+            c[0].v[i] = c[1].v[i] = c[2].v[i] = v;
         }
     }
     // Brightness, contrast and the dark parts, the same for each colour.
@@ -732,6 +924,10 @@ QStringList ffmpegArguments(const QString &in, const QString &out, double speed,
 {
     speed = std::clamp(speed, 0.1, 2.0);
     QStringList video;
+    if (s.fullRange)
+        video << QStringLiteral("scale=in_range=limited:out_range=full");
+    if (s.field == 1 || s.field == 2)
+        video << QStringLiteral("field=type=%1,scale=iw:ih*2:flags=neighbor").arg(s.field == 1 ? QStringLiteral("top") : QStringLiteral("bottom"));
     if (s.deinterlace)
         video << QStringLiteral("yadif");
     if (s.steady)
@@ -921,7 +1117,7 @@ Plane lightOf(const QImage &image)
 
 } // namespace
 
-QImage stack(const QVector<QImage> &frames, int reference, int scale, bool middle, QVector<QPointF> *shifts, const std::function<bool(int percent)> &progress)
+QImage stack(const QVector<QImage> &frames, int reference, int scale, Combine how, QVector<QPointF> *shifts, const std::function<bool(int percent)> &progress)
 {
     if (frames.isEmpty() || reference < 0 || reference >= frames.size())
         return {};
@@ -965,15 +1161,32 @@ QImage stack(const QVector<QImage> &frames, int reference, int scale, bool middl
                     g[size_t(i)] = qGreen(p);
                     b[size_t(i)] = qBlue(p);
                 }
-                const auto combine = [middle](std::vector<int> &v) {
-                    if (middle) {
+                const auto combine = [how](std::vector<int> &v) {
+                    if (how == Combine::Middle) {
                         std::nth_element(v.begin(), v.begin() + std::ptrdiff_t(v.size() / 2), v.end());
                         return v[v.size() / 2];
                     }
-                    int sum = 0;
-                    for (int x : v)
+                    double sum = 0, sq = 0;
+                    for (int x : v) {
                         sum += x;
-                    return (sum + int(v.size()) / 2) / int(v.size());
+                        sq += double(x) * x;
+                    }
+                    const double mean = sum / double(v.size());
+                    if (how == Combine::AverageWithoutOutliers && v.size() > 3) {
+                        // The ones more than twice the spread from the average left out.
+                        const double spread = std::sqrt(std::max(0.0, sq / double(v.size()) - mean * mean));
+                        double kept = 0;
+                        int n = 0;
+                        for (int x : v) {
+                            if (std::abs(x - mean) <= 2 * spread + 1) {
+                                kept += x;
+                                ++n;
+                            }
+                        }
+                        if (n > 0)
+                            return int(std::lround(kept / n));
+                    }
+                    return int(std::lround(mean));
                 };
                 line[X] = qRgb(combine(r), combine(g), combine(b));
             }
@@ -982,6 +1195,42 @@ QImage stack(const QVector<QImage> &frames, int reference, int scale, bool middl
         }
     });
     return stopped ? QImage() : out;
+}
+
+QImage clippedOverlay(const QImage &picture)
+{
+    const QImage src = picture.convertToFormat(QImage::Format_ARGB32);
+    QImage out(src.size(), QImage::Format_ARGB32);
+    out.fill(Qt::transparent);
+    for (int y = 0; y < src.height(); ++y) {
+        const QRgb *from = reinterpret_cast<const QRgb *>(src.constScanLine(y));
+        QRgb *to = reinterpret_cast<QRgb *>(out.scanLine(y));
+        for (int x = 0; x < src.width(); ++x) {
+            const int r = qRed(from[x]), g = qGreen(from[x]), b = qBlue(from[x]);
+            if (r >= 254 || g >= 254 || b >= 254)
+                to[x] = qRgba(255, 30, 60, 200);
+            else if (r <= 1 && g <= 1 && b <= 1)
+                to[x] = qRgba(40, 110, 255, 200);
+        }
+    }
+    return out;
+}
+
+QString channelName(int channel)
+{
+    switch (channel) {
+    case Settings::Red: return tr("red");
+    case Settings::Green: return tr("green");
+    case Settings::Blue: return tr("blue");
+    case Settings::Brightness: return tr("brightness (Y)");
+    case Settings::BlueDifference: return tr("blue difference (Cb)");
+    case Settings::RedDifference: return tr("red difference (Cr)");
+    case Settings::Hue: return tr("hue");
+    case Settings::Saturation: return tr("saturation");
+    case Settings::Value: return tr("value (V)");
+    case Settings::MostContrast: return tr("most contrast (principal component)");
+    default: return {};
+    }
 }
 
 } // namespace enhance

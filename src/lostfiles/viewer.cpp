@@ -167,7 +167,7 @@ QByteArray encode(const Message &m)
     case Message::ExportFilm:
         s << m.speed << m.durationMs << qint32(m.settings.brightness) << qint32(m.settings.contrast) << qint32(m.settings.shadows)
           << qint32(m.settings.sharpen) << m.settings.grey << m.settings.invert << qint32(m.settings.smooth) << m.settings.deinterlace
-          << m.settings.steady;
+          << m.settings.steady << m.settings.fullRange << qint32(m.settings.field);
         break;
     case Message::Profiles:
         s << quint32(m.profiles.size());
@@ -244,8 +244,10 @@ bool decode(QByteArray &buffer, Message &m, bool *bad)
         break;
     case Message::ExportFilm: {
         qint32 brightness = 0, contrast = 0, shadows = 0, sharpen = 0, smooth = 0;
+        qint32 field = 0;
         s >> m.speed >> m.durationMs >> brightness >> contrast >> shadows >> sharpen >> m.settings.grey >> m.settings.invert >> smooth
-          >> m.settings.deinterlace >> m.settings.steady;
+          >> m.settings.deinterlace >> m.settings.steady >> m.settings.fullRange >> field;
+        m.settings.field = std::clamp(field, 0, 2);
         m.settings.smooth = std::clamp(smooth, 0, 100);
         // From another process: kept to what the panel can set.
         m.speed = std::isfinite(m.speed) ? std::clamp(m.speed, 0.1, 2.0) : 1.0;
@@ -414,6 +416,8 @@ public:
     QSize pictureSize() const { return m_image.size(); }
     // Each pixel as a square (exactly what's there) instead of smoothly made bigger.
     void setShowPixels(bool on) { m_showPixels = on; viewport()->update(); }
+    // What's blown out or pure black, shown over it.
+    void setShowClipped(bool on) { m_showClipped = on; viewport()->update(); }
     double zoom() const { return m_zoom; }
 
     void fit()
@@ -452,6 +456,14 @@ protected:
         } else {
             p.setRenderHint(QPainter::SmoothPixmapTransform);
             p.drawImage(at, shown);
+        }
+        if (m_showClipped) {
+            if (m_clippedFor != shown.cacheKey()) {
+                m_clipped = enhance::clippedOverlay(shown);
+                m_clippedFor = shown.cacheKey();
+            }
+            p.setRenderHint(QPainter::SmoothPixmapTransform, false);
+            p.drawImage(at, m_clipped);
         }
         if (m_measuring && !m_line.isNull()) {
             p.setRenderHint(QPainter::Antialiasing);
@@ -645,6 +657,9 @@ private:
     QLineF m_line;
     bool m_picking = false;
     bool m_showPixels = false;
+    bool m_showClipped = false;
+    QImage m_clipped;          // the overlay, for the picture it was made from
+    qint64 m_clippedFor = 0;
     QImage m_smooth;          // the picture made bigger for the screen, at the size shown
     qint64 m_smoothFor = 0;   // and which picture it was made from
     bool m_cornering = false;
@@ -723,6 +738,12 @@ public:
         m_sharpen = slider(viewer::tr("Sharpen"), 0, 100, QStringLiteral("sharpen"));
         m_smooth = slider(viewer::tr("Smooth grain"), 0, 100, QStringLiteral("smooth"));
         m_deblock = slider(viewer::tr("JPEG squares"), 0, 100, QStringLiteral("deblock"));
+        m_homomorphic = slider(viewer::tr("Uneven light"), 0, 100, QStringLiteral("homomorphic"));
+        m_homomorphic->setToolTip(viewer::tr("The light falling on things turned down and what's lit turned up: a backlit face in a doorway, "
+                                             "a street with one bright lamp (a homomorphic filter)"));
+        m_retinex = slider(viewer::tr("Retinex"), 0, 100, QStringLiteral("retinex"));
+        m_retinex->setToolTip(viewer::tr("Dark parts brought up the way an eye adjusts to them, against the light around them at three "
+                                         "distances (multi-scale Retinex)"));
         m_deblock->setToolTip(viewer::tr("The 8 by 8 squares a hard-squeezed JPEG (a thumbnail, a picture sent by a phone) shows, evened out"));
         m_smooth->setToolTip(viewer::tr("Grain evened out while edges stay sharp (a bilateral filter)"));
         m_focus = slider(viewer::tr("Out of focus"), 0, 15, QStringLiteral("focus"));
@@ -743,16 +764,36 @@ public:
         m_invert = new QCheckBox(viewer::tr("Inverted (for a negative)"));
         m_deinterlace = new QCheckBox(viewer::tr("Deinterlace (comb lines from an older camera)"));
         m_deinterlace->setObjectName(QStringLiteral("deinterlace"));
+        m_fullRange = new QCheckBox(viewer::tr("Video levels to full (washed-out CCTV)"));
+        m_fullRange->setObjectName(QStringLiteral("fullRange"));
+        m_fullRange->setToolTip(viewer::tr("Video often keeps black at 16 and white at 235: stretched to 0 and 255, the grey haze goes"));
+        m_field = new QComboBox;
+        m_field->setObjectName(QStringLiteral("field"));
+        m_field->addItems({viewer::tr("Both half-pictures (fields)"), viewer::tr("Only the first field, lines doubled"), viewer::tr("Only the second field, lines doubled")});
+        m_field->setToolTip(viewer::tr("An interlaced frame is two half-pictures taken a moment apart: one on its own has no comb lines"));
+        m_channel = new QComboBox;
+        m_channel->setObjectName(QStringLiteral("channel"));
+        m_channel->addItems({viewer::tr("All the colour"), viewer::tr("Only red"), viewer::tr("Only green"), viewer::tr("Only blue"), viewer::tr("Only brightness (Y)"),
+                             viewer::tr("Only blue difference (Cb)"), viewer::tr("Only red difference (Cr)"), viewer::tr("Only hue"), viewer::tr("Only saturation"),
+                             viewer::tr("Only value (V)"), viewer::tr("Most contrast (from the picture)")});
+        m_channel->setToolTip(viewer::tr("One part of the colour on its own, as grey: writing or a plate often stands out in one"));
+        m_clipped = new QCheckBox(viewer::tr("Show what's blown out (red) or black (blue)"));
+        m_clipped->setObjectName(QStringLiteral("clipped"));
+        m_clipped->setToolTip(viewer::tr("Where the picture is pure white or pure black nothing is left to bring out: shown over it, not saved"));
         m_steady = new QCheckBox(viewer::tr("Steady it (in the copy saved)"));
         m_steady->setObjectName(QStringLiteral("steady"));
         m_steady->setToolTip(viewer::tr("A shaky film is steadied in the slowed-down copy (ffmpeg's deshake)"));
         m_steady->hide();
         for (QWidget *w : {static_cast<QWidget *>(m_grain), static_cast<QWidget *>(m_levels), static_cast<QWidget *>(m_grey), static_cast<QWidget *>(m_invert),
-                           static_cast<QWidget *>(m_deinterlace), static_cast<QWidget *>(m_steady)})
+                           static_cast<QWidget *>(m_deinterlace), static_cast<QWidget *>(m_fullRange), static_cast<QWidget *>(m_field),
+                           static_cast<QWidget *>(m_channel), static_cast<QWidget *>(m_clipped), static_cast<QWidget *>(m_steady)})
             layout->addWidget(w);
         QObject::connect(m_grain, &QComboBox::currentIndexChanged, this, [this] { touched(); });
-        for (QCheckBox *box : {m_levels, m_grey, m_invert, m_deinterlace, m_steady})
+        for (QCheckBox *box : {m_levels, m_grey, m_invert, m_deinterlace, m_steady, m_fullRange})
             QObject::connect(box, &QCheckBox::toggled, this, [this] { touched(); });
+        for (QComboBox *box : {m_field, m_channel})
+            QObject::connect(box, &QComboBox::currentIndexChanged, this, [this] { touched(); });
+        QObject::connect(m_clipped, &QCheckBox::toggled, this, [this](bool on) { if (showClipped) showClipped(on); });
         // A spot: a box drawn around part of the picture (a face, a number plate), which is then
         // shown filling the window and is what the tools work on and what's saved.
         auto *spotRow = new QHBoxLayout;
@@ -789,7 +830,13 @@ public:
         m_stack->setObjectName(QStringLiteral("stackFrames"));
         m_stack->setToolTip(viewer::tr("The frames around this one, lined up on the spot and put together: the grain evens out, and what "
                                        "keeps still (a number plate, a face) shows more clearly than in any one frame"));
+        m_stackHow = new QComboBox;
+        m_stackHow->setObjectName(QStringLiteral("stackHow"));
+        m_stackHow->addItems({viewer::tr("Average"), viewer::tr("Middle value"), viewer::tr("Average without outliers")});
+        m_stackHow->setToolTip(viewer::tr("Average: the most grain taken out. Middle value, or the average without outliers: something "
+                                          "in only a few of the frames (a passer-by, a car) is left out instead of smeared in"));
         stackRow->addWidget(m_stackCount);
+        stackRow->addWidget(m_stackHow);
         stackRow->addWidget(m_stackDouble);
         stackRow->addWidget(m_stack, 1);
         layout->addWidget(m_stackBox);
@@ -797,7 +844,7 @@ public:
         QObject::connect(m_pick, &QPushButton::toggled, this, [this](bool on) { if (pick) pick(on); });
         QObject::connect(m_whole, &QPushButton::clicked, this, [this] { if (whole) whole(); });
         QObject::connect(m_straighten, &QPushButton::toggled, this, [this](bool on) { if (straightenAsked) straightenAsked(on); });
-        QObject::connect(m_stack, &QPushButton::clicked, this, [this] { if (stackAsked) stackAsked(m_stackCount->value(), m_stackDouble->isChecked() ? 2 : 1); });
+        QObject::connect(m_stack, &QPushButton::clicked, this, [this] { if (stackAsked) stackAsked(m_stackCount->value(), m_stackDouble->isChecked() ? 2 : 1, m_stackHow->currentIndex()); });
         auto *buttons = new QHBoxLayout;
         m_compare = new QPushButton(viewer::tr("Hold to Compare"));
         m_compare->setToolTip(viewer::tr("Shows the picture as it was found while it's held down"));
@@ -845,6 +892,11 @@ public:
         s.denoise = m_grain->isEnabled() ? m_grain->currentIndex() : 0;
         s.smooth = m_smooth->isEnabled() ? m_smooth->value() : 0;
         s.deblock = m_deblock->value();
+        s.homomorphic = m_homomorphic->value();
+        s.retinex = m_retinex->value();
+        s.fullRange = m_fullRange->isChecked();
+        s.field = m_field->currentIndex();
+        s.channel = m_channel->currentIndex();
         s.localContrast = m_local->value();
         s.deinterlace = m_deinterlace->isChecked();
         s.steady = m_steady->isVisible() && m_steady->isChecked();
@@ -870,6 +922,11 @@ public:
         m_invert->setChecked(s.invert);
         m_smooth->setValue(s.smooth);
         m_deblock->setValue(s.deblock);
+        m_homomorphic->setValue(s.homomorphic);
+        m_retinex->setValue(s.retinex);
+        m_fullRange->setChecked(s.fullRange);
+        m_field->setCurrentIndex(std::clamp(s.field, 0, 2));
+        m_channel->setCurrentIndex(std::clamp(s.channel, 0, int(enhance::Settings::MostContrast)));
         m_local->setValue(s.localContrast);
         m_deinterlace->setChecked(s.deinterlace);
         m_steady->setChecked(s.steady);
@@ -931,8 +988,10 @@ public:
         for (QSlider *s : std::as_const(m_rows))
             s->setValue(0);
         m_grain->setCurrentIndex(0);
-        for (QCheckBox *box : {m_levels, m_grey, m_invert, m_deinterlace, m_steady})
+        for (QCheckBox *box : {m_levels, m_grey, m_invert, m_deinterlace, m_steady, m_fullRange, m_clipped})
             box->setChecked(false);
+        m_field->setCurrentIndex(0);
+        m_channel->setCurrentIndex(0);
         m_bigger->setCurrentIndex(0);
         m_measure->setChecked(false);
         m_quiet = false;
@@ -983,7 +1042,8 @@ public:
     std::function<void(bool on)> pick;
     std::function<void()> whole;
     std::function<void(bool on)> straightenAsked;
-    std::function<void(int frames, int scale)> stackAsked;
+    std::function<void(int frames, int scale, int how)> stackAsked;
+    std::function<void(bool on)> showClipped;
     std::function<void(viewer::ProfileDo what, const QString &name, const QByteArray &file)> profileAsked;
 
 private:
@@ -1105,7 +1165,9 @@ private:
     QAction *m_saveProfile, *m_removeProfile, *m_importProfile, *m_exportProfile;
     QVector<enhance::Profile> m_builtIn, m_saved;
     QPushButton *m_pick, *m_whole, *m_straighten, *m_stack;
-    QSlider *m_local, *m_smooth, *m_deblock;
+    QSlider *m_local, *m_smooth, *m_deblock, *m_homomorphic, *m_retinex;
+    QCheckBox *m_fullRange, *m_clipped;
+    QComboBox *m_field, *m_channel, *m_stackHow;
     QCheckBox *m_deinterlace, *m_steady, *m_stackDouble;
     QSpinBox *m_stackCount;
     QWidget *m_stackBox;
@@ -2075,7 +2137,8 @@ Window::Window(QWidget *parent)
         straightenSpot(on);
     };
     m_picture->cornered = [this](const QPolygonF &corners) { straightened(corners); };
-    m_enhance->stackAsked = [this](int frames, int scale) { stackFrames(frames, scale); };
+    m_enhance->stackAsked = [this](int frames, int scale, int how) { stackFrames(frames, scale, how); };
+    m_enhance->showClipped = [this](bool on) { m_picture->setShowClipped(on); };
     setAcceptDrops(true);
 }
 
@@ -2215,7 +2278,7 @@ void Window::straightened(const QPolygonF &corners)
     enhanceSoon();
 }
 
-void Window::stackFrames(int count, int scale)
+void Window::stackFrames(int count, int scale, int how)
 {
     if (!m_spotFromFilm || m_reshaped || m_media->collecting())
         return;
@@ -2223,7 +2286,7 @@ void Window::stackFrames(int count, int scale)
     m_enhance->setStacking(true);
     m_enhance->setStatus(tr("Collecting %n frame(s) around this one…", nullptr, count));
     QPointer<Window> self(this);
-    m_media->collectFrames(m_spotAt, count, [self, region, scale, count](const QVector<QImage> &frames, int nearest) {
+    m_media->collectFrames(m_spotAt, count, [self, region, scale, count, how](const QVector<QImage> &frames, int nearest) {
         if (!self)
             return;
         if (frames.size() < 2 || nearest < 0) {
@@ -2237,10 +2300,11 @@ void Window::stackFrames(int count, int scale)
         self->m_enhance->setStatus(Window::tr("Lining up %n frame(s) and putting them together…", nullptr, int(spots.size())));
         const std::shared_ptr<std::atomic<int>> current = self->m_enhanceRound;
         const int round = current->load();
-        QThreadPool::globalInstance()->start([self, spots, nearest, scale, current, round, count] {
+        QThreadPool::globalInstance()->start([self, spots, nearest, scale, current, round, count, how] {
             QVector<QPointF> moved;
-            const QImage stacked = enhance::stack(spots, nearest, scale, false, &moved, [current, round](int) { return current->load() == round; });
-            QMetaObject::invokeMethod(qApp, [self, stacked, used = int(spots.size()), scale, count] {
+            const QImage stacked = enhance::stack(spots, nearest, scale, enhance::Combine(std::clamp(how, 0, 2)), &moved,
+                                                  [current, round](int) { return current->load() == round; });
+            QMetaObject::invokeMethod(qApp, [self, stacked, used = int(spots.size()), scale, count, how] {
                 if (!self)
                     return;
                 self->m_enhance->setStacking(false);
@@ -2250,8 +2314,9 @@ void Window::stackFrames(int count, int scale)
                 }
                 self->m_reshaped = true;
                 self->m_enhance->setStackable(false);
-                self->m_steps << (scale > 1 ? Window::tr("%1 frames around it lined up and put together, twice the size (shift and add)").arg(used)
-                                            : Window::tr("%1 frames around it lined up and averaged").arg(used));
+                const QString combined = how == 1 ? Window::tr("each point's middle value") : how == 2 ? Window::tr("averaged without outliers") : Window::tr("averaged");
+                self->m_steps << (scale > 1 ? Window::tr("%1 frames around it lined up and put together (%2), twice the size (shift and add)").arg(used).arg(combined)
+                                            : Window::tr("%1 frames around it lined up and %2").arg(used).arg(combined));
                 self->m_picture->showSpot(stacked, stacked.rect());
                 self->m_enhance->setBigger(scale > 1 ? 2 : 4);
                 self->m_enhance->setStatus(used < count ? Window::tr("Stacked %1 frames (the film had no more there).").arg(used)
