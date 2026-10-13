@@ -331,9 +331,10 @@ void writeAll(const QString &path, const QByteArray &bytes)
 void winStart(const QString &top)
 {
     const QByteArray components = readAll(kData + QStringLiteral("components.hiv"));
-    const QByteArray pending = "<?xml version='1.0' encoding='utf-8'?>\n<PendingTransaction Version=\"3.1\"><Transactions>"
-                               "<Checkpoint/><Poq><HardlinkFile source=\"a\" destination=\"b\"/><CreateFile path=\"c\"/>"
-                               "<DeleteFile path=\"d\"/></Poq></Transactions></PendingTransaction>\n";
+    // Laid out the way Windows 11 writes it: the updates' list, then the queue of what to do.
+    const QByteArray pending = "<?xml version='1.0' encoding='utf-8'?>\n<PendingTransaction Version=\"3.1\"><Transactions><Transaction>"
+                               "<Install/><Install/></Transaction></Transactions><ChangeList><Change/></ChangeList><POQ><BeginTransaction/>"
+                               "<HardlinkFile source=\"a\" destination=\"b\"/><SetKeyValue/></POQ><POQ><MoveFile/></POQ></PendingTransaction>\n";
     auto windows = [&](const QString &name, const QByteArray &hive, const QVector<QByteArray> &logs) {
         const QString root = top + QLatin1Char('/') + name;
         writeAll(root + QStringLiteral("/Windows/WinSxS/pending.xml"), pending);
@@ -360,7 +361,7 @@ void winStart(const QString &top)
     // Closed properly.
     const QString clean = windows(QStringLiteral("clean"), components, {});
     const winstart::StuckUpdate s = winstart::findStuckUpdate(clean);
-    report(s.stuck && s.pointers.size() == 3 && s.actions == 3 && s.problem.isEmpty(),
+    report(s.stuck && s.pointers.size() == 3 && s.actions == 4 && s.problem.isEmpty(),
            QStringLiteral("windows won't start: a waiting update is seen, with what points at it"),
            QStringLiteral("%1 %2 %3").arg(s.pointers.join(QLatin1Char(','))).arg(s.actions).arg(s.problem));
     QStringList done;

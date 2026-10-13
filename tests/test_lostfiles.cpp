@@ -1541,12 +1541,18 @@ int shadowImage(const QString &path)
         out << error << Qt::endl;
         return 1;
     }
-    const lost::Extent where{0, source->size()};
+    // DISKANVIL_SHADOW_PARTITION=start,length (bytes): a volume inside a whole disk's image.
+    lost::Extent where{0, source->size()};
+    if (const QStringList part = qEnvironmentVariable("DISKANVIL_SHADOW_PARTITION").split(QLatin1Char(',')); part.size() == 2)
+        where = {part[0].toULongLong(), part[1].toULongLong()};
     const QVector<vss::Copy> copies = vss::copies(*source, where, &error);
     if (!error.isEmpty())
         out << "problem: " << error << Qt::endl;
+    out << copies.size() << " copies" << Qt::endl;
     for (int i = 0; i < copies.size(); ++i) {
         out << "copy " << copies[i].id << " " << QDateTime::fromMSecsSinceEpoch(copies[i].created, QTimeZone::UTC).toString(Qt::ISODate).chopped(1) << Qt::endl;
+        if (qEnvironmentVariableIsSet("DISKANVIL_SHADOW_LIST_ONLY"))
+            continue;
         auto copy = vss::open(source, where, i, &error);
         if (!copy) {
             out << "problem: " << error << Qt::endl;

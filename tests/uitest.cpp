@@ -5269,7 +5269,7 @@ void winStartWindow()
     QByteArray broken = read(data + QStringLiteral("software.hiv"));
     for (qsizetype i = 4096 + 32; i < broken.size(); i += 61)
         broken[i] = char(broken[i] ^ 0x5A);
-    put(root + QStringLiteral("/Windows/WinSxS/pending.xml"), "<PendingTransaction><Transactions><Poq><CreateFile/><DeleteFile/></Poq></Transactions></PendingTransaction>");
+    put(root + QStringLiteral("/Windows/WinSxS/pending.xml"), "<PendingTransaction><Transactions><Transaction><Install/></Transaction></Transactions><POQ><CreateFile/><DeleteFile/></POQ></PendingTransaction>");
     put(root + QStringLiteral("/Windows/System32/config/COMPONENTS"), read(data + QStringLiteral("components.hiv")));
     put(root + QStringLiteral("/Windows/System32/config/SOFTWARE"), broken);
     put(root + QStringLiteral("/Windows/System32/config/SYSTEM"), read(data + QStringLiteral("system.hiv")));

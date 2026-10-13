@@ -78,7 +78,9 @@ struct Store {
 bool header(const QByteArray &block, quint32 record)
 {
     const uchar *p = bytes(block);
-    return block.size() >= kHeader && memcmp(p, kIdentifier, 16) == 0 && le32(p + 16) == 1 && le32(p + 20) == record;
+    // Version 1, and 2 for the volume's own header on newer Windows (Windows 11 24H2 on).
+    const quint32 version = le32(p + 16);
+    return block.size() >= kHeader && memcmp(p, kIdentifier, 16) == 0 && (version == 1 || version == 2) && le32(p + 20) == record;
 }
 
 class Reader

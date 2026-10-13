@@ -153,13 +153,20 @@ StuckUpdate findStuckUpdate(const QString &root)
         QFile f(s.pendingFile);
         if (f.open(QIODevice::ReadOnly)) {
             QXmlStreamReader xml(&f);
-            int depth = 0;
+            // What's to be done is listed in its POQ ("pending operations queue") sections:
+            // files to link, move and delete, registry keys and values to set.
+            int depth = 0, poqAt = -1;
             while (!xml.atEnd() && s.actions < 1000000) {
                 const auto t = xml.readNext();
                 if (t == QXmlStreamReader::StartElement) {
-                    if (++depth == 4)
-                        ++s.actions; // the root, its transactions, a queue, then what's to be done
+                    ++depth;
+                    if (poqAt < 0 && xml.name().compare(QLatin1String("POQ"), Qt::CaseInsensitive) == 0)
+                        poqAt = depth;
+                    else if (poqAt >= 0 && depth == poqAt + 1)
+                        ++s.actions;
                 } else if (t == QXmlStreamReader::EndElement) {
+                    if (depth == poqAt)
+                        poqAt = -1;
                     --depth;
                 }
             }
