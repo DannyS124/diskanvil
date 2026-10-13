@@ -26,7 +26,7 @@ constexpr quint64 kMiB = 1024 * 1024;
 namespace {
 
 // The file systems worth finding; anything else stays unknown rather than a false match.
-const char *const kTypes[] = {"ext2", "ext3", "ext4", "btrfs", "xfs", "vfat", "exfat", "ntfs", "f2fs", "swap",
+const char *const kTypes[] = {"ext2", "ext3", "ext4", "btrfs", "bcachefs", "xfs", "vfat", "exfat", "ntfs", "f2fs", "swap",
                               "crypto_LUKS", "LVM2_member", "jfs", "reiserfs", "hfsplus", "udf", nullptr};
 
 QString value(blkid_probe pr, const char *name)

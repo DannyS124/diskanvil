@@ -7,6 +7,8 @@
 
 #include "testkit.h"
 
+#include <cstring>
+
 #include "../src/drives/gpt.h"
 #include "../src/drives/partrecover.h"
 #include "../src/drives/partscan.h"
@@ -369,11 +371,40 @@ void probeSizes()
     }
 }
 
+// bcachefs, from an image bcachefs-tools made (tests/data/lostfs/bcachefs.img.zst, its label
+// AnvilTest): the same type, label and ID as libblkid.
+void probeBcachefs()
+{
+    QTemporaryDir dir;
+    const QString image = dir.filePath(QStringLiteral("bcachefs.img"));
+    int code = -1;
+    sh(QStringLiteral("zstd"), {QStringLiteral("-q"), QStringLiteral("-d"), QStringLiteral(SOURCE_DIR "/tests/data/lostfs/bcachefs.img.zst"), QStringLiteral("-o"), image}, &code);
+    const int fd = ::open(QFile::encodeName(image).constData(), O_RDONLY | O_CLOEXEC);
+    QByteArray head(fsprobe::kHeadSize, '\0');
+    const bool read = fd >= 0 && blockio::readAt(fd, head.data(), quint64(head.size()), 0);
+    const std::optional<partscan::Found> blkid = fd >= 0 ? partscan::probe(fd, 0, 32 * MiB) : std::nullopt;
+    if (fd >= 0)
+        ::close(fd);
+    const fsprobe::Result own = fsprobe::probe(head);
+    report(read && own.type == QLatin1String("bcachefs") && own.label == QLatin1String("AnvilTest") && own.uuid == QLatin1String("11223344-5566-7788-99aa-bbccddeeff00")
+               && (!blkid || blkid->type == own.type),
+           QStringLiteral("own probe, bcachefs: its type, label and ID (libblkid: %1)").arg(blkid ? blkid->type : QStringLiteral("not asked")),
+           own.type + QLatin1Char(' ') + own.label + QLatin1Char(' ') + own.uuid);
+    // bcache, the block cache, has the same magic and isn't a file system.
+    QByteArray cache = head;
+    const QByteArray bcacheMagic = QByteArray::fromHex("c68573f64e1a45ca8265f57f48ba6d81");
+    std::memcpy(cache.data() + 4096 + 24, bcacheMagic.constData(), 16);
+    cache[4096 + 16] = 3;
+    cache[4096 + 17] = 0;
+    report(fsprobe::probe(cache).type != QLatin1String("bcachefs"), QStringLiteral("own probe: bcache's own superblock isn't taken for bcachefs"));
+}
+
 } // namespace
 
 void recoverTests()
 {
     probeSizes();
+    probeBcachefs();
     gptRecovery(512);
     gptRecovery(4096);
     mbrRecovery();

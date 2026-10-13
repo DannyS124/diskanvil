@@ -104,6 +104,11 @@ Result probe(const QByteArray &head)
             return make("linux_raid_member", "raid", text(head, at + 32, 32), uuid(head, at + 16));
     }
 
+    // bcachefs: its superblock 4 KiB in, with bcachefs' own magic, or bcache's from before it had
+    // one (told from bcache, the block cache, by its version: bcache's never went past 4).
+    if (has(head, 4096 + 24, "\xc6\x85\x73\xf6\x66\xce\x90\xa9\xd9\x6a\x60\xcf\x80\x3d\xf7\xef", 16)
+        || (has(head, 4096 + 24, "\xc6\x85\x73\xf6\x4e\x1a\x45\xca\x82\x65\xf5\x7f\x48\xba\x6d\x81", 16) && le16(head, 4096 + 16) > 4))
+        return make("bcachefs", "filesystem", text(head, 4096 + 72, 32), uuid(head, 4096 + 56));
     if (has(head, 65536 + 64, "_BHRfS_M", 8))
         return make("btrfs", "filesystem", text(head, 65536 + 0x12b, 256), uuid(head, 65536 + 32), le64(head, 65536 + 0x70));
     if (le16(head, 1024 + 0x38) == 0xef53) {

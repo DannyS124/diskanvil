@@ -992,7 +992,13 @@ void UDisks::mount(const Volume &volume, bool readOnly)
     const QString failure = tr("Couldn't mount %1").arg(name);
     const QString volumeName = m_windows->volumeNames.value(volume.objectPath);
     if (volumeName.isEmpty()) {
-        QTimer::singleShot(0, this, [this, failure] { emit operationFinished(false, failure + reasonAfter(failure) + tr("Windows can't read what's on it")); });
+        // A Linux file system: DiskAnvil Live reads it.
+        static const QStringList linux = {QStringLiteral("ext2"), QStringLiteral("ext3"), QStringLiteral("ext4"), QStringLiteral("btrfs"),
+                                          QStringLiteral("bcachefs"), QStringLiteral("xfs"), QStringLiteral("f2fs"), QStringLiteral("crypto_LUKS")};
+        const QString why = linux.contains(volume.effectiveFsType())
+                                ? tr("Windows can't read %1; DiskAnvil Live can").arg(volume.effectiveFsType())
+                                : tr("Windows can't read what's on it");
+        QTimer::singleShot(0, this, [this, failure, why] { emit operationFinished(false, failure + reasonAfter(failure) + why); });
         return;
     }
     // The first free letter from D on, the way Windows picks one.
