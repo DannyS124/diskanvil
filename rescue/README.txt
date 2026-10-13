@@ -46,6 +46,7 @@ Find Lost Partitions    TestDisk: lost partitions and broken boot sectors
 Write an Image to USB   an ISO or a disk image onto a USB stick (compressed ones too)
 Make a Windows USB      a stick that installs Windows 10 or 11
 Check a USB Stick       bad spots, and sticks that are smaller than they say
+Write-Protected Drive   a stick or card that won't let you save: why, and the fix
 Copy This Stick         another stick like this one. After "Copy to memory" the stick
                         isn't mounted: mount it in DiskAnvil first
 Programs                Files, Web Browser, Terminal, Task Manager, Text Editor, Save Logs

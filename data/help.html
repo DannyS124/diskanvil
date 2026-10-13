@@ -46,6 +46,22 @@ wimlib installed, to split the big install.wim for FAT32.</p>
 erases it). Fake sticks say they're bigger than they are and lose what goes past their real size; the check
 says how much it really holds, and Make It Safe to Use makes a partition that stays inside that. Quick takes
 minutes, Full checks every byte and takes hours.</p>
+<p><b>A stick or card that won't let you save?</b> Action → Write-Protected Drive (or right-click it). It looks at
+the stick, the system and its file systems, without changing anything, and says what's stopping it:</p>
+<ul>
+<li><b>An SD card's lock switch:</b> slide it up, towards the contacts. A card that's locked in every reader has
+locked itself.</li>
+<li><b>The stick says so itself:</b> its lock switch if it has one; if not, it locked itself to read-only because
+its memory is wearing out. No program can undo that (the tools that claim to often finish it off), but everything on
+it can still be copied off.</li>
+<li><b>Linux was told not to write to it</b> (a read-only flag): Clear the Flag, with the admin password.</li>
+<li><b>DiskAnvil Live's write protection</b> holds it: Allow Writing to It.</li>
+<li><b>Open read-only:</b> Linux found errors in its file system and stopped writing. Repair and Open Again. NTFS
+open read-only usually means Windows didn't shut down fully (Fast Startup): hold Shift while clicking Shut down.</li>
+<li><b>On Windows:</b> the setting that write-protects every USB drive (StorageDevicePolicies), the read-only marks
+diskpart sets on a disk or a volume (each taken off with a button), and an administrator's "deny write access"
+policy (it says where to change it on your own PC).</li>
+</ul>
 <p><b>Make a DiskAnvil Live USB (a rescue stick):</b> File → Make a DiskAnvil Live USB. Pick the DiskAnvil Live ISO (from the releases page) and
 the stick, type the stick's name to confirm. The stick can then start any PC, new (UEFI) or old (BIOS), even one
 whose own system won't start, with DiskAnvil and other repair tools on a small desktop. Secure Boot can stay on,
