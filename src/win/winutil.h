@@ -56,6 +56,28 @@ private:
     HANDLE m_h = INVALID_HANDLE_VALUE;
 };
 
+// IOCTL_DISK_SET_DISK_ATTRIBUTES and its SET_DISK_ATTRIBUTES, from ntddisk.h, which MinGW's
+// headers don't have.
+constexpr DWORD kSetDiskAttributes = CTL_CODE(IOCTL_DISK_BASE, 0x003d, METHOD_BUFFERED, FILE_READ_ACCESS | FILE_WRITE_ACCESS);
+constexpr DWORDLONG kDiskOffline = 0x1;
+constexpr DWORDLONG kDiskReadOnly = 0x2;
+struct SetDiskAttributes {
+    DWORD version;
+    BOOLEAN persist;
+    BYTE reserved1[3];
+    DWORDLONG attributes;
+    DWORDLONG mask;
+    DWORD reserved2[4];
+};
+
+// IOCTL_DISK_GET_DISK_ATTRIBUTES and its answer, the same.
+constexpr DWORD kGetDiskAttributes = CTL_CODE(IOCTL_DISK_BASE, 0x003c, METHOD_BUFFERED, FILE_ANY_ACCESS);
+struct GetDiskAttributes {
+    DWORD version;
+    DWORD reserved1;
+    DWORDLONG attributes;
+};
+
 std::wstring wide(const QString &s);
 QString fromWide(const wchar_t *s, int length = -1);
 // What Windows says about an error code, without the full stop and newline on the end.

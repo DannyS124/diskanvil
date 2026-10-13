@@ -183,9 +183,6 @@ void WriteProtectDialog::look()
         p.number = v.number;
         if (!v.mounts().isEmpty())
             p.mountPoint = v.mounts().first();
-#ifdef Q_OS_WIN
-        p.mountedReadOnly = v.readOnly;
-#endif
         s.parts << p;
     }
     m_look->setEnabled(false);

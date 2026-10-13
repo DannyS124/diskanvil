@@ -116,26 +116,11 @@ QString onlyOnLive(const QString &fsName)
 constexpr quint64 kFat32Most = 32ull * 1024 * 1024 * 1024; // Windows makes FAT32 only this big
 
 
-// IOCTL_DISK_SET_DISK_ATTRIBUTES and its SET_DISK_ATTRIBUTES, from ntddisk.h, which MinGW's
-// headers don't have.
-constexpr DWORD kSetDiskAttributes = CTL_CODE(IOCTL_DISK_BASE, 0x003d, METHOD_BUFFERED, FILE_READ_ACCESS | FILE_WRITE_ACCESS);
-constexpr DWORDLONG kDiskOffline = 0x1;
-struct SetDiskAttributes {
-    DWORD version;
-    BOOLEAN persist;
-    BYTE reserved1[3];
-    DWORDLONG attributes;
-    DWORDLONG mask;
-    DWORD reserved2[4];
-};
-
-// IOCTL_DISK_GET_DISK_ATTRIBUTES and its answer, the same.
-constexpr DWORD kGetDiskAttributes = CTL_CODE(IOCTL_DISK_BASE, 0x003c, METHOD_BUFFERED, FILE_ANY_ACCESS);
-struct GetDiskAttributes {
-    DWORD version;
-    DWORD reserved1;
-    DWORDLONG attributes;
-};
+using win::GetDiskAttributes;
+using win::kDiskOffline;
+using win::kGetDiskAttributes;
+using win::kSetDiskAttributes;
+using win::SetDiskAttributes;
 
 bool isOffline(const QString &blockPath)
 {

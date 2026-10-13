@@ -15,7 +15,7 @@
 #endif
 
 #ifdef Q_OS_WIN
-#include "winutil.h"
+#include "win/winutil.h"
 
 #include <QProcess>
 #include <windows.h>
@@ -271,10 +271,10 @@ void readWindows(State &s)
 
     const win::Handle disk = win::openDevice(s.device, GENERIC_READ);
     if (disk.valid()) {
-        GET_DISK_ATTRIBUTES attributes {};
-        attributes.Version = sizeof attributes;
-        if (win::ioctl(disk.get(), IOCTL_DISK_GET_DISK_ATTRIBUTES, nullptr, 0, &attributes, sizeof attributes))
-            s.diskAttributeReadOnly = attributes.Attributes & DISK_ATTRIBUTE_READ_ONLY;
+        win::GetDiskAttributes attributes {};
+        attributes.version = sizeof attributes;
+        if (win::ioctl(disk.get(), win::kGetDiskAttributes, nullptr, 0, &attributes, sizeof attributes))
+            s.diskAttributeReadOnly = attributes.attributes & win::kDiskReadOnly;
         const bool writable = win::ioctl(disk.get(), IOCTL_DISK_IS_WRITABLE, nullptr, 0, nullptr, 0);
         // The policy and the mark make Windows say "write-protected" too; only without them is it the drive.
         s.drivesays = writable ? 0 : (GetLastError() == ERROR_WRITE_PROTECT && !s.policyWriteProtect && !s.diskAttributeReadOnly ? 1 : -1);
@@ -315,12 +315,12 @@ QString clearDiskAttribute(int diskNumber)
     const win::Handle disk = win::openDevice(QStringLiteral("\\\\.\\PhysicalDrive%1").arg(diskNumber), GENERIC_READ | GENERIC_WRITE);
     if (!disk.valid())
         return win::lastErrorText();
-    SET_DISK_ATTRIBUTES set {};
-    set.Version = sizeof set;
-    set.Persist = TRUE;
-    set.Attributes = 0;
-    set.AttributesMask = DISK_ATTRIBUTE_READ_ONLY;
-    if (!win::ioctl(disk.get(), IOCTL_DISK_SET_DISK_ATTRIBUTES, &set, sizeof set, nullptr, 0))
+    win::SetDiskAttributes set {};
+    set.version = sizeof set;
+    set.persist = TRUE;
+    set.attributes = 0;
+    set.mask = win::kDiskReadOnly;
+    if (!win::ioctl(disk.get(), win::kSetDiskAttributes, &set, sizeof set, nullptr, 0))
         return win::lastErrorText();
     win::ioctl(disk.get(), IOCTL_DISK_UPDATE_PROPERTIES, nullptr, 0, nullptr, 0);
     return {};
