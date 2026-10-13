@@ -111,7 +111,10 @@ square to see where it is. Slow spots often turn into bad sectors later, so keep
 read into an image file (or onto another drive): the easy parts first, then it goes back for the hard ones. You can
 stop it and start it again later with the same file; it carries on where it stopped. Do this before running any
 repairs on a failing drive. Then open the image with File → Open Disk Image and copy your files off. Under "Go easy on
-the drive" it can pause when the drive gets too hot, rest after a run of read errors, or read slower.</p>
+the drive" it can pause when the drive gets too hot, rest after a run of read errors, or read slower. When one of a
+hard drive's heads is dying, its read errors come round again and again at the same spacing (the drive's data takes
+turns between its heads in bands): once that's seen, the dying head's bands still to come are jumped over and copied
+last, so the good heads' data comes off first. That's on by default; the box for it is there too.</p>
 <p><b>Which files did the bad spots hit?</b> When a Rescue Copy couldn't read everything, Which Files Were Hit? (next
 to Start) reads the copy's file systems (FAT, exFAT and NTFS) and lists each file with parts that couldn't be read, and
 how much of each is missing; everything else came off whole. The list can be saved next to the copy. Deleted FAT files

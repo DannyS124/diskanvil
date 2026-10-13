@@ -232,6 +232,8 @@ bool RescueCopy::readSource(char *buf, quint64 len, quint64 pos)
     waitWhilePaused();
     // Read even when stopping meanwhile: a read that didn't happen mustn't count as bad.
     const bool ok = blockio::readAt(m_source, buf, len, pos);
+    if (!ok)
+        ++m_failedReads;
     coolDown(ok, len);
     return ok;
 }
@@ -292,6 +294,57 @@ bool RescueCopy::writeTarget(const char *buf, quint64 len, quint64 pos)
     if (blockio::writeAt(m_target, buf, len, pos))
         return true;
     m_writeError = QString::fromLocal8Bit(std::strerror(errno));
+    return false;
+}
+
+void RescueCopy::failedStretch(quint64 start, quint64 length)
+{
+    m_stretches.push_back({start, length});
+    if (!m_skipHeads || m_stretches.size() < 4)
+        return;
+    // The last four: three gaps between their starts, within 15% of each other, and bands much
+    // narrower than the gaps (a wide bad area isn't a head).
+    const int n = int(m_stretches.size());
+    QVector<quint64> gaps, widths;
+    for (int i = n - 3; i < n; ++i) {
+        gaps << m_stretches[i].first - m_stretches[i - 1].first;
+        widths << m_stretches[i].second;
+    }
+    widths << m_stretches[n - 4].second;
+    std::sort(gaps.begin(), gaps.end());
+    std::sort(widths.begin(), widths.end());
+    if (gaps.first() == 0 || double(gaps.last()) > double(gaps.first()) * 1.15 || widths.last() * 5 > gaps[1] * 3)
+        return;
+    const bool first = m_period == 0;
+    m_period = gaps[1];
+    m_band = widths.last() + widths.last() / 4; // a little wider: the edges are found later
+    m_anchor = m_stretches.back().first;
+    if (first)
+        m_phase = tr("Copying the easy parts (a dying head: its stripes are left for last)");
+}
+
+bool RescueCopy::nextBand(quint64 pos, quint64 *start, quint64 *end) const
+{
+    if (!m_period)
+        return false;
+    // Bands at anchor + k * period; the first one that isn't over yet.
+    quint64 k = pos > m_anchor ? (pos - m_anchor) / m_period : 0;
+    quint64 s = m_anchor + k * m_period;
+    if (s + m_band <= pos)
+        s += m_period;
+    *start = s;
+    *end = std::min(m_size, s + m_band);
+    return s < m_size;
+}
+
+bool RescueCopy::inHeadZone(quint64 pos, quint64 len, quint64 *zoneStart) const
+{
+    for (const auto &[start, length] : m_headZones) {
+        if (pos < start + length && start < pos + len) {
+            *zoneStart = start;
+            return true;
+        }
+    }
     return false;
 }
 
@@ -358,13 +411,35 @@ void RescueCopy::run()
     // 1: forwards, jumping ahead after a failed read so a bad patch doesn't eat hours.
     m_phase = tr("Copying the easy parts");
     m_map.currentPass = 1;
+    tick(true); // each pass shows up, however short
     m_map.currentStatus = '?';
     const quint64 maxSkip = std::max<quint64>(kChunk, std::min<quint64>(m_size / 100, 1024ull * kChunk) / sector * sector);
     quint64 start = 0, end = 0, from = 0, skip = 64 * 1024;
+    bool failing = false;
+    quint64 failedFrom = 0;
     while (m_map.next(RescueMap::NonTried, from, &start, &end)) {
         for (quint64 pos = start; pos < end;) {
             if (m_cancel)
                 return stopped();
+            // A dying head's band coming up: jumped over, left as it is for the end.
+            quint64 bandStart = 0, bandEnd = 0;
+            if (!failing && nextBand(pos, &bandStart, &bandEnd) && bandStart <= pos + kChunk && bandEnd > pos) {
+                const quint64 jumpFrom = std::max(pos, bandStart > kChunk ? (bandStart - kChunk) / sector * sector : 0);
+                const quint64 to = std::min(end, (bandEnd + sector - 1) / sector * sector);
+                if (to > jumpFrom) {
+                    if (jumpFrom > pos) {
+                        // The good part before it first.
+                        const quint64 len = std::min(kChunk, jumpFrom - pos);
+                        if (!attempt(pos, len, RescueMap::NonTrimmed))
+                            return stopped();
+                        pos += len;
+                        continue;
+                    }
+                    m_headZones.push_back({jumpFrom, to - jumpFrom});
+                    pos = to;
+                    continue;
+                }
+            }
             const quint64 len = std::min(kChunk, end - pos);
             const bool good = readSource(buf.get(), len, pos);
             m_map.currentPos = pos;
@@ -373,9 +448,15 @@ void RescueCopy::run()
                     return stopped();
                 m_map.set(pos, len, RescueMap::Finished);
                 skip = 64 * 1024;
+                if (failing)
+                    failedStretch(failedFrom, pos - failedFrom);
+                failing = false;
                 pos += len;
             } else {
                 m_map.set(pos, len, RescueMap::NonTrimmed);
+                if (!failing)
+                    failedFrom = pos;
+                failing = true;
                 pos = std::min(end, pos + len + skip);
                 skip = std::min(skip * 2, maxSkip);
             }
@@ -387,12 +468,18 @@ void RescueCopy::run()
     // 2: backwards over what was skipped; bad areas are often easier from the other side.
     m_phase = tr("Copying backwards");
     m_map.currentPass = 2;
+    tick(true); // each pass shows up, however short
     quint64 before = m_size;
     while (m_map.previous(RescueMap::NonTried, before, &start, &end)) {
         for (quint64 stop = end; stop > start;) {
             if (m_cancel)
                 return stopped();
             const quint64 len = std::min(kChunk, stop - start);
+            quint64 zone = 0;
+            if (inHeadZone(stop - len, len, &zone)) {
+                stop = std::max(start, zone); // left for last
+                continue;
+            }
             if (!attempt(stop - len, len, RescueMap::NonTrimmed))
                 return stopped();
             stop -= len;
@@ -400,61 +487,125 @@ void RescueCopy::run()
         before = start;
     }
 
-    // 3: trim each failed area from both ends, one sector at a time, until it hits a bad one.
-    m_phase = tr("Narrowing down bad areas");
-    m_map.currentPass = 3;
-    m_map.currentStatus = '*';
-    from = 0;
-    while (m_map.next(RescueMap::NonTrimmed, from, &start, &end)) {
-        quint64 low = start, high = end;
-        while (low < high) {
-            if (m_cancel)
-                return stopped();
-            m_map.currentPos = low;
-            if (!readSource(buf.get(), sector, low)) {
-                m_map.set(low, sector, RescueMap::Bad);
+    // 3 and 4, again after the dying head's stripes.
+    auto trimAndScrape = [&]() -> bool {
+        // 3: trim each failed area from both ends, one sector at a time, until it hits a bad one.
+        m_phase = tr("Narrowing down bad areas");
+        m_map.currentPass = 3;
+        tick(true); // each pass shows up, however short
+        m_map.currentStatus = '*';
+        from = 0;
+        while (m_map.next(RescueMap::NonTrimmed, from, &start, &end)) {
+            quint64 low = start, high = end;
+            while (low < high) {
+                if (m_cancel)
+                    return false;
+                m_map.currentPos = low;
+                if (!readSource(buf.get(), sector, low)) {
+                    m_map.set(low, sector, RescueMap::Bad);
+                    low += sector;
+                    break;
+                }
+                if (!writeTarget(buf.get(), sector, low))
+                    return false;
+                m_map.set(low, sector, RescueMap::Finished);
                 low += sector;
-                break;
+                tick();
             }
-            if (!writeTarget(buf.get(), sector, low))
-                return stopped();
-            m_map.set(low, sector, RescueMap::Finished);
-            low += sector;
-            tick();
-        }
-        while (high > low) {
-            if (m_cancel)
-                return stopped();
-            m_map.currentPos = high - sector;
-            if (!readSource(buf.get(), sector, high - sector)) {
-                m_map.set(high - sector, sector, RescueMap::Bad);
+            while (high > low) {
+                if (m_cancel)
+                    return false;
+                m_map.currentPos = high - sector;
+                if (!readSource(buf.get(), sector, high - sector)) {
+                    m_map.set(high - sector, sector, RescueMap::Bad);
+                    high -= sector;
+                    break;
+                }
+                if (!writeTarget(buf.get(), sector, high - sector))
+                    return false;
+                m_map.set(high - sector, sector, RescueMap::Finished);
                 high -= sector;
-                break;
+                tick();
             }
-            if (!writeTarget(buf.get(), sector, high - sector))
-                return stopped();
-            m_map.set(high - sector, sector, RescueMap::Finished);
-            high -= sector;
-            tick();
+            if (high > low)
+                m_map.set(low, high - low, RescueMap::NonScraped);
+            from = end;
         }
-        if (high > low)
-            m_map.set(low, high - low, RescueMap::NonScraped);
-        from = end;
-    }
 
-    // 4: everything left, one sector at a time.
-    m_phase = tr("Reading what's left sector by sector");
-    m_map.currentPass = 4;
-    m_map.currentStatus = '/';
-    from = 0;
-    while (m_map.next(RescueMap::NonScraped, from, &start, &end)) {
-        for (quint64 pos = start; pos < end; pos += sector) {
-            if (m_cancel)
-                return stopped();
-            if (!attempt(pos, sector, RescueMap::Bad))
-                return stopped();
+        // 4: everything left, one sector at a time.
+        m_phase = tr("Reading what's left sector by sector");
+        m_map.currentPass = 4;
+        tick(true); // each pass shows up, however short
+        m_map.currentStatus = '/';
+        from = 0;
+        while (m_map.next(RescueMap::NonScraped, from, &start, &end)) {
+            for (quint64 pos = start; pos < end; pos += sector) {
+                if (m_cancel)
+                    return false;
+                if (!attempt(pos, sector, RescueMap::Bad))
+                    return false;
+            }
+            from = end;
         }
-        from = end;
+        return true;
+    };
+    if (!trimAndScrape())
+        return stopped();
+
+    // 5: last, the dying head's stripes that were jumped over: forwards with the usual skipping,
+    // then backwards, then trimmed and scraped like the rest.
+    if (!m_headZones.isEmpty()) {
+        m_phase = tr("Copying the dying head's stripes, last");
+        m_map.currentPass = 5;
+        tick(true); // each pass shows up, however short
+        m_map.currentStatus = '?';
+        for (const auto &[zoneStart, zoneLength] : std::as_const(m_headZones)) {
+            quint64 pos = zoneStart, skipHere = 64 * 1024;
+            const quint64 zoneEnd = zoneStart + zoneLength;
+            while (pos < zoneEnd) {
+                if (m_cancel)
+                    return stopped();
+                if (m_map.statusAt(pos) != RescueMap::NonTried) {
+                    pos += sector;
+                    continue;
+                }
+                quint64 s = 0, e = 0;
+                m_map.next(RescueMap::NonTried, pos, &s, &e);
+                const quint64 len = std::min({kChunk, zoneEnd - pos, e - pos});
+                const bool good = readSource(buf.get(), len, pos);
+                m_map.currentPos = pos;
+                if (good) {
+                    if (!writeTarget(buf.get(), len, pos))
+                        return stopped();
+                    m_map.set(pos, len, RescueMap::Finished);
+                    skipHere = 64 * 1024;
+                    pos += len;
+                } else {
+                    m_map.set(pos, len, RescueMap::NonTrimmed);
+                    pos = std::min(zoneEnd, pos + len + skipHere);
+                    skipHere = std::min(skipHere * 2, maxSkip);
+                }
+                tick();
+            }
+            for (quint64 stop = zoneEnd; stop > zoneStart;) {
+                if (m_cancel)
+                    return stopped();
+                const quint64 len = std::min(kChunk, stop - zoneStart);
+                if (m_map.statusAt(stop - len) == RescueMap::NonTried && m_map.statusAt(stop - 1) == RescueMap::NonTried) {
+                    if (!attempt(stop - len, len, RescueMap::NonTrimmed))
+                        return stopped();
+                } else {
+                    // Partly done: what's left of it, a sector at a time is too slow; the chunk's
+                    // untried pieces go to trimming instead.
+                    for (quint64 p = stop - len; p < stop; p += sector)
+                        if (m_map.statusAt(p) == RescueMap::NonTried)
+                            m_map.set(p, sector, RescueMap::NonTrimmed);
+                }
+                stop -= len;
+            }
+        }
+        if (!trimAndScrape())
+            return stopped();
     }
 
     // What couldn't be read becomes zeros in the copy, not whatever the target held before.

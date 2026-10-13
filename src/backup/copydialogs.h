@@ -174,6 +174,7 @@ private:
     QSpinBox *m_restSeconds;
     QSpinBox *m_restErrors;
     QCheckBox *m_limit;
+    QCheckBox *m_heads;
     QSpinBox *m_rate;
     QLabel *m_heatStatus;
     QTimer *m_heatTimer;

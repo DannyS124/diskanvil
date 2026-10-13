@@ -700,7 +700,7 @@
 <context>
     <name>RescueCopy</name>
     <message numerus="yes">
-        <location filename="../src/backup/rescuecopy.cpp" line="262"/>
+        <location filename="../src/backup/rescuecopy.cpp" line="264"/>
         <source>Resting for %n second(s) after %1 read errors in a row</source>
         <translation>
             <numerusform>Resting for %n second after %1 read errors in a row</numerusform>

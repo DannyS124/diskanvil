@@ -937,6 +937,12 @@ RescueDialog::RescueDialog(UDisks *udisks, const QString &sourceBlockPath, QWidg
     m_restErrors = spin(1, 1000, 10, QString());
     m_limit = new QCheckBox(tr("Read at most"));
     m_rate = spin(1, 2000, 50, tr(" MB/s"));
+    m_heads = new QCheckBox(tr("When read errors come round at a steady spacing (one dying head of several), leave its stripes for last"));
+    m_heads->setObjectName(QStringLiteral("dyingHead"));
+    m_heads->setChecked(true);
+    m_heads->setToolTip(tr("A hard drive's data takes turns between its heads in bands. When one head is dying its bands fail again "
+                           "and again at the same spacing: those still to come are jumped over, so the other heads' data comes off "
+                           "first, and read last."));
     m_heatStatus = new QLabel;
     m_heatTimer = new QTimer(this);
     m_heatTimer->setInterval(60000);
@@ -957,7 +963,8 @@ RescueDialog::RescueDialog(UDisks *udisks, const QString &sourceBlockPath, QWidg
     easyLayout->addLayout(row({m_heat, m_hot, new QLabel(tr("and carry on at")), m_cool, m_heatStatus}));
     easyLayout->addLayout(row({m_rest, m_restSeconds, new QLabel(tr("after")), m_restErrors, new QLabel(tr("read errors in a row"))}));
     easyLayout->addLayout(row({m_limit, m_rate}));
-    for (QCheckBox *c : {m_heat, m_rest, m_limit})
+    easyLayout->addLayout(row({m_heads}));
+    for (QCheckBox *c : {m_heat, m_rest, m_limit, m_heads})
         connect(c, &QCheckBox::toggled, this, &RescueDialog::applyCoolDown);
     for (QSpinBox *s : {m_hot, m_cool, m_restSeconds, m_restErrors, m_rate})
         connect(s, &QSpinBox::valueChanged, this, &RescueDialog::applyCoolDown);
@@ -1025,6 +1032,7 @@ void RescueDialog::applyCoolDown()
     if (m_job) {
         m_job->setSpeedLimit(m_limit->isChecked() ? quint64(m_rate->value()) * 1000 * 1000 : 0);
         m_job->setErrorRest(m_rest->isChecked() ? m_restErrors->value() : 0, m_restSeconds->value());
+        m_job->setSkipDyingHead(m_heads->isChecked());
     }
     if (m_job && m_heat->isChecked())
         m_heatTimer->start();

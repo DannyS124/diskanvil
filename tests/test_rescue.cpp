@@ -31,18 +31,22 @@ struct Run {
     QString message;
     QStringList phases; // every phase it reported, in order, once each
     qint64 ms = 0;
+    int zones = 0;          // stretches left for last as a dying head's
+    int failedBeforeTrim = -1; // read errors met before it started narrowing down bad areas
 };
 
 Run rescue(const QString &device, const QString &image, const QString &map, double stopAt = 0,
-           const std::function<void(RescueCopy &)> &setup = {})
+           const std::function<void(RescueCopy &)> &setup = {}, qint64 size = kSize)
 {
     Run r;
     const int source = ::open(QFile::encodeName(device).constData(), O_RDONLY | O_DIRECT | O_CLOEXEC);
     const int target = ::open(QFile::encodeName(image).constData(), O_RDWR | O_CREAT | O_CLOEXEC, 0644);
-    RescueCopy copy(source, quint64(kSize), target, map);
+    RescueCopy copy(source, quint64(size), target, map);
     QObject::connect(&copy, &RescueCopy::progress, [&](quint64 rescued, quint64, quint64 total, const QString &phase) {
         if (r.phases.isEmpty() || r.phases.last() != phase)
             r.phases << phase;
+        if (r.failedBeforeTrim < 0 && phase == QLatin1String("Narrowing down bad areas"))
+            r.failedBeforeTrim = copy.failedReads();
         if (stopAt > 0 && rescued >= quint64(total * stopAt))
             copy.cancel();
     });
@@ -56,6 +60,7 @@ Run rescue(const QString &device, const QString &image, const QString &map, doub
     t.start();
     copy.run();
     r.ms = t.elapsed();
+    r.zones = int(copy.headZones().size());
     return r;
 }
 
@@ -66,6 +71,8 @@ QByteArray readFile(const QString &path)
 }
 
 } // namespace
+
+void dyingHeadTests();
 
 void rescueTests()
 {
@@ -109,6 +116,7 @@ void rescueTests()
     const QString image = dir.filePath(QStringLiteral("rescued.img"));
     const QString map = image + QStringLiteral(".map");
     Run r = rescue(device, image, map);
+    report(r.zones == 0, QStringLiteral("scattered bad spots aren't taken for a dying head"));
     report(r.completed, QStringLiteral("rescue runs to the end"), r.message);
     RescueMap loaded;
     QString error;
@@ -183,6 +191,57 @@ void rescueTests()
 
     sh(QStringLiteral("dmsetup"), {QStringLiteral("remove"), name});
     sh(QStringLiteral("dmsetup"), {QStringLiteral("remove"), dust});
+    sh(QStringLiteral("losetup"), {QStringLiteral("-d"), loop});
+    dyingHeadTests();
+}
+
+// A dying head: bad stripes of 512 KiB every 4 MiB, the way a drive's bands take turns between
+// its heads. Once they've come round a few times the rest are jumped over and left for last:
+// far fewer failed reads before the good data is all off, and the same copy in the end.
+void dyingHeadTests()
+{
+    // 256 MiB three times over: not in /tmp, which is memory.
+    QDir().mkpath(QDir::homePath() + QStringLiteral("/.cache"));
+    QTemporaryDir dir(QDir::homePath() + QStringLiteral("/.cache/diskanvil-heads-XXXXXX"));
+    constexpr qint64 size = 256 * MiB;
+    const QString backing = dir.filePath(QStringLiteral("heads.img"));
+    QByteArray original(size, Qt::Uninitialized);
+    QRandomGenerator::global()->fillRange(reinterpret_cast<quint32 *>(original.data()), int(size / 4));
+    {
+        QFile f(backing);
+        if (!f.open(QIODevice::WriteOnly))
+            return report(false, QStringLiteral("dying head: create test image"));
+        f.write(original);
+    }
+    const QString loop = sh(QStringLiteral("losetup"), {QStringLiteral("-f"), QStringLiteral("--show"), backing});
+    const QString name = QStringLiteral("diskanvil-rescue-heads");
+    QStringList table;
+    QByteArray expected = original;
+    constexpr qint64 sectorsPerMiB = 2048;
+    qint64 at = 0;
+    for (qint64 band = 5 * sectorsPerMiB; band + 3 * sectorsPerMiB < size / 512; band += 12 * sectorsPerMiB) {
+        table << QStringLiteral("%1 %2 linear %3 %1").arg(at).arg(band - at).arg(loop);
+        table << QStringLiteral("%1 %2 error").arg(band).arg(3 * sectorsPerMiB);
+        std::memset(expected.data() + band * 512, 0, size_t(3 * sectorsPerMiB * 512));
+        at = band + 3 * sectorsPerMiB;
+    }
+    table << QStringLiteral("%1 %2 linear %3 %1").arg(at).arg(size / 512 - at).arg(loop);
+    int code = -1;
+    sh(QStringLiteral("dmsetup"), {QStringLiteral("create"), name, QStringLiteral("--table"), table.join(QLatin1Char('\n'))}, &code);
+    report(code == 0, QStringLiteral("dying head: a drive with a bad stripe every 12 MiB"));
+    const QString device = QStringLiteral("/dev/mapper/") + name;
+
+    const QString off = dir.filePath(QStringLiteral("off.img")), on = dir.filePath(QStringLiteral("on.img"));
+    const Run plain = rescue(device, off, off + QStringLiteral(".map"), 0, [](RescueCopy &c) { c.setSkipDyingHead(false); }, size);
+    const Run heads = rescue(device, on, on + QStringLiteral(".map"), 0, {}, size);
+    report(plain.completed && readFile(off) == expected && plain.zones == 0, QStringLiteral("dying head: without it, the copy is right"));
+    report(heads.completed && readFile(on) == expected && heads.zones >= 12 && heads.phases.contains(QStringLiteral("Copying the dying head's stripes, last")),
+           QStringLiteral("dying head: the pattern is seen, its stripes copied last, and the copy is the same"),
+           QStringLiteral("%1 stripes; %2").arg(heads.zones).arg(heads.phases.join(QStringLiteral(" | "))));
+    report(heads.failedBeforeTrim >= 0 && heads.failedBeforeTrim * 2 < plain.failedBeforeTrim,
+           QStringLiteral("dying head: far fewer failed reads before the good data is off"),
+           QStringLiteral("%1 with it, %2 without").arg(heads.failedBeforeTrim).arg(plain.failedBeforeTrim));
+    sh(QStringLiteral("dmsetup"), {QStringLiteral("remove"), name});
     sh(QStringLiteral("losetup"), {QStringLiteral("-d"), loop});
 }
 

@@ -5329,11 +5329,12 @@ void stillOkWindow()
     const QDateTime old = QDateTime::currentDateTime().addDays(-100);
     for (const char *name : {"a.jpg", "b.jpg", "c.jpg"}) {
         QFile f(top + QLatin1Char('/') + QLatin1String(name));
-        f.open(QIODevice::WriteOnly);
+        if (!f.open(QIODevice::WriteOnly))
+            continue;
         f.write(QByteArray(name).repeated(5000));
         f.close();
-        f.open(QIODevice::ReadWrite);
-        f.setFileTime(old, QFileDevice::FileModificationTime);
+        if (f.open(QIODevice::ReadWrite))
+            f.setFileTime(old, QFileDevice::FileModificationTime);
     }
     FingerprintsDialog dialog(top);
     int ran = 0;
@@ -5347,12 +5348,13 @@ void stillOkWindow()
     waitUntil([&] { return ran > 0; }, 30000);
     {
         QFile f(top + QStringLiteral("/b.jpg"));
-        f.open(QIODevice::ReadWrite);
-        f.seek(100);
-        f.write("!");
-        f.close();
-        f.open(QIODevice::ReadWrite);
-        f.setFileTime(old, QFileDevice::FileModificationTime);
+        if (f.open(QIODevice::ReadWrite)) {
+            f.seek(100);
+            f.write("!");
+            f.close();
+        }
+        if (f.open(QIODevice::ReadWrite))
+            f.setFileTime(old, QFileDevice::FileModificationTime);
     }
     if (check)
         check->click();
