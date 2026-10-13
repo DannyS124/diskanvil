@@ -149,7 +149,7 @@ QByteArray encode(const Message &m)
     case Message::ShowFile:
         s << qint32(m.show.kind) << qint32(m.show.type) << m.show.path << m.show.name << m.show.where;
         preview::writeStrings(s, m.show.facts);
-        s << m.show.previous << m.show.next << m.show.openable << m.show.repairable;
+        s << m.show.previous << m.show.next << m.show.openable << m.show.repairable << m.show.from;
         break;
     case Message::AskFor:
         s << qint32(m.ask);
@@ -214,7 +214,7 @@ bool decode(QByteArray &buffer, Message &m, bool *bad)
         qint32 kind = 0, fileType = -1;
         s >> kind >> fileType >> m.show.path >> m.show.name >> m.show.where;
         preview::readStrings(s, m.show.facts);
-        s >> m.show.previous >> m.show.next >> m.show.openable >> m.show.repairable;
+        s >> m.show.previous >> m.show.next >> m.show.openable >> m.show.repairable >> m.show.from;
         m.show.kind = kind >= qint32(Kind::Picture) && kind <= qint32(Kind::Bytes) ? Kind(kind) : Kind::Bytes;
         m.show.type = fileType;
         break;
@@ -786,7 +786,7 @@ public:
         m_invert = new QCheckBox(viewer::tr("Inverted (for a negative)"));
         m_deinterlace = new QCheckBox(viewer::tr("Deinterlace (comb lines from an older camera)"));
         m_deinterlace->setObjectName(QStringLiteral("deinterlace"));
-        m_redecode = new QCheckBox(viewer::tr("Decode the JPEG again (squares smoothed, within what it stores)"));
+        m_redecode = new QCheckBox(viewer::tr("Decode the JPEG again"));
         m_redecode->setObjectName(QStringLiteral("redecode"));
         m_redecode->setToolTip(viewer::tr("A JPEG keeps each 8 by 8 square as rounded numbers. Decoded again, it's the smoothest picture "
                                           "whose numbers round to exactly what the file has: the squares go, and nothing the file doesn't allow is made up"));
@@ -2133,8 +2133,13 @@ Window::Window(QWidget *parent)
     enhanceScroll->setWidget(m_enhance);
     enhanceScroll->setWidgetResizable(true);
     enhanceScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    enhanceScroll->setMinimumWidth(m_enhance->minimumSizeHint().width() + style()->pixelMetric(QStyle::PM_ScrollBarExtent) + 8);
     enhanceScroll->hide();
+    // As wide as the panel needs (worked out when it's shown: some of it shows only for some files).
+    m_fitEnhance = [this, enhanceScroll] {
+        m_enhance->adjustSize();
+        enhanceScroll->setMinimumWidth(m_enhance->minimumSizeHint().width() + style()->pixelMetric(QStyle::PM_ScrollBarExtent) + 8);
+    };
+    m_fitEnhance();
     auto *split = new QSplitter;
     split->addWidget(middle);
     split->addWidget(enhanceScroll);
@@ -2172,6 +2177,8 @@ Window::Window(QWidget *parent)
     m_enhanceTimer->setInterval(180);
     connect(m_enhanceTimer, &QTimer::timeout, this, &Window::enhanceNow);
     connect(m_enhanceAction, &QAction::toggled, this, [this, enhanceScroll](bool on) {
+        if (on)
+            m_fitEnhance();
         enhanceScroll->setVisible(on);
         // On a screen without room for both, Details makes way while Enhance is open.
         if (on && m_details->isChecked() && width() < 1500) {
@@ -2720,11 +2727,13 @@ void Window::present(const Show &show)
     m_pdf->clear();
     m_problem->hide();
     m_title->setText(show.where.isEmpty() ? show.name : show.name + QStringLiteral(" · ") + show.where);
-    setWindowTitle(tr("%1 – Find Lost Files").arg(show.name));
+    setWindowTitle(QStringLiteral("%1 – %2").arg(show.name, show.from.isEmpty() ? tr("Find Lost Files") : show.from));
     m_previous->setEnabled(show.previous);
     m_next->setEnabled(show.next);
     m_open->setEnabled(show.openable);
     m_repair->setVisible(!show.repairable.isEmpty());
+    if (m_fitEnhance)
+        m_fitEnhance();
     m_repair->setToolTip(show.repairable + tr(" (on a copy, which then shows here)"));
     m_open->setToolTip(show.openable ? tr("Open it in the program this computer has for it (a copy)")
                                      : tr("Programs and scripts aren't opened: they could run"));

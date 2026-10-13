@@ -89,6 +89,7 @@
 #include <QAbstractButton>
 #include <QAction>
 #include <QApplication>
+#include <QScrollBar>
 #include <QGuiApplication>
 #include <QCheckBox>
 #include <QStorageInfo>
@@ -4979,6 +4980,29 @@ void enhanceWindow()
         action->setChecked(true);
         auto *again = window.findChild<QCheckBox *>(QStringLiteral("redecode"));
         report(again && again->isVisible(), QStringLiteral("viewer: a JPEG offers to be decoded again"));
+        {
+            // On a 1280-wide screen (DiskAnvil Live in a VM) nothing in the panel is cut off on the right.
+            const QSize before = window.size();
+            window.resize(1280, 760);
+            action->setChecked(false);
+            action->setChecked(true);
+            QCoreApplication::processEvents();
+            bool cut = false;
+            QString which;
+            if (again)
+                for (QWidget *w : again->parentWidget()->findChildren<QWidget *>()) {
+                    if (!w->isVisible() || qobject_cast<QScrollBar *>(w))
+                        continue;
+                    QWidget *port = again->parentWidget()->parentWidget(); // the scroll area's viewport
+                    const QRect r(w->mapTo(port, QPoint(0, 0)), w->size());
+                    if (r.right() > port->width() + 1) {
+                        cut = true;
+                        which = w->objectName().isEmpty() ? QString::fromLatin1(w->metaObject()->className()) : w->objectName();
+                    }
+                }
+            report(!cut, QStringLiteral("viewer: the Enhance panel fits a 1280-wide window"), which);
+            window.resize(before);
+        }
         if (again) {
             again->setChecked(true);
             waitUntil([] { return false; }, 3000); // it's decoded on a thread

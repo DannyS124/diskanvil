@@ -44,6 +44,7 @@ struct Show {
     bool previous = false, next = false; // whether there's one before it and after it
     bool openable = false;               // safe to open in the program the computer has for it
     QString repairable;                  // what Repair does for it; empty when it can't be repaired
+    QString from;                        // the window it's shown for ("Look Closer"); empty: Find Lost Files
 };
 
 // What the viewer asks Find Lost Files for.
@@ -182,6 +183,7 @@ private:
     QStringList m_steps;        // what was done since, for the note in what's saved
     QImage m_asFound;           // while it's decoded again: the picture as the file decodes normally
     QString m_redecodeStep;
+    std::function<void()> m_fitEnhance;
     bool m_fitting = false;     // three clicks along something straight, for the lens's bend
     QPolygonF m_frameCorners;   // a straightened flat thing's corners in the film's frame, to follow
     QSize m_straightSize;

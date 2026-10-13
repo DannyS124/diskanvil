@@ -194,6 +194,7 @@ void LookCloserDialog::look(int row)
     show.previous = row > 0;
     show.next = row + 1 < m_files.size();
     show.openable = true; // the person's own file, where it is
+    show.from = tr("Look Closer");
     m_baseFacts = {tr("Size") + QLatin1Char('\t') + formatSize(quint64(info.size())), tr("In") + QLatin1Char('\t') + QDir::toNativeSeparators(info.absolutePath()),
                    tr("Changed") + QLatin1Char('\t') + QLocale().toString(info.lastModified(), QLocale::LongFormat)};
     if (info.birthTime().isValid())
