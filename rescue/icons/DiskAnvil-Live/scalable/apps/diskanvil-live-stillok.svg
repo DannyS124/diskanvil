@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#9ad8ff" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Are My Files Still OK?: a picture with a fingerprint's ridges and a tick. -->
+  <rect x="3" y="3.5" width="13" height="16" rx="2"/>
+  <path d="M6.5 10a3 3 0 0 1 6 0v2.5M8.5 15v-5a1 1 0 0 1 2 0v4" stroke="#00e5ff"/>
+  <path d="M14.5 17.5l2.5 2.5 4.5-5" stroke="#2bee8a"/>
+</svg>

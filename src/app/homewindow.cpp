@@ -323,6 +323,9 @@ QVector<HomeWindow::Tile> HomeWindow::allTiles() const
     add(QStringLiteral("winstart"), QStringLiteral("diskanvil-live-winstart"), QStringLiteral("system-reboot"), tr("Windows Won't Start"),
         tr("Stuck on an update, or a damaged registry file"))
         .tool = QStringLiteral("windows-start");
+    add(QStringLiteral("stillok"), QStringLiteral("diskanvil-live-stillok"), QStringLiteral("security-high"), tr("Are My Files Still OK?"),
+        tr("Photos and papers checked for going bad over the years"))
+        .tool = QStringLiteral("still-ok");
     add(QStringLiteral("testdisk"), QStringLiteral("diskanvil-live-testdisk"), QStringLiteral("drive-harddisk"), tr("Find Lost Partitions"),
         tr("Partitions that disappeared, and boot sectors (TestDisk)"))
         .desktopId = QStringLiteral("diskanvil-live-testdisk");

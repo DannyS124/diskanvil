@@ -7,7 +7,9 @@
 #include "testkit.h"
 
 #include "../src/backup/savefiles.h"
+#include "../src/tools/fingerprints.h"
 
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QProcess>
@@ -40,8 +42,11 @@ const char *kChrome = R"({"roots": {
 
 } // namespace
 
+void fingerprintTests();
+
 void saveFilesTests()
 {
+    fingerprintTests();
     QTemporaryDir dir;
     const QString root = dir.filePath(QStringLiteral("drive"));
     put(root + QStringLiteral("/Users/alice/Desktop/note.txt"), "on the desktop\n");
@@ -128,3 +133,107 @@ void saveFilesTests()
                QStringLiteral("save files: Firefox's bookmarks through sqlite3, its own folders named, queries and tags left out"), firefox.left(700));
     QFile::setPermissions(root + QStringLiteral("/Users/alice/Documents/stuck.txt"), QFileDevice::ReadOwner | QFileDevice::WriteOwner);
 }
+
+namespace {
+
+// Runs a fingerprints job to the end, on this thread.
+QVector<fingerprints::Result> runJob(const QString &folder, fingerprints::Job::Mode mode, bool *ok, QString *book)
+{
+    fingerprints::Job job(folder, mode);
+    QVector<fingerprints::Result> out;
+    QObject::connect(&job, &fingerprints::Job::finished, [&](bool good, const QVector<fingerprints::Result> &results, const QString &where, const QString &) {
+        *ok = good;
+        out = results;
+        *book = where;
+    });
+    job.run();
+    return out;
+}
+
+} // namespace
+
+// Are My Files Still OK?: fingerprints recorded for a folder, then each kind of change found:
+// damaged (changed, its date not), edited, missing, new, unreadable; the file sha256sum reads.
+void fingerprintTests()
+{
+    QTemporaryDir dir;
+    const QString top = dir.filePath(QStringLiteral("Photos"));
+    auto put = [&](const QString &name, const QByteArray &bytes) {
+        QDir().mkpath(QFileInfo(top + QLatin1Char('/') + name).absolutePath());
+        QFile f(top + QLatin1Char('/') + name);
+        return f.open(QIODevice::WriteOnly | QIODevice::Truncate) && f.write(bytes) == bytes.size();
+    };
+    const QDateTime old = QDateTime::currentDateTime().addDays(-400);
+    auto age = [&](const QString &name) {
+        QFile f(top + QLatin1Char('/') + name);
+        f.open(QIODevice::ReadWrite);
+        f.setFileTime(old, QFileDevice::FileModificationTime);
+    };
+    for (const char *name : {"2019/beach.jpg", "2019/cake.jpg", "letter.pdf", "notes.txt", "gone.jpg", "stuck.jpg", "odd\\name.txt"}) {
+        put(QString::fromLatin1(name), QByteArray(name).repeated(3000));
+        age(QString::fromLatin1(name));
+    }
+    bool ok = false;
+    QString book;
+    runJob(top, fingerprints::Job::Mode::Record, &ok, &book);
+    fingerprints::Book b;
+    QString error;
+    report(ok && book == top + QStringLiteral("/DiskAnvil fingerprints.sha256") && fingerprints::read(book, &b, &error) && b.files.size() == 7
+               && b.made.secsTo(QDateTime::currentDateTimeUtc()) < 60,
+           QStringLiteral("fingerprints: recorded for every file, in the folder, with when"), QStringLiteral("%1 %2").arg(book).arg(b.files.size()));
+    if (!QStandardPaths::findExecutable(QStringLiteral("sha256sum")).isEmpty()) {
+        QProcess sum;
+        sum.setWorkingDirectory(top);
+        sum.start(QStringLiteral("sha256sum"), {QStringLiteral("--quiet"), QStringLiteral("-c"), QStringLiteral("DiskAnvil fingerprints.sha256")});
+        sum.waitForFinished(30000);
+        report(sum.exitCode() == 0, QStringLiteral("fingerprints: sha256sum -c checks the same file"), QString::fromLocal8Bit(sum.readAll()).left(200));
+    }
+    // A bit flipped with the date kept (what a failing drive does), one saved again, one deleted,
+    // one added, one that can't be read.
+    {
+        QFile f(top + QStringLiteral("/2019/beach.jpg"));
+        f.open(QIODevice::ReadWrite);
+        f.seek(4000);
+        f.write("X");
+        f.close();
+        age(QStringLiteral("2019/beach.jpg"));
+    }
+    put(QStringLiteral("letter.pdf"), "a newer letter");
+    QFile::remove(top + QStringLiteral("/gone.jpg"));
+    put(QStringLiteral("2020/new.jpg"), "new");
+    QFile::setPermissions(top + QStringLiteral("/stuck.jpg"), QFileDevice::Permissions());
+    const bool asRoot = ::geteuid() == 0;
+    const QVector<fingerprints::Result> results = runJob(top, fingerprints::Job::Mode::Check, &ok, &book);
+    QStringList seen;
+    for (const fingerprints::Result &r : results)
+        if (r.state != fingerprints::State::Same)
+            seen << r.path + QLatin1Char('=') + fingerprints::stateName(r.state);
+    seen.sort();
+    QStringList want = {QStringLiteral("2019/beach.jpg=Damaged"), QStringLiteral("2020/new.jpg=New since"), QStringLiteral("gone.jpg=Missing"),
+                        QStringLiteral("letter.pdf=Changed (saved since)")};
+    if (!asRoot)
+        want << QStringLiteral("stuck.jpg=Can't be read");
+    want.sort();
+    report(ok && seen == want, QStringLiteral("fingerprints: damaged, saved since, missing, new and unreadable told apart, the rest the same"),
+           seen.join(QStringLiteral(", ")));
+    QFile::setPermissions(top + QStringLiteral("/stuck.jpg"), QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+
+    // A folder that can't be written to: they're kept in DiskAnvil's own folder.
+    const QString locked = dir.filePath(QStringLiteral("Locked"));
+    QDir().mkpath(locked);
+    QFile f(locked + QStringLiteral("/a.txt"));
+    f.open(QIODevice::WriteOnly);
+    f.write("a");
+    f.close();
+    QFile::setPermissions(locked, QFileDevice::ReadOwner | QFileDevice::ExeOwner);
+    runJob(locked, fingerprints::Job::Mode::Record, &ok, &book);
+    if (!asRoot)
+        report(ok && book == fingerprints::ownCopyFor(locked) && QFile::exists(book), QStringLiteral("fingerprints: a read-only folder's are kept in DiskAnvil's own folder"), book);
+    QFile::remove(fingerprints::ownCopyFor(locked));
+    QFile::setPermissions(locked, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+
+    const fingerprints::Book round = fingerprints::fromText(fingerprints::toText(b));
+    report(round.files.size() == b.files.size() && round.made == b.made.toUTC().addMSecs(-b.made.time().msec()),
+           QStringLiteral("fingerprints: written and read back the same"));
+}
+

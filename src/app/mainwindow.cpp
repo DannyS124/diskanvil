@@ -19,6 +19,7 @@
 #include "holdersdialog.h"
 #include "whycrashdialog.h"
 #include "winstartdialog.h"
+#include "fingerprintsdialog.h"
 #include "writeprotectdialog.h"
 #include "remotehelpdialog.h"
 #include "netbootdialog.h"
@@ -853,6 +854,12 @@ void MainWindow::createActions()
         WinStartDialog(m_udisks, picker.root(), this).exec();
     });
 
+    m_stillOk = new QAction(themeIcon("diskanvil-live-stillok", "security-high"), tr("Are My Files Still &OK?…"), this);
+    m_stillOk->setObjectName(QStringLiteral("stillOk"));
+    m_stillOk->setToolTip(tr("A fingerprint of every file in a folder, checked again later: which photos and papers went bad (\"bit rot\", "
+                             "a failing drive) while a good copy still exists"));
+    connect(m_stillOk, &QAction::triggered, this, [this] { FingerprintsDialog(QString(), this).exec(); });
+
     m_lookCloser = new QAction(themeIcon("diskanvil-live-lookcloser", "zoom-in"), tr("&Look Closer at Pictures and Films…"), this);
     m_lookCloser->setObjectName(QStringLiteral("lookCloser"));
     m_lookCloser->setToolTip(tr("Any picture or film in the viewer, with its tools: Enhance and its profiles, Pick a Spot, Straighten, "
@@ -1084,13 +1091,14 @@ void MainWindow::createActions()
         tools->addAction(m_activity);
         tools->addAction(m_whyCrash);
         tools->addAction(m_winStart);
+        tools->addAction(m_stillOk);
         tools->addAction(m_lookCloser);
         tools->addAction(m_productKey);
         tools->addAction(m_certificates);
         tools->addSeparator();
 #ifdef Q_OS_WIN
         // Quick Fixes' tools, and add-ons (Linux commands), aren't in the Windows version yet.
-        tools->addActions({m_saveFiles, m_virusScan, m_bootMenu, m_drivers, m_activity, m_whyCrash, m_winStart, m_lookCloser, m_winRe, m_productKey, m_certificates, m_usage, m_cleanup, m_optimize, m_snapshots});
+        tools->addActions({m_saveFiles, m_virusScan, m_bootMenu, m_drivers, m_activity, m_whyCrash, m_winStart, m_stillOk, m_lookCloser, m_winRe, m_productKey, m_certificates, m_usage, m_cleanup, m_optimize, m_snapshots});
         return;
 #endif
         tools->addAction(themeIcon("tools-wizard", "system-run"), tr("&Quick Fixes…"), this, [this] {
@@ -1936,6 +1944,7 @@ bool MainWindow::openTool(const QString &name)
                                              {QStringLiteral("write-protected"), m_writeProtected},
                                              {QStringLiteral("why-crash"), m_whyCrash},
                                              {QStringLiteral("windows-start"), m_winStart},
+                                             {QStringLiteral("still-ok"), m_stillOk},
                                              {QStringLiteral("lost-files"), m_findFiles},
                                              {QStringLiteral("virus-scan"), m_virusScan},
                                              {QStringLiteral("save-files"), m_saveFiles},

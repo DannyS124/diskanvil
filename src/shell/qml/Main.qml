@@ -38,6 +38,7 @@ WaylandCompositor {
         { id: "copystick", icon: "diskanvil-live-copystick", title: "Copy This Stick", program: "diskanvil", args: ["--open", "rescue-usb"] },
         { id: "activity", icon: "diskanvil-live-logs", title: "What This PC Did", program: "diskanvil", args: ["--open", "activity"] },
         { id: "winstart", icon: "diskanvil-live-winstart", title: "Windows Won't Start", program: "diskanvil", args: ["--open", "windows-start"] },
+        { id: "stillok", icon: "diskanvil-live-stillok", title: "Are My Files Still OK?", program: "diskanvil", args: ["--open", "still-ok"] },
         { id: "whycrash", icon: "diskanvil-live-whycrash", title: "Why Did It Crash?", program: "diskanvil", args: ["--open", "why-crash"] },
         { id: "drivers", icon: "diskanvil-live-windowsfix", title: "Windows Drivers", program: "diskanvil", args: ["--open", "drivers"] },
         { id: "bootmenu", icon: "diskanvil-live-firmware", title: "Boot Menu Repair", program: "diskanvil", args: ["--open", "boot-menu"] },

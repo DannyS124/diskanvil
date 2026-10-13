@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Are My Files Still OK?
+Comment=Photos and papers checked for going bad over the years
+Exec=diskanvil --open still-ok
+Icon=diskanvil-live-stillok
+Categories=System;
