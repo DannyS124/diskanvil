@@ -68,7 +68,10 @@ whose own system won't start, with DiskAnvil and other repair tools on a small d
 except for the memory test. Every start leaves its logs in the logs folder on the stick; when you plug it back in, Make a DiskAnvil Live USB
 has an Open Logs button for them. Its boot menu also has "Start this PC's own system" (the PC's own Windows or other
 system, as if the stick weren't in), "Large text and high contrast", and, under Tools and troubleshooting, a check of
-every file on the stick (on its own, or before copying it to memory).</p>
+every file on the stick (on its own, or before copying it to memory). <i>DiskAnvil Live settings.txt</i>, at the top
+of the stick, is read at every start and can be edited on any computer: the keyboard layout, the time zone, a Wi-Fi
+network to join (its password is kept there as plain text), a tool to open once the screen is up, every drive
+write-protected, and large text. Take the # off a line to use it; nothing in it is ever run as a command.</p>
 <p><b>Keep changes on the Live stick, and a drive for files:</b> when you make it, tick "Keep my changes between
 starts" (settings, downloads and programs you add are still there next time) and "A drive for my files" (the rest of
 the stick as exFAT, which Windows, Macs and Linux all read). Linux ISOs copied into that drive's ISOs folder start

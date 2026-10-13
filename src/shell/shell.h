@@ -21,6 +21,8 @@ class Shell : public QObject
     Q_PROPERTY(bool fullScreen READ fullScreen CONSTANT)
     Q_PROPERTY(QString keyboardLayout READ keyboardLayout NOTIFY keyboardChanged)
     Q_PROPERTY(QString keyboardVariant READ keyboardVariant NOTIFY keyboardChanged)
+    // A DiskAnvil tool to open once the screen is up (the stick's settings.txt, "open = ..."): its id.
+    Q_PROPERTY(QString openAtStart READ openAtStart CONSTANT)
 public:
     // Drawing straight to the screen there's nothing else to draw the mouse pointer: the shell
     // does, where the mouse is.
@@ -38,6 +40,7 @@ public:
     // it, and it's followed at once), else what DiskAnvil Live was started with (XKB_DEFAULT_LAYOUT).
     explicit Shell(QObject *parent = nullptr);
     QString keyboardLayout() const { return m_layout; }
+    QString openAtStart() const;
     QString keyboardVariant() const { return m_variant; }
     QString version() const;
     // Starts a program to show as a window here; its process number, or 0.

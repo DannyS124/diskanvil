@@ -562,8 +562,43 @@ fi
            QStringLiteral("Live on this PC: and Take It Off takes it out again, leaving the rest"), said);
 }
 
+// The stick's settings file, read by diskanvil-live-settings (its --dry-run, under a pretend /):
+// the template a new stick gets changes nothing; filled in, each setting is checked and applied,
+// a command isn't run, and Windows line endings are fine.
+void stickSettingsTests()
+{
+    QTemporaryDir dir;
+    const QString script = QStringLiteral(SOURCE_DIR "/rescue/files/usr/local/bin/diskanvil-live-settings");
+    auto run = [&](const QByteArray &settings) {
+        writeFile(dir.filePath(QStringLiteral("settings.txt")), settings);
+        QDir(dir.filePath(QStringLiteral("root"))).removeRecursively();
+        QDir().mkpath(dir.filePath(QStringLiteral("root/etc/default")));
+        QProcess p;
+        p.start(QStringLiteral("bash"), {script, QStringLiteral("--file"), dir.filePath(QStringLiteral("settings.txt")), QStringLiteral("--root"),
+                                         dir.filePath(QStringLiteral("root")), QStringLiteral("--dry-run")});
+        p.waitForFinished(30000);
+        return QString::fromUtf8(p.readAllStandardOutput());
+    };
+    const QString blank = run(rescue::settingsTemplate());
+    report(blank.trimmed().count(QLatin1Char('\n')) == 0 && blank.startsWith(QLatin1String("Settings from")) && rescue::settingsTemplate().contains("\r\n"),
+           QStringLiteral("stick settings: the template a new stick gets changes nothing"), blank.left(200));
+    const QString filled = run("keyboard = de\r\nTimeZone = America/New_York\r\nwifi = Cafe\r\nwifi-password = short\r\nopen = why-crash\r\n"
+                               "write-protect = no\r\nlarge-text = yes\r\nrun = reboot\r\nopen = ../../bin/sh\r\n");
+    report(filled.contains(QLatin1String("Keyboard: de")) && filled.contains(QLatin1String("Time zone: America/New_York"))
+               && filled.contains(QLatin1String("Wi-Fi: a Wi-Fi password has 8 to 63 characters")) && filled.contains(QLatin1String("isn't a tool's name"))
+               && !filled.contains(QLatin1String("Drives write-protected")) && filled.contains(QLatin1String("Large text"))
+               && filled.contains(QLatin1String("Not done: run")) && !QFile::exists(dir.filePath(QStringLiteral("root/run/diskanvil-live/open"))),
+           QStringLiteral("stick settings: each one checked, a bad Wi-Fi password and a path for a tool refused, no commands"), filled);
+    const QString wifi = run("wifi = Cafe\nwifi-password = latte-1234\nopen = lost-files\n");
+    QFile conn(dir.filePath(QStringLiteral("root/etc/NetworkManager/system-connections/stick-settings.nmconnection")));
+    const QByteArray c = conn.open(QIODevice::ReadOnly) ? conn.readAll() : QByteArray();
+    report(c.contains("ssid=Cafe") && c.contains("psk=latte-1234") && (conn.permissions() & QFileDevice::ReadOther) == 0,
+           QStringLiteral("stick settings: Wi-Fi becomes a NetworkManager connection only root can read"));
+}
+
 void rescueUsbTests()
 {
+    stickSettingsTests();
     QTemporaryDir dir;
     folderTests(dir.path());
     fromStickTests(dir.path());

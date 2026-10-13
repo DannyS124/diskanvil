@@ -1,0 +1,136 @@
+#!/bin/bash
+# DiskAnvil Live's settings from its own stick: "DiskAnvil Live settings.txt" at the top of the
+# stick, a plain text file anyone can edit on any computer. systemd runs this early at boot, as
+# root, before the network and the screen start. Only the settings below are read, each checked;
+# nothing in the file is ever run (there are no commands or scripts in it, by design).
+#
+#   keyboard = gb               the keyboard layout (a code, like gb, de, fr, us:intl)
+#   timezone = Europe/London    the clock's time zone
+#   wifi = My Network           a Wi-Fi network to join...
+#   wifi-password = secret      ...and its password (kept on the stick as plain text)
+#   open = lost-files           a DiskAnvil tool to open once the screen is up
+#   write-protect = yes         every drive but this stick read-only, as the boot menu's entry
+#   large-text = yes            everything half as big again, high-contrast colours
+#
+#   diskanvil-live-settings [--file F] [--root DIR] [--dry-run]   (the tests: another file, a
+#   pretend / under DIR, and only say what would be done)
+set -u
+file= root= dry=no
+while [ $# -gt 0 ]; do
+    case $1 in
+    --file) file=$2; shift ;;
+    --root) root=$2; shift ;;
+    --dry-run) dry=yes ;;
+    esac
+    shift
+done
+state=$root/run/diskanvil-live
+mkdir -p "$state"
+log=$state/settings.log
+say() { echo "$*" >> "$log"; [ "$dry" = yes ] && echo "$*"; }
+do_() { if [ "$dry" = yes ]; then echo "would: $*"; else "$@"; fi; }
+
+if [ -z "$file" ]; then
+    . /etc/diskanvil-live.conf
+    . /usr/local/lib/diskanvil-live/find-stick.sh
+    stick=$(find_stick) || exit 0
+    file="$stick/DiskAnvil Live settings.txt"
+fi
+[ -f "$file" ] || exit 0
+say "Settings from $file"
+
+keyboard= timezone= wifi= password= open= protect= large=
+while IFS= read -r line || [ -n "$line" ]; do
+    line=${line%$'\r'}                        # written on Windows
+    line=$(printf '%s' "$line" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+    case $line in ''|'#'*) continue ;; esac
+    if [[ $line != *=* ]]; then
+        say "Not understood (no '='): $line"
+        continue
+    fi
+    key=$(printf '%s' "${line%%=*}" | sed 's/[[:space:]]*$//' | tr 'A-Z_' 'a-z-')
+    value=$(printf '%s' "${line#*=}" | sed 's/^[[:space:]]*//')
+    case $key in
+    keyboard) keyboard=$value ;;
+    timezone|time-zone) timezone=$value ;;
+    wifi) wifi=$value ;;
+    wifi-password) password=$value ;;
+    open) open=$value ;;
+    write-protect) protect=$value ;;
+    large-text) large=$value ;;
+    run|script|command|exec|autorun) say "Not done: $key. DiskAnvil Live doesn't run commands from its settings." ;;
+    *) say "Not a setting DiskAnvil Live knows: $key" ;;
+    esac
+done < "$file"
+yes() { case $(printf '%s' "$1" | tr 'A-Z' 'a-z') in yes|on|true|1) return 0 ;; *) return 1 ;; esac; }
+
+if [ -n "$keyboard" ]; then
+    layout=${keyboard%%:*} variant=
+    [[ $keyboard == *:* ]] && variant=${keyboard#*:}
+    if [[ $layout =~ ^[a-z]{2,6}$ ]] && [[ $variant =~ ^[a-z0-9_]*$ ]] &&
+        { grep -qE "^ +$layout +" "$root/usr/share/X11/xkb/rules/base.lst" 2>/dev/null || [ "$dry" = yes ]; }; then
+        do_ sed -i -e "s/^XKBLAYOUT=.*/XKBLAYOUT=\"$layout\"/" -e "s/^XKBVARIANT=.*/XKBVARIANT=\"$variant\"/" "$root/etc/default/keyboard"
+        [ "$dry" = yes ] || setupcon -k --force >/dev/null 2>&1
+        say "Keyboard: $layout${variant:+ ($variant)}"
+    else
+        say "Keyboard: there's no layout called $keyboard"
+    fi
+fi
+if [ -n "$timezone" ]; then
+    if [[ $timezone =~ ^[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*$ ]] && { [ -f "$root/usr/share/zoneinfo/$timezone" ] || [ "$dry" = yes ]; }; then
+        do_ ln -sf "/usr/share/zoneinfo/$timezone" "$root/etc/localtime"
+        say "Time zone: $timezone"
+    else
+        say "Time zone: there's no time zone called $timezone"
+    fi
+fi
+if [ -n "$wifi" ]; then
+    if [ ${#wifi} -gt 32 ] || [[ $wifi == *';'* ]] || [[ $wifi =~ [[:cntrl:]] ]]; then
+        say "Wi-Fi: \"$wifi\" isn't a network name it can use"
+    elif [ -n "$password" ] && { [ ${#password} -lt 8 ] || [ ${#password} -gt 63 ] || [[ $password =~ [[:cntrl:]] ]]; }; then
+        say "Wi-Fi: a Wi-Fi password has 8 to 63 characters"
+    else
+        # A NetworkManager connection, ready before it starts.
+        dir=$root/etc/NetworkManager/system-connections
+        mkdir -p "$dir"
+        conn=$dir/stick-settings.nmconnection
+        {
+            echo "[connection]"
+            echo "id=$wifi"
+            echo "type=wifi"
+            echo "autoconnect=true"
+            echo "[wifi]"
+            echo "mode=infrastructure"
+            echo "ssid=$wifi"
+            if [ -n "$password" ]; then
+                echo "[wifi-security]"
+                echo "key-mgmt=wpa-psk"
+                echo "psk=$password"
+            fi
+            echo "[ipv4]"
+            echo "method=auto"
+            echo "[ipv6]"
+            echo "method=auto"
+        } > "$conn.new"
+        chmod 600 "$conn.new"
+        mv "$conn.new" "$conn"
+        say "Wi-Fi: $wifi"
+    fi
+fi
+if [ -n "$open" ]; then
+    if [[ $open =~ ^[a-z]+(-[a-z]+)*$ ]]; then
+        echo "$open" > "$state/open"
+        say "Opens at the start: $open"
+    else
+        say "Open: \"$open\" isn't a tool's name (like lost-files)"
+    fi
+fi
+if [ -n "$protect" ] && yes "$protect"; then
+    do_ /usr/local/bin/diskanvil-live-writeblock on
+    say "Drives write-protected"
+fi
+if [ -n "$large" ] && yes "$large"; then
+    touch "$state/large"
+    say "Large text and high contrast"
+fi
+exit 0

@@ -201,5 +201,8 @@ WaylandCompositor {
     Component.onCompleted: {
         shell.setSocket(socketName)
         useKeyboard()
+        // The stick's settings can ask for a tool to open once the screen is up.
+        if (shell.openAtStart.length > 0)
+            Qt.callLater(() => launch({ id: "settings-open", program: "diskanvil", args: ["--open", shell.openAtStart] }))
     }
 }

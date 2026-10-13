@@ -37,6 +37,13 @@ Tools and troubleshooting:
   Check, then to memory               the same, then copies the checked stick to memory
   Firmware settings                   the PC's UEFI setup
 
+Settings on the stick
+---------------------
+"DiskAnvil Live settings.txt" at the top of the stick can be edited on any computer: the
+keyboard layout, the time zone, a Wi-Fi network to join (its password is kept there as
+plain text), a tool to open once the screen is up, every drive write-protected, large
+text. Take the # off a line to use it. Nothing in it is ever run as a command.
+
 The home screen
 ---------------
 It opens on a home screen: big tiles for the jobs people bring the stick for, the everyday

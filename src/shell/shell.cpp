@@ -10,6 +10,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QProcess>
+#include <QRegularExpression>
 
 #include <signal.h>
 
@@ -45,6 +46,14 @@ void Shell::readKeyboard()
     // An editor (sed -i) puts a new file in its place: watched again.
     if (QFile::exists(path) && !m_keyboardFile.files().contains(path))
         m_keyboardFile.addPath(path);
+}
+
+QString Shell::openAtStart() const
+{
+    // Only a tool's id: lower-case words joined by dashes. DiskAnvil itself says if there's no such tool.
+    const QString id = qEnvironmentVariable("DISKANVIL_LIVE_OPEN").trimmed();
+    static const QRegularExpression tool(QStringLiteral("^[a-z]+(-[a-z]+)*$"));
+    return tool.match(id).hasMatch() ? id : QString();
 }
 
 QString Shell::version() const

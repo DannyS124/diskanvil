@@ -13,11 +13,15 @@ if [ -r /etc/default/keyboard ]; then
     . /etc/default/keyboard
     export XKB_DEFAULT_LAYOUT=${XKBLAYOUT:-us} XKB_DEFAULT_VARIANT=${XKBVARIANT:-} XKB_DEFAULT_OPTIONS=${XKBOPTIONS:-}
 fi
-# "Large text and high contrast" from the boot menu: everything half as big again, and DiskAnvil's
-# high-contrast colours.
-if grep -qw diskanvil-live.large /proc/cmdline; then
+# "Large text and high contrast" from the boot menu (or the stick's settings): everything half as big
+# again, and DiskAnvil's high-contrast colours.
+if grep -qw diskanvil-live.large /proc/cmdline || [ -e /run/diskanvil-live/large ]; then
     export QT_SCALE_FACTOR=1.5
     sed -i 's/^theme=.*/theme=high-contrast/' ~/.config/diskanvil/diskanvil.conf 2>/dev/null
+fi
+# A tool the stick's settings want open once the screen is up.
+if [ -s /run/diskanvil-live/open ]; then
+    export DISKANVIL_LIVE_OPEN=$(cat /run/diskanvil-live/open)
 fi
 # The shell reads the mouse, touchpad and keyboard itself (touchpads tap and scroll with two fingers).
 export QT_QPA_FB_DISABLE_INPUT=1

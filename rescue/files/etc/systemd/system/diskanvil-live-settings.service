@@ -1,0 +1,16 @@
+# DiskAnvil Live's settings from "DiskAnvil Live settings.txt" on its stick: keyboard, time zone,
+# Wi-Fi, a tool to open, write-protection, large text. Before the network, the drives' service and
+# the screen start, so they all start with them.
+[Unit]
+Description=DiskAnvil Live: the stick's settings
+DefaultDependencies=no
+After=systemd-udev-trigger.service systemd-udev-settle.service local-fs.target
+Before=NetworkManager.service udisks2.service getty@tty1.service sysinit.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/diskanvil-live-settings
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target

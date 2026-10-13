@@ -29,6 +29,11 @@ struct Info {
 };
 Info parseInfo(const QByteArray &text);
 
+// DiskAnvil Live's settings file at the top of the stick, and what a new stick gets in it (every
+// setting there, switched off). diskanvil-live-settings reads it at boot.
+inline constexpr char kSettingsFile[] = "DiskAnvil Live settings.txt";
+QByteArray settingsTemplate();
+
 // sha256sum.txt: "<hash>  ./path" on each line. Paths come back without the "./".
 QHash<QString, QByteArray> parseSums(const QByteArray &text);
 

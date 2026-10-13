@@ -298,8 +298,42 @@ void rescue::StickWriter::run()
                    "named by the date and the PC's model. summary.txt in each one is the place to start.\n");
         note.close();
     }
+    // Its settings, ready to fill in on any computer; one that's there already (an update) is kept.
+    QFile settings(m_root + QLatin1Char('/') + QLatin1String(rescue::kSettingsFile));
+    if (!settings.exists() && settings.open(QIODevice::WriteOnly))
+        settings.write(rescue::settingsTemplate());
     blockio::syncFileSystem(m_root);
     finish(true, message);
+}
+
+QByteArray rescue::settingsTemplate()
+{
+    // Windows line endings: Notepad on an old Windows shows anything else on one line.
+    return QByteArray("# DiskAnvil Live's settings, read each time this stick starts a PC.\n"
+                      "# Take the # off the start of a line to use it, and change what's after the =.\n"
+                      "# Only these settings are read. Nothing here is ever run as a command.\n"
+                      "\n"
+                      "# The keyboard layout: a code like gb, us, de, fr, es, it, us:intl\n"
+                      "# keyboard = gb\n"
+                      "\n"
+                      "# The clock's time zone (DiskAnvil Live starts on UTC)\n"
+                      "# timezone = Europe/London\n"
+                      "\n"
+                      "# A Wi-Fi network to join by itself. The password is kept here as plain text:\n"
+                      "# anyone with the stick can read it.\n"
+                      "# wifi = My Network\n"
+                      "# wifi-password = my password\n"
+                      "\n"
+                      "# A tool to open once the screen is up: lost-files, save-files, virus-scan,\n"
+                      "# why-crash, windows-start, check-stick, hardware, burn-in, ...\n"
+                      "# open = lost-files\n"
+                      "\n"
+                      "# Every drive but this stick read-only, as the boot menu's \"Drives write-protected\"\n"
+                      "# write-protect = yes\n"
+                      "\n"
+                      "# Everything half as big again, in high-contrast colours\n"
+                      "# large-text = yes\n")
+        .replace("\n", "\r\n");
 }
 
 bool rescue::writeBiosBoot(int fd, const QByteArray &bootImg, const QByteArray &coreImg, QString *error)
