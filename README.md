@@ -116,6 +116,21 @@ files that FAT, exFAT or NTFS still remember come back with their real names and
 - <img src="docs/icons/themes.svg" width="22" height="22" align="top" alt="">&nbsp; **Themes**: System, Classic, Deadshadow, High Contrast and DiskAnvil Live, or make your own
 - <img src="docs/icons/raid.svg" width="22" height="22" align="top" alt="">&nbsp; **RAID and LVM**: software RAID arrays with their status and a check button, and LVM volume groups
 
+### New in 0.5.2
+
+<table>
+<tr>
+<td width="50%"><img src="docs/shots/windows-wont-start.png" alt="Windows Won't Start, with a Windows' registry files checked and its System Restore copies"><br><b>Windows Won't Start</b>: a stuck update undone, a damaged registry file put back from System Restore</td>
+<td width="50%"><img src="docs/shots/burn-in.png" alt="Burn In a New Drive, finished"><br><b>Burn In a New Drive</b>: every step, then a verdict and a PDF</td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/shots/write-speed.png" alt="Write Speed Over Time, a 2 GB drive written over"><br><b>Write Speed Over Time</b>: the speed drawn as it writes, and where an SSD's fast cache runs out</td>
+<td width="50%"><img src="docs/shots/hardware-check.png" alt="Hardware Check, this PC's parts"><br><b>Hardware Check</b>: the PC's parts, heat under load, battery wear, keys, screen and camera</td>
+</tr>
+</table>
+
+All taken on DiskAnvil Live in a virtual machine, so the drives and the PC are QEMU's.
+
 ## Getting it
 
 ### Arch
@@ -187,10 +202,11 @@ Most of it works the same as on Linux. What's different:
 
 ## <img src="rescue/art/diskanvil-live-icon.svg" width="32" height="32" align="top" alt="">&nbsp; DiskAnvil Live
 
-![DiskAnvil Live's home screen](docs/diskanvil-live.png)
+![Everything on DiskAnvil Live](docs/diskanvil-live.png)
 
 DiskAnvil Live is a small Linux system on a USB stick, with DiskAnvil and a few other repair tools on it. It starts
-any PC, new or old, even one whose own system won't start, and it opens on the screen above. To make one:
+any PC, new or old, even one whose own system won't start, with every tool a click away (above: all of them). To
+make one:
 
 1. Download `diskanvil-live-<version>.iso` from the [Releases page](https://github.com/DannyS124/diskanvil/releases).
 2. In DiskAnvil, go to File → Make a DiskAnvil Live USB, pick the ISO and the stick, and type the stick's name to
@@ -208,6 +224,12 @@ When you make the stick you can also tick:
   ISOs folder start from the boot menu too (Other ISOs on this stick, with Secure Boot off)
 
 A stick made with those can be updated to a new version without wiping it.
+
+Its boot menu can also start the PC's own system (Windows, say) as if the stick weren't in, start with large text
+and high contrast, and check every file on the stick first. **DiskAnvil Live settings.txt**, at the top of the
+stick, is read at every start and can be edited on any computer: the keyboard layout, the time zone, a Wi-Fi network
+to join, a tool to open straight away, every drive write-protected, large text. Nothing in it is ever run as a
+command.
 
 In DiskAnvil Live, Tools also has:
 
