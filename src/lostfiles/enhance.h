@@ -52,6 +52,9 @@ struct Settings {
     bool wiener = false;
     int noise = 30;           // 1 to 100
     int nlm = 0;              // 0 to 100: grain taken out by non-local means (each point from the patches like it)
+    // A wide lens's bend (doorbell and fisheye cameras) taken out: 0 none, 100 a lot. One
+    // parameter of the division model (Fitzgibbon), about the picture's middle.
+    int fisheye = 0;
     bool grey = false;
     bool invert = false;
     bool isDefault() const;
@@ -69,6 +72,19 @@ QImage resize(const QImage &in, QSize to);
 // Something seen at an angle (a number plate, a sign, a page) made square-on: the four corners
 // picked on it, clockwise from its top left, become a rectangle as wide and tall as its sides.
 QImage straighten(const QImage &in, const QPolygonF &corners);
+// The same, to a size given (so each frame of a film comes out the same size as the first).
+QImage straighten(const QImage &in, const QPolygonF &corners, QSize size);
+// How sharp it is (the spread of its Laplacian): to pick a film's sharpest frames.
+double sharpness(const QImage &image);
+// A flat thing seen in one frame (its four corners) followed through the others: each frame's
+// corners, found by matching the patch around each corner frame to frame, to a fraction of a
+// pixel. A corner lost (gone out of the picture, too unlike) keeps where it was in the frame before.
+QVector<QPolygonF> followCorners(const QVector<QImage> &frames, int reference, const QPolygonF &corners);
+// The fisheye strength (as Settings::fisheye) that makes points along something that should be
+// straight lie on a line; -1 when there aren't enough of them.
+int fisheyeFromLine(const QVector<QPointF> &points, QSize picture);
+// The point where a picture point lands with the bend taken out (for the tests and the fit).
+QPointF unbend(QPointF point, QSize picture, int fisheye);
 // Frames of a film showing the same thing, lined up on the one at `reference` and put together:
 // the camera's noise, different in each, evens out, and lined up to a fraction of a pixel they
 // can show more than any one of them (shift and add). `scale` 2 makes it twice as big from what the

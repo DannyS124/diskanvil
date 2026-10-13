@@ -4930,6 +4930,38 @@ void enhanceWindow()
                && window.findChild<QCheckBox *>(QStringLiteral("deinterlace")),
            QStringLiteral("viewer: local contrast, edge-keeping smoothing and deinterlacing are there"));
 
+    // A lens's bend fitted to three clicks along a line; a squashed picture given its shape.
+    {
+        window.present(show);
+        action->setChecked(true);
+        QCoreApplication::processEvents();
+        auto *fit = window.findChild<QPushButton *>(QStringLiteral("fitLine"));
+        fit->setChecked(true);
+        QCoreApplication::processEvents();
+        QWidget *port = picture->viewport();
+        const QPointF corner((port->width() - stripes.width()) / 2.0, (port->height() - stripes.height()) / 2.0);
+        for (const QPointF at : {QPointF(30, 40), QPointF(160, 22), QPointF(290, 40)}) { // bowed, as a wide lens bows a straight edge
+            QMouseEvent press(QEvent::MouseButtonPress, corner + at, port->mapToGlobal(corner + at), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(port, &press);
+            QMouseEvent release(QEvent::MouseButtonRelease, corner + at, port->mapToGlobal(corner + at), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(port, &release);
+        }
+        QCoreApplication::processEvents();
+        report(window.findChild<QSlider *>(QStringLiteral("fisheye"))->value() > 0, QStringLiteral("viewer: three clicks along a bowed line set the lens's bend"),
+               QString::number(window.findChild<QSlider *>(QStringLiteral("fisheye"))->value()));
+        window.findChild<QSlider *>(QStringLiteral("fisheye"))->setValue(0);
+        auto *shapeBox = window.findChild<QComboBox *>(QStringLiteral("shape"));
+        shapeBox->setCurrentIndex(3);
+        Q_EMIT shapeBox->activated(3);
+        QCoreApplication::processEvents();
+        png.clear();
+        window.findChild<QPushButton *>(QStringLiteral("saveEnhanced"))->click();
+        waitUntil([&] { return !png.isEmpty(); }, 20000);
+        saved.loadFromData(png, "PNG");
+        report(saved.height() == stripes.height() * 2 * (saved.width() / stripes.width()) && saved.text(QStringLiteral("Description")).contains(QLatin1String("twice as tall")),
+               QStringLiteral("viewer: a squashed picture given its shape, and the note says so"), QStringLiteral("%1x%2").arg(saved.width()).arg(saved.height()));
+        window.findChild<QPushButton *>(QStringLiteral("wholePicture"))->click();
+    }
     // A JPEG can be decoded again within what it stores, and what's saved says so.
     {
         QImage photo(160, 120, QImage::Format_RGB32);
@@ -5101,6 +5133,39 @@ void filmTools()
         const QString note = frame.text(QStringLiteral("Description"));
         report(note.contains(QLatin1String("frames around it lined up and averaged")) && note.contains(QLatin1String("only the spot")),
                QStringLiteral("film tools: the frames around the spot are stacked, and what's saved says how many"), note);
+    }
+    // A flat thing in the frame straightened, then followed through the frames around it.
+    window.findChild<QPushButton *>(QStringLiteral("wholePicture"))->click();
+    QCoreApplication::processEvents();
+    window.findChild<QPushButton *>(QStringLiteral("straighten"))->setChecked(true);
+    QCoreApplication::processEvents();
+    if (picture) {
+        QWidget *port = picture->viewport();
+        const QSizeF shown = QSizeF(320, 240) * std::min({1.0, port->width() / 320.0, port->height() / 240.0});
+        const QPointF corner((port->width() - shown.width()) / 2.0, (port->height() - shown.height()) / 2.0);
+        const double f = shown.width() / 320.0;
+        for (const QPointF at : {QPointF(80, 60), QPointF(220, 66), QPointF(214, 170), QPointF(84, 164)}) {
+            QMouseEvent press(QEvent::MouseButtonPress, corner + at * f, port->mapToGlobal(corner + at * f), Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(port, &press);
+            QMouseEvent release(QEvent::MouseButtonRelease, corner + at * f, port->mapToGlobal(corner + at * f), Qt::LeftButton, Qt::NoButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(port, &release);
+        }
+    }
+    QCoreApplication::processEvents();
+    report(stackButton && stackButton->isVisible() && stackButton->text().contains(QLatin1String("Following")),
+           QStringLiteral("film tools: a straightened flat thing in a frame can be followed through the frames"));
+    if (stackButton && stackButton->isVisible()) {
+        window.findChild<QCheckBox *>(QStringLiteral("sharpest"))->setChecked(true);
+        stackCount->setValue(7);
+        stackButton->click();
+        waitUntil([&] { return stackButton->isEnabled() && !stackButton->isVisible(); }, 60000);
+        png.clear();
+        window.findChild<QPushButton *>(QStringLiteral("saveEnhanced"))->click();
+        waitUntil([&] { return !png.isEmpty(); }, 10000);
+        frame.loadFromData(png, "PNG");
+        const QString note = frame.text(QStringLiteral("Description"));
+        report(note.contains(QLatin1String("corners followed")) && note.contains(QLatin1String("straightened")) && note.contains(QLatin1String("least sharp")),
+               QStringLiteral("film tools: followed, straightened frame by frame, the sharpest stacked, and the note says so"), note);
     }
     window.findChild<QPushButton *>(QStringLiteral("wholePicture"))->click();
     QCoreApplication::processEvents();

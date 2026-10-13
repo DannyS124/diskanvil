@@ -149,6 +149,7 @@ private:
     void straightened(const QPolygonF &corners);
     void stackFrames(int count, int scale, int how);
     void redecodeJpeg(bool on);
+    void reshape(int index);
 
     Show m_shown;
     QStackedWidget *m_pages;
@@ -181,6 +182,9 @@ private:
     QStringList m_steps;        // what was done since, for the note in what's saved
     QImage m_asFound;           // while it's decoded again: the picture as the file decodes normally
     QString m_redecodeStep;
+    bool m_fitting = false;     // three clicks along something straight, for the lens's bend
+    QPolygonF m_frameCorners;   // a straightened flat thing's corners in the film's frame, to follow
+    QSize m_straightSize;
     QTimer *m_enhanceTimer;
     std::shared_ptr<std::atomic<int>> m_enhanceRound; // a newer request stops the ones before it
 };

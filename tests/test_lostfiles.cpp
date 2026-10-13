@@ -3888,6 +3888,75 @@ void enhanceTools()
                QStringLiteral("enhance: what's blown out or pure black is marked, the rest isn't"));
     }
 
+    {
+        // A wide lens bends a straight line; three points on it give the strength back.
+        const QSize pic(800, 600);
+        const int truth = 55;
+        const auto bend = [&](QPointF u) { // the bent point whose unbending is u
+            QPointF d = u;
+            for (int it = 0; it < 30; ++it) {
+                const QPointF back = enhance::unbend(d, pic, truth);
+                d += u - back;
+            }
+            return d;
+        };
+        QVector<QPointF> line;
+        for (int i = 0; i <= 8; ++i)
+            line << bend(QPointF(60 + i * 85, 80 + i * 10));
+        const int found = enhance::fisheyeFromLine(line, pic);
+        report(std::abs(found - truth) <= 3, QStringLiteral("enhance: a bent straight line gives the lens's bend back"), QStringLiteral("%1 for %2").arg(found).arg(truth));
+        enhance::Settings unfish;
+        unfish.fisheye = 40;
+        QImage grid(80, 60, QImage::Format_RGB32);
+        grid.fill(Qt::white);
+        report(enhance::apply(grid, unfish).size() == grid.size() && unfish.describe().join(QLatin1Char(' ')).contains(QLatin1String("lens")),
+               QStringLiteral("enhance: the bend taken out of a picture, and said"));
+    }
+    {
+        // Frames: a sharp one scores above a blurred one; corners followed through moving frames.
+        QImage sharp(160, 120, QImage::Format_RGB32);
+        QRandomGenerator blocks(21);
+        sharp.fill(qRgb(90, 90, 90));
+        {
+            QPainter p(&sharp);
+            for (int i = 0; i < 40; ++i)
+                p.fillRect(int(blocks.bounded(150)), int(blocks.bounded(110)), 4 + int(blocks.bounded(16)), 4 + int(blocks.bounded(16)),
+                           QColor::fromHsv(int(blocks.bounded(360)), 200, 60 + int(blocks.bounded(190))));
+        }
+        enhance::Settings blur;
+        blur.smooth = 100;
+        const QImage soft = enhance::apply(sharp, blur);
+        report(enhance::sharpness(sharp) > enhance::sharpness(soft) * 1.5, QStringLiteral("enhance: a sharp frame scores above a blurred one"));
+        QVector<QImage> frames;
+        QVector<QPointF> moves = {QPointF(0, 0), QPointF(1.4, 0.6), QPointF(2.7, 1.1), QPointF(3.9, 2.3), QPointF(5.2, 2.8)};
+        for (const QPointF &m : moves) {
+            // Moved by exactly m (between pixels, smoothly): what the frame shows at x is the scene at x - m.
+            QImage f(160, 120, QImage::Format_RGB32);
+            for (int y = 0; y < 120; ++y)
+                for (int x = 0; x < 160; ++x) {
+                    const double sx = x - m.x(), sy = y - m.y();
+                    const int ix = int(std::floor(sx)), iy = int(std::floor(sy));
+                    const double tx = sx - ix, ty = sy - iy;
+                    const auto at = [&sharp](int px, int py, int ch) {
+                        const QRgb c = sharp.pixel(std::clamp(px, 0, 159), std::clamp(py, 0, 119));
+                        return double(ch == 0 ? qRed(c) : ch == 1 ? qGreen(c) : qBlue(c));
+                    };
+                    int rgb[3];
+                    for (int ch = 0; ch < 3; ++ch)
+                        rgb[ch] = int(std::lround((at(ix, iy, ch) * (1 - tx) + at(ix + 1, iy, ch) * tx) * (1 - ty) + (at(ix, iy + 1, ch) * (1 - tx) + at(ix + 1, iy + 1, ch) * tx) * ty));
+                    f.setPixel(x, y, qRgb(rgb[0], rgb[1], rgb[2]));
+                }
+            frames << f;
+        }
+        const QPolygonF corners{QPointF(40, 30), QPointF(120, 32), QPointF(118, 90), QPointF(42, 88)};
+        const QVector<QPolygonF> followed = enhance::followCorners(frames, 0, corners);
+        double worst = 0;
+        for (int i = 0; i < frames.size(); ++i)
+            for (int k = 0; k < 4; ++k)
+                worst = std::max(worst, std::hypot(followed[i][k].x() - (corners[k].x() + moves[i].x()), followed[i][k].y() - (corners[k].y() + moves[i].y())));
+        report(worst < 0.5, QStringLiteral("enhance: a flat thing's corners followed from frame to frame"), QStringLiteral("off by %1 px at worst").arg(worst, 0, 'f', 2));
+        report(enhance::straighten(frames[2], followed[2], QSize(80, 58)).size() == QSize(80, 58), QStringLiteral("enhance: each frame straightened to the same size"));
+    }
     if (jpegexact::available()) {
         // A picture squeezed hard into a JPEG: decoded again within what the file stores, nearer
         // the original than an ordinary decode, and its squares' edges weaker.

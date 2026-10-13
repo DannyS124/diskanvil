@@ -176,13 +176,15 @@ Plane median(const Plane &in, int radius)
 
 bool Settings::isDefault() const
 {
-    return nlm == 0 && !fullRange && field == 0 && homomorphic == 0 && retinex == 0 && channel == AllColour && deblock == 0 && brightness == 0 && contrast == 0 && shadows == 0 && !autoLevels && denoise == 0 && smooth == 0 && localContrast == 0 && !deinterlace
+    return fisheye == 0 && nlm == 0 && !fullRange && field == 0 && homomorphic == 0 && retinex == 0 && channel == AllColour && deblock == 0 && brightness == 0 && contrast == 0 && shadows == 0 && !autoLevels && denoise == 0 && smooth == 0 && localContrast == 0 && !deinterlace
         && sharpen == 0 && focus == 0 && motion == 0 && !grey && !invert;
 }
 
 QStringList Settings::describe() const
 {
     QStringList out;
+    if (fisheye > 0)
+        out << tr("a wide lens's bend taken out (%1%, division model)").arg(fisheye);
     if (fullRange)
         out << tr("video levels 16-235 stretched to the full range");
     if (field == 1 || field == 2)
@@ -808,7 +810,7 @@ QByteArray profileToFile(const Profile &p)
                          {QStringLiteral("channel"), s.channel},       {QStringLiteral("field"), s.field},
                          {QStringLiteral("fullRange"), s.fullRange},   {QStringLiteral("nlm"), s.nlm},
                          {QStringLiteral("noise"), s.noise},           {QStringLiteral("focusDisc"), s.focusDisc},
-                         {QStringLiteral("wiener"), s.wiener}};
+                         {QStringLiteral("wiener"), s.wiener},         {QStringLiteral("fisheye"), s.fisheye}};
     QJsonObject o{{QStringLiteral("diskanvil-enhance-profile"), 1}, {QStringLiteral("name"), p.name}, {QStringLiteral("settings"), settings}};
     if (!p.description.isEmpty())
         o.insert(QStringLiteral("description"), p.description);
@@ -868,6 +870,7 @@ bool profileFromFile(const QByteArray &file, Profile *p, QString *why)
     s.field = number("field", 0, 2);
     s.fullRange = j.value(QStringLiteral("fullRange")).toBool();
     s.nlm = number("nlm", 0, 100);
+    s.fisheye = number("fisheye", 0, 100);
     s.noise = std::max(1, number("noise", 0, 100));
     s.focusDisc = j.value(QStringLiteral("focusDisc")).toBool();
     s.wiener = j.value(QStringLiteral("wiener")).toBool();
@@ -969,6 +972,32 @@ QImage apply(const QImage &in, const Settings &s, const std::function<bool(int p
         return stopped;
     };
 
+    if (s.fisheye > 0) {
+        // Each point of the result from where the bent picture has it (the inverse of unbend,
+        // found by a few steps of a fixed-point solve), smoothly between pixels.
+        const QSize size(w, h);
+        const QPointF centre(w / 2.0, h / 2.0);
+        const double half = std::hypot(w, h) / 2, k = -std::clamp(s.fisheye, 0, 100) / 100.0 * 0.45;
+        std::array<Plane, 3> bent = c;
+        rows(h, [&](int y0, int y1) {
+            for (int y = y0; y < y1; ++y)
+                for (int x = 0; x < w; ++x) {
+                    // Undistorted u = d / (1 + k |d|^2); solve for d given u.
+                    const QPointF u = (QPointF(x + 0.5, y + 0.5) - centre) / half;
+                    QPointF d = u;
+                    for (int it = 0; it < 8; ++it)
+                        d = u * (1 + k * (d.x() * d.x() + d.y() * d.y()));
+                    const QPointF from = centre + d * half - QPointF(0.5, 0.5);
+                    const int ix = int(std::floor(from.x())), iy = int(std::floor(from.y()));
+                    const float tx = float(from.x() - ix), ty = float(from.y() - iy);
+                    for (int ch = 0; ch < 3; ++ch) {
+                        const Plane &p = bent[size_t(ch)];
+                        c[size_t(ch)](x, y) = (p.at(ix, iy) * (1 - tx) + p.at(ix + 1, iy) * tx) * (1 - ty) + (p.at(ix, iy + 1) * (1 - tx) + p.at(ix + 1, iy + 1) * tx) * ty;
+                    }
+                }
+        });
+        Q_UNUSED(size)
+    }
     if (s.fullRange) {
         // 16 is black and 235 white in a video's limited range: stretched to the full range.
         for (Plane &p : c)
@@ -1296,13 +1325,19 @@ QImage resize(const QImage &in, QSize to)
 
 QImage straighten(const QImage &in, const QPolygonF &corners)
 {
-    if (in.isNull() || corners.size() != 4)
+    if (corners.size() != 4)
         return {};
     // As wide as its longer top or bottom, as tall as its longer side.
     const auto length = [](QPointF a, QPointF b) { return std::hypot(a.x() - b.x(), a.y() - b.y()); };
     const int W = int(std::lround(std::max(length(corners[0], corners[1]), length(corners[3], corners[2]))));
     const int H = int(std::lround(std::max(length(corners[0], corners[3]), length(corners[1], corners[2]))));
-    if (W < 2 || H < 2 || qint64(W) * H > 100000000LL)
+    return straighten(in, corners, QSize(W, H));
+}
+
+QImage straighten(const QImage &in, const QPolygonF &corners, QSize size)
+{
+    const int W = size.width(), H = size.height();
+    if (in.isNull() || corners.size() != 4 || W < 2 || H < 2 || qint64(W) * H > 100000000LL)
         return {};
     QTransform back;
     const QPolygonF square{QPointF(0, 0), QPointF(W, 0), QPointF(W, H), QPointF(0, H)};
@@ -1493,6 +1528,142 @@ QImage stack(const QVector<QImage> &frames, int reference, int scale, Combine ho
         }
     });
     return stopped ? QImage() : out;
+}
+
+double sharpness(const QImage &image)
+{
+    const QImage grey = image.convertToFormat(QImage::Format_Grayscale8);
+    double sum = 0, sq = 0;
+    long n = 0;
+    for (int y = 1; y + 1 < grey.height(); ++y) {
+        const uchar *above = grey.constScanLine(y - 1), *line = grey.constScanLine(y), *below = grey.constScanLine(y + 1);
+        for (int x = 1; x + 1 < grey.width(); ++x, ++n) {
+            const double l = above[x] + below[x] + line[x - 1] + line[x + 1] - 4.0 * line[x];
+            sum += l;
+            sq += l * l;
+        }
+    }
+    return n ? sq / double(n) - (sum / double(n)) * (sum / double(n)) : 0;
+}
+
+QVector<QPolygonF> followCorners(const QVector<QImage> &frames, int reference, const QPolygonF &corners)
+{
+    QVector<QPolygonF> out(frames.size());
+    if (frames.isEmpty() || reference < 0 || reference >= frames.size() || corners.size() != 4)
+        return out;
+    QVector<QImage> grey;
+    for (const QImage &f : frames)
+        grey << f.convertToFormat(QImage::Format_Grayscale8);
+    constexpr int patch = 12, reach = 14;
+    const auto value = [](const QImage &g, double x, double y) {
+        const int ix = int(std::floor(x)), iy = int(std::floor(y));
+        const double tx = x - ix, ty = y - iy;
+        const auto at = [&g](int px, int py) { return double(g.constScanLine(std::clamp(py, 0, g.height() - 1))[std::clamp(px, 0, g.width() - 1)]); };
+        return (at(ix, iy) * (1 - tx) + at(ix + 1, iy) * tx) * (1 - ty) + (at(ix, iy + 1) * (1 - tx) + at(ix + 1, iy + 1) * tx) * ty;
+    };
+    // One corner from one frame to the next: the shift whose patch matches best (mean taken off
+    // each, so a change of light doesn't matter), then a fraction of a pixel either way.
+    const auto track = [&](const QImage &from, QPointF at, const QImage &to, QPointF guess) {
+        std::vector<double> ref;
+        double refMean = 0;
+        for (int j = -patch; j <= patch; ++j)
+            for (int i = -patch; i <= patch; ++i) {
+                ref.push_back(value(from, at.x() + i, at.y() + j));
+                refMean += ref.back();
+            }
+        refMean /= double(ref.size());
+        const auto cost = [&](double dx, double dy) {
+            double s = 0, mean = 0;
+            std::vector<double> here;
+            here.reserve(ref.size());
+            for (int j = -patch; j <= patch; ++j)
+                for (int i = -patch; i <= patch; ++i) {
+                    here.push_back(value(to, guess.x() + dx + i, guess.y() + dy + j));
+                    mean += here.back();
+                }
+            mean /= double(here.size());
+            for (size_t k = 0; k < here.size(); ++k) {
+                const double d = (here[k] - mean) - (ref[k] - refMean);
+                s += d * d;
+            }
+            return s;
+        };
+        double best = 1e300, bx = 0, by = 0;
+        for (int dy = -reach; dy <= reach; ++dy)
+            for (int dx = -reach; dx <= reach; ++dx) {
+                const double c = cost(dx, dy);
+                if (c < best) {
+                    best = c;
+                    bx = dx;
+                    by = dy;
+                }
+            }
+        for (const double stride : {0.25, 0.05}) {
+            double nx = bx, ny = by;
+            for (int j = -2; j <= 2; ++j)
+                for (int i = -2; i <= 2; ++i) {
+                    const double c = cost(bx + i * stride, by + j * stride);
+                    if (c < best) {
+                        best = c;
+                        nx = bx + i * stride;
+                        ny = by + j * stride;
+                    }
+                }
+            bx = nx;
+            by = ny;
+        }
+        return guess + QPointF(bx, by);
+    };
+    out[reference] = corners;
+    // Outwards from the reference, each frame matched against the reference itself (so small
+    // errors don't add up frame by frame), starting from where the frame next to it had them.
+    for (const int dir : {1, -1}) {
+        for (int i = reference + dir; i >= 0 && i < frames.size(); i += dir) {
+            QPolygonF here;
+            for (int k = 0; k < 4; ++k)
+                here << track(grey[reference], corners[k], grey[i], out[i - dir][k]);
+            out[i] = here;
+        }
+    }
+    return out;
+}
+
+QPointF unbend(QPointF point, QSize picture, int fisheye)
+{
+    // Division model: undistorted = centre + (p - centre) / (1 + k r^2), r measured against half
+    // the picture's diagonal so the strength means the same at any size.
+    const QPointF centre(picture.width() / 2.0, picture.height() / 2.0);
+    const double half = std::hypot(picture.width(), picture.height()) / 2;
+    const double k = -std::clamp(fisheye, 0, 100) / 100.0 * 0.45;
+    const QPointF d = (point - centre) / half;
+    const double r2 = d.x() * d.x() + d.y() * d.y();
+    return centre + d * half / (1 + k * r2);
+}
+
+int fisheyeFromLine(const QVector<QPointF> &points, QSize picture)
+{
+    if (points.size() < 3)
+        return -1;
+    // The strength that leaves the points nearest a straight line (the line through the first and last).
+    int best = 0;
+    double bestOff = 1e300;
+    for (int f = 0; f <= 100; ++f) {
+        QVector<QPointF> p;
+        for (const QPointF &q : points)
+            p << unbend(q, picture, f);
+        const QPointF a = p.first(), b = p.last();
+        const double len = std::hypot(b.x() - a.x(), b.y() - a.y());
+        if (len < 1)
+            return -1;
+        double off = 0;
+        for (const QPointF &q : p)
+            off += std::abs((b.x() - a.x()) * (a.y() - q.y()) - (a.x() - q.x()) * (b.y() - a.y())) / len;
+        if (off < bestOff) {
+            bestOff = off;
+            best = f;
+        }
+    }
+    return best;
 }
 
 QImage clippedOverlay(const QImage &picture)

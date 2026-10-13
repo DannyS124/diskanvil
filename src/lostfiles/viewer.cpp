@@ -381,9 +381,10 @@ public:
     }
     std::function<void(const QRect &spot)> picked;
     // Straightening: four corners clicked on the picture, clockwise from the top left.
-    void setCornering(bool on)
+    void setCornering(bool on, int wanted = 4)
     {
         m_cornering = on;
+        m_cornersWanted = wanted;
         m_corners.clear();
         viewport()->setCursor(on ? Qt::CrossCursor : Qt::OpenHandCursor);
         viewport()->update();
@@ -523,7 +524,7 @@ protected:
             const QPointF in = (event->position() - target().topLeft()) / m_zoom;
             m_corners << QPointF(std::clamp(in.x(), 0.0, double(m_image.width())), std::clamp(in.y(), 0.0, double(m_image.height())));
             viewport()->update();
-            if (m_corners.size() == 4) {
+            if (m_corners.size() == m_cornersWanted) {
                 const QPolygonF corners = m_corners;
                 setCornering(false);
                 if (cornered)
@@ -664,6 +665,7 @@ private:
     QImage m_smooth;          // the picture made bigger for the screen, at the size shown
     qint64 m_smoothFor = 0;   // and which picture it was made from
     bool m_cornering = false;
+    int m_cornersWanted = 4;
     QPolygonF m_corners;
     bool m_spot = false;
     QPointF m_boxFrom;
@@ -756,6 +758,9 @@ public:
         m_focus->setToolTip(viewer::tr("How blurred it is, in pixels: the blur is taken back out (slow on a big picture)"));
         m_motion->setToolTip(viewer::tr("How far it moved while it was taken, in pixels (or draw along a streak)"));
         m_angle->setToolTip(viewer::tr("Which way it moved: 0 across, 90 up and down"));
+        m_fisheye = slider(viewer::tr("Wide lens bend"), 0, 100, QStringLiteral("fisheye"));
+        m_fisheye->setToolTip(viewer::tr("A doorbell's or a wide camera's bend taken out, so straight things are straight again "
+                                         "(or use Fit to a Straight Line)"));
         m_noise = slider(viewer::tr("Grain allowance"), 1, 100, QStringLiteral("noise"));
         m_noise->setToolTip(viewer::tr("For Wiener: how much grain to allow for. Low is sharpest but grainy; raise it if the picture fills with speckle or rings"));
         m_noise->setValue(30);
@@ -837,6 +842,20 @@ public:
         m_straighten->setToolTip(viewer::tr("Click the four corners of something seen at an angle (a number plate, a sign, a page), clockwise from "
                                             "its top left: it's made square-on"));
         layout->addWidget(m_straighten);
+        auto *geometryRow = new QHBoxLayout;
+        m_fitLine = new QPushButton(viewer::tr("Fit to a Straight Line"));
+        m_fitLine->setObjectName(QStringLiteral("fitLine"));
+        m_fitLine->setCheckable(true);
+        m_fitLine->setToolTip(viewer::tr("Click three points along something that should be straight (a door frame, a kerb): the lens's "
+                                         "bend is worked out from how far they're off a line"));
+        m_shape = new QComboBox;
+        m_shape->setObjectName(QStringLiteral("shape"));
+        m_shape->addItems({viewer::tr("Shape as it's stored"), viewer::tr("Made 4:3"), viewer::tr("Made 16:9"), viewer::tr("Twice as tall"), viewer::tr("Twice as wide")});
+        m_shape->setToolTip(viewer::tr("A camera that stores its picture squashed (people too thin or too wide, half-height fields): "
+                                       "its proper shape"));
+        geometryRow->addWidget(m_fitLine);
+        geometryRow->addWidget(m_shape, 1);
+        layout->addLayout(geometryRow);
         // Stacking: the frames around a paused one, lined up on the spot and put together.
         m_stackBox = new QWidget;
         auto *stackRow = new QHBoxLayout(m_stackBox);
@@ -860,6 +879,10 @@ public:
                                           "in only a few of the frames (a passer-by, a car) is left out instead of smeared in"));
         stackRow->addWidget(m_stackCount);
         stackRow->addWidget(m_stackHow);
+        m_sharpest = new QCheckBox(viewer::tr("Sharpest"));
+        m_sharpest->setObjectName(QStringLiteral("sharpest"));
+        m_sharpest->setToolTip(viewer::tr("Only the sharpest frames of those collected (blurred or badly squeezed ones left out)"));
+        stackRow->addWidget(m_sharpest);
         stackRow->addWidget(m_stackDouble);
         stackRow->addWidget(m_stack, 1);
         layout->addWidget(m_stackBox);
@@ -867,7 +890,9 @@ public:
         QObject::connect(m_pick, &QPushButton::toggled, this, [this](bool on) { if (pick) pick(on); });
         QObject::connect(m_whole, &QPushButton::clicked, this, [this] { if (whole) whole(); });
         QObject::connect(m_straighten, &QPushButton::toggled, this, [this](bool on) { if (straightenAsked) straightenAsked(on); });
-        QObject::connect(m_stack, &QPushButton::clicked, this, [this] { if (stackAsked) stackAsked(m_stackCount->value(), m_stackDouble->isChecked() ? 2 : 1, m_stackHow->currentIndex()); });
+        QObject::connect(m_stack, &QPushButton::clicked, this, [this] { if (stackAsked) stackAsked(m_stackCount->value(), m_stackDouble->isChecked() ? 2 : 1, m_stackHow->currentIndex() + (m_sharpest->isChecked() ? 10 : 0)); });
+        QObject::connect(m_fitLine, &QPushButton::toggled, this, [this](bool on) { if (fitLine) fitLine(on); });
+        QObject::connect(m_shape, &QComboBox::activated, this, [this](int index) { if (shape) shape(index); });
         auto *buttons = new QHBoxLayout;
         m_compare = new QPushButton(viewer::tr("Hold to Compare"));
         m_compare->setToolTip(viewer::tr("Shows the picture as it was found while it's held down"));
@@ -915,6 +940,7 @@ public:
         s.denoise = m_grain->isEnabled() ? m_grain->currentIndex() : 0;
         s.smooth = m_smooth->isEnabled() ? m_smooth->value() : 0;
         s.deblock = m_deblock->value();
+        s.fisheye = m_fisheye->value();
         s.nlm = m_nlm->isEnabled() ? m_nlm->value() : 0;
         s.noise = m_noise->value();
         s.focusDisc = m_blurShape->currentIndex() == 1;
@@ -949,6 +975,7 @@ public:
         m_invert->setChecked(s.invert);
         m_smooth->setValue(s.smooth);
         m_deblock->setValue(s.deblock);
+        m_fisheye->setValue(s.fisheye);
         m_nlm->setValue(s.nlm);
         m_noise->setValue(std::clamp(s.noise, 1, 100));
         m_blurShape->setCurrentIndex(s.focusDisc ? 1 : 0);
@@ -1080,6 +1107,16 @@ public:
     std::function<void(int frames, int scale, int how)> stackAsked;
     std::function<void(bool on)> showClipped;
     std::function<void(bool on)> redecode;
+    std::function<void(bool on)> fitLine;
+    std::function<void(int index)> shape;
+    void setFisheye(int value)
+    {
+        const QSignalBlocker quiet(m_fitLine);
+        m_fitLine->setChecked(false);
+        m_fisheye->setValue(value);
+    }
+    void setStackLabel(const QString &text) { m_stack->setText(text); }
+    void resetShape() { m_shape->setCurrentIndex(0); }
     // Offered for a JPEG (a picture as found, not a film's frame); unticked when another is shown.
     void setRedecodable(bool can)
     {
@@ -1210,7 +1247,10 @@ private:
     QVector<enhance::Profile> m_builtIn, m_saved;
     QPushButton *m_pick, *m_whole, *m_straighten, *m_stack;
     QSlider *m_local, *m_smooth, *m_deblock, *m_homomorphic, *m_retinex, *m_nlm, *m_noise;
-    QComboBox *m_blurShape, *m_deblurWay;
+    QComboBox *m_blurShape, *m_deblurWay, *m_shape;
+    QSlider *m_fisheye;
+    QPushButton *m_fitLine;
+    QCheckBox *m_sharpest;
     QCheckBox *m_fullRange, *m_clipped, *m_redecode;
     QComboBox *m_field, *m_channel, *m_stackHow;
     QCheckBox *m_deinterlace, *m_steady, *m_stackDouble;
@@ -2181,10 +2221,26 @@ Window::Window(QWidget *parent)
             return;
         straightenSpot(on);
     };
-    m_picture->cornered = [this](const QPolygonF &corners) { straightened(corners); };
+    m_picture->cornered = [this](const QPolygonF &corners) {
+        if (m_fitting) {
+            m_fitting = false;
+            const int found = enhance::fisheyeFromLine(QVector<QPointF>(corners.begin(), corners.end()), m_picture->original().size());
+            m_enhance->setFisheye(std::max(0, found));
+            m_enhance->setStatus(found > 0 ? tr("The lens's bend from that line: %1.").arg(found) : tr("That line is straight already: no bend to take out."));
+            return;
+        }
+        straightened(corners);
+    };
     m_enhance->stackAsked = [this](int frames, int scale, int how) { stackFrames(frames, scale, how); };
     m_enhance->showClipped = [this](bool on) { m_picture->setShowClipped(on); };
     m_enhance->redecode = [this](bool on) { redecodeJpeg(on); };
+    m_enhance->fitLine = [this](bool on) {
+        m_fitting = on;
+        m_picture->setPicking(false);
+        m_picture->setCornering(on, 3);
+        m_enhance->setStatus(on ? tr("Click three points along something that should be straight: one end, the middle, the other end.") : QString());
+    };
+    m_enhance->shape = [this](int index) { reshape(index); };
     setAcceptDrops(true);
 }
 
@@ -2316,8 +2372,18 @@ void Window::straightened(const QPolygonF &corners)
         m_enhance->setStatus(tr("Those corners don't make a shape that can be straightened: click them again, going round it."));
         return;
     }
+    // In a film's frame, the corners in the frame's own pixels: Stack Frames can follow them.
+    m_frameCorners.clear();
+    if (m_spotFromFilm && !m_reshaped) {
+        const QPointF offset = m_spot.isNull() ? QPointF() : QPointF(m_spot.topLeft());
+        for (const QPointF &p : corners)
+            m_frameCorners << p + offset;
+        m_straightSize = flat.size();
+    }
     m_reshaped = true;
-    m_enhance->setStackable(false);
+    m_enhance->setStackable(!m_frameCorners.isEmpty());
+    if (!m_frameCorners.isEmpty())
+        m_enhance->setStackLabel(tr("Stack Frames (Following It)"));
     m_steps << tr("straightened (four corners made square-on)");
     m_picture->showSpot(flat, flat.rect());
     m_enhance->setStatus(tr("Straightened: %1 × %2 pixels, square-on.").arg(flat.width()).arg(flat.height()));
@@ -2326,13 +2392,19 @@ void Window::straightened(const QPolygonF &corners)
 
 void Window::stackFrames(int count, int scale, int how)
 {
-    if (!m_spotFromFilm || m_reshaped || m_media->collecting())
+    // A stack of the spot; or, once it's straightened, of the flat thing followed frame to frame.
+    const bool follow = !m_frameCorners.isEmpty();
+    if (!m_spotFromFilm || (m_reshaped && !follow) || m_media->collecting())
         return;
+    const bool sharpestOnly = how >= 10;
+    how %= 10;
     const QRect region = m_spot.isNull() ? m_whole.rect() : m_spot;
+    const QPolygonF corners = m_frameCorners;
+    const QSize flatSize = m_straightSize;
     m_enhance->setStacking(true);
     m_enhance->setStatus(tr("Collecting %n frame(s) around this one…", nullptr, count));
     QPointer<Window> self(this);
-    m_media->collectFrames(m_spotAt, count, [self, region, scale, count, how](const QVector<QImage> &frames, int nearest) {
+    m_media->collectFrames(m_spotAt, count, [self, region, scale, count, how, follow, corners, flatSize, sharpestOnly](const QVector<QImage> &frames, int nearest) {
         if (!self)
             return;
         if (frames.size() < 2 || nearest < 0) {
@@ -2341,16 +2413,41 @@ void Window::stackFrames(int count, int scale, int how)
             return;
         }
         QVector<QImage> spots;
-        for (const QImage &f : frames)
-            spots << f.copy(region);
+        if (follow) {
+            const QVector<QPolygonF> followed = enhance::followCorners(frames, nearest, corners);
+            for (int i = 0; i < frames.size(); ++i)
+                spots << enhance::straighten(frames[i], followed[i], flatSize);
+        } else {
+            for (const QImage &f : frames)
+                spots << f.copy(region);
+        }
+        int dropped = 0;
+        if (sharpestOnly && spots.size() > 3) {
+            // The sharpest 60% (at least three), the one paused on always among them.
+            QVector<QPair<double, int>> scores;
+            for (int i = 0; i < spots.size(); ++i)
+                scores << qMakePair(i == nearest ? 1e300 : enhance::sharpness(spots[i]), i);
+            std::sort(scores.begin(), scores.end(), [](const auto &a, const auto &b) { return a.first > b.first; });
+            const int keep = std::max(3, int(spots.size() * 6 / 10));
+            QVector<int> kept;
+            for (int i = 0; i < keep; ++i)
+                kept << scores[i].second;
+            std::sort(kept.begin(), kept.end());
+            QVector<QImage> best;
+            for (int i : kept)
+                best << spots[i];
+            nearest = int(kept.indexOf(nearest));
+            dropped = int(spots.size() - best.size());
+            spots = best;
+        }
         self->m_enhance->setStatus(Window::tr("Lining up %n frame(s) and putting them together…", nullptr, int(spots.size())));
         const std::shared_ptr<std::atomic<int>> current = self->m_enhanceRound;
         const int round = current->load();
-        QThreadPool::globalInstance()->start([self, spots, nearest, scale, current, round, count, how] {
+        QThreadPool::globalInstance()->start([self, spots, nearest, scale, current, round, count, how, follow, dropped] {
             QVector<QPointF> moved;
             const QImage stacked = enhance::stack(spots, nearest, scale, enhance::Combine(std::clamp(how, 0, 2)), &moved,
                                                   [current, round](int) { return current->load() == round; });
-            QMetaObject::invokeMethod(qApp, [self, stacked, used = int(spots.size()), scale, count, how] {
+            QMetaObject::invokeMethod(qApp, [self, stacked, used = int(spots.size()), scale, count, how, follow, dropped] {
                 if (!self)
                     return;
                 self->m_enhance->setStacking(false);
@@ -2361,8 +2458,14 @@ void Window::stackFrames(int count, int scale, int how)
                 self->m_reshaped = true;
                 self->m_enhance->setStackable(false);
                 const QString combined = how == 1 ? Window::tr("each point's middle value") : how == 2 ? Window::tr("averaged without outliers") : Window::tr("averaged");
-                self->m_steps << (scale > 1 ? Window::tr("%1 frames around it lined up and put together (%2), twice the size (shift and add)").arg(used).arg(combined)
-                                            : Window::tr("%1 frames around it lined up and %2").arg(used).arg(combined));
+                QString how2 = scale > 1 ? Window::tr("%1 frames around it lined up and put together (%2), twice the size (shift and add)").arg(used).arg(combined)
+                                         : Window::tr("%1 frames around it lined up and %2").arg(used).arg(combined);
+                if (follow)
+                    how2 += Window::tr(", its four corners followed and each frame straightened");
+                if (dropped > 0)
+                    how2 += Window::tr(", the %n least sharp left out", nullptr, dropped);
+                self->m_steps << how2;
+                self->m_frameCorners.clear();
                 self->m_picture->showSpot(stacked, stacked.rect());
                 self->m_enhance->setBigger(scale > 1 ? 2 : 4);
                 self->m_enhance->setStatus(used < count ? Window::tr("Stacked %1 frames (the film had no more there).").arg(used)
@@ -2371,6 +2474,35 @@ void Window::stackFrames(int count, int scale, int how)
             }, Qt::QueuedConnection);
         });
     });
+}
+
+void Window::reshape(int index)
+{
+    // Its proper shape: the picture as it is now, made that shape (smoothly), as a step.
+    const QImage now = m_picture->original();
+    if (now.isNull() || index <= 0)
+        return;
+    QSize to = now.size();
+    QString words;
+    switch (index) {
+    case 1: to.setWidth(now.height() * 4 / 3); words = tr("made 4:3"); break;
+    case 2: to.setWidth(now.height() * 16 / 9); words = tr("made 16:9"); break;
+    case 3: to.setHeight(now.height() * 2); words = tr("made twice as tall"); break;
+    case 4: to.setWidth(now.width() * 2); words = tr("made twice as wide"); break;
+    default: return;
+    }
+    const QImage shaped = enhance::resize(now, to);
+    if (shaped.isNull())
+        return;
+    if (m_whole.isNull())
+        m_whole = now;
+    m_reshaped = true;
+    m_enhance->setStackable(false);
+    m_steps << words;
+    m_picture->showSpot(shaped, shaped.rect());
+    m_enhance->setSpotShown(true);
+    m_enhance->setStatus(tr("Its shape: %1 × %2 pixels.").arg(shaped.width()).arg(shaped.height()));
+    enhanceSoon();
 }
 
 void Window::redecodeJpeg(bool on)
@@ -2422,7 +2554,10 @@ void Window::showWhole()
     m_picture->setCornering(false);
     m_reshaped = false;
     m_steps.clear();
+    m_frameCorners.clear();
     m_enhance->setStackable(false);
+    m_enhance->setStackLabel(tr("Stack Frames"));
+    m_enhance->resetShape();
     if (m_spotFromFilm) {
         // Back to the film where it was paused.
         m_spotFromFilm = false;
