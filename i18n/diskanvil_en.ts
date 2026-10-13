@@ -442,7 +442,7 @@
 <context>
     <name>MainWindow</name>
     <message numerus="yes">
-        <location filename="../src/app/mainwindow.cpp" line="1554"/>
+        <location filename="../src/app/mainwindow.cpp" line="1556"/>
         <source>%n more drive(s) need a look; their health is in the Status column.</source>
         <translation>
             <numerusform>%n more drive need a look; their health is in the Status column.</numerusform>
@@ -450,7 +450,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/app/mainwindow.cpp" line="2869"/>
+        <location filename="../src/app/mainwindow.cpp" line="2871"/>
         <source>%n add-on command(s) still running. Stop them and quit?</source>
         <translation>
             <numerusform>%n add-on command still running. Stop them and quit?</numerusform>
