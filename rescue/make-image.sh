@@ -77,7 +77,11 @@ cp "$chroot/boot/initrd.img-$kver" "$iso/live/initrd.img"
 chroot "$chroot" dpkg-query -W -f '${Package} ${Version}\n' > "$iso/live/packages.txt"
 
 echo "--> Packing the system (this takes a few minutes)"
-mksquashfs "$chroot" "$iso/live/filesystem.squashfs" -noappend -no-progress -quiet \
+# Kept to the memory that's free: one packer per free GB, and a cache of at most a quarter of it.
+free_mb=$(awk '/MemAvailable/ {print int($2 / 1024)}' /proc/meminfo)
+packers=$(( free_mb / 1024 )); [ "$packers" -ge 1 ] || packers=1; [ "$packers" -le "$(nproc)" ] || packers=$(nproc)
+cache=$(( free_mb / 4 )); [ "$cache" -ge 128 ] || cache=128; [ "$cache" -le 2048 ] || cache=2048
+mksquashfs "$chroot" "$iso/live/filesystem.squashfs" -noappend -no-progress -quiet -processors "$packers" -mem "${cache}M" \
     -comp zstd -Xcompression-level 19 -b 1M -xattrs-exclude '^system\.posix_acl' \
     -wildcards -e 'boot/vmlinuz-*' 'boot/initrd.img-*' 'boot/System.map-*' 'boot/config-*' \
     'proc/*' 'sys/*' 'dev/*' 'run/*' 'tmp/*'
