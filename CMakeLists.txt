@@ -308,9 +308,9 @@ if(DISKANVIL_SHELL)
             qt_policy(SET QTP0004 NEW)
         endif()
         qt_add_executable(diskanvil-shell src/shell/main.cpp src/shell/shell.cpp src/shell/shell.h src/shell/selftest.cpp src/shell/selftest.h
-                          src/shell/network.cpp src/shell/network.h src/shell/notifications.cpp src/shell/notifications.h)
+                          src/shell/network.cpp src/shell/network.h)
         # The QML at the module's top (qrc:/qt/qml/DiskAnvilShell/Main.qml), the same with every Qt 6 from 6.8.
-        set(shell_qml Main ShellWindow TopBar Dock AppGrid PowerMenu Toasts)
+        set(shell_qml Main ShellWindow TopBar Dock AppGrid PowerMenu)
         set(shell_qml_files)
         foreach(name ${shell_qml})
             set_source_files_properties(src/shell/qml/${name}.qml PROPERTIES QT_RESOURCE_ALIAS ${name}.qml)

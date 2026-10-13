@@ -118,7 +118,6 @@ WaylandCompositor {
             Dock { id: dock; comp: comp; z: 100000 }
             AppGrid { id: grid; comp: comp; z: 100001 }
             PowerMenu { id: powerMenu; comp: comp; z: 100001 }
-            Toasts { comp: comp; z: 100002 }
 
             Shortcut { sequences: ["Alt+Tab"]; context: Qt.ApplicationShortcut; onActivated: comp.cycle() }
 

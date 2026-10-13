@@ -170,21 +170,6 @@ int runSelfTest(QQmlApplicationEngine &engine)
     QTest::keyClick(screen, Qt::Key_Escape);
     report(gridShown && !grid->isVisible(), "the first dock button shows everything, and Esc closes it");
 
-    // A program's notification shows in the corner, and a click puts it away.
-    QObject *notes = qvariant_cast<QObject *>(engine.rootContext()->contextProperty(QStringLiteral("notifications")));
-    if (notes && notes->property("registered").toBool()) {
-        QDBusInterface bus(QStringLiteral("org.freedesktop.Notifications"), QStringLiteral("/org/freedesktop/Notifications"),
-                           QStringLiteral("org.freedesktop.Notifications"));
-        const QDBusReply<uint> id = bus.call(QStringLiteral("Notify"), QStringLiteral("Firefox"), 0u, QString(), QStringLiteral("Download finished"),
-                                             QStringLiteral("drivers.zip"), QStringList(), QVariantMap(), 5000);
-        QTest::qWait(300);
-        report(id.isValid() && notes->property("shown").toList().size() == 1, "a program's notification shows", id.error().message());
-        QMetaObject::invokeMethod(notes, "dismiss", Q_ARG(uint, id.value()));
-        report(notes->property("shown").toList().isEmpty(), "and goes away");
-    } else {
-        out << "SKIP  notifications: another notification service has the name (run it in its own session bus)" << Qt::endl;
-    }
-
     // Whatever's still open closes with the test.
     for (QQuickItem *w : windows())
         QMetaObject::invokeMethod(w, "close");
