@@ -95,7 +95,7 @@ while true; do
     banner
     if [ "$(nmcli radio wifi)" != enabled ]; then
         echo "  Wi-Fi is off.  ${bold}o${off} turn it on   ${bold}q${off} close"
-        read -r -p "  ${neon}>${off} " choice
+        read -r -p "  ${neon}>${off} " choice || exit 0
         case $choice in o|O) nmcli radio wifi on; sleep 2; continue ;; *) exit 0 ;; esac
     fi
     dev=$(wifi_device)
@@ -115,7 +115,7 @@ while true; do
     done
     echo
     echo "  ${bold}number${off} join   ${bold}h${off} a hidden network   ${bold}d${off} disconnect   ${bold}r${off} look again   ${bold}q${off} close"
-    read -r -p "  ${neon}>${off} " choice
+    read -r -p "  ${neon}>${off} " choice || exit 0
     case $choice in
     q|Q) exit 0 ;;
     r|R|'') continue ;;
@@ -123,7 +123,7 @@ while true; do
         spin "Leaving…" nmcli device disconnect "$dev"
         continue ;;
     h|H)
-        read -r -p "  Its name: " ssid
+        read -r -p "  Its name: " ssid || exit 0
         [ -z "$ssid" ] && continue
         read -r -s -p "  Its password (empty if none): " password; echo
         if [ -n "$password" ]; then
@@ -139,7 +139,7 @@ while true; do
         rest=${row#*:}; rest=${rest#*:}; security=${rest%%:*}; ssid=${rest#*:}; ssid=${ssid//\\:/:}
         if [[ $security == *802.1X* ]]; then
             echo "  $ssid needs a user name as well: nmtui (type it here) can join it."
-            read -r -p "  Press Enter. " _
+            read -r -p "  Press Enter. " _ || exit 0
             continue
         fi
         if [ -n "$security" ] && [ "$security" != -- ]; then
@@ -156,7 +156,7 @@ while true; do
         echo "  ${red}✗ $ssid wasn't joined.${off} $(grep -m1 -o 'Error:.*' /tmp/diskanvil-wifi.$$ | sed 's/^Error: //')"
         grep -qi 'secrets\|password\|802-11-wireless-security' /tmp/diskanvil-wifi.$$ && echo "  ${dim}Is the password right?${off}"
         nmcli -t -f NAME connection show | grep -qxF "$ssid" && nmcli connection delete "$ssid" >/dev/null 2>&1
-        read -r -p "  Press Enter. " _
+        read -r -p "  Press Enter. " _ || exit 0
     fi
     rm -f /tmp/diskanvil-wifi.$$
 done
