@@ -78,6 +78,7 @@ add_library(diskanvil-core STATIC
     src/drives/writeblock.cpp src/drives/writeblock.h
     src/drives/writeprotect.cpp src/drives/writeprotect.h
     src/drives/holders.cpp src/drives/holders.h
+    src/drives/opal.cpp src/drives/opal.h
     src/lostfiles/mediainfo.cpp src/lostfiles/mediainfo.h
     src/lostfiles/exif.cpp src/lostfiles/exif.h
     src/lostfiles/lookcopies.cpp src/lostfiles/lookcopies.h
@@ -194,6 +195,7 @@ add_library(diskanvil-ui STATIC
     src/tools/fingerprintsdialog.cpp src/tools/fingerprintsdialog.h
     src/health/burnindialog.cpp src/health/burnindialog.h
     src/health/writecliffdialog.cpp src/health/writecliffdialog.h
+    src/drives/opaldialog.cpp src/drives/opaldialog.h
     src/lostfiles/timelinedialog.cpp src/lostfiles/timelinedialog.h
     src/lostfiles/placesmap.cpp src/lostfiles/placesmap.h
     src/lostfiles/enhance.cpp src/lostfiles/enhance.h

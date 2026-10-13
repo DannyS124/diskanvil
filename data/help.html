@@ -335,6 +335,15 @@ be compressed, and draws the speed as it goes. At the end it says how much went 
 and after, and when the speed after is very low for an SSD, that it's a cheap or fake one. It writes into a test file
 in the drive's free space, deleted at the end (nothing on the drive is touched), or over a whole empty drive (after its
 name is typed). Write more than the cache to see the drop: some hold 50 GB or more.</p>
+<p><b>Self-Encrypting Drive</b> (Action menu, and a tile in DiskAnvil Live): many SSDs and some hard drives encrypt
+everything inside the drive itself (TCG Opal and its cousins) and can be locked with a password. Ask the Drive gets its
+own answer, read-only: what kind it is, whether it encrypts, whether its locking was switched on and whether it's locked
+right now, and whether it shows a small stand-in "shadow" disk until it's unlocked. A second-hand drive still locked
+with a password nobody has (it shows up empty or tiny, or can't be partitioned) can be reset with the 32-character
+PSID printed on its label: it goes back to how it left the factory, and everything on it is erased for good (its key
+is replaced). Type the PSID and the drive's name to confirm. It needs administrator rights (DiskAnvil Live's own, or
+the admin password on a PC), the PSID is passed on privately, and the drive the system runs from is never reset. Some
+USB adapters don't pass the drive's answer on: plug the drive in directly. Enterprise drives use their maker's tool.</p>
 <p><b>What This PC Did</b> (Tools menu): what system is on a drive and what it was used for, read from its own records
 without starting it. On Windows: the version, the PC's name and owner, when it was installed and last shut down, the USB
 drives plugged in (with their serial numbers and when), programs run (how often and when last), files and folders

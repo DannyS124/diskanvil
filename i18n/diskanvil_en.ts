@@ -423,7 +423,7 @@
 <context>
     <name>MainWindow</name>
     <message numerus="yes">
-        <location filename="../src/app/mainwindow.cpp" line="1536"/>
+        <location filename="../src/app/mainwindow.cpp" line="1546"/>
         <source>%n more drive(s) need a look; their health is in the Status column.</source>
         <translation>
             <numerusform>%n more drive need a look; their health is in the Status column.</numerusform>
@@ -431,7 +431,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/app/mainwindow.cpp" line="2849"/>
+        <location filename="../src/app/mainwindow.cpp" line="2860"/>
         <source>%n add-on command(s) still running. Stop them and quit?</source>
         <translation>
             <numerusform>%n add-on command still running. Stop them and quit?</numerusform>
@@ -1075,6 +1075,17 @@
         <translation>
             <numerusform>%n partition ID</numerusform>
             <numerusform>%n partition IDs</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
+    <name>opal</name>
+    <message numerus="yes">
+        <location filename="../src/drives/opal.cpp" line="399"/>
+        <source>A PSID has 32 letters and digits; that&apos;s %n.</source>
+        <translation>
+            <numerusform>A PSID has 32 letters and digits; that's %n.</numerusform>
+            <numerusform>A PSID has 32 letters and digits; that's %n.</numerusform>
         </translation>
     </message>
 </context>

@@ -11,6 +11,7 @@
 #include "udisks.h"
 #include "viewer.h"
 #include "holders.h"
+#include "opal.h"
 #include "writeprotect.h"
 
 #include <QApplication>
@@ -78,6 +79,10 @@ int main(int argc, char *argv[])
         std::printf("%d\n", writeprotect::askDevice(QString::fromLocal8Bit(argv[2])));
         return 0;
     }
+    // Self-Encrypting Drive asking a drive about its encryption, or resetting it with its PSID, as
+    // root (DiskAnvil Live's sudo, or pkexec).
+    if (argc == 4 && QByteArray(argv[1]) == opal::kOption)
+        return opal::runOption(QString::fromLocal8Bit(argv[2]), QString::fromLocal8Bit(argv[3]));
     // Find Lost Files' preview helper (preview.h): no window, no screen, just answers.
     if (argc == 2 && QByteArray(argv[1]) == "--preview-helper") {
         qputenv("QT_QPA_PLATFORM", "offscreen");
@@ -127,7 +132,7 @@ int main(int argc, char *argv[])
     const QCommandLineOption logOption(QStringLiteral("log"),
                                        QStringLiteral("Write what DiskAnvil does to <file>. DISKANVIL_LOG=<file> does the same."),
                                        QStringLiteral("file"));
-    const QString tools = QStringLiteral("what-happened, write-image, windows-usb, rescue-usb, live-on-pc, check-stick, write-protected, why-crash, windows-start, still-ok, burn-in, write-speed, lost-files, virus-scan, save-files, remote-help, net-boot, product-key, drivers, activity, look-closer, files, boot-menu, linux-boot, make-room, certificates or open-sets");
+    const QString tools = QStringLiteral("what-happened, write-image, windows-usb, rescue-usb, live-on-pc, check-stick, write-protected, why-crash, windows-start, still-ok, burn-in, write-speed, self-encrypting, lost-files, virus-scan, save-files, remote-help, net-boot, product-key, drivers, activity, look-closer, files, boot-menu, linux-boot, make-room, certificates or open-sets");
     const QCommandLineOption openOption(QStringLiteral("open"), QStringLiteral("Open just one tool: ") + tools + QLatin1Char('.'),
                                         QStringLiteral("tool"));
     const QCommandLineOption homeOption(QStringLiteral("home"), QStringLiteral("Be DiskAnvil Live's home screen (its desktop)."));

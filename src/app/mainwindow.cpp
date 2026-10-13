@@ -22,6 +22,7 @@
 #include "fingerprintsdialog.h"
 #include "burnindialog.h"
 #include "writecliffdialog.h"
+#include "opaldialog.h"
 #include "writeprotectdialog.h"
 #include "remotehelpdialog.h"
 #include "netbootdialog.h"
@@ -705,6 +706,15 @@ void MainWindow::createActions()
         dialog.exec();
     });
 
+    m_opal = new QAction(themeIcon("diskanvil-live-opal", "document-encrypt"), tr("Self-&Encrypting Drive…"), this);
+    m_opal->setObjectName(QStringLiteral("opal"));
+    m_opal->setToolTip(tr("Whether a drive encrypts in hardware and is locked; a second-hand one locked with a password nobody has, reset "
+                          "with the PSID on its label (it erases it)"));
+    connect(m_opal, &QAction::triggered, this, [this] {
+        const Disk *selected = selectedDisk();
+        OpalDialog(m_udisks, selected ? selected->blockPath : QString(), toolParent()).exec();
+    });
+
     m_benchmark = new QAction(themeIcon("speedometer", "chronometer"), tr("&Benchmark…"), this);
     connect(m_benchmark, &QAction::triggered, this, [this] {
         if (const Disk *d = selectedDisk())
@@ -1057,7 +1067,7 @@ void MainWindow::createActions()
     action->addSeparator();
     action->addActions({m_newTable, m_inspect, m_recover, m_findFiles, m_wipe, m_sdCard, m_secureErase, m_detachImage});
     action->addSeparator();
-    action->addActions({m_health, m_badSectors, m_checkStick, m_writeProtected, m_benchmark, m_raidCheck});
+    action->addActions({m_health, m_badSectors, m_checkStick, m_writeProtected, m_opal, m_benchmark, m_raidCheck});
     action->addSeparator();
     action->addActions({m_backup, m_restore, m_clonezilla, m_evidence, m_clone, m_newIds, m_rescue});
     action->addSeparator();
@@ -1969,6 +1979,7 @@ bool MainWindow::openTool(const QString &name)
                                              {QStringLiteral("still-ok"), m_stillOk},
                                              {QStringLiteral("burn-in"), m_burnIn},
                                              {QStringLiteral("write-speed"), m_writeSpeed},
+                                             {QStringLiteral("self-encrypting"), m_opal},
                                              {QStringLiteral("lost-files"), m_findFiles},
                                              {QStringLiteral("virus-scan"), m_virusScan},
                                              {QStringLiteral("save-files"), m_saveFiles},

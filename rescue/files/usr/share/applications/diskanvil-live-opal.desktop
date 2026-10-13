@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Self-Encrypting Drive
+Comment=Locked second-hand drive: reset with the PSID on its label
+Exec=diskanvil --open self-encrypting
+Icon=diskanvil-live-opal
+Categories=System;

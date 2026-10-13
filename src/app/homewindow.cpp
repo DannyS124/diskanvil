@@ -332,6 +332,9 @@ QVector<HomeWindow::Tile> HomeWindow::allTiles() const
     add(QStringLiteral("writespeed"), QStringLiteral("diskanvil-live-writespeed"), QStringLiteral("speedometer"), tr("Write Speed Over Time"),
         tr("An SSD's fast cache, and its real speed after it"))
         .tool = QStringLiteral("write-speed");
+    add(QStringLiteral("opal"), QStringLiteral("diskanvil-live-opal"), QStringLiteral("document-encrypt"), tr("Self-Encrypting Drive"),
+        tr("Locked second-hand drive: reset with the PSID on its label"))
+        .tool = QStringLiteral("self-encrypting");
     add(QStringLiteral("testdisk"), QStringLiteral("diskanvil-live-testdisk"), QStringLiteral("drive-harddisk"), tr("Find Lost Partitions"),
         tr("Partitions that disappeared, and boot sectors (TestDisk)"))
         .desktopId = QStringLiteral("diskanvil-live-testdisk");

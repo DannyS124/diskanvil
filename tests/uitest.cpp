@@ -23,6 +23,7 @@
 #include "../src/tools/fingerprintsdialog.h"
 #include "../src/health/burnindialog.h"
 #include "../src/health/writecliffdialog.h"
+#include "../src/drives/opaldialog.h"
 #include "../src/tools/holdersdialog.h"
 #include "../src/lostfiles/lostscan.h"
 #include "../src/lostfiles/viewerhost.h"
@@ -5489,6 +5490,86 @@ void writeSpeedWindow()
     cleanUpLoop(udisks, loopPath);
 }
 
+// Self-Encrypting Drive on a loop device, with the root helper's answers pretended: a locked Opal 2
+// drive described, the reset offered only once the PSID and the drive's name are typed, and the
+// PSID handed over on standard input, never on the command line.
+void opalWindow()
+{
+    QTemporaryDir dir;
+    const QString image = dir.filePath(QStringLiteral("sed.img"));
+    sh(QStringLiteral("truncate"), {QStringLiteral("-s"), QStringLiteral("16M"), image});
+    const QString loopPath = userLoop(image);
+    report(!loopPath.isEmpty(), QStringLiteral("self-encrypting: a loop device stands in for the drive"));
+    if (loopPath.isEmpty())
+        return;
+    UDisks udisks;
+    udisks.setInteractive(false);
+    const Disk *drive = nullptr;
+    waitUntil([&] {
+        udisks.refresh();
+        drive = udisks.diskByPath(loopPath);
+        return drive != nullptr;
+    }, 15000);
+    const QString device = drive ? drive->device : QString();
+    QList<QStringList> calls;
+    QByteArray given;
+    OpalDialog::allowLoopDevicesForTest = true;
+    OpalDialog::runForTest = [&](const QStringList &args, const QByteArray &input, bool *ok) {
+        calls << args;
+        if (args.value(2) == QLatin1String("revert"))
+            given = input;
+        *ok = true;
+        const QString locked = QStringLiteral("answered=1\nssc=Opal 2\ncomid=4100\nsupported=1\nenabled=1\nlocked=1\nencrypts=1\nmbr=0\nmbrdone=0\nblocksid=0\npsid=1\n");
+        return args.value(2) == QLatin1String("revert") ? locked + QStringLiteral("revert=0\n") : locked;
+    };
+    QStringList boxes;
+    Answerer answerer;
+    answerer.answer = [&](QWidget *modal) {
+        if (auto *box = qobject_cast<QMessageBox *>(modal)) {
+            boxes << box->text();
+            if (QAbstractButton *yes = box->button(QMessageBox::Yes))
+                yes->click();
+            else
+                box->accept();
+            return true;
+        }
+        return false;
+    };
+    {
+        OpalDialog dialog(&udisks, loopPath);
+        dialog.show();
+        auto *ask = dialog.findChild<QPushButton *>(QStringLiteral("ask"));
+        auto *state = dialog.findChild<QLabel *>(QStringLiteral("state"));
+        auto *psid = dialog.findChild<QLineEdit *>(QStringLiteral("psid"));
+        auto *confirm = dialog.findChild<QLineEdit *>(QStringLiteral("confirm"));
+        auto *reset = dialog.findChild<QPushButton *>(QStringLiteral("reset"));
+        if (ask)
+            ask->click();
+        report(state && state->text().contains(QLatin1String("Opal 2")) && state->text().contains(QLatin1String("locked right now")) && calls.size() == 1
+                   && calls[0] == QStringList{QStringLiteral("--drive-opal"), device, QStringLiteral("status")},
+               QStringLiteral("self-encrypting: the drive asked through the root helper, and described"), state ? state->text().left(100) : QString());
+        if (psid)
+            psid->setText(QStringLiteral("abcd-efgh-jklm-npqr-stuv-wxyz-2345-6789"));
+        report(reset && !reset->isEnabled(), QStringLiteral("self-encrypting: no reset before the drive's name is typed"));
+        if (confirm)
+            confirm->setText(shortDevice(device));
+        report(reset && reset->isEnabled(), QStringLiteral("self-encrypting: with the PSID and the name, the reset can start"));
+        if (qEnvironmentVariableIsSet("DISKANVIL_SHOTS"))
+            dialog.grab().save(qEnvironmentVariable("DISKANVIL_SHOTS") + QStringLiteral("/self-encrypting.png"));
+        if (reset)
+            reset->click();
+        bool psidOnLine = false;
+        for (const QStringList &c : calls)
+            psidOnLine |= c.join(QLatin1Char(' ')).contains(QLatin1String("ABCD"));
+        report(calls.size() >= 2 && calls[1].value(2) == QLatin1String("revert") && given == "ABCDEFGHJKLMNPQRSTUVWXYZ23456789\n" && !psidOnLine
+                   && boxes.size() == 2 && boxes[1].startsWith(QLatin1String("Done")),
+               QStringLiteral("self-encrypting: the reset runs with the PSID on standard input only, and says it's done"), boxes.join(QStringLiteral(" | ")).left(200));
+    }
+    OpalDialog::runForTest = nullptr;
+    OpalDialog::allowLoopDevicesForTest = false;
+    cleanUpLoop(udisks, loopPath);
+}
+
 void whyCrashWindow()
 {
     whycrash::Report r;
@@ -7415,7 +7496,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"lookcloser", lookCloserWindow}, {"files", filesWindow}, {"writeprotected", writeProtectedWindow}, {"hitfiles", hitFilesWindow}, {"whycrash", whyCrashWindow}, {"winstart", winStartWindow}, {"stillok", stillOkWindow}, {"burnin", burnInWindow}, {"writespeed", writeSpeedWindow}, {"holders", holdersWindow}, {"enhance", enhanceWindow}, {"film", filmTools}, {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"lookcloser", lookCloserWindow}, {"files", filesWindow}, {"writeprotected", writeProtectedWindow}, {"hitfiles", hitFilesWindow}, {"whycrash", whyCrashWindow}, {"winstart", winStartWindow}, {"stillok", stillOkWindow}, {"burnin", burnInWindow}, {"writespeed", writeSpeedWindow}, {"opal", opalWindow}, {"holders", holdersWindow}, {"enhance", enhanceWindow}, {"film", filmTools}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},
