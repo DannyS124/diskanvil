@@ -5222,14 +5222,20 @@ bool makeVirusList(const QVector<QPair<QByteArray, const char *>> &viruses, cons
         }
     }
     QFile::remove(work + QStringLiteral("/daily.cud"));
+    // Now and then (1 in 256) sigtool makes one whose MD5 starts with 00, tries again itself, and
+    // that try fails: it's run again, a second later, for another.
     QProcess sig;
-    sig.setWorkingDirectory(work);
-    sig.setProcessChannelMode(QProcess::MergedChannels);
-    sig.start(QStringLiteral("sigtool"), {QStringLiteral("--build=daily.cud"), QStringLiteral("--unsigned"), QStringLiteral("--cvd-version=1"),
-                                          QStringLiteral("--datadir=old")});
-    sig.write("diskanvil-test\n");
-    sig.closeWriteChannel();
-    sig.waitForFinished(60000);
+    for (int tries = 0; tries < 5 && !QFileInfo::exists(work + QStringLiteral("/daily.cud")); ++tries) {
+        if (tries > 0)
+            QThread::sleep(1);
+        sig.setWorkingDirectory(work);
+        sig.setProcessChannelMode(QProcess::MergedChannels);
+        sig.start(QStringLiteral("sigtool"), {QStringLiteral("--build=daily.cud"), QStringLiteral("--unsigned"), QStringLiteral("--cvd-version=1"),
+                                              QStringLiteral("--datadir=old")});
+        sig.write("diskanvil-test\n");
+        sig.closeWriteChannel();
+        sig.waitForFinished(60000);
+    }
     const QString own = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) + QStringLiteral("/diskanvil/clamav");
     QDir().mkpath(own);
     QFile::remove(own + QStringLiteral("/daily.cud"));
