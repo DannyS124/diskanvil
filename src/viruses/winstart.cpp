@@ -361,7 +361,8 @@ QVector<EarlierCopy> shadowCopies(const std::shared_ptr<lost::Source> &volume, c
                 continue;
             EarlierCopy c;
             c.hive = it.key();
-            c.from = tr("System Restore's copy of %1").arg(QLocale().toString(when, QLocale::ShortFormat));
+            // To the second: Windows often makes two within a minute (one before an update, say).
+            c.from = tr("System Restore's copy of %1").arg(when.toLocalTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")));
             c.when = when;
             const QString name = it.key();
             const quint64 record = it.value();

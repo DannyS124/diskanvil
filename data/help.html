@@ -310,8 +310,8 @@ named with evidence, and it says how it's known. Save Report keeps it as text, f
 fixed from outside it. <i>A stuck update</i> ("Undoing changes", "Preparing Windows" or "Working on updates" for
 ever): Windows keeps what it has still to do in WinSxS\pending.xml, and points at it from its COMPONENTS registry
 file. Undoing it sets pending.xml aside and takes those pointers out, as Microsoft's DISM /RevertPendingActions
-does; the Windows version runs DISM itself. Windows then starts as it was before the update, and Windows Update tries
-it again later. <i>A damaged registry file</i> ("the registry file is missing or contains errors", 0xc0000098,
+does; the Windows version runs DISM itself. Windows then starts as it was before the update (the first time it may
+restart by itself once or twice while it tidies up), and Windows Update tries it again later. <i>A damaged registry file</i> ("the registry file is missing or contains errors", 0xc0000098,
 REGISTRY_ERROR): SYSTEM, SOFTWARE, SAM, SECURITY and DEFAULT are each checked, and a damaged one can be put back from
 an earlier day, from Windows' own RegBack copies (Windows stopped making them in 2018 unless told to) or from System
 Restore's shadow copies. That undoes what changed since, so only do it for one that's damaged. Nothing is deleted:

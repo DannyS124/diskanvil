@@ -263,7 +263,8 @@ void WinStartDialog::undoUpdate()
         say({error});
         QMessageBox::warning(this, windowTitle(), error);
     } else {
-        say({tr("Done. Start that Windows again: it starts without the update, and tries it again later.")});
+        say({tr("Done. Start that Windows again: it starts without the update, and tries it again later. The first time, Windows "
+                "may restart by itself once or twice while it tidies up what was waiting; then it starts as usual.")});
     }
     look();
 }
