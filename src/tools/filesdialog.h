@@ -33,6 +33,7 @@ public:
 
 private:
     void fillPlaces();
+    void openedNow();
     QStringList picked() const;
     void updateActions();
     void newFolder();
@@ -49,6 +50,7 @@ private:
     QLabel *m_note;
     QAction *m_up, *m_newFolder, *m_copy, *m_cut, *m_paste, *m_rename, *m_delete, *m_look, *m_terminal;
     QString m_folder;
+    QString m_opening; // the drive asked to open (UDisks object), shown once it is
     QStringList m_clipboard;
     bool m_move = false;
     bool m_answerYes = false;

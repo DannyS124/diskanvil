@@ -258,23 +258,22 @@ FilesDialog::FilesDialog(UDisks *udisks, QWidget *parent)
             for (const Volume &v : d.volumes) {
                 if (v.objectPath == objectPath) {
                     m_note->setText(tr("Opening %1…").arg(v.label.isEmpty() ? v.device : v.label));
+                    m_opening = objectPath;
                     m_udisks->mount(v);
                 }
             }
         }
     });
     connect(m_places, &QListWidget::itemClicked, m_places, &QListWidget::itemActivated);
-    connect(m_udisks, &UDisks::changed, this, &FilesDialog::fillPlaces);
+    connect(m_udisks, &UDisks::changed, this, [this] {
+        fillPlaces();
+        openedNow();
+    });
     connect(m_udisks, &UDisks::operationFinished, this, [this](bool ok, const QString &message) {
         if (!ok)
             m_note->setText(message);
         fillPlaces();
-        // The drive just opened is shown.
-        for (int i = 0; i < m_places->count(); ++i) {
-            QListWidgetItem *item = m_places->item(i);
-            if (item->isSelected() && !item->data(Qt::UserRole).toString().isEmpty())
-                go(item->data(Qt::UserRole).toString());
-        }
+        openedNow();
     });
     fillPlaces();
     go(QDir::homePath());
@@ -301,6 +300,22 @@ void FilesDialog::fillPlaces()
             m_places->addItem(item);
             if (item->data(Qt::UserRole + 1).toString() + item->text() == selected)
                 m_places->setCurrentItem(item);
+        }
+    }
+}
+
+void FilesDialog::openedNow()
+{
+    // The drive asked to be opened: shown once it is.
+    if (m_opening.isEmpty())
+        return;
+    for (int i = 0; i < m_places->count(); ++i) {
+        QListWidgetItem *item = m_places->item(i);
+        if (item->data(Qt::UserRole + 1).toString() == m_opening && !item->data(Qt::UserRole).toString().isEmpty()) {
+            m_opening.clear();
+            m_places->setCurrentItem(item);
+            go(item->data(Qt::UserRole).toString());
+            return;
         }
     }
 }
