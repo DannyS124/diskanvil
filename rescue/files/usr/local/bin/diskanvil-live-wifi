@@ -11,6 +11,18 @@ else
     neon= baby= green= red= dim= bold= off=
 fi
 
+# The Wi-Fi to join with: the first one that isn't itself a hotspot.
+wifi_device() {
+    local dev conn
+    while IFS=: read -r dev type conn; do
+        [ "$type" = wifi ] || continue
+        if [ -n "$conn" ] && [ "$(nmcli -g 802-11-wireless.mode connection show "$conn" 2>/dev/null)" = ap ]; then
+            continue
+        fi
+        echo "$dev"
+        return
+    done < <(nmcli -t -f DEVICE,TYPE,CONNECTION device 2>/dev/null)
+}
 banner() {
     clear
     printf '%s' "$neon$bold"
@@ -29,7 +41,7 @@ ART
 status() {
     local wired wifi
     wired=$(nmcli -t -f TYPE,STATE device 2>/dev/null | grep -c '^ethernet:connected$')
-    wifi=$(nmcli -t -f ACTIVE,SSID,SIGNAL device wifi list --rescan no 2>/dev/null | grep '^yes:' | head -1)
+    wifi=$(nmcli -t -f ACTIVE,SSID,SIGNAL device wifi list ifname "$(wifi_device)" --rescan no 2>/dev/null | grep '^yes:' | head -1)
     if [ "$wired" -gt 0 ]; then
         printf '  %s● Online through the cable%s\n' "$green" "$off"
     fi
@@ -54,13 +66,14 @@ spin() {
     local message=$1; shift
     "$@" > /tmp/diskanvil-wifi.$$ 2>&1 &
     local pid=$! frames='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' i=0
-    while kill -0 "$pid" 2>/dev/null; do
+    # (Only in a terminal: written somewhere else it would just be in the way.)
+    while [ -t 1 ] && kill -0 "$pid" 2>/dev/null; do
         printf '\r  %s%s%s %s' "$neon" "${frames:i++%${#frames}:1}" "$off" "$message"
         sleep 0.1
     done
     wait "$pid"
     local result=$?
-    printf '\r\e[K'
+    [ -t 1 ] && printf '\r\e[K'
     return $result
 }
 
@@ -70,7 +83,7 @@ if ! command -v nmcli >/dev/null || ! nmcli -t general status >/dev/null 2>&1; t
     read -r -p "  Press Enter to close. " _
     exit 1
 fi
-if ! nmcli -t -f TYPE device 2>/dev/null | grep -qx wifi; then
+if [ -z "$(wifi_device)" ]; then
     banner
     echo "  No Wi-Fi was found in this PC. Plug in a network cable, or a USB Wi-Fi adapter,"
     echo "  then press Enter to look again."
@@ -85,8 +98,9 @@ while true; do
         read -r -p "  ${neon}>${off} " choice
         case $choice in o|O) nmcli radio wifi on; sleep 2; continue ;; *) exit 0 ;; esac
     fi
-    spin "Looking for networks…" nmcli device wifi rescan
-    mapfile -t rows < <(nmcli -t -f IN-USE,SIGNAL,SECURITY,SSID device wifi list --rescan no 2>/dev/null |
+    dev=$(wifi_device)
+    spin "Looking for networks…" nmcli device wifi rescan ifname "$dev"
+    mapfile -t rows < <(nmcli -t -f IN-USE,SIGNAL,SECURITY,SSID device wifi list ifname "$dev" --rescan no 2>/dev/null |
         awk -F: '$4 != "" && !seen[$4]++' | sort -t: -k1,1r -k2,2nr)
     if [ ${#rows[@]} -eq 0 ]; then
         echo "  No networks in reach."
@@ -106,17 +120,16 @@ while true; do
     q|Q) exit 0 ;;
     r|R|'') continue ;;
     d|D)
-        device=$(nmcli -t -f DEVICE,TYPE device | awk -F: '$2 == "wifi" {print $1; exit}')
-        spin "Leaving…" nmcli device disconnect "$device"
+        spin "Leaving…" nmcli device disconnect "$dev"
         continue ;;
     h|H)
         read -r -p "  Its name: " ssid
         [ -z "$ssid" ] && continue
         read -r -s -p "  Its password (empty if none): " password; echo
         if [ -n "$password" ]; then
-            spin "Joining $ssid…" nmcli device wifi connect "$ssid" password "$password" hidden yes
+            spin "Joining $ssid…" nmcli device wifi connect "$ssid" password "$password" hidden yes ifname "$dev"
         else
-            spin "Joining $ssid…" nmcli device wifi connect "$ssid" hidden yes
+            spin "Joining $ssid…" nmcli device wifi connect "$ssid" hidden yes ifname "$dev"
         fi ;;
     *[!0-9]*)
         continue ;;
@@ -131,9 +144,9 @@ while true; do
         fi
         if [ -n "$security" ] && [ "$security" != -- ]; then
             read -r -s -p "  Password for ${bold}$ssid${off}: " password; echo
-            spin "Joining $ssid…" nmcli device wifi connect "$ssid" password "$password"
+            spin "Joining $ssid…" nmcli device wifi connect "$ssid" password "$password" ifname "$dev"
         else
-            spin "Joining $ssid…" nmcli device wifi connect "$ssid"
+            spin "Joining $ssid…" nmcli device wifi connect "$ssid" ifname "$dev"
         fi ;;
     esac
     if [ $? -eq 0 ]; then

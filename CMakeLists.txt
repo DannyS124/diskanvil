@@ -309,11 +309,14 @@ if(DISKANVIL_SHELL)
         endif()
         qt_add_executable(diskanvil-shell src/shell/main.cpp src/shell/shell.cpp src/shell/shell.h src/shell/selftest.cpp src/shell/selftest.h
                           src/shell/network.cpp src/shell/network.h src/shell/notifications.cpp src/shell/notifications.h)
-        set_source_files_properties(src/shell/qml/Main.qml src/shell/qml/ShellWindow.qml src/shell/qml/TopBar.qml src/shell/qml/Dock.qml
-                                    src/shell/qml/AppGrid.qml src/shell/qml/PowerMenu.qml src/shell/qml/Toasts.qml PROPERTIES QT_RESOURCE_ALIAS "")
-        qt_add_qml_module(diskanvil-shell URI DiskAnvilShell VERSION 1.0 NO_RESOURCE_TARGET_PATH
-            QML_FILES src/shell/qml/Main.qml src/shell/qml/ShellWindow.qml src/shell/qml/TopBar.qml src/shell/qml/Dock.qml
-                      src/shell/qml/AppGrid.qml src/shell/qml/PowerMenu.qml src/shell/qml/Toasts.qml)
+        # The QML at the module's top (qrc:/qt/qml/DiskAnvilShell/Main.qml), the same with every Qt 6 from 6.8.
+        set(shell_qml Main ShellWindow TopBar Dock AppGrid PowerMenu Toasts)
+        set(shell_qml_files)
+        foreach(name ${shell_qml})
+            set_source_files_properties(src/shell/qml/${name}.qml PROPERTIES QT_RESOURCE_ALIAS ${name}.qml)
+            list(APPEND shell_qml_files src/shell/qml/${name}.qml)
+        endforeach()
+        qt_add_qml_module(diskanvil-shell URI DiskAnvilShell VERSION 1.0 RESOURCE_PREFIX /qt/qml QML_FILES ${shell_qml_files})
         file(GLOB shell_icons ${CMAKE_CURRENT_SOURCE_DIR}/rescue/icons/DiskAnvil-Live/scalable/apps/diskanvil-live-*.svg)
         foreach(icon ${shell_icons})
             get_filename_component(name ${icon} NAME)
