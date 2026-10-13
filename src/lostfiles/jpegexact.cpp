@@ -225,7 +225,7 @@ QImage decode(const QByteArray &file, int rounds, QString *why, const std::funct
     // First what an ordinary decoder shows (the middle of each rounding), then smoothed and put
     // back within the file's numbers, again and again.
     const Dct dct;
-    rounds = std::clamp(rounds, 1, 100);
+    const int passes = std::clamp(rounds, 1, 100);
     for (Component &c : comps) {
         const int stride = c.blocksWide * 8;
         c.pixels.assign(size_t(stride) * size_t(c.blocksHigh * 8), 0);
@@ -240,13 +240,13 @@ QImage decode(const QByteArray &file, int rounds, QString *why, const std::funct
                         c.pixels[size_t((by * 8 + y) * stride + bx * 8 + x)] = block[y * 8 + x];
             }
     }
-    for (int r = 0; r < rounds; ++r) {
+    for (int r = 0; r < passes; ++r) {
         for (Component &c : comps) {
             for (int s = 0; s < 1; ++s)
                 smooth(c, 1.0f);
             project(c, dct);
         }
-        if (progress && !progress(r * 100 / rounds))
+        if (progress && !progress(r * 100 / passes))
             return {};
     }
 
