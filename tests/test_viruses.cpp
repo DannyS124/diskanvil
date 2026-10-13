@@ -453,13 +453,13 @@ quint64 fileTimeOf(const QDateTime &t)
 }
 
 // A small blue-screen dump of our own: stop code 0xD1 in testnet.sys.
-QByteArray makeDump(const QDateTime &when)
+QByteArray makeDump(const QDateTime &when, quint32 code = 0xd1)
 {
     QByteArray d(0x4000, '\0');
     std::memcpy(d.data(), "PAGEDU64", 8);
     put<quint32>(d, 0x0c, 22631);
     put<quint32>(d, 0x30, 0x8664);
-    put<quint32>(d, 0x38, 0xd1);
+    put<quint32>(d, 0x38, code);
     put<quint64>(d, 0x40, 0x10);
     put<quint64>(d, 0x48, 2);
     put<quint64>(d, 0x50, 0);
@@ -643,6 +643,18 @@ void whyCrash()
            blue ? blue->blame : QString());
     report(r.summary.join(QLatin1Char(' ')).contains(QLatin1String("testnet.sys")) && r.notes.join(QLatin1Char(' ')).contains(QLatin1String("CrashDumpEnabled")),
            QStringLiteral("why did it crash: what they have in common, and a setting that hides crashes"), r.summary.join(QLatin1String(" | ")));
+    // Made on purpose from the keyboard: no driver blamed. Windows' own driver (by its maker): not the culprit.
+    whycrash::Records manual;
+    manual.dumps.push_back({QStringLiteral("a.dmp"), crashdump::read(makeDump(blueAt, 0xe2))});
+    const whycrash::Report m = whycrash::explain(manual);
+    report(m.incidents.size() == 1 && m.incidents[0].driver.isEmpty() && m.incidents[0].title.contains(QLatin1String("MANUALLY_INITIATED_CRASH")),
+           QStringLiteral("why did it crash: a crash made on purpose blames no driver"), m.incidents.value(0).driver);
+    whycrash::Records own = records;
+    own.system = evtx::Log();
+    own.microsoftDriver = [](const QString &path) { return path.endsWith(QLatin1String("testnet.sys")); };
+    const whycrash::Report o = whycrash::explain(own);
+    report(o.incidents.size() == 1 && o.incidents[0].driver.isEmpty() && o.incidents[0].blame.contains(QLatin1String("Windows' own code")),
+           QStringLiteral("why did it crash: Windows' own driver isn't named as the cause"), o.incidents.value(0).blame);
     whycrash::Records nothing;
     report(whycrash::explain(nothing).incidents.isEmpty() && !whycrash::explain(nothing).notes.isEmpty(), QStringLiteral("why did it crash: no log: said, not guessed"));
     const QString werText = QStringLiteral("Version=1\r\nEventType=BlueScreen\r\nEventTime=133500000000000000\r\nSig[0].Name=BCCode\r\nSig[0].Value=9f\r\nSig[1].Value=3\r\n");

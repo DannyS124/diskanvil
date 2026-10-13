@@ -136,7 +136,10 @@ bool hardwareEvent(const evtx::Event &e)
 
 bool diskEvent(const evtx::Event &e)
 {
-    return e.provider == QLatin1String("disk") || e.provider == QLatin1String("storahci") || e.provider == QLatin1String("stornvme")
+    // Errors only: not a stick unplugged (disk 157) or the like.
+    if (e.provider == QLatin1String("disk"))
+        return e.id == 7 || e.id == 11 || e.id == 51 || e.id == 153 || e.id == 154;
+    return ((e.provider == QLatin1String("storahci") || e.provider == QLatin1String("stornvme")) && e.id == 129)
         || (e.provider.contains(QLatin1String("Ntfs")) && e.id == 55);
 }
 
@@ -166,12 +169,24 @@ bool windowsDriver(const QString &name)
 }
 
 // A blue screen's driver from its dump: the stop code's address, else the saved instruction.
-void blameFromDump(const crashdump::Dump &dump, const StopCode *sc, Incident &inc, const std::function<QString(const QString &)> &describe)
+void blameFromDump(const crashdump::Dump &dump, const StopCode *sc, Incident &inc, const std::function<QString(const QString &)> &describe,
+                   const std::function<bool(const QString &)> &microsoft)
 {
     if (sc && sc->hardware) {
         inc.blame = tr("A hardware error: no driver is to blame.");
         return;
     }
+    // Made on purpose (the keyboard, the power button held): no driver did it.
+    const quint32 code = dump.code & ~0x10000000u;
+    if (code == 0xe2 || code == 0x1c8 || code == 0xdeaddead)
+        return;
+    const auto pathOf = [&dump](const QString &n) {
+        for (const crashdump::Driver &d : dump.drivers)
+            if (d.name.compare(n, Qt::CaseInsensitive) == 0)
+                return d.path;
+        return QString();
+    };
+    const auto windowsOwn = [&](const QString &n) { return windowsDriver(n) || (microsoft && microsoft(pathOf(n))); };
     QString at;
     bool unloaded = false;
     if (sc && sc->addressParameter > 0)
@@ -180,14 +195,11 @@ void blameFromDump(const crashdump::Dump &dump, const StopCode *sc, Incident &in
         at = crashdump::where(dump, dump.instruction, &unloaded);
     const QString name = at.section(QLatin1Char('+'), 0, 0);
     const auto describeName = [&](const QString &n) {
-        QString path;
-        for (const crashdump::Driver &d : dump.drivers)
-            if (d.name.compare(n, Qt::CaseInsensitive) == 0)
-                path = d.path;
+        const QString path = pathOf(n);
         const QString what = describe && !path.isEmpty() ? describe(path) : QString();
         return what.isEmpty() ? n : QStringLiteral("%1 (%2)").arg(n, what);
     };
-    if (!name.isEmpty() && !windowsDriver(name)) {
+    if (!name.isEmpty() && !windowsOwn(name)) {
         inc.driver = name;
         inc.blame = unloaded ? tr("It crashed in the code of %1, a driver that had already been removed.").arg(name)
                              : tr("It crashed in the code of %1.").arg(describeName(name));
@@ -196,10 +208,10 @@ void blameFromDump(const crashdump::Dump &dump, const StopCode *sc, Incident &in
     // Windows' own code was running: the driver that handed it bad data is often further up the stack.
     QStringList others;
     for (const QString &n : dump.onStack)
-        if (!windowsDriver(n))
+        if (!windowsOwn(n))
             others << n;
     if (!name.isEmpty())
-        inc.blame = tr("It crashed in Windows' own code (%1); the real cause is usually a driver that gave it bad data.").arg(name);
+        inc.blame = tr("It crashed in Windows' own code (%1); the real cause is usually a driver that gave it bad data.").arg(describeName(name));
     if (!others.isEmpty()) {
         inc.driver = others.first();
         inc.blame += (inc.blame.isEmpty() ? QString() : QStringLiteral(" "))
@@ -292,7 +304,7 @@ Report explain(const Records &r)
         usedDumps << index;
         inc.sources << tr("crash dump %1").arg(file);
         const StopCode *sc = stopCode(dump.code);
-        blameFromDump(dump, sc, inc, r.describeDriver);
+        blameFromDump(dump, sc, inc, r.describeDriver, r.microsoftDriver);
         if (!dump.complete)
             inc.sources.last() += tr(" (not written to the end)");
     };
@@ -373,6 +385,9 @@ Report explain(const Records &r)
                 }
             }
         }
+        if (inc.kind == Kind::BlueScreen && inc.sources.filter(QRegularExpression(QStringLiteral("\\.dmp|MEMORY"), QRegularExpression::CaseInsensitiveOption)).isEmpty()
+            && inc.blame.isEmpty())
+            inc.blame = tr("No crash dump of it was found, so the driver can't be named from here.");
         errorsBefore(inc.when, inc);
         out.incidents << inc;
     }
@@ -580,6 +595,10 @@ Report read(const QString &root, const std::atomic<bool> *cancel)
             }
         }
     }
+    r.microsoftDriver = [root](const QString &driverPath) {
+        const QHash<QString, QString> v = peinfo::versionStrings(readFile(onDisk(root, driverPath), 64 * 1024 * 1024));
+        return v.value(QStringLiteral("CompanyName")).contains(QLatin1String("Microsoft"), Qt::CaseInsensitive);
+    };
     r.describeDriver = [root](const QString &driverPath) {
         const QHash<QString, QString> v = peinfo::versionStrings(readFile(onDisk(root, driverPath), 64 * 1024 * 1024));
         const QString what = v.value(QStringLiteral("FileDescription")), who = v.value(QStringLiteral("CompanyName"));

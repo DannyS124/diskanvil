@@ -83,6 +83,8 @@ struct Records {
     bool autoReboot = true;
     // What a driver says it is ("NVIDIA Kernel Mode Driver, NVIDIA Corporation"), by file name.
     std::function<QString(const QString &driverPath)> describeDriver;
+    // Whether a driver is Windows' own (its file says Microsoft made it).
+    std::function<bool(const QString &driverPath)> microsoftDriver;
 };
 
 Report explain(const Records &records);

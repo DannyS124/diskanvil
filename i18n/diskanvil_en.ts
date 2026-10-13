@@ -1130,7 +1130,7 @@
 <context>
     <name>whycrash</name>
     <message numerus="yes">
-        <location filename="../src/viruses/whycrash.cpp" line="286"/>
+        <location filename="../src/viruses/whycrash.cpp" line="298"/>
         <source>%n second(s)</source>
         <translation>
             <numerusform>%n second</numerusform>
@@ -1138,7 +1138,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/viruses/whycrash.cpp" line="287"/>
+        <location filename="../src/viruses/whycrash.cpp" line="299"/>
         <source>%n minute(s)</source>
         <translation>
             <numerusform>%n minute</numerusform>
@@ -1146,7 +1146,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/viruses/whycrash.cpp" line="447"/>
+        <location filename="../src/viruses/whycrash.cpp" line="462"/>
         <source>%1 was involved in %n of them: most likely that driver. Update it from its maker (or roll it back if it started after an update).</source>
         <translation>
             <numerusform>%1 was involved in %n of them: most likely that driver. Update it from its maker (or roll it back if it started after an update).</numerusform>
@@ -1154,7 +1154,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/viruses/whycrash.cpp" line="456"/>
+        <location filename="../src/viruses/whycrash.cpp" line="471"/>
         <source>The disk had errors (%n logged): check it in Disk Health, and copy your files off first if it&apos;s failing.</source>
         <translation>
             <numerusform>The disk had errors (%n logged): check it in Disk Health, and copy your files off first if it's failing.</numerusform>
@@ -1162,7 +1162,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/viruses/whycrash.cpp" line="470"/>
+        <location filename="../src/viruses/whycrash.cpp" line="485"/>
         <source>%n event(s) in the log were damaged and skipped.</source>
         <translation>
             <numerusform>%n event in the log were damaged and skipped.</numerusform>
