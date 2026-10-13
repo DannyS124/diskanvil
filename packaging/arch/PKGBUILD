@@ -1,6 +1,6 @@
 # Maintainer: Danny S <48356907+DannyS124@users.noreply.github.com>
 pkgname=diskanvil
-pkgver=0.5.1
+pkgver=0.5.2
 pkgrel=1
 pkgdesc='Disk manager for Linux that works like Windows Disk Management'
 arch=('x86_64')
@@ -38,7 +38,7 @@ optdepends=(
   'ldmtool: open Windows dynamic disks (from the AUR)'
 )
 source=("$pkgname-$pkgver.tar.gz::$url/releases/download/v$pkgver/$pkgname-$pkgver.tar.gz")
-sha256sums=('fa15799a32afd502a564479164095112987e8108d9bf78757d034b7026fe6995')
+sha256sums=('6810c2e71f1f8ebf85716f2bb2c308a18b5a109ac99c160ebbf8d7b6be3146e9')
 
 build() {
   rm -rf build  # makepkg keeps src/ between builds; an old cache breaks updates
