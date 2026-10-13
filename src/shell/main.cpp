@@ -6,6 +6,7 @@
 // tools, a terminal and Firefox are its windows.
 
 #include "selftest.h"
+#include "input.h"
 #include "network.h"
 #include "shell.h"
 
@@ -16,6 +17,8 @@
 #include <QQuickWindow>
 #include <QStandardPaths>
 #include <QTimer>
+
+#include <memory>
 
 int main(int argc, char **argv)
 {
@@ -48,6 +51,18 @@ int main(int argc, char **argv)
     // Where the mouse is, for the pointer the shell draws.
     for (QQuickWindow *w : engine.rootObjects().first()->findChildren<QQuickWindow *>())
         w->installEventFilter(new PointerWatch(&shell, w));
+#ifdef DISKANVIL_SHELL_INPUT
+    // Straight on the screen, the mouse, touchpad and keyboard are the shell's own to read (the
+    // session turns Qt's off: QT_QPA_FB_DISABLE_INPUT).
+    std::unique_ptr<Input> input;
+    if (shell.drawsPointer() && qEnvironmentVariableIntValue("QT_QPA_FB_DISABLE_INPUT")) {
+        if (QQuickWindow *w = engine.rootObjects().first()->findChild<QQuickWindow *>()) {
+            input = std::make_unique<Input>(w);
+            QObject::connect(&shell, &Shell::keyboardChanged, input.get(), [&shell, &input] { input->setLayout(shell.keyboardLayout(), shell.keyboardVariant()); });
+            input->setLayout(shell.keyboardLayout(), shell.keyboardVariant());
+        }
+    }
+#endif
 
     // For checking it without a screen: --shot FILE MS saves what's on it, then quits;
     // --selftest uses it with real windows in it.

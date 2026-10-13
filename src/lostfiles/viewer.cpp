@@ -412,6 +412,8 @@ public:
     std::function<void(int length, int angle)> measured;
 
     QSize pictureSize() const { return m_image.size(); }
+    // Each pixel as a square (exactly what's there) instead of smoothly made bigger.
+    void setShowPixels(bool on) { m_showPixels = on; viewport()->update(); }
     double zoom() const { return m_zoom; }
 
     void fit()
@@ -433,8 +435,24 @@ protected:
         p.fillRect(viewport()->rect(), palette().color(QPalette::Window).darker(115));
         if (m_image.isNull())
             return;
-        p.setRenderHint(QPainter::SmoothPixmapTransform, m_zoom < 4);
-        p.drawImage(target(), !m_comparing && !m_processed.isNull() ? m_processed : m_image);
+        const QImage &shown = !m_comparing && !m_processed.isNull() ? m_processed : m_image;
+        const QRectF at = target();
+        if (m_showPixels) {
+            // Its own pixels, as squares: what's really there, exactly.
+            p.setRenderHint(QPainter::SmoothPixmapTransform, m_zoom < 1);
+            p.drawImage(at, shown);
+        } else if (m_zoom > 1.01 && at.width() * at.height() <= 6e6) {
+            // Bigger than it is: made bigger properly (Lanczos), not as squares, once for this size.
+            const QSize size = at.size().toSize();
+            if (m_smoothFor != shown.cacheKey() || m_smooth.size() != size) {
+                m_smooth = enhance::resize(shown, size);
+                m_smoothFor = shown.cacheKey();
+            }
+            p.drawImage(at.topLeft(), m_smooth);
+        } else {
+            p.setRenderHint(QPainter::SmoothPixmapTransform);
+            p.drawImage(at, shown);
+        }
         if (m_measuring && !m_line.isNull()) {
             p.setRenderHint(QPainter::Antialiasing);
             p.setPen(QPen(palette().color(QPalette::Highlight), 2));
@@ -626,6 +644,9 @@ private:
     bool m_measuring = false;
     QLineF m_line;
     bool m_picking = false;
+    bool m_showPixels = false;
+    QImage m_smooth;          // the picture made bigger for the screen, at the size shown
+    qint64 m_smoothFor = 0;   // and which picture it was made from
     bool m_cornering = false;
     QPolygonF m_corners;
     bool m_spot = false;
@@ -701,6 +722,8 @@ public:
         m_local->setToolTip(viewer::tr("Detail brought out in the dark and the light parts each on its own (CLAHE), as forensic video tools do"));
         m_sharpen = slider(viewer::tr("Sharpen"), 0, 100, QStringLiteral("sharpen"));
         m_smooth = slider(viewer::tr("Smooth grain"), 0, 100, QStringLiteral("smooth"));
+        m_deblock = slider(viewer::tr("JPEG squares"), 0, 100, QStringLiteral("deblock"));
+        m_deblock->setToolTip(viewer::tr("The 8 by 8 squares a hard-squeezed JPEG (a thumbnail, a picture sent by a phone) shows, evened out"));
         m_smooth->setToolTip(viewer::tr("Grain evened out while edges stay sharp (a bilateral filter)"));
         m_focus = slider(viewer::tr("Out of focus"), 0, 15, QStringLiteral("focus"));
         m_motion = slider(viewer::tr("Moved"), 0, 60, QStringLiteral("motion"));
@@ -786,7 +809,9 @@ public:
         m_status->setWordWrap(true);
         layout->addWidget(m_status);
         m_bigger = new QComboBox;
-        m_bigger->addItems({viewer::tr("Its own size"), viewer::tr("Twice as big"), viewer::tr("Three times as big"), viewer::tr("Four times as big")});
+        for (const auto &[factor, words] : {std::pair{1, viewer::tr("Its own size")}, std::pair{2, viewer::tr("Twice as big")}, std::pair{3, viewer::tr("Three times as big")},
+                                            std::pair{4, viewer::tr("Four times as big")}, std::pair{6, viewer::tr("Six times as big")}, std::pair{8, viewer::tr("Eight times as big")}})
+            m_bigger->addItem(words, factor);
         m_bigger->setToolTip(viewer::tr("Bigger, smoothly: the same picture larger, nothing made up"));
         m_save = new QPushButton(viewer::tr("Save as a New Picture…"));
         m_save->setObjectName(QStringLiteral("saveEnhanced"));
@@ -802,7 +827,7 @@ public:
         QObject::connect(m_compare, &QPushButton::released, this, [this] { if (compare) compare(false); });
         QObject::connect(reset, &QPushButton::clicked, this, [this] { this->reset(); if (changed) changed(); });
         QObject::connect(m_measure, &QPushButton::toggled, this, [this](bool on) { if (measure) measure(on); });
-        QObject::connect(m_save, &QPushButton::clicked, this, [this] { if (save) save(m_bigger->currentIndex() + 1); });
+        QObject::connect(m_save, &QPushButton::clicked, this, [this] { if (save) save(m_bigger->currentData().toInt()); });
         QObject::connect(m_export, &QPushButton::clicked, this, [this] { if (exportFilm) exportFilm(); });
         fillProfiles({});
     }
@@ -819,6 +844,7 @@ public:
         s.motionAngle = m_angle->value();
         s.denoise = m_grain->isEnabled() ? m_grain->currentIndex() : 0;
         s.smooth = m_smooth->isEnabled() ? m_smooth->value() : 0;
+        s.deblock = m_deblock->value();
         s.localContrast = m_local->value();
         s.deinterlace = m_deinterlace->isChecked();
         s.steady = m_steady->isVisible() && m_steady->isChecked();
@@ -843,6 +869,7 @@ public:
         m_grey->setChecked(s.grey);
         m_invert->setChecked(s.invert);
         m_smooth->setValue(s.smooth);
+        m_deblock->setValue(s.deblock);
         m_local->setValue(s.localContrast);
         m_deinterlace->setChecked(s.deinterlace);
         m_steady->setChecked(s.steady);
@@ -914,7 +941,14 @@ public:
     }
 
     // Bigger when saved: a spot is usually wanted bigger.
-    void setBigger(int factor) { m_bigger->setCurrentIndex(std::clamp(factor, 1, 4) - 1); }
+    void setBigger(int factor)
+    {
+        int at = 0;
+        for (int i = 0; i < m_bigger->count(); ++i)
+            if (m_bigger->itemData(i).toInt() <= factor)
+                at = i;
+        m_bigger->setCurrentIndex(at);
+    }
 
     void setMotion(int length, int angle)
     {
@@ -1071,7 +1105,7 @@ private:
     QAction *m_saveProfile, *m_removeProfile, *m_importProfile, *m_exportProfile;
     QVector<enhance::Profile> m_builtIn, m_saved;
     QPushButton *m_pick, *m_whole, *m_straighten, *m_stack;
-    QSlider *m_local, *m_smooth;
+    QSlider *m_local, *m_smooth, *m_deblock;
     QCheckBox *m_deinterlace, *m_steady, *m_stackDouble;
     QSpinBox *m_stackCount;
     QWidget *m_stackBox;
@@ -1891,7 +1925,11 @@ Window::Window(QWidget *parent)
     m_fit = bar->addAction(icon("zoom-fit-best"), tr("Fit"));
     m_actual = bar->addAction(icon("zoom-original"), tr("Actual Size"));
     m_zoomIn = bar->addAction(icon("zoom-in"), tr("Bigger"));
-    for (QAction *a : {m_zoomOut, m_fit, m_actual, m_zoomIn})
+    m_pixels = bar->addAction(icon("view-grid"), tr("Pixels"));
+    m_pixels->setObjectName(QStringLiteral("pixelsAction"));
+    m_pixels->setCheckable(true);
+    m_pixels->setToolTip(tr("Show each pixel as a square, exactly as the picture has it (otherwise a picture shown bigger is made bigger smoothly)"));
+    for (QAction *a : {m_zoomOut, m_fit, m_actual, m_zoomIn, m_pixels})
         bar->widgetForAction(a)->setProperty("zoom", true);
     bar->addSeparator();
     m_details = bar->addAction(icon("documentinfo"), tr("Details"));
@@ -1976,6 +2014,7 @@ Window::Window(QWidget *parent)
     });
     connect(m_inside, &InsideView::saveEdited, this, [this] { Q_EMIT saveEdited(m_inside->edits()); });
     connect(m_zoomIn, &QAction::triggered, this, [this] { m_shown.kind == Kind::Pdf ? m_pdf->zoomBy(1.25) : m_picture->zoomBy(1.25); });
+    connect(m_pixels, &QAction::toggled, this, [this](bool on) { m_picture->setShowPixels(on); });
     connect(m_zoomOut, &QAction::triggered, this, [this] { m_shown.kind == Kind::Pdf ? m_pdf->zoomBy(0.8) : m_picture->zoomBy(0.8); });
     connect(m_fit, &QAction::triggered, this, [this] { m_shown.kind == Kind::Pdf ? m_pdf->fit() : m_picture->fit(); });
     connect(m_actual, &QAction::triggered, this, [this] { m_shown.kind == Kind::Pdf ? m_pdf->actualSize() : m_picture->actualSize(); });
@@ -2464,6 +2503,18 @@ void Window::present(const Show &show)
         m_problem->show();
     }
     m_shown.kind = kind;
+    // A small picture says so: made bigger it's smooth, but it can't show what it never had.
+    if (kind == Kind::Picture) {
+        const QSize size = m_picture->pictureSize();
+        if (!size.isEmpty() && std::max(size.width(), size.height()) < 320) {
+            m_shown.facts << tr("Small") + QLatin1Char('\t')
+                                 + tr("Only %1 × %2 pixels: probably a thumbnail (a small copy a camera, phone or Windows keeps). Shown bigger it's "
+                                      "smoothed; no tool can add the detail it never had. The full photo may be among the files found too: "
+                                      "look for one from the same time, or sort by size.")
+                                       .arg(size.width()).arg(size.height());
+            showFacts();
+        }
+    }
     QWidget *page = kind == Kind::Picture ? static_cast<QWidget *>(m_picture)
                   : kind == Kind::Pdf     ? static_cast<QWidget *>(m_pdf)
                   : kind == Kind::Film || kind == Kind::Song ? static_cast<QWidget *>(m_media)
@@ -2481,6 +2532,7 @@ void Window::present(const Show &show)
     m_pages->setCurrentWidget(page);
     for (QAction *a : {m_zoomOut, m_fit, m_actual, m_zoomIn})
         a->setVisible(kind == Kind::Picture || kind == Kind::Pdf);
+    m_pixels->setVisible(kind == Kind::Picture);
     // Enhancing is for still pictures (an animated one shows its frames as they come) and films.
     const bool canEnhance = (kind == Kind::Picture && !m_picture->animated()) || kind == Kind::Film;
     m_enhanceAction->setVisible(canEnhance);

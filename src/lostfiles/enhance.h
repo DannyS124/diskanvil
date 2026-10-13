@@ -27,6 +27,7 @@ struct Settings {
     int smooth = 0;     // 0 to 100: grain smoothed with the edges kept (a bilateral filter)
     int localContrast = 0; // 0 to 100: detail brought out in the dark and light parts each on its own (CLAHE)
     bool deinterlace = false; // an old camera's two half-pictures (the comb lines) made into one
+    int deblock = 0;          // 0 to 100: the 8 by 8 squares heavy JPEG squeezing leaves, evened out
     bool steady = false;      // a film saved steadied (ffmpeg's deshake); it doesn't change a picture
     int sharpen = 0;    // 0 to 100 (an unsharp mask)
     int focus = 0;      // 0 off, else how far out of focus it is, in pixels (1 to 15)
@@ -43,8 +44,10 @@ struct Settings {
 // The picture with the settings applied. `progress` hears how far it is (0 to 100) and stops it
 // by returning false (then the result is empty).
 QImage apply(const QImage &in, const Settings &settings, const std::function<bool(int percent)> &progress = {});
-// Bigger by a whole factor (2, 3 or 4), smoothly (Lanczos): what's there, larger, nothing made up.
+// Bigger by a whole factor (2 to 8), smoothly (Lanczos): what's there, larger, nothing made up.
 QImage enlarge(const QImage &in, int factor);
+// To any size, the same way (for showing a small picture big without its squares).
+QImage resize(const QImage &in, QSize to);
 // Something seen at an angle (a number plate, a sign, a page) made square-on: the four corners
 // picked on it, clockwise from its top left, become a rectangle as wide and tall as its sides.
 QImage straighten(const QImage &in, const QPolygonF &corners);

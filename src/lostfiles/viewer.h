@@ -164,6 +164,7 @@ private:
     QScrollArea *m_side;
     QAction *m_previous, *m_next, *m_zoomOut, *m_fit, *m_actual, *m_zoomIn, *m_details, *m_open, *m_save;
     QAction *m_insideAction;
+    QAction *m_pixels; // each pixel as a square, or smoothly made bigger
     QAction *m_repair;
     QAction *m_enhanceAction;
     EnhancePanel *m_enhance;

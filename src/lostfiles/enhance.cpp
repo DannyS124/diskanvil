@@ -175,7 +175,7 @@ Plane median(const Plane &in, int radius)
 
 bool Settings::isDefault() const
 {
-    return brightness == 0 && contrast == 0 && shadows == 0 && !autoLevels && denoise == 0 && smooth == 0 && localContrast == 0 && !deinterlace
+    return deblock == 0 && brightness == 0 && contrast == 0 && shadows == 0 && !autoLevels && denoise == 0 && smooth == 0 && localContrast == 0 && !deinterlace
         && sharpen == 0 && focus == 0 && motion == 0 && !grey && !invert;
 }
 
@@ -184,6 +184,8 @@ QStringList Settings::describe() const
     QStringList out;
     if (deinterlace)
         out << tr("deinterlaced");
+    if (deblock > 0)
+        out << tr("JPEG's squares evened out (%1%)").arg(deblock);
     if (smooth > 0)
         out << tr("grain smoothed with the edges kept (%1%)").arg(smooth);
     if (denoise > 0)
@@ -223,6 +225,28 @@ void deinterlace(Plane &p)
         for (int x = 0; x < p.w; ++x)
             p(x, y) = (p.at(x, y - 1) + p.at(x, y + 1)) / 2;
     }
+}
+
+// JPEG squeezes a picture in 8 by 8 squares; squeezed hard, their edges show. Where the step
+// across a square's edge is small (the squares, not a real edge in the picture), it's spread over
+// the pixels either side so the squares melt into each other. A big step is a real edge: kept.
+void deblock(Plane &p, int strength)
+{
+    const float limit = 0.03f + strength / 100.0f * 0.12f, amount = 0.4f + strength / 100.0f * 0.6f;
+    const auto across = [&](float &a2, float &a1, float &b1, float &b2) {
+        const float d = b1 - a1;
+        if (std::abs(d) >= limit)
+            return;
+        const float c = d * amount;
+        a1 += c * 0.375f; b1 -= c * 0.375f;
+        a2 += c * 0.125f; b2 -= c * 0.125f;
+    };
+    for (int y = 0; y < p.h; ++y)
+        for (int x = 8; x + 1 < p.w; x += 8)
+            across(p(x - 2, y), p(x - 1, y), p(x, y), p(x + 1, y));
+    for (int y = 8; y + 1 < p.h; y += 8)
+        for (int x = 0; x < p.w; ++x)
+            across(p(x, y - 2), p(x, y - 1), p(x, y), p(x, y + 1));
 }
 
 // Each point the average of those around it, weighted by how near they are and by how alike in
@@ -404,6 +428,9 @@ QVector<Profile> builtInProfiles()
         make(tr("Number plate or sign"), tr("Letters to read: detail brought out where it's dark or bright, sharpened hard, black and white. Pick "
                                             "a spot around it; Straighten if it's at an angle."),
              [](Settings &s) { s.localContrast = 70; s.sharpen = 45; s.grey = true; s.autoLevels = true; }),
+        make(tr("Small or blocky picture"), tr("A thumbnail, or a photo squeezed hard: JPEG's squares evened out, grain smoothed with the edges kept, "
+                                               "sharpened a little. Save it bigger below; shown bigger it's smoothed too (Pixels shows the squares)."),
+             [](Settings &s) { s.deblock = 70; s.smooth = 25; s.sharpen = 15; }),
         make(tr("Grainy"), tr("Speckled from a high ISO or a cheap camera: grain smoothed, then sharpened a little."),
              [](Settings &s) { s.denoise = 2; s.sharpen = 10; }),
         make(tr("Scanned page"), tr("A document or receipt: black and white, the levels stretched, strong contrast, sharpened, so the writing stands out."),
@@ -423,7 +450,7 @@ QByteArray profileToFile(const Profile &p)
                          {QStringLiteral("motionAngle"), s.motionAngle}, {QStringLiteral("grey"), s.grey},
                          {QStringLiteral("invert"), s.invert},         {QStringLiteral("smooth"), s.smooth},
                          {QStringLiteral("localContrast"), s.localContrast}, {QStringLiteral("deinterlace"), s.deinterlace},
-                         {QStringLiteral("steady"), s.steady}};
+                         {QStringLiteral("steady"), s.steady},         {QStringLiteral("deblock"), s.deblock}};
     QJsonObject o{{QStringLiteral("diskanvil-enhance-profile"), 1}, {QStringLiteral("name"), p.name}, {QStringLiteral("settings"), settings}};
     if (!p.description.isEmpty())
         o.insert(QStringLiteral("description"), p.description);
@@ -476,6 +503,7 @@ bool profileFromFile(const QByteArray &file, Profile *p, QString *why)
     s.grey = j.value(QStringLiteral("grey")).toBool();
     s.invert = j.value(QStringLiteral("invert")).toBool();
     s.smooth = number("smooth", 0, 100);
+    s.deblock = number("deblock", 0, 100);
     s.localContrast = number("localContrast", 0, 100);
     s.deinterlace = j.value(QStringLiteral("deinterlace")).toBool();
     s.steady = j.value(QStringLiteral("steady")).toBool();
@@ -577,6 +605,12 @@ QImage apply(const QImage &in, const Settings &s, const std::function<bool(int p
     if (s.deinterlace) {
         for (Plane &p : c)
             deinterlace(p);
+    }
+    if (s.deblock > 0) {
+        for (Plane &p : c)
+            deblock(p, std::clamp(s.deblock, 0, 100));
+        if (step(5))
+            return {};
     }
     if (s.denoise > 0) {
         for (Plane &p : c)
@@ -729,7 +763,7 @@ QStringList ffmpegArguments(const QString &in, const QString &out, double speed,
 
 QImage enlarge(const QImage &in, int factor)
 {
-    factor = std::clamp(factor, 1, 4);
+    factor = std::clamp(factor, 1, 8);
     if (in.isNull() || factor == 1)
         return in;
     const QImage src = in.convertToFormat(QImage::Format_ARGB32);
@@ -743,6 +777,24 @@ QImage enlarge(const QImage &in, int factor)
             QRgb *line = reinterpret_cast<QRgb *>(out.scanLine(Y));
             for (int X = 0; X < W; ++X)
                 line[X] = sample(src, (X + 0.5f) / factor - 0.5f, sy);
+        }
+    });
+    return out;
+}
+
+QImage resize(const QImage &in, QSize to)
+{
+    if (in.isNull() || to.isEmpty() || qint64(to.width()) * to.height() > 100000000LL)
+        return {};
+    const QImage src = in.convertToFormat(QImage::Format_ARGB32);
+    QImage out(to, QImage::Format_ARGB32);
+    const float fx = float(src.width()) / to.width(), fy = float(src.height()) / to.height();
+    rows(to.height(), [&](int y0, int y1) {
+        for (int Y = y0; Y < y1; ++Y) {
+            QRgb *line = reinterpret_cast<QRgb *>(out.scanLine(Y));
+            const float sy = (Y + 0.5f) * fy - 0.5f;
+            for (int X = 0; X < to.width(); ++X)
+                line[X] = sample(src, (X + 0.5f) * fx - 0.5f, sy);
         }
     });
     return out;

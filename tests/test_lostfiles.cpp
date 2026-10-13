@@ -3710,6 +3710,32 @@ void enhanceTools()
                QStringLiteral("grain of %1 in one frame, %2 stacked").arg(off(frames[0]), 0, 'f', 1).arg(off(same), 0, 'f', 1));
     }
 
+    {
+        // JPEG's squares: flat 8 by 8 squares a little apart are evened out; a real edge stays.
+        QImage squares(64, 16, QImage::Format_RGB32);
+        for (int y = 0; y < 16; ++y)
+            for (int x = 0; x < 64; ++x) {
+                const int v = x < 32 ? 100 + (x / 8) * 6 : 230; // squares 6 apart, then a real edge at 32
+                squares.setPixel(x, y, qRgb(v, v, v));
+            }
+        enhance::Settings blocks;
+        blocks.deblock = 80;
+        const QImage even = enhance::apply(squares, blocks);
+        const int stepBefore = qGray(squares.pixel(8, 4)) - qGray(squares.pixel(7, 4)), stepAfter = qGray(even.pixel(8, 4)) - qGray(even.pixel(7, 4));
+        const int edgeAfter = qGray(even.pixel(32, 4)) - qGray(even.pixel(31, 4));
+        report(stepAfter < stepBefore && edgeAfter > 90, QStringLiteral("enhance: JPEG's squares are evened out, a real edge is kept"),
+               QStringLiteral("square step %1 to %2, edge %3").arg(stepBefore).arg(stepAfter).arg(edgeAfter));
+        // Made bigger to any size smoothly: no squares, and the same picture.
+        QImage tiny(4, 4, QImage::Format_RGB32);
+        tiny.fill(qRgb(10, 10, 10));
+        tiny.setPixel(1, 1, qRgb(250, 250, 250));
+        const QImage big = enhance::resize(tiny, QSize(40, 40));
+        report(big.size() == QSize(40, 40) && qGray(big.pixel(15, 15)) > 200 && qGray(big.pixel(20, 15)) > qGray(big.pixel(30, 15))
+                   && qGray(big.pixel(20, 15)) < qGray(big.pixel(15, 15)),
+               QStringLiteral("enhance: a tiny picture made bigger to any size, smoothly (no squares)"));
+        report(enhance::enlarge(tiny, 8).size() == QSize(32, 32), QStringLiteral("enhance: saved up to eight times as big"));
+    }
+
     // Profiles: DiskAnvil's own, and files people save and pass on.
     const QVector<enhance::Profile> own = enhance::builtInProfiles();
     bool ownFine = own.size() >= 6;

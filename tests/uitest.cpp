@@ -4930,6 +4930,21 @@ void enhanceWindow()
                && window.findChild<QCheckBox *>(QStringLiteral("deinterlace")),
            QStringLiteral("viewer: local contrast, edge-keeping smoothing and deinterlacing are there"));
 
+    // A small picture says it is, and has the Pixels switch.
+    QImage thumb(64, 48, QImage::Format_RGB32);
+    thumb.fill(qRgb(90, 120, 150));
+    const QString thumbPath = dir.path() + QStringLiteral("/thumb.png");
+    thumb.save(thumbPath);
+    viewer::Show small = show;
+    small.path = thumbPath;
+    small.name = QStringLiteral("thumb.png");
+    small.facts.clear();
+    window.present(small);
+    QLabel *factsLabel = window.findChild<QLabel *>(QStringLiteral("facts"));
+    auto *pixels = window.findChild<QAction *>(QStringLiteral("pixelsAction"));
+    report(factsLabel && factsLabel->text().contains(QStringLiteral("64 × 48")) && factsLabel->text().contains(QLatin1String("thumbnail")) && pixels && pixels->isVisible(),
+           QStringLiteral("viewer: a small picture says how small it is, and the squares can be shown or smoothed"));
+
     show.kind = viewer::Kind::Words;
     window.present(show);
     report(!action->isVisible() && !action->isChecked(), QStringLiteral("viewer: Enhance goes away for what isn't a picture"));
