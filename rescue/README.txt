@@ -24,12 +24,17 @@ Start DiskAnvil Live                  the normal way
 Safe graphics                         if the screen stays black or looks broken
 Text mode                             no desktop, just a command line
 Copy to memory                        takes longer to start, then the stick can come out
+Large text and high contrast          everything half as big again, in DiskAnvil's high-contrast
+                                      colours
+Start this PC's own system            Windows (or whatever the PC has) as if the stick weren't
+                                      in: no need to pull it out or change the boot order
 Tools and troubleshooting:
   Memory test                         memtest86+. It isn't signed for Secure Boot, so turn
                                       Secure Boot off in the PC's setup to use it
   Detailed messages                   more on screen and on the serial port, for when
                                       something goes wrong while starting
   Check the stick                     reads every file on the stick and checks it
+  Check, then to memory               the same, then copies the checked stick to memory
   Firmware settings                   the PC's UEFI setup
 
 The home screen
