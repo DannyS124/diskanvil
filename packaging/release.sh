@@ -1,13 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-FileCopyrightText: 2026 Danny S
-# SPDX-License-Identifier: GPL-3.0-or-later
-#
-# Nothing goes on GitHub until you've installed and tried the exact package.
-#
-#   packaging/release.sh --stage 0.4.3     test and build 0.4.3 on this PC, ready to install and try
-#   packaging/release.sh --publish 0.4.3   tried it and it's fine: upload exactly what was staged
-#   packaging/release.sh --pull 0.4.3      a bad release got out: delete it, PKGBUILD goes back to the previous one
-#   packaging/release.sh --aur 0.4.3       push the current PKGBUILD to the AUR (after a packaging-only fix)
+
 #
 # The AUR repo is expected at ../diskanvil-aur (git clone ssh://aur@aur.archlinux.org/diskanvil.git).
 #
