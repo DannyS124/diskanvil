@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.5.3
+- Scan for Bad Sectors counts each bad sector as soon as it's found. Before, the count only moved every 64 MB scanned, so a drive stuck in one bad patch (each sector taking it seconds) showed red on the map with "bad sectors so far: 0" for up to an hour
 - Mounting a Windows drive that Windows didn't shut down fully (hibernated by Fast Startup, which Windows has on by default, or after a crash or power cut) no longer fails with Linux's "wrong fs type, bad option, bad superblock": it's opened read-only, so its files can be copied off, and the message says why and how to make it writable (shut Windows down while holding Shift). Found by a user on a laptop with DiskAnvil Live
 - Get Add-ons (and Themes → Get More) is hidden until there's an online list of add-ons to get them from; the docs pointed at a repository that doesn't exist yet. Install from File and Make an Add-on are unchanged
 - Write Speed Over Time no longer calls a drive full of random-looking data (one Burn In has just written over, or an encrypted one) a drive "with partitions with something on them": it says what it is

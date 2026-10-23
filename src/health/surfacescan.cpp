@@ -89,8 +89,13 @@ void SurfaceScan::run()
                     continue;
                 }
                 for (quint64 s = p; s < p + plen; s += quint64(logical)) {
-                    if (!timedRead(quint64(logical), s))
-                        bad << s;
+                    if (timedRead(quint64(logical), s))
+                        continue;
+                    bad << s;
+                    // A bad sector can take the drive seconds to give up on: counted straight away,
+                    // not at the next 64 MiB, or a bad patch shows red with "0 so far" for an hour.
+                    flush();
+                    emit progress(s, m_size, int(bad.size()));
                 }
             }
         }

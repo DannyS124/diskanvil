@@ -404,6 +404,7 @@ void badSectorTests()
         sh(QStringLiteral("dmsetup"), {QStringLiteral("message"), name, QStringLiteral("0"), QStringLiteral("addbadblock"), QLatin1String(block)});
     sh(QStringLiteral("dmsetup"), {QStringLiteral("message"), name, QStringLiteral("0"), QStringLiteral("enable")});
 
+    quint64 firstCounted = 0; // where the scan was when it first said "1 so far", plus one
     auto scan = [&](QVector<quint64> *bad) {
         const int fd = ::open(dev.toLocal8Bit().constData(), O_RDONLY | O_DIRECT | O_CLOEXEC);
         if (fd < 0)
@@ -411,6 +412,10 @@ void badSectorTests()
         bool completed = false;
         SurfaceScan s(fd, quint64(original.size()));
         QObject::connect(&s, &SurfaceScan::finished, [&](bool c, const QVector<quint64> &b, int) { completed = c; *bad = b; });
+        QObject::connect(&s, &SurfaceScan::progress, [&](quint64 done, quint64, int count) {
+            if (count > 0 && firstCounted == 0)
+                firstCounted = done + 1;
+        });
         s.run();
         return completed;
     };
@@ -419,6 +424,8 @@ void badSectorTests()
     const bool scanned = scan(&bad);
     report(scanned && bad == QVector<quint64>{1000 * 512ull, 50003 * 512ull}, QStringLiteral("scan finds exactly the two bad sectors"),
            QStringLiteral("%1 found").arg(bad.size()));
+    report(firstCounted > 0 && firstCounted - 1 < 50003 * 512ull, QStringLiteral("a bad sector is counted as soon as it's found"),
+           QStringLiteral("first counted at %1").arg(firstCounted - 1));
 
     RepairResult result;
     {
