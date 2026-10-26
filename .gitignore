@@ -12,3 +12,4 @@ rescue/out/
 # Crash dumps: they hold what was in memory (never committed)
 core
 core.[0-9]*
+tests/bench/__pycache__/

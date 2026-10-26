@@ -45,6 +45,7 @@ int main(int argc, char *argv[])
 
     lost::DeepScan deep(source);
     deep.skip(quick.knownRanges(), quick.knownStarts());
+    deep.setVolumes(quick.volumes());
     QObject::connect(&deep, &lost::DeepScan::found, [&](const QVector<lost::Found> &batch) {
         files += batch;
         byContents += int(batch.size());

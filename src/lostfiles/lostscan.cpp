@@ -230,6 +230,8 @@ void lost::DeepScan::run()
     quint64 skipUntil = 0;
     int foundCount = 0;
     const quint64 total = m_end - m_start;
+    QVector<LeftoverFolder> leftovers;
+    quint64 leftoverUntil = 0;
     qCInfo(lcOps).noquote() << "Find Lost Files: deep scan of" << total << "bytes";
 
     qsizetype range = 0; // the first known range that doesn't end before pos
@@ -257,6 +259,15 @@ void lost::DeepScan::run()
             if (at < skipUntil || m_skipStarts.contains(at) || known(at))
                 continue;
             const uchar *head = reinterpret_cast<const uchar *>(chunk.constData()) + off;
+            // A folder a quick format left behind: its files are listed at the end, by name.
+            if (at >= leftoverUntil && leftovers.size() < kLeftoverFolderLimit) {
+                LeftoverFolder folder;
+                if (leftoverFolderAt(*m_source, at, head, int(std::min(kSector, n - off)), &folder)) {
+                    leftoverUntil = at + quint64(folder.data.size());
+                    leftovers << std::move(folder);
+                    continue;
+                }
+            }
             QVector<int> candidates = filetypes::candidates(head, int(std::min(kSector, n - off)));
             // Nothing else starts here: plain text, which has no mark of its own, is looked for last.
             static const int text = filetypes::typeNumber(QStringLiteral("txt"));
@@ -304,6 +315,17 @@ void lost::DeepScan::run()
             sinceBatch.restart();
         }
         Q_EMIT progress(std::min(pos, m_end) - m_start, total);
+    }
+    // The files in folders from before a format, but not the ones a file system lists now.
+    if (!m_cancel && !leftovers.isEmpty()) {
+        for (Found &f : filesInLeftoverFolders(*m_source, leftovers, m_volumes)) {
+            if (m_cancel)
+                break;
+            if (!f.extents.isEmpty() && m_skipStarts.contains(f.extents.first().start))
+                continue;
+            checkContents(m_source, f, f.size <= kFullCheckLimit);
+            batch << std::move(f);
+        }
     }
     if (!batch.isEmpty())
         Q_EMIT found(batch);

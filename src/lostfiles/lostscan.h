@@ -92,6 +92,10 @@ struct Volume {
     Extent where;
     int files = 0;
     int deleted = 0;
+    // FAT and exFAT: how big a cluster is and where cluster 2 is on the source (to read the
+    // folders a quick format left behind).
+    quint64 clusterSize = 0;
+    quint64 heap = 0;
     // NTFS: Windows' earlier copies of it (shadow copies), and what its records hold now.
     QVector<vss::Copy> copies;
     QString copiesProblem;
@@ -171,9 +175,13 @@ public:
     // What the quick scan listed already: nothing starting at one of `starts` is listed again,
     // and nothing inside `ranges` is looked at (files that are there for sure).
     void skip(QVector<Extent> ranges, QVector<quint64> starts);
+    // The file systems the quick scan read: their cluster layout, for the folders a quick format
+    // left behind (they're listed at the end, with their files' names).
+    void setVolumes(QVector<Volume> volumes) { m_volumes = std::move(volumes); }
 
     static constexpr int kPerTypeLimit = 250000; // past that, more of one type isn't listed
     static constexpr int kTotalLimit = 1000000;  // and past this, nothing more at all
+    static constexpr int kLeftoverFolderLimit = 200000;
 
 public Q_SLOTS:
     void run();
@@ -189,6 +197,7 @@ private:
     std::atomic<bool> m_cancel{false};
     QVector<Extent> m_skipRanges; // sorted, not overlapping
     QSet<quint64> m_skipStarts;
+    QVector<Volume> m_volumes;
 };
 
 // Finds the files that are the same as another found one, byte for byte (the same photo found

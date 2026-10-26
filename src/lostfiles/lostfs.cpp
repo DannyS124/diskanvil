@@ -3,6 +3,7 @@
 
 #include "lostfs.h"
 
+#include "applog.h"
 #include "filetypes.h"
 #include "format.h"
 #include "lostraw.h"
@@ -703,6 +704,8 @@ bool walkFat(Source &source, const Extent &where, const Batch &out, const std::a
         volume->type = QStringLiteral("vfat");
         volume->label = top;
         volume->where = where;
+        volume->clusterSize = fat.clusterSize;
+        volume->heap = where.start + fat.heap;
     }
 
     QVector<std::pair<Folder, QVector<Entry>>> todo = {{Folder{top, fat.rootCluster, 0, false, false, 0}, rootEntries}};
@@ -804,6 +807,8 @@ bool walkExfat(Source &source, const Extent &where, const Batch &out, const std:
         volume->type = QStringLiteral("exfat");
         volume->label = top;
         volume->where = where;
+        volume->clusterSize = fs.clusterSize;
+        volume->heap = where.start + fs.heap;
     }
     QVector<std::pair<Folder, QVector<Entry>>> todo = {{Folder{top, fs.rootCluster, 0, false, false, 0}, rootEntries}};
     while (!todo.isEmpty() && !walker.stop()) {
@@ -836,6 +841,234 @@ bool walkExfat(Source &source, const Extent &where, const Batch &out, const std:
 }
 
 } // namespace
+
+// --- Folders a quick format left behind
+
+namespace {
+
+constexpr quint64 kMaxLeftoverFolderBytes = 1024 * 1024;
+
+// One cluster layout an old file system may have had: where cluster 2 was and a cluster's size.
+struct Layout {
+    quint64 heap = 0;
+    quint64 clusterSize = 0;
+    bool operator==(const Layout &o) const { return heap == o.heap && clusterSize == o.clusterSize; }
+};
+
+// Readers that take any cluster number: the layout is worked out afterwards.
+Fat looseFat(Source &source)
+{
+    Fat fat(source, {0, source.size()});
+    fat.bits = 32;
+    fat.count = 0x0FFFFFF0;
+    return fat;
+}
+
+Exfat looseExfat(Source &source)
+{
+    Exfat fs(source, {0, source.size()});
+    fs.count = 0xFFFFFFF0;
+    return fs;
+}
+
+// How many of the files in `entries` start where `layout` puts them the way their names say.
+int startsThatFit(Source &source, const QVector<Entry> &entries, const Layout &layout)
+{
+    int fit = 0, tried = 0;
+    for (const Entry &e : entries) {
+        const int type = filetypes::typeForName(e.name);
+        if (e.isDir || e.size == 0 || e.first < 2 || type < 0 || !filetypes::alwaysRecognised(type))
+            continue;
+        if (++tried > 400)
+            break;
+        const quint64 at = layout.heap + quint64(e.first - 2) * layout.clusterSize;
+        if (at + 512 > source.size())
+            continue;
+        const QByteArray head = readBytes(source, at, 512);
+        if (head.size() >= 32 && filetypes::candidates(bytes(head), int(head.size())).contains(filetypes::startType(type)))
+            ++fit;
+    }
+    return fit;
+}
+
+} // namespace
+
+bool leftoverFolderAt(Source &source, quint64 at, const uchar *s, int len, LeftoverFolder *folder)
+{
+    if (len < 96)
+        return false;
+    const bool fat = std::memcmp(s, ".          ", 11) == 0 && (s[11] & 0x10) && std::memcmp(s + 32, "..         ", 11) == 0 && (s[43] & 0x10);
+    // exFAT: a file's set of entries (file, stream, name) with a checksum that adds up.
+    bool exfat = false;
+    if (!fat && (s[0] == 0x85 || s[0] == 0x05) && s[1] >= 2 && s[1] <= 18 && (s[32] & 0x7F) == 0x40 && (s[64] & 0x7F) == 0x41) {
+        Exfat loose = looseExfat(source);
+        const int setBytes = (s[1] + 1) * 32;
+        exfat = setBytes <= len && !loose.parse(QByteArray(reinterpret_cast<const char *>(s), setBytes), false, false).isEmpty();
+    }
+    if (!fat && !exfat)
+        return false;
+    folder->at = at;
+    folder->exfat = exfat;
+    if (fat) {
+        folder->self = quint32(le16(s + 20)) << 16 | le16(s + 26);
+        folder->parent = quint32(le16(s + 52)) << 16 | le16(s + 58);
+        if (folder->self < 2)
+            return false;
+    }
+    // Its entries, up to the end mark (an entry starting with a zero byte).
+    QByteArray data;
+    for (quint64 pos = at; pos < at + kMaxLeftoverFolderBytes && pos < source.size(); pos += 4096) {
+        const QByteArray piece = readBytes(source, pos, 4096);
+        if (piece.isEmpty())
+            break;
+        qsizetype end = -1;
+        for (qsizetype k = 0; k + 32 <= piece.size(); k += 32) {
+            if (piece[k] == 0) {
+                end = k;
+                break;
+            }
+        }
+        data += end < 0 ? piece : piece.left(end);
+        if (end >= 0)
+            break;
+    }
+    folder->data = data;
+    return data.size() >= 96;
+}
+
+QVector<Found> filesInLeftoverFolders(Source &source, const QVector<LeftoverFolder> &folders, const QVector<Volume> &volumes)
+{
+    QVector<Found> out;
+    for (const bool exfat : {false, true}) {
+        Fat fat = looseFat(source);
+        Exfat fs = looseExfat(source);
+        QVector<const LeftoverFolder *> mine;
+        QVector<QVector<Entry>> listed;
+        QVector<Entry> all;
+        for (const LeftoverFolder &f : folders) {
+            if (f.exfat != exfat)
+                continue;
+            mine << &f;
+            listed << (exfat ? fs.parse(f.data, true, false) : fat.parse(f.data, true));
+            all += listed.last();
+        }
+        if (mine.isEmpty())
+            continue;
+
+        // The layouts it may have had: the file systems' now, and on FAT, what pairs of folders
+        // say from their own cluster numbers.
+        QVector<Layout> layouts;
+        QString top = tr("Folders from before a format");
+        for (const Volume &v : volumes) {
+            if (v.clusterSize > 0 && (v.type == QLatin1String("exfat")) == exfat) {
+                layouts << Layout{v.heap, v.clusterSize};
+                top = tr("%1, before it was formatted").arg(v.label);
+            }
+        }
+        if (!exfat) {
+            for (qsizetype i = 0; i < mine.size() && i < 64; ++i) {
+                for (qsizetype j = i + 1; j < mine.size() && j < 64; ++j) {
+                    const LeftoverFolder &a = *mine[i], &b = *mine[j];
+                    if (a.self == b.self || (a.at > b.at) != (a.self > b.self))
+                        continue;
+                    const quint64 bytes = a.at > b.at ? a.at - b.at : b.at - a.at;
+                    const quint64 clusters = a.self > b.self ? a.self - b.self : b.self - a.self;
+                    if (bytes % clusters)
+                        continue;
+                    const quint64 size = bytes / clusters;
+                    if (size < 512 || size > 2 * 1024 * 1024 || (size & (size - 1)) || a.at < quint64(a.self - 2) * size)
+                        continue;
+                    const Layout l{a.at - quint64(a.self - 2) * size, size};
+                    if (!layouts.contains(l))
+                        layouts << l;
+                }
+            }
+        }
+        Layout best;
+        int bestFit = 0;
+        for (const Layout &l : std::as_const(layouts)) {
+            const int fit = startsThatFit(source, all, l);
+            if (fit > bestFit) {
+                best = l;
+                bestFit = fit;
+            }
+        }
+        if (bestFit == 0)
+            continue;
+        qCInfo(lcOps).noquote() << "Find Lost Files:" << mine.size() << (exfat ? "exFAT" : "FAT") << "folders from before a format, clusters of"
+                                << best.clusterSize << "from" << best.heap << "(" << bestFit << "files start where they should)";
+
+        // Each folder's own cluster, and what each one called its folders.
+        const auto clusterAt = [&best](quint64 at) -> quint32 {
+            if (at < best.heap || (at - best.heap) % best.clusterSize)
+                return 0;
+            return quint32((at - best.heap) / best.clusterSize + 2);
+        };
+        QHash<quint32, QString> nameOf;
+        QHash<quint32, quint32> parentOf;
+        QHash<quint32, qsizetype> folderOf;
+        for (qsizetype i = 0; i < mine.size(); ++i) {
+            const quint32 self = exfat ? clusterAt(mine[i]->at) : mine[i]->self;
+            if (self == 0)
+                continue;
+            folderOf.insert(self, i);
+            if (!exfat && mine[i]->parent >= 2)
+                parentOf.insert(self, mine[i]->parent);
+            for (const Entry &e : std::as_const(listed[i])) {
+                if (e.isDir && e.first >= 2) {
+                    nameOf.insert(e.first, lost::cleanName(e.name));
+                    parentOf.insert(e.first, self);
+                }
+            }
+        }
+        // A folder whose name was in a folder that's gone (the top one, which a format writes over)
+        // gets a number, in the order they're on the drive.
+        QHash<quint32, int> unnamed;
+        const auto pathOf = [&](quint32 self) {
+            QStringList parts;
+            QSet<quint32> seen;
+            for (quint32 c = self; c >= 2 && !seen.contains(c) && parts.size() < kMaxDepth; c = parentOf.value(c)) {
+                seen.insert(c);
+                if (!nameOf.contains(c) && !unnamed.contains(c))
+                    unnamed.insert(c, int(unnamed.size()) + 1);
+                parts.prepend(nameOf.contains(c) ? nameOf.value(c) : tr("Unnamed folder %1").arg(unnamed.value(c)));
+            }
+            return top + QLatin1Char('/') + parts.join(QLatin1Char('/'));
+        };
+
+        for (qsizetype i = 0; i < mine.size(); ++i) {
+            const quint32 self = exfat ? clusterAt(mine[i]->at) : mine[i]->self;
+            const QString folder = self ? pathOf(self) : top;
+            for (const Entry &e : std::as_const(listed[i])) {
+                if (e.isDir)
+                    continue;
+                Found f;
+                f.name = e.name;
+                f.folder = folder;
+                f.origin = Origin::FileSystem;
+                f.deleted = true;
+                f.nameGuessed = e.nameGuessed;
+                f.size = e.size;
+                f.modified = e.modified;
+                f.created = e.created;
+                f.accessed = e.accessed;
+                f.accessedDayOnly = !exfat;
+                f.type = filetypes::typeForName(e.name);
+                const quint64 start = best.heap + quint64(std::max<quint32>(e.first, 2) - 2) * best.clusterSize;
+                if (e.size > 0 && (e.first < 2 || start >= source.size()))
+                    continue;
+                if (e.size > 0)
+                    f.extents = {{start, std::min(e.size, source.size() - start)}};
+                if (f.extents.value(0).length < e.size)
+                    f.condition = Condition::MaybeDamaged;
+                f.piecesGuessed = !e.contiguous && e.size > best.clusterSize;
+                f.note = tr("Found in a folder left from before the drive was formatted.");
+                out << f;
+            }
+        }
+    }
+    return out;
+}
 
 QVector<Extent> partitionsOf(Source &source)
 {

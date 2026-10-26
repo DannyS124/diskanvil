@@ -72,6 +72,25 @@ struct JournalEntry {
 };
 QVector<JournalEntry> readJournal(const QByteArray &bytes);
 
+// Folders a quick format left behind. Making a FAT or exFAT file system again writes a new top
+// folder and a new, empty table, but the old folders stay where they were until something is
+// written there, and they still list their files' names, sizes and first clusters.
+struct LeftoverFolder {
+    quint64 at = 0;  // where it is on the source
+    QByteArray data; // its entries
+    bool exfat = false;
+    quint32 self = 0, parent = 0; // FAT: its own cluster and its parent's, from "." and ".."
+};
+// Whether the sector at `at` starts one (the rest is read from the source). Only folders below
+// the top: the top folder is the one a format writes over.
+bool leftoverFolderAt(Source &source, quint64 at, const uchar *sector, int len, LeftoverFolder *folder);
+// The files they list, with their names and folders, and where their bytes were. Where cluster
+// 2 was and how big a cluster was come from `volumes` (a quick format usually keeps both) or, on
+// FAT, from where the folders are themselves; whichever puts files' starts where their names say
+// wins. Their pieces are taken to run on from the first cluster unless exFAT said so: the table
+// that kept them is gone.
+QVector<Found> filesInLeftoverFolders(Source &source, const QVector<LeftoverFolder> &folders, const QVector<Volume> &volumes);
+
 // How whole a deleted file looks from what's in it: the start against what its name says it
 // is, and when `full`, the whole structure (the deep scan's checks). Sets condition and checked.
 void checkContents(const std::shared_ptr<Source> &source, Found &file, bool full);

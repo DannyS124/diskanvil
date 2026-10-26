@@ -51,6 +51,7 @@
 #include <QImageReader>
 #include <QPainter>
 #include <QProcess>
+#include <QStandardPaths>
 #include <QRandomGenerator>
 #include <QTemporaryDir>
 #include <QTimeZone>
@@ -897,6 +898,64 @@ QVector<lost::Found> quickScan(const std::shared_ptr<lost::Source> &source, QVec
     if (volumes)
         *volumes = scan.volumes();
     return all;
+}
+
+// The FAT32 and exFAT test images quick-formatted (mkfs over them, as a format does): the new
+// top folder knows nothing, but Pictures/2024 is still on the drive, and its photo comes back
+// from it with its name, in its folder, whole.
+void formattedFolders(const QString &dir)
+{
+    const QString data = QStringLiteral(SOURCE_DIR "/tests/data/lostfs/");
+    const QHash<QString, QStringList> mkfs = {
+        {QStringLiteral("fat32"), {QStringLiteral("mkfs.fat"), QStringLiteral("-F"), QStringLiteral("32"), QStringLiteral("-n"), QStringLiteral("AFTER")}},
+        {QStringLiteral("exfat"), {QStringLiteral("mkfs.exfat"), QStringLiteral("-L"), QStringLiteral("AFTER")}}};
+    const QHash<QString, QByteArray> sha = {
+        {QStringLiteral("fat32"), QByteArrayLiteral("c444bf89ff27949491b6598c7819bc1c0f09fea870f06c841eec7cdff6cd99dc")}, {QStringLiteral("exfat"), QByteArrayLiteral("c444bf89ff27949491b6598c7819bc1c0f09fea870f06c841eec7cdff6cd99dc")}};
+    for (const QString &name : {QStringLiteral("fat32"), QStringLiteral("exfat")}) {
+        if (QStandardPaths::findExecutable(mkfs[name].first()).isEmpty()) {
+            report(true, QStringLiteral("%1 formatted: skipped, %2 isn't here").arg(name, mkfs[name].first()));
+            continue;
+        }
+        const QString path = dir + QStringLiteral("/formatted-") + name + QStringLiteral(".img");
+        QFile out(path);
+        if (!out.open(QIODevice::WriteOnly) || out.write(unpackImage(data + name + QStringLiteral(".img.zst"))) <= 0)
+            return report(false, QStringLiteral("%1 formatted: the test image unpacks").arg(name));
+        out.close();
+        QProcess p;
+        p.start(mkfs[name].first(), mkfs[name].mid(1) << path);
+        report(p.waitForFinished(30000) && p.exitCode() == 0, QStringLiteral("%1 formatted: quick-formatted").arg(name));
+        QFile in(path);
+        in.open(QIODevice::ReadOnly);
+        auto source = lost::Source::fromMemory(in.readAll());
+        QVector<lost::Volume> volumes;
+        const QVector<lost::Found> listed = quickScan(source, &volumes);
+        lost::DeepScan deep(source);
+        deep.setVolumes(volumes);
+        QVector<lost::Found> found;
+        QObject::connect(&deep, &lost::DeepScan::found, [&found](const QVector<lost::Found> &batch) { found += batch; });
+        deep.run();
+        const lost::Found *photo = nullptr;
+        for (const lost::Found &f : std::as_const(found)) {
+            if (f.name == QLatin1String("pic2.jpg") && f.folder.endsWith(QLatin1String("before it was formatted/Unnamed folder 1/2024")))
+                photo = &f;
+        }
+        QByteArray hash;
+        if (photo) {
+            lost::FileReader reader(source, *photo);
+            QByteArray bytes(qsizetype(reader.size()), Qt::Uninitialized);
+            reader.read(0, bytes.data(), bytes.size());
+            hash = QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex();
+        }
+        report(listed.isEmpty() && photo && hash == sha[name],
+               QStringLiteral("%1 formatted: Pictures/2024/pic2.jpg comes back from its old folder, by name and whole").arg(name),
+               [&] {
+                   QStringList all;
+                   for (const lost::Found &f : std::as_const(found))
+                       if (f.origin == lost::Origin::FileSystem)
+                           all << f.folder + QLatin1Char('/') + f.name;
+                   return all.join(QStringLiteral(", "));
+               }());
+    }
 }
 
 // FAT12, FAT16, FAT32 and exFAT images that Linux put files on and deleted some of them from
@@ -4199,6 +4258,7 @@ void lostFilesTests()
     names();
     fuzz();
     fileSystems(dir.path());
+    formattedFolders(dir.path());
     fileSystemFuzz();
     shadowCopies();
     shadowFileByRecord();

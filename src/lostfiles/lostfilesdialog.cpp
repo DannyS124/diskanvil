@@ -1505,6 +1505,7 @@ void LostFilesDialog::startDeepScan(const QVector<lost::Extent> &knownRanges, co
                                            .arg(read.join(QStringLiteral(", ")), m_title));
     m_scan = new lost::DeepScan(m_source);
     m_scan->skip(knownRanges, knownStarts);
+    m_scan->setVolumes(m_volumes);
     connect(m_scan, &lost::DeepScan::found, this, [this](const QVector<lost::Found> &files) {
         m_model->append(files);
         addFolders(files);
