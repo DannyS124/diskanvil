@@ -406,6 +406,10 @@ if(DISKANVIL_SELFTEST)
     diskanvil_add_data(diskanvil-uitest)
     target_link_libraries(diskanvil-uitest PRIVATE diskanvil-ui OpenSSL::Crypto)
     target_compile_definitions(diskanvil-uitest PRIVATE SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+
+    # Find Lost Files without its window, for tests/bench (the recovery benchmark).
+    qt_add_executable(diskanvil-recoverbench tests/bench/recoverbench.cpp)
+    target_link_libraries(diskanvil-recoverbench PRIVATE diskanvil-core)
 endif()
 
 # English plural forms ("1 sector", "2 sectors"); other languages get their own
