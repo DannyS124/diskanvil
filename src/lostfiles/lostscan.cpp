@@ -431,6 +431,37 @@ void lost::DeepScan::run()
     Q_EMIT finished(m_cancel);
 }
 
+lost::Confidence lost::confidenceOf(const Found &file)
+{
+    if (file.nameOnly)
+        return Confidence::None;
+    switch (file.condition) {
+    case Condition::Good:
+        return Confidence::LikelyIntact;
+    case Condition::MaybeDamaged:
+        return Confidence::Partial;
+    case Condition::Overwritten:
+    case Condition::Unreadable:
+        break;
+    }
+    return Confidence::Damaged;
+}
+
+QString lost::confidenceName(Confidence confidence)
+{
+    switch (confidence) {
+    case Confidence::LikelyIntact:
+        return tr("Likely intact");
+    case Confidence::Partial:
+        return tr("Partial");
+    case Confidence::Damaged:
+        return tr("Damaged");
+    case Confidence::None:
+        break;
+    }
+    return tr("Name only");
+}
+
 QVector<int> lost::Merger::add(QVector<Found> &list, const QVector<Found> &files)
 {
     QVector<int> replaced;

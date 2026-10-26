@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.5.3
+- Find Lost Files shows how whole each file looks with a dot next to it (green likely intact, amber partial, red damaged), in its tooltip and at the top of its details
 - Find Lost Files lists each file once: one found by what's in it and then again in a folder or file record a format left takes the found name and folder in the same row, and a file the file system only has the name of takes the contents of the file found with exactly its size and kind
 - Find Lost Files reads ext4's journal: it keeps older copies of file records from before a file was deleted (with its size and where its pieces are) and of folder blocks (with names), so deleted ext4 files come back by name and whole, in the folder they were in. Linux now wipes a deleted file's folder entry, so the journal is where the name still is
 - Find Lost Files reads more of NTFS: after a quick format, the old file records past the new MFT give files back with their names, folders, dates and contents (small files are kept inside the record); and the names, sizes and dates of deleted files whose records went to other files come from what's left in folders' indexes and in NTFS's log file

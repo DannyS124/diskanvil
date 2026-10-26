@@ -159,6 +159,7 @@ QString conditionWords(const lost::Found &f)
 constexpr int kNameRole = Qt::UserRole + 1;  // the file's own name, without what the list adds to it
 constexpr int kSavedRole = Qt::UserRole + 2; // where it was saved to, once it has been
 constexpr int kMarkRole = Qt::UserRole + 3;  // "copy" or "broken": marked on its picture
+constexpr int kConfidenceRole = Qt::UserRole + 4; // lost::Confidence: a coloured dot by it
 
 class GridDelegate : public QStyledItemDelegate
 {
@@ -197,6 +198,21 @@ public:
         p->restore();
     }
 
+    // How whole it probably is: green likely intact, amber partial, red damaged.
+    static void drawConfidence(QPainter *p, const QPointF &centre, int confidence)
+    {
+        if (confidence == int(lost::Confidence::None))
+            return;
+        p->save();
+        p->setRenderHint(QPainter::Antialiasing);
+        p->setPen(QPen(QColor(0, 0, 0, 90), 1));
+        p->setBrush(confidence == int(lost::Confidence::LikelyIntact) ? QColor(0x2b, 0xc0, 0x6a)
+                    : confidence == int(lost::Confidence::Partial)   ? QColor(0xf0, 0xa3, 0x00)
+                                                                       : QColor(0xd0, 0x1f, 0x3c));
+        p->drawEllipse(centre, 4.5, 4.5);
+        p->restore();
+    }
+
     // A green tick on a file that has been saved, so it's clear what's done.
     static void drawSaved(QPainter *p, const QRectF &badge)
     {
@@ -216,6 +232,9 @@ public:
         const bool saved = !index.data(kSavedRole).toString().isEmpty();
         if (!grid(option)) {
             QStyledItemDelegate::paint(p, option, index);
+            drawConfidence(p, QPointF(option.rect.right() - (saved ? 52 : 32) - (index.data(kMarkRole).toString().isEmpty() ? -20 : 0),
+                                      option.rect.center().y()),
+                           index.data(kConfidenceRole).toInt());
             if (saved)
                 drawSaved(p, QRectF(option.rect.right() - 22, option.rect.center().y() - 8, 16, 16));
             drawMark(p, QRectF(option.rect.right() - (saved ? 42 : 22), option.rect.center().y() - 8, 16, 16), index.data(kMarkRole).toString());
@@ -296,6 +315,7 @@ public:
         if (saved)
             drawSaved(p, QRectF(opt.rect.right() - 22, opt.rect.top() + 5, 16, 16));
         drawMark(p, QRectF(opt.rect.right() - (saved ? 42 : 22), opt.rect.top() + 5, 16, 16), index.data(kMarkRole).toString());
+        drawConfidence(p, QPointF(opt.rect.left() + 11, opt.rect.bottom() - textHeight - 6), index.data(kConfidenceRole).toInt());
         p->restore();
     }
 
@@ -531,7 +551,7 @@ void LostFilesModel::setCopies(const QHash<int, int> &copyOf)
     if (m_filter.hideCopies)
         setFilter(m_filter);
     else if (!m_shown.isEmpty())
-        Q_EMIT dataChanged(index(0), index(int(m_shown.size()) - 1), {Qt::ToolTipRole, kMarkRole});
+        Q_EMIT dataChanged(index(0), index(int(m_shown.size()) - 1), {Qt::ToolTipRole, kMarkRole, kConfidenceRole});
 }
 
 void LostFilesModel::setOpens(int index, bool opens)
@@ -542,7 +562,7 @@ void LostFilesModel::setOpens(int index, bool opens)
         return;
     }
     if (const int row = rowOf(index); row >= 0)
-        Q_EMIT dataChanged(this->index(row), this->index(row), {Qt::ToolTipRole, kMarkRole});
+        Q_EMIT dataChanged(this->index(row), this->index(row), {Qt::ToolTipRole, kMarkRole, kConfidenceRole});
 }
 
 int LostFilesModel::brokenCount() const
@@ -646,6 +666,8 @@ QVariant LostFilesModel::data(const QModelIndex &index, int role) const
     case Qt::ToolTipRole: {
         QString tip = QStringLiteral("%1\n%2, %3").arg(f.name, f.type >= 0 ? filetypes::types()[f.type].name : tr("File"),
                                                        f.nameOnly ? tr("only the name is left") : formatSize(f.size));
+        if (!f.nameOnly)
+            tip += QLatin1Char('\n') + lost::confidenceName(!m_opens.value(i, true) ? lost::Confidence::Damaged : lost::confidenceOf(f));
         if (!deleted.isEmpty())
             tip += QLatin1Char('\n') + tr("Deleted %1").arg(deleted);
         if (m_saved.contains(i))
@@ -658,6 +680,8 @@ QVariant LostFilesModel::data(const QModelIndex &index, int role) const
     }
     case kMarkRole:
         return !m_opens.value(i, true) ? QStringLiteral("broken") : m_copyOf.contains(i) ? QStringLiteral("copy") : QString();
+    case kConfidenceRole:
+        return int(!m_opens.value(i, true) ? lost::Confidence::Damaged : lost::confidenceOf(f));
     case Qt::UserRole:
         return i;
     case kNameRole:
@@ -2088,6 +2112,9 @@ void LostFilesDialog::showPreview()
     const quint64 where = f.extents.isEmpty() ? 0 : f.extents.first().start;
     QString html = QStringLiteral("<b>%1</b><br>%2, %3<br>")
                        .arg(f.name.toHtmlEscaped(), type.name.toHtmlEscaped(), f.nameOnly ? tr("size not known") : formatSize(f.size));
+    if (!f.nameOnly)
+        html += QStringLiteral("<span style=\"color:%1\"><b>%2</b></span><br>")
+                    .arg(colour.name(), lost::confidenceName(m_model->opens(i) ? lost::confidenceOf(f) : lost::Confidence::Damaged).toHtmlEscaped());
     if (f.origin == lost::Origin::Contents) {
         static const QRegularExpression madeUp(QStringLiteral("^\\S+ \\d{6}\\.[^.]+$"));
         html += (madeUp.match(f.name).hasMatch()

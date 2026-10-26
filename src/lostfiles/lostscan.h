@@ -290,6 +290,13 @@ private:
     std::atomic<bool> m_cancel{false};
 };
 
+// How whole a found file probably is, at a glance: likely intact (it checks out, or a file
+// system lists it whole), partial (it breaks off or doesn't add up: parts may be missing), or
+// damaged (written over since, or on spots the drive couldn't read). None for a name only.
+enum class Confidence : quint8 { None, LikelyIntact, Partial, Damaged };
+Confidence confidenceOf(const Found &file);
+QString confidenceName(Confidence confidence);
+
 // Keeps a list of found files without doubles. The same file can be found twice: by its
 // contents and later in a folder or file record a format left (then the named one takes its
 // place), or as a name only and then by its contents (the deep scan names it from the name
