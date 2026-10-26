@@ -559,16 +559,20 @@ void UDisks::wipe(const Disk &disk)
         return;
     const QString path = disk.blockPath;
     const erasure::Record record = erasureOf(disk, tr("Every sector written with zeros (Wipe Disk)"), true);
-    unmountThen(disk.volumes, failure, [this, path, name, failure, record] {
-        call(path, kBlock, QStringLiteral("Format"),
-             {QStringLiteral("empty"), options({{QStringLiteral("erase"), QStringLiteral("zero")}, {QStringLiteral("tear-down"), true}})},
-             [this, name, record](const QDBusMessage &) {
-                 erasure::Record done = record;
-                 done.finished = QDateTime::currentDateTime();
-                 emit erased(done);
-                 return tr("%1 has been wiped").arg(name);
-             },
-             failure);
+    const QString device = disk.device;
+    // Only UDisks' own success means every sector was written: when it gives up waiting after
+    // its first wipe, it hasn't started the zeros, so there's no direct way round that here.
+    unmountThen(disk.volumes, failure, [this, path, device, name, failure, record] {
+        formatBlock(path, device,
+                    {QStringLiteral("empty"), options({{QStringLiteral("erase"), QStringLiteral("zero")}, {QStringLiteral("tear-down"), true}})},
+                    failure,
+                    [this, name, record](const QDBusMessage &) {
+                        erasure::Record done = record;
+                        done.finished = QDateTime::currentDateTime();
+                        emit erased(done);
+                        emit operationFinished(true, tr("%1 has been wiped").arg(name));
+                    },
+                    {}, {});
     }, true);
 }
 

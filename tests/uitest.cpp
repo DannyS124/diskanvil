@@ -5677,6 +5677,77 @@ bool markNtfsDirty(const QString &image)
     }
 
 
+// New Partition Table and Wipe Disk when UDisks gives up waiting after its first wipe ("Error
+// synchronizing after initial wipe", seen on eMMC): tried again; as root a table is then written
+// with sfdisk; a wipe that never ran is never called done, and gets no certificate.
+void udisksSyncTimeout()
+{
+    qputenv("DISKANVIL_SYNC_WAIT", "0,0");
+    QTemporaryDir dir;
+    const QString image = dir.filePath(QStringLiteral("emmc.img"));
+    sh(QStringLiteral("truncate"), {QStringLiteral("-s"), QStringLiteral("64M"), image});
+    const QString loopPath = userLoop(image);
+    if (loopPath.isEmpty())
+        return report(false, QStringLiteral("sync timeout: a loop device holds the test drive"));
+    UDisks udisks;
+    udisks.setInteractive(false);
+    const Disk *disk = nullptr;
+    waitUntil([&] {
+        udisks.refresh();
+        disk = udisks.diskByPath(loopPath);
+        return disk != nullptr;
+    }, 15000);
+    if (!disk)
+        return report(false, QStringLiteral("sync timeout: the test drive shows up"));
+    QString said;
+    bool ok = false, done = false, certificate = false;
+    QObject::connect(&udisks, &UDisks::operationFinished, [&](bool good, const QString &message) {
+        ok = good;
+        said = message;
+        done = true;
+    });
+    QObject::connect(&udisks, &UDisks::erased, [&] { certificate = true; });
+    const auto tableIs = [&](const QString &type) {
+        waitUntil([&] {
+            udisks.refresh();
+            const Disk *d = udisks.diskByPath(loopPath);
+            return d && d->tableType == type;
+        }, 10000);
+        const Disk *d = udisks.diskByPath(loopPath);
+        return d && d->tableType == type;
+    };
+
+    // Times out once, then works.
+    udisks.failFormatsForTest(1);
+    udisks.createPartitionTable(*disk, QStringLiteral("gpt"));
+    waitUntil([&] { return done; }, 60000);
+    report(ok && said.contains(QLatin1String("empty GPT partition table")) && tableIs(QStringLiteral("gpt")),
+           QStringLiteral("sync timeout: tried again, and the GPT is really there"), said);
+
+    // Times out every time: as root, written with sfdisk and checked; as a user that would ask
+    // for the admin password, so it's only tried as root.
+    if (::geteuid() == 0) {
+        done = false;
+        disk = udisks.diskByPath(loopPath);
+        udisks.failFormatsForTest(3);
+        udisks.createPartitionTable(*disk, QStringLiteral("dos"));
+        waitUntil([&] { return done; }, 60000);
+        report(ok && said.contains(QLatin1String("written directly")) && tableIs(QStringLiteral("dos")),
+               QStringLiteral("sync timeout every time: the table is written directly, and checked"), said);
+    }
+
+    // Wipe Disk timing out every time: a failure, and no certificate.
+    done = false;
+    disk = udisks.diskByPath(loopPath);
+    udisks.failFormatsForTest(3);
+    udisks.wipe(*disk);
+    waitUntil([&] { return done; }, 60000);
+    report(done && !ok && said.contains(QLatin1String("Error synchronizing after initial wipe")) && !certificate,
+           QStringLiteral("sync timeout every time on a wipe: said it failed, no erasure certificate"), said.left(160));
+    qunsetenv("DISKANVIL_SYNC_WAIT");
+    cleanUpLoop(udisks, loopPath);
+}
+
 // Mount on an NTFS drive Windows didn't shut down fully: Linux won't open it for changes, so it's
 // opened read-only and the message says why, instead of "wrong fs type, bad option".
 void mountDirtyNtfs()
@@ -7715,7 +7786,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"testbootdata", testBootDataDrive}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"lookcloser", lookCloserWindow}, {"files", filesWindow}, {"writeprotected", writeProtectedWindow}, {"hitfiles", hitFilesWindow}, {"whycrash", whyCrashWindow}, {"winstart", winStartWindow}, {"stillok", stillOkWindow}, {"burnin", burnInWindow}, {"writespeed", writeSpeedWindow}, {"opal", opalWindow}, {"mountntfs", mountDirtyNtfs}, {"hardware", hardwareWindow}, {"holders", holdersWindow}, {"enhance", enhanceWindow}, {"film", filmTools}, {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"testbootdata", testBootDataDrive}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"lookcloser", lookCloserWindow}, {"files", filesWindow}, {"writeprotected", writeProtectedWindow}, {"hitfiles", hitFilesWindow}, {"whycrash", whyCrashWindow}, {"winstart", winStartWindow}, {"stillok", stillOkWindow}, {"burnin", burnInWindow}, {"writespeed", writeSpeedWindow}, {"opal", opalWindow}, {"mountntfs", mountDirtyNtfs}, {"synctimeout", udisksSyncTimeout}, {"hardware", hardwareWindow}, {"holders", holdersWindow}, {"enhance", enhanceWindow}, {"film", filmTools}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},

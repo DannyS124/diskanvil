@@ -361,6 +361,9 @@ public:
     bool wasStopped() const { return m_stopped; } // during operationFinished
     // For tests: jobs to report next to the real ones, from the next refresh on.
     void setJobsForTest(const QVector<Job> &jobs) { m_testJobs = jobs; }
+    // For tests: the next `count` Format calls fail the way UDisks does when it gives up waiting
+    // after its first wipe ("Error synchronizing after initial wipe"), without asking UDisks.
+    void failFormatsForTest(int count) { m_failFormatsForTest = count; }
     QVector<SmartAttribute> smartAttributes(const Disk &disk); // blocking
     // Raw access to a whole disk or one partition. Everything except the read-only
     // benchmark mode unmounts first; writable modes refuse system disks. polkit asks
@@ -409,7 +412,20 @@ private:
     // `failed` if there is one.
     void callThen(const QString &path, const QString &interface, const QString &method, const QVariantList &args,
                   const QString &failure, const std::function<void(const QDBusMessage &reply)> &next,
-                  const std::function<void()> &failed = {}, const Explain &explain = {});
+                  const std::function<void()> &failed = {}, const Explain &explain = {},
+                  const std::function<bool(const QString &error)> &takeOver = {});
+    // Block.Format, tried again when UDisks gives up waiting for the kernel after its first wipe
+    // (eMMC does this): at that point it has only cleared the old signatures. When the last try
+    // fails that way too, `lastResort` gets the error instead of it being reported.
+    void formatBlock(const QString &path, const QString &device, const QVariantList &args, const QString &failure,
+                     const std::function<void(const QDBusMessage &reply)> &next, const std::function<void()> &failed,
+                     const std::function<void(const QString &error)> &lastResort, int attempt = 0);
+    void settleThen(const QString &device, int seconds, const std::function<void()> &then);
+    // A new partition table written with sfdisk, as root, when UDisks couldn't.
+    void tableDirectly(const QString &path, const QString &device, const QString &tableType, const QString &failure,
+                       const QString &udisksError);
+    // Done only once the drive shows the table: refreshes for a few seconds until it does.
+    void confirmTable(const QString &path, const QString &tableType, const QString &failure, const QString &done, int tries = 0);
     QVariantMap options(QVariantMap extra = {}) const;
     Health readHealth(const QString &drivePath, const QVariantMap &drive, const QVariantMap &ata, const QVariantMap &nvme);
 #else
@@ -449,6 +465,7 @@ private:
     bool m_lvmAsked = false; // asked UDisks to load its lvm2 module
 #endif
     QVector<Job> m_testJobs;
+    int m_failFormatsForTest = 0;
     QStringList m_stopMessages; // for jobs asked to stop, in order
     bool m_stopped = false;
 };

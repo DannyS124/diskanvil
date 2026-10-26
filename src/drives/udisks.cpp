@@ -6,6 +6,7 @@
 #include "partrecover.h"
 
 #include "applog.h"
+#include "hostprocess.h"
 #include "dbusnames.h"
 #include "btrfscheck.h"
 #include "format.h"
@@ -16,6 +17,8 @@
 #include <QFileInfo>
 #include <QTimer>
 #include <QFile>
+#include <QProcess>
+#include <QRegularExpression>
 #include <QDBusArgument>
 #include <QDBusConnection>
 #include <QDBusMessage>
@@ -29,12 +32,64 @@
 #include <QVariantMap>
 
 #include <algorithm>
+#include <unistd.h>
 #include <memory>
 
 namespace {
 
 using InterfaceMap = QMap<QString, QVariantMap>;
 using ObjectMap = QMap<QDBusObjectPath, InterfaceMap>;
+
+// UDisks gave up waiting for the kernel and udev to catch up after a change of its own.
+bool isSyncTimeout(const QString &error)
+{
+    return error.contains(QLatin1String("Error synchronizing after"));
+}
+
+// How long to let udev settle before each new try, in seconds. eMMC (mmcblk) is slow to show
+// a change; DISKANVIL_SYNC_WAIT ("10,30,60") overrides it for odd hardware and the tests.
+QVector<int> syncWaits(const QString &device)
+{
+    QVector<int> waits;
+    for (const QString &part : qEnvironmentVariable("DISKANVIL_SYNC_WAIT").split(QLatin1Char(','), Qt::SkipEmptyParts))
+        waits << std::clamp(part.trimmed().toInt(), 0, 600);
+    if (!waits.isEmpty())
+        return waits;
+    if (kernelName(device).startsWith(QLatin1String("mmcblk")))
+        return {10, 30, 60};
+    return {5, 15, 30};
+}
+
+// What the kernel said about a drive in the last ten minutes (its last 10 lines), for a failure's
+// message. journalctl reads it as an ordinary user on most systems; DiskAnvil Live's sudo otherwise.
+QString kernelLines(const QString &device)
+{
+    const QString name = kernelName(device);
+    if (name.isEmpty())
+        return {};
+    const auto read = [](const QStringList &command) {
+        QProcess p;
+        p.start(command.first(), command.mid(1));
+        if (!p.waitForFinished(5000) || p.exitStatus() != QProcess::NormalExit || p.exitCode() != 0) {
+            p.kill();
+            return QString();
+        }
+        return QString::fromLocal8Bit(p.readAllStandardOutput());
+    };
+    QString log = read(host::command({QStringLiteral("journalctl"), QStringLiteral("-k"), QStringLiteral("--since"), QStringLiteral("-10min"),
+                                      QStringLiteral("--no-pager"), QStringLiteral("-o"), QStringLiteral("short")}));
+    if (log.trimmed().isEmpty() && rescue::runningInRescue())
+        log = read({QStringLiteral("sudo"), QStringLiteral("-n"), QStringLiteral("dmesg")});
+    QStringList lines;
+    const QRegularExpression word(QStringLiteral("\\b%1").arg(QRegularExpression::escape(name)));
+    for (const QString &line : log.split(QLatin1Char('\n'), Qt::SkipEmptyParts)) {
+        if (line.contains(word))
+            lines << line.trimmed();
+    }
+    if (lines.isEmpty())
+        return {};
+    return UDisks::tr("What Linux said about %1:").arg(name) + QLatin1Char('\n') + lines.mid(std::max<qsizetype>(0, lines.size() - 10)).join(QLatin1Char('\n'));
+}
 
 // "ay" byte strings, NUL-terminated
 QString byteString(const QVariant &value)
@@ -603,7 +658,8 @@ QVariantMap UDisks::options(QVariantMap extra) const
 
 void UDisks::callThen(const QString &path, const QString &interface, const QString &method, const QVariantList &args,
                       const QString &failure, const std::function<void(const QDBusMessage &)> &next,
-                      const std::function<void()> &failed, const Explain &explain)
+                      const std::function<void()> &failed, const Explain &explain,
+                      const std::function<bool(const QString &error)> &takeOver)
 {
     QDBusMessage message = QDBusMessage::createMethodCall(kService, path, interface, method);
     message.setArguments(args);
@@ -613,7 +669,7 @@ void UDisks::callThen(const QString &path, const QString &interface, const QStri
 
     ++m_pending;
     auto *watcher = new QDBusPendingCallWatcher(QDBusConnection::systemBus().asyncCall(message, kNoTimeout), this);
-    connect(watcher, &QDBusPendingCallWatcher::finished, this, [this, method, path, failure, next, failed, explain](QDBusPendingCallWatcher *w) {
+    connect(watcher, &QDBusPendingCallWatcher::finished, this, [this, method, path, failure, next, failed, explain, takeOver](QDBusPendingCallWatcher *w) {
         w->deleteLater();
         --m_pending;
         if (w->isError())
@@ -630,6 +686,8 @@ void UDisks::callThen(const QString &path, const QString &interface, const QStri
             m_stopped = false;
             if (failed)
                 failed();
+        } else if (w->isError() && takeOver && takeOver(w->error().message())) {
+            // Handled by the caller (tried again, or another way).
         } else if (w->isError()) {
             // A drive that won't unmount because something has it open: Who's Using It? can say what.
             if (method == QLatin1String("Unmount")
@@ -645,6 +703,142 @@ void UDisks::callThen(const QString &path, const QString &interface, const QStri
             next(w->reply());
         }
     });
+}
+
+void UDisks::formatBlock(const QString &path, const QString &device, const QVariantList &args, const QString &failure,
+                         const std::function<void(const QDBusMessage &)> &next, const std::function<void()> &failed,
+                         const std::function<void(const QString &error)> &lastResort, int attempt)
+{
+    const QVector<int> waits = syncWaits(device);
+    const auto onError = [=, this](const QString &error) {
+        if (!isSyncTimeout(error))
+            return false;
+        if (attempt < waits.size()) {
+            qCInfo(lcOps).noquote() << "UDisks timed out waiting for" << device << "- settling" << waits[attempt] << "s and trying again";
+            settleThen(device, waits[attempt], [=, this] { formatBlock(path, device, args, failure, next, failed, lastResort, attempt + 1); });
+            return true;
+        }
+        if (!lastResort)
+            return false;
+        lastResort(error);
+        return true;
+    };
+    const Explain explain = [device](const QString &) { return kernelLines(device); };
+    if (m_failFormatsForTest > 0) {
+        --m_failFormatsForTest;
+        QTimer::singleShot(0, this, [=, this] {
+            const QString error = QStringLiteral("Error synchronizing after initial wipe: Timed out waiting for object");
+            if (onError(error))
+                return;
+            QString text = failure + QStringLiteral(": ") + error;
+            if (const QString more = explain(error); !more.isEmpty())
+                text += QStringLiteral("\n\n") + more;
+            emit operationFinished(false, text);
+            if (failed)
+                failed();
+        });
+        return;
+    }
+    callThen(path, kBlock, QStringLiteral("Format"), args, failure, next, failed, explain, onError);
+}
+
+void UDisks::settleThen(const QString &device, int seconds, const std::function<void()> &then)
+{
+    // The kernel told to read the drive's table again (DiskAnvil Live, or as root: UDisks does
+    // the same itself, but a busy eMMC can miss it), then udev let finish what it's doing.
+    QStringList steps;
+    if (::geteuid() == 0 || rescue::runningInRescue())
+        steps << QStringLiteral("rereadpt");
+    steps << QStringLiteral("settle");
+    auto run = std::make_shared<std::function<void()>>();
+    *run = [this, device, seconds, then, steps, weak = std::weak_ptr(run)]() mutable {
+        const auto self = weak.lock(); // kept alive by whoever called it
+        if (steps.isEmpty()) {
+            refresh();
+            QTimer::singleShot(2000, this, then);
+            return;
+        }
+        const QString step = steps.takeFirst();
+        QStringList command = step == QLatin1String("settle")
+            ? host::command({QStringLiteral("udevadm"), QStringLiteral("settle"), QStringLiteral("--timeout=%1").arg(seconds)})
+            : QStringList{QStringLiteral("blockdev"), QStringLiteral("--rereadpt"), device};
+        if (step == QLatin1String("rereadpt") && ::geteuid() != 0)
+            command = QStringList{QStringLiteral("sudo"), QStringLiteral("-n")} + command;
+        auto *p = new QProcess(this);
+        connect(p, &QProcess::finished, this, [p, self] {
+            p->deleteLater();
+            (*self)();
+        });
+        connect(p, &QProcess::errorOccurred, this, [p, self](QProcess::ProcessError e) {
+            if (e != QProcess::FailedToStart)
+                return;
+            p->deleteLater();
+            (*self)();
+        });
+        p->start(command.first(), command.mid(1));
+    };
+    (*run)();
+}
+
+void UDisks::tableDirectly(const QString &path, const QString &device, const QString &tableType, const QString &failure,
+                           const QString &udisksError)
+{
+    // sfdisk writes just the empty table, the way `parted mklabel` does. As root: DiskAnvil
+    // Live's sudo, or the admin password on a PC.
+    qCInfo(lcOps).noquote() << "UDisks couldn't make the table on" << device << "- writing it with sfdisk";
+    QStringList command{QStringLiteral("sfdisk"), QStringLiteral("--quiet"), QStringLiteral("--wipe"), QStringLiteral("always"), device};
+    if (::geteuid() != 0)
+        command = rescue::runningInRescue() ? QStringList{QStringLiteral("sudo"), QStringLiteral("-n")} + command
+                                            : host::command(QStringList{QStringLiteral("pkexec")} + command);
+    ++m_pending;
+    auto *p = new QProcess(this);
+    p->setProcessChannelMode(QProcess::MergedChannels);
+    const auto finish = [=, this](bool ok, const QString &said) {
+        p->deleteLater();
+        --m_pending;
+        qCInfo(lcOps).noquote() << "sfdisk on" << device << (ok ? "done" : "failed:") << said;
+        if (!ok) {
+            QString text = failure + QStringLiteral(": ") + udisksError + QStringLiteral("\n\n")
+                         + tr("Writing it directly didn't work either: %1").arg(said.isEmpty() ? tr("sfdisk failed") : said);
+            if (const QString more = kernelLines(device); !more.isEmpty())
+                text += QStringLiteral("\n\n") + more;
+            emit operationFinished(false, text);
+            return;
+        }
+        settleThen(device, 10, [=, this] {
+            confirmTable(path, tableType, failure,
+                         tr("%1 now has an empty %2 partition table (written directly: UDisks kept timing out on this drive)")
+                             .arg(shortDevice(device), tableType == QLatin1String("gpt") ? QStringLiteral("GPT") : QStringLiteral("MBR")));
+        });
+    };
+    connect(p, &QProcess::finished, this, [p, finish](int code, QProcess::ExitStatus status) {
+        finish(status == QProcess::NormalExit && code == 0, QString::fromLocal8Bit(p->readAll()).trimmed().section(QLatin1Char('\n'), -2));
+    });
+    connect(p, &QProcess::errorOccurred, this, [p, finish](QProcess::ProcessError e) {
+        if (e == QProcess::FailedToStart)
+            finish(false, p->errorString());
+    });
+    p->start(command.first(), command.mid(1));
+    p->write(tableType == QLatin1String("gpt") ? "label: gpt\n" : "label: dos\n");
+    p->closeWriteChannel();
+}
+
+void UDisks::confirmTable(const QString &path, const QString &tableType, const QString &failure, const QString &done, int tries)
+{
+    refresh();
+    const Disk *d = diskByPath(path);
+    if (d && d->tableType == tableType) {
+        emit operationFinished(true, done);
+        return;
+    }
+    if (tries >= 20) {
+        emit operationFinished(false, failure + QStringLiteral(": ")
+                                          + tr("it was written, but the drive still doesn't show a %1 partition table. Unplug it and plug it "
+                                               "back in (or restart), then look again.")
+                                                .arg(tableType == QLatin1String("gpt") ? QStringLiteral("GPT") : QStringLiteral("MBR")));
+        return;
+    }
+    QTimer::singleShot(500, this, [=, this] { confirmTable(path, tableType, failure, done, tries + 1); });
 }
 
 void UDisks::call(const QString &path, const QString &interface, const QString &method, const QVariantList &args,
@@ -911,12 +1105,12 @@ void UDisks::createPartitionTable(const Disk &disk, const QString &tableType)
     QVariantMap extra;
     if (tearDown)
         extra.insert(QStringLiteral("tear-down"), true);
-    unmountThen(disk.volumes, failure, [this, path, tableType, name, failure, extra] {
-        call(path, kBlock, QStringLiteral("Format"), {tableType, options(extra)},
-             [name, tableType](const QDBusMessage &) {
-                 return tr("%1 now has an empty %2 partition table").arg(name, tableType == QLatin1String("gpt") ? QStringLiteral("GPT") : QStringLiteral("MBR"));
-             },
-             failure);
+    const QString device = disk.device;
+    unmountThen(disk.volumes, failure, [this, path, device, tableType, name, failure, extra] {
+        const QString done = tr("%1 now has an empty %2 partition table").arg(name, tableType == QLatin1String("gpt") ? QStringLiteral("GPT") : QStringLiteral("MBR"));
+        formatBlock(path, device, {tableType, options(extra)}, failure,
+                    [this, path, tableType, failure, done](const QDBusMessage &) { confirmTable(path, tableType, failure, done); }, {},
+                    [this, path, device, tableType, failure](const QString &error) { tableDirectly(path, device, tableType, failure, error); });
     }, true);
 }
 
