@@ -699,6 +699,70 @@ void kinds053()
     }
 }
 
+// A photo and a film in pieces, as a file system leaves a big file on a full drive: random data
+// between the pieces and another file's start right after each. Both come back whole and
+// byte for byte, from their pieces in order (fragments.h).
+void fragmentedFiles()
+{
+    constexpr qsizetype cluster = 4096;
+    const auto pieces = [](const QByteArray &file, const QVector<qsizetype> &cuts, const QVector<qsizetype> &places, QByteArray *drive) {
+        const QByteArray png = QByteArrayLiteral("\x89PNG\r\n\x1a\n") + QByteArray(cluster - 8, 'p');
+        for (qsizetype i = 0; i < places.size(); ++i) {
+            const qsizetype from = cuts[i], to = i + 1 < cuts.size() ? cuts[i + 1] : file.size();
+            const QByteArray part = file.mid(from, to - from);
+            drive->replace(places[i], part.size(), part);
+            // Another file starts right after this piece (in the cluster after its last).
+            const qsizetype after = places[i] + (part.size() + cluster - 1) / cluster * cluster;
+            drive->replace(after, png.size(), png);
+        }
+    };
+    const auto check = [](const QVector<lost::Found> &found, qsizetype at, const QByteArray &file, const std::shared_ptr<lost::Source> &source) {
+        for (const lost::Found &f : found) {
+            if (f.extents.isEmpty() || f.extents[0].start != quint64(at))
+                continue;
+            lost::FileReader reader(source, f);
+            QByteArray bytes(qsizetype(reader.size()), Qt::Uninitialized);
+            reader.read(0, bytes.data(), bytes.size());
+            return QStringLiteral("%1 bytes in %2 piece(s), %3, condition %4")
+                .arg(f.size)
+                .arg(f.extents.size())
+                .arg(bytes == file ? QStringLiteral("the same") : QStringLiteral("different"))
+                .arg(int(f.condition));
+        }
+        return QStringLiteral("not found");
+    };
+
+    // A photo: decoded on from where it broke off.
+    QImage picture(900, 700, QImage::Format_RGB32);
+    QRandomGenerator rng(77);
+    for (int y = 0; y < picture.height(); ++y)
+        for (int x = 0; x < picture.width(); ++x)
+            picture.setPixel(x, y, qRgb((x * y / 7 + int(rng.bounded(40))) % 256, (x + y) % 256, (x * 3 + int(rng.bounded(30))) % 256));
+    QByteArray photo;
+    QBuffer buffer(&photo);
+    buffer.open(QIODevice::WriteOnly);
+    picture.save(&buffer, "JPEG", 90);
+    QByteArray drive = noise(16 * kMiB, 12);
+    const qsizetype cut = 7 * cluster;
+    pieces(photo, {0, cut}, {2 * kMiB, 9 * kMiB}, &drive);
+    auto source = lost::Source::fromMemory(drive);
+    QString got = check(scan(source), 2 * kMiB, photo, source);
+    report(got.contains(QLatin1String("the same")) && got.contains(QLatin1String("2 piece")) && got.endsWith(QLatin1String("condition 0")),
+           QStringLiteral("fragments: a photo in two pieces comes back whole, byte for byte"),
+           QStringLiteral("%1 bytes: %2").arg(photo.size()).arg(got));
+
+    // A film in three pieces, its index in the last: found frame by frame from its index.
+    QFile f(QStringLiteral(SOURCE_DIR "/tests/data/lostfs/fragments/film.mp4"));
+    const QByteArray film = f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
+    drive = noise(16 * kMiB, 13);
+    pieces(film, {0, 20 * cluster, 51 * cluster}, {1 * kMiB, 12 * kMiB, 6 * kMiB}, &drive);
+    source = lost::Source::fromMemory(drive);
+    got = check(scan(source), 1 * kMiB, film, source);
+    report(!film.isEmpty() && got.contains(QLatin1String("the same")) && got.contains(QLatin1String("3 piece")) && got.endsWith(QLatin1String("condition 0")),
+           QStringLiteral("fragments: a film in three pieces comes back whole, byte for byte"),
+           QStringLiteral("%1 bytes: %2").arg(film.size()).arg(got));
+}
+
 // Plain text has no mark of its own: found where nothing else starts, ended where the text does,
 // and never found in random bytes.
 void plainText()
@@ -4422,6 +4486,7 @@ void lostFilesTests()
     QTemporaryDir dir;
     plainText();
     kinds053();
+    fragmentedFiles();
     finding(dir.path());
     damage();
     names();

@@ -344,6 +344,9 @@ bool mp4(Context &c, Found &file)
         // starts (so it's this film's index, not another's laid out the same way).
         if (f.first().at < mdatFrom || f.last().at + f.last().size > mdatTo)
             return false;
+        // ...and reach (nearly) to its end: a shorter film of the same kind starts the same way.
+        if (f.last().at + f.last().size < mdatTo - std::min<quint64>((mdatTo - mdatFrom) / 10, 4 * 1024 * 1024))
+            return false;
         const quint64 k0 = f.first().at / cs;
         const QByteArray first = raw::read(c.source, p.start + k0 * cs, cs);
         if (first.size() != qsizetype(cs) || clusterFits(t, f, k0, cs, bytes(first), first.size()) != Fits::Yes)
@@ -610,7 +613,11 @@ public:
     }
 
     State state() const { return m_state; }
-    void setState(const State &s) { m_state = s; }
+    void setState(const State &s)
+    {
+        m_state = s;
+        m_failed = false;
+    }
     qint64 total() const { return qint64(m_h.mcusX) * m_h.mcusY; }
     bool failed() const { return m_failed; }
 
@@ -790,12 +797,15 @@ bool jpeg(Context &c, Found &file)
     QVector<Decoder::State> atCluster; // the state where each cluster's bytes start being used
     QSet<quint64> used;
     for (;;) {
-        // Decode on until the end or a unit that can't be.
+        // Decode on until the end or a unit that can't be. Each cluster keeps the state from
+        // before the unit that read into it first, so trying another piece for it re-reads all
+        // of it through that piece.
         while (d.state().mcu < d.total()) {
             const Decoder::State s = d.state();
-            while (quint64(atCluster.size()) <= s.pos / cs)
+            const bool ok = d.next();
+            while (quint64(atCluster.size()) <= d.state().pos / cs)
                 atCluster << s;
-            if (!d.next())
+            if (!ok)
                 break;
         }
         if (!d.failed()) {
