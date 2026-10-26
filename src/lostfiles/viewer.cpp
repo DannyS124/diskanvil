@@ -2762,7 +2762,7 @@ void Window::present(const Show &show)
                                        QStringLiteral("ics"), QStringLiteral("vcf")}
                                .contains(type->id)) {
             text = texts::text(show.type, data, 2000000);
-        } else if (type && type->category == filetypes::Category::Document) {
+        } else if (type && type->category == filetypes::Category::Document && type->id != QLatin1String("txt")) {
             text = officetext::text(show.type, data, 2000000);
         }
         if (text.isEmpty() && type && (type->category == filetypes::Category::Archive || type->id == QLatin1String("epub"))) {
@@ -2771,7 +2771,7 @@ void Window::present(const Show &show)
                 lines << (e.folder ? e.path : QStringLiteral("%1  (%2)").arg(e.path, formatSize(e.size)));
             text = lines.join(QLatin1Char('\n'));
         }
-        if (text.isEmpty() && !type) {
+        if (text.isEmpty() && (!type || type->id == QLatin1String("txt"))) {
             // A text file: UTF-8, or UTF-16 when it starts saying so, else the old 8-bit kind.
             data.truncate(8 * 1024 * 1024);
             auto encoding = QStringConverter::encodingForData(data);

@@ -1,6 +1,10 @@
 # Changelog
 
 ## 0.5.3
+- Find Lost Files reads ext4 (and ext2 and ext3) itself: every file with its name, folder and pieces, the names of deleted files, and after a quick format, the files from the old file records the format left behind
+- Find Lost Files gives files their names back after a quick format of a FAT or exFAT drive, from the old folders still on it
+- Find Lost Files finds plain text files by what's in them
+- tests/bench: a recovery benchmark. Test drives (NTFS, FAT32, exFAT, ext4; files deleted, or quick-formatted) with known files, recovered by DiskAnvil, The Sleuth Kit and PhotoRec and scored the same way, so each change to Find Lost Files is measured
 - New Partition Table and Wipe Disk no longer just fail with "Error synchronizing after initial wipe: Timed out waiting for object" on drives that are slow to show a change (eMMC especially, seen on an Acer Cloudbook with DiskAnvil Live). That's UDisks giving up waiting after its first step, before it has written anything: DiskAnvil now lets the system catch up and tries again (longer on eMMC), and a new table that still won't go through UDisks is written directly with sfdisk and checked. A wipe is only called done, and only gets its certificate, when every sector really was written. When something fails, the message now includes what the kernel said about the drive
 - Scan for Bad Sectors counts each bad sector as soon as it's found. Before, the count only moved every 64 MB scanned, so a drive stuck in one bad patch (each sector taking it seconds) showed red on the map with "bad sectors so far: 0" for up to an hour
 - Mounting a Windows drive that Windows didn't shut down fully (hibernated by Fast Startup, which Windows has on by default, or after a crash or power cut) no longer fails with Linux's "wrong fs type, bad option, bad superblock": it's opened read-only, so its files can be copied off, and the message says why and how to make it writable (shut Windows down while holding Shift). Found by a user on a laptop with DiskAnvil Live

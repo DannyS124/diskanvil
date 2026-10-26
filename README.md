@@ -83,7 +83,7 @@ Everything is on the [Releases page](https://github.com/DannyS124/diskanvil/rele
 ### <img src="docs/icons/findfiles.svg" width="28" height="28" align="top" alt="">&nbsp; Getting files back
 
 - <img src="docs/icons/repair.svg" width="22" height="22" align="top" alt="">&nbsp; **What Happened?** starts from what went wrong (deleted, formatted, won't open, clicking, ransomware...) and gives honest odds, what not to do, and which tools to use, in order
-- <img src="docs/icons/findfiles.svg" width="22" height="22" align="top" alt="">&nbsp; **Find Lost Files** brings deleted files back with their names and folders from FAT, exFAT and NTFS (the Recycle Bin too) and from Windows' earlier versions of a drive. When a drive was formatted or won't open, it finds files by what's inside them. It reads virtual machine disks and backups, and it only ever reads the drive it looks through
+- <img src="docs/icons/findfiles.svg" width="22" height="22" align="top" alt="">&nbsp; **Find Lost Files** brings deleted files back with their names and folders from FAT, exFAT, NTFS and ext4 (the Recycle Bin too) and from Windows' earlier versions of a drive. After a quick format it still finds the old folders and gives files their names back. When a drive won't open, it finds files by what's inside them. It reads virtual machine disks and backups, and it only ever reads the drive it looks through
 - <img src="docs/icons/findfiles.svg" width="22" height="22" align="top" alt="">&nbsp; **Look before you save**: a viewer for pictures, PDFs, films, songs and documents, each file's dates and photo details, the damage marked inside a file, Repair a Copy (PNG, JPEG, Office, PDF, SQLite, films without their index), search by words you remember, Windows' thumbnail caches and a timeline
 - <img src="docs/icons/rescuecopy.svg" width="22" height="22" align="top" alt="">&nbsp; **Rescue Copy** copies a failing drive to an image file or another drive, easy parts first. It can stop and carry on later, its map works with GNU ddrescue, it can go easy on a hot or struggling drive, and it leaves a dying head's stripes for last. Afterwards it lists which files the bad spots hit
 - <img src="docs/icons/stillok.svg" width="22" height="22" align="top" alt="">&nbsp; **Are My Files Still OK?** keeps a fingerprint of every file in a folder and checks them again later, so you know which photos went bad over the years while a good copy still exists
@@ -98,7 +98,7 @@ Find Lost Files recognises these by what's inside them:
 | Video | MP4, MOV, 3GP, AVI, MKV, WebM, WMV, Ogg video |
 | Music | MP3, WAV, M4A, FLAC, Ogg, Opus |
 | Archives | ZIP, 7-Zip, RAR, gzip, JAR, APK |
-| Mail and more | emails (.eml), mailboxes, Outlook files, calendars, contacts, SQLite databases |
+| Mail and more | emails (.eml), mailboxes, Outlook files, calendars, contacts, SQLite databases, plain text |
 
 Files found that way get names made up from what's in them. Deleted files that FAT, exFAT or NTFS still remember come
 back with their real names and folders, whatever kind they are.

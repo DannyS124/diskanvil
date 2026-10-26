@@ -295,6 +295,10 @@ Result make(const Request &r)
         out.facts = texts::properties(r.type, r.data);
         return out;
     }
+    if (id == QLatin1String("txt")) {
+        out.text = textOf(r.data, 4000);
+        return out;
+    }
     if (type && type->category == filetypes::Category::Document) {
         out.text = officetext::text(r.type, r.data);
         out.facts = officetext::properties(r.type, r.data);

@@ -80,7 +80,7 @@ Report find(lost::Source &copy, const RescueMap &map, const std::atomic<bool> &c
             r.volumes << QStringLiteral("%1 (%2)").arg(volume.label, typeName(volume.type));
         }
     }
-    // Bad spots on no file system that was read: an ext4 or other partition, or the tables themselves.
+    // Bad spots on no file system that was read: a Btrfs or other partition, or the tables themselves.
     for (int p = 1; p < places.size(); ++p) {
         const lost::Extent where = places[p];
         const bool covered = std::any_of(read.cbegin(), read.cend(), [&where](const lost::Extent &e) { return where.start >= e.start && where.end() <= e.end(); });
@@ -89,7 +89,7 @@ Report find(lost::Source &copy, const RescueMap &map, const std::atomic<bool> &c
             r.unread << tr("partition %1 (%2 not read; DiskAnvil can't list the files of its file system)").arg(p).arg(formatSize(there));
     }
     if (read.isEmpty() && places.size() == 1)
-        r.unread << tr("the whole copy: no FAT, exFAT or NTFS file system was found on it (ext4 and others can't be listed yet)");
+        r.unread << tr("the whole copy: no FAT, exFAT, NTFS or ext4 file system was found on it (Btrfs and others can't be listed yet)");
     std::sort(r.hits.begin(), r.hits.end(), [](const Hit &a, const Hit &b) {
         if (a.deleted != b.deleted)
             return !a.deleted;

@@ -61,7 +61,7 @@ add_library(diskanvil-core STATIC
     src/lostfiles/lostsource.cpp src/lostfiles/lostsource.h
     src/lostfiles/lostscan.cpp src/lostfiles/lostscan.h
     src/lostfiles/timeline.cpp src/lostfiles/timeline.h
-    src/lostfiles/lostfs.cpp src/lostfiles/lostfs.h src/lostfiles/lostntfs.cpp src/lostfiles/lostraw.h
+    src/lostfiles/lostfs.cpp src/lostfiles/lostext4.cpp src/lostfiles/lostfs.h src/lostfiles/lostntfs.cpp src/lostfiles/lostraw.h
     src/lostfiles/hitfiles.cpp src/lostfiles/hitfiles.h
     src/lostfiles/unpack.cpp src/lostfiles/unpack.h
     src/lostfiles/places.cpp src/lostfiles/places.h

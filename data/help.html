@@ -121,9 +121,9 @@ hard drive's heads is dying, its read errors come round again and again at the s
 turns between its heads in bands): once that's seen, the dying head's bands still to come are jumped over and copied
 last, so the good heads' data comes off first. That's on by default; the box for it is there too.</p>
 <p><b>Which files did the bad spots hit?</b> When a Rescue Copy couldn't read everything, Which Files Were Hit? (next
-to Start) reads the copy's file systems (FAT, exFAT and NTFS) and lists each file with parts that couldn't be read, and
+to Start) reads the copy's file systems (FAT, exFAT, NTFS and ext4) and lists each file with parts that couldn't be read, and
 how much of each is missing; everything else came off whole. The list can be saved next to the copy. Deleted FAT files
-whose pieces are a guess, and files Windows keeps compressed, are marked. ext4 and other file systems can't be listed
+whose pieces are a guess, and files Windows keeps compressed, are marked. Btrfs and other file systems can't be listed
 yet: it says so.</p>
 <p><b>"Target is busy": it won't unmount.</b> Something has a file or folder open on it. The error offers Who's Using
 It? (also on a mounted partition's right-click menu): the programs with something open there, and what (a terminal
@@ -174,10 +174,14 @@ the disk name to confirm. Pick GPT unless it's for a really old computer.</p>
 on the toolbar too). What's already wiped is gone; to use the drive again, make a new partition table. A drive's own
 Secure Erase can't be stopped once it starts.</p>
 <p><b>Get deleted files back:</b> Action → Find Lost Files (or right-click the drive). Pick the drive or partition the
-files were on, or a disk image. On FAT, exFAT and NTFS drives it first lists deleted files with their real names and
-folders, the Recycle Bin's too, and on NTFS what was deleted recently, newest first. Untick Only deleted files to see
-the rest as well. Then it looks through the whole drive for pictures, documents, videos, music and archives by what's
-inside them, so it also works on a drive that was formatted or won't open; those get made-up names. If Windows kept
+files were on, or a disk image. On FAT, exFAT, NTFS and ext4 drives it first lists deleted files with their real names and
+folders, the Recycle Bin's too, and on NTFS what was deleted recently, newest first. (ext4 keeps only a deleted file's
+name and dates; its contents come back from the search by contents.) Untick Only deleted files to see the rest as
+well. Then it looks through the whole drive for pictures, documents, videos, music, archives and plain text by what's
+inside them, so it also works on a drive that was formatted or won't open; those get made-up names. After a quick
+format of a FAT, exFAT or ext4 drive, the old folders and file records the format left behind give files their names
+back, in a "before it was formatted" folder (folders whose own name was in the top folder show as Unnamed folder 1,
+2...). If Windows kept
 earlier versions of the drive, Look in Them brings back what has changed or gone since. Files Windows kept compressed
 come back unpacked. Pictures show as thumbnails,
 and the preview shows PDFs, documents, archives, songs and films. Each file says whether it looks whole. Tick the ones

@@ -1140,7 +1140,7 @@ QVector<Extent> partitionsOf(Source &source)
 bool readFileSystem(Source &source, const Extent &where, const Batch &out, const std::atomic<bool> &cancel, Volume *volume, RecordIndex *index)
 {
     return walkExfat(source, where, out, cancel, volume) || readNtfs(source, where, out, cancel, volume, index)
-        || walkFat(source, where, out, cancel, volume);
+        || readExt4(source, where, out, cancel, volume) || walkFat(source, where, out, cancel, volume);
 }
 
 void checkContents(const std::shared_ptr<Source> &source, Found &file, bool full)

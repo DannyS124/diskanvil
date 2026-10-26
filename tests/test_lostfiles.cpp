@@ -900,6 +900,98 @@ QVector<lost::Found> quickScan(const std::shared_ptr<lost::Source> &source, QVec
     return all;
 }
 
+// ext4, made here with mke2fs and filled with debugfs (no mounting, no root): the files come back
+// with their names, folders and bytes, a deleted one's name is listed, and after mke2fs again
+// (a quick format) the files come back from the records the format left, named from their old
+// folder.
+void ext4Reader(const QString &dir)
+{
+    for (const QString &tool : {QStringLiteral("mkfs.ext4"), QStringLiteral("debugfs")}) {
+        if (QStandardPaths::findExecutable(tool).isEmpty())
+            return report(true, QStringLiteral("ext4: skipped, %1 isn't here").arg(tool));
+    }
+    const QString image = dir + QStringLiteral("/ext4.img");
+    const auto run = [](const QString &program, const QStringList &args) {
+        QProcess p;
+        p.start(program, args);
+        return p.waitForFinished(30000) && p.exitCode() == 0;
+    };
+    QFile(image).remove();
+    QFile blank(image);
+    blank.open(QIODevice::WriteOnly);
+    blank.resize(64 * kMiB);
+    blank.close();
+    const QStringList mkfs = {QStringLiteral("-q"), QStringLiteral("-F"), QStringLiteral("-E"), QStringLiteral("nodiscard")};
+    report(run(QStringLiteral("mkfs.ext4"), mkfs + QStringList{QStringLiteral("-L"), QStringLiteral("E4TEST"), image}), QStringLiteral("ext4: made"));
+
+    QImage picture(400, 300, QImage::Format_RGB32);
+    for (int y = 0; y < picture.height(); ++y)
+        for (int x = 0; x < picture.width(); ++x)
+            picture.setPixel(x, y, qRgb(x % 256, y % 256, (x * y) % 256));
+    const QString photo = dir + QStringLiteral("/photo.png"), notes = dir + QStringLiteral("/notes.txt");
+    picture.save(photo);
+    QFile n(notes);
+    n.open(QIODevice::WriteOnly);
+    for (int i = 0; i < 2000; ++i)
+        n.write("a line of notes, number " + QByteArray::number(i) + "\n");
+    n.close();
+    const QStringList commands = {QStringLiteral("mkdir Photos"), QStringLiteral("mkdir Photos/2024"),
+                                  QStringLiteral("write %1 Photos/2024/photo.png").arg(photo), QStringLiteral("write %1 notes.txt").arg(notes),
+                                  QStringLiteral("write %1 gone.txt").arg(notes), QStringLiteral("rm gone.txt")};
+    bool filled = true;
+    for (const QString &c : commands)
+        filled = run(QStringLiteral("debugfs"), {QStringLiteral("-w"), QStringLiteral("-R"), c, image}) && filled;
+    report(filled, QStringLiteral("ext4: files put on it, one deleted"));
+
+    const auto hashOf = [](const QString &path) {
+        QFile f(path);
+        f.open(QIODevice::ReadOnly);
+        return QCryptographicHash::hash(f.readAll(), QCryptographicHash::Sha256);
+    };
+    const auto scanImage = [&image](QVector<lost::Volume> *volumes) {
+        QFile f(image);
+        f.open(QIODevice::ReadOnly);
+        auto source = lost::Source::fromMemory(f.readAll());
+        return std::make_pair(source, quickScan(source, volumes));
+    };
+    const auto find = [](const QVector<lost::Found> &found, const QString &folder, const QString &name) -> const lost::Found * {
+        for (const lost::Found &f : found) {
+            if (f.folder == folder && f.name == name)
+                return &f;
+        }
+        return nullptr;
+    };
+    const auto bytesOf = [](const std::shared_ptr<lost::Source> &source, const lost::Found &f) {
+        lost::FileReader reader(source, f);
+        QByteArray data(qsizetype(reader.size()), Qt::Uninitialized);
+        reader.read(0, data.data(), data.size());
+        return QCryptographicHash::hash(data, QCryptographicHash::Sha256);
+    };
+    const auto listing = [](const QVector<lost::Found> &found) {
+        QStringList all;
+        for (const lost::Found &f : found)
+            all << f.folder + QLatin1Char('/') + f.name;
+        return all.join(QStringLiteral(", "));
+    };
+
+    QVector<lost::Volume> volumes;
+    auto [source, found] = scanImage(&volumes);
+    report(volumes.size() == 1 && volumes[0].type == QLatin1String("ext4") && volumes[0].label == QLatin1String("E4TEST"),
+           QStringLiteral("ext4: the file system and its label are found"));
+    const lost::Found *p = find(found, QStringLiteral("E4TEST/Photos/2024"), QStringLiteral("photo.png"));
+    const lost::Found *t = find(found, QStringLiteral("E4TEST"), QStringLiteral("notes.txt"));
+    const lost::Found *g = find(found, QStringLiteral("E4TEST"), QStringLiteral("gone.txt"));
+    report(p && !p->deleted && bytesOf(source, *p) == hashOf(photo) && t && bytesOf(source, *t) == hashOf(notes),
+           QStringLiteral("ext4: files listed with their names and folders, their bytes right"), listing(found));
+    report(g && g->deleted, QStringLiteral("ext4: the deleted file's name is listed"));
+
+    report(run(QStringLiteral("mkfs.ext4"), mkfs + QStringList{QStringLiteral("-L"), QStringLiteral("AFTER"), image}), QStringLiteral("ext4: formatted"));
+    auto [again, after] = scanImage(&volumes);
+    const lost::Found *old = find(after, QStringLiteral("AFTER, before it was formatted/Unnamed folder 1/2024"), QStringLiteral("photo.png"));
+    report(old && old->deleted && bytesOf(again, *old) == hashOf(photo),
+           QStringLiteral("ext4 formatted: the photo comes back from the record the format left, by name and whole"), listing(after));
+}
+
 // The FAT32 and exFAT test images quick-formatted (mkfs over them, as a format does): the new
 // top folder knows nothing, but Pictures/2024 is still on the drive, and its photo comes back
 // from it with its name, in its folder, whole.
@@ -4259,6 +4351,7 @@ void lostFilesTests()
     fuzz();
     fileSystems(dir.path());
     formattedFolders(dir.path());
+    ext4Reader(dir.path());
     fileSystemFuzz();
     shadowCopies();
     shadowFileByRecord();

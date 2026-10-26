@@ -50,6 +50,9 @@ struct CopyOptions {
 };
 bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::atomic<bool> &cancel, Volume *volume,
               RecordIndex *index = nullptr, const CopyOptions *copy = nullptr);
+// The ext4 part (lostext4.cpp), ext2 and ext3 too: what the tree lists, the names of deleted
+// files, and the files of an ext4 that was made again over this one.
+bool readExt4(Source &source, const Extent &where, const Batch &out, const std::atomic<bool> &cancel, Volume *volume);
 
 // One file of an NTFS volume (`volume` is just the volume), found by its record in NTFS's file
 // table (the inode number Linux's NTFS drivers give it), as a source of its bytes: unpacked when
