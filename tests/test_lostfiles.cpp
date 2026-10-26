@@ -1042,6 +1042,50 @@ QVector<lost::Found> quickScan(const std::shared_ptr<lost::Source> &source, QVec
     return all;
 }
 
+// The NTFS test image quick-formatted with mkntfs: the old file records after the new MFT give
+// the files back by name, a photo's pieces and a small note kept inside its record alike.
+void ntfsAfterFormat(const QString &dir)
+{
+    if (QStandardPaths::findExecutable(QStringLiteral("mkntfs")).isEmpty())
+        return report(true, QStringLiteral("ntfs formatted: skipped, mkntfs isn't here"));
+    const QString path = dir + QStringLiteral("/formatted-ntfs.img");
+    QFile out(path);
+    if (!out.open(QIODevice::WriteOnly) || out.write(unpackImage(QStringLiteral(SOURCE_DIR "/tests/data/lostfs/ntfs.img.zst"))) <= 0)
+        return report(false, QStringLiteral("ntfs formatted: the test image unpacks"));
+    out.close();
+    QProcess p;
+    p.start(QStringLiteral("mkntfs"), {QStringLiteral("-q"), QStringLiteral("-F"), QStringLiteral("-f"), QStringLiteral("-L"), QStringLiteral("AFTER"), path});
+    report(p.waitForFinished(30000) && p.exitCode() == 0, QStringLiteral("ntfs formatted: quick-formatted"));
+    QFile in(path);
+    auto source = lost::Source::fromMemory(in.open(QIODevice::ReadOnly) ? in.readAll() : QByteArray());
+    QVector<lost::Volume> volumes;
+    quickScan(source, &volumes);
+    lost::DeepScan deep(source);
+    deep.setVolumes(volumes);
+    QVector<lost::Found> found;
+    QObject::connect(&deep, &lost::DeepScan::found, [&found](const QVector<lost::Found> &batch) { found += batch; });
+    deep.run();
+    const auto sha = [&source](const lost::Found &f) {
+        lost::FileReader reader(source, f);
+        QByteArray bytes(qsizetype(reader.size()), Qt::Uninitialized);
+        reader.read(0, bytes.data(), bytes.size());
+        return QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex();
+    };
+    const auto byName = [&found](const QString &name) -> const lost::Found * {
+        for (const lost::Found &f : std::as_const(found)) {
+            if (f.name == name && f.folder.contains(QLatin1String("before it was formatted")))
+                return &f;
+        }
+        return nullptr;
+    };
+    const lost::Found *photo = byName(QStringLiteral("pic2.jpg")), *note = byName(QStringLiteral("notes.txt"));
+    report(photo && photo->folder.endsWith(QLatin1String("/2024")) && sha(*photo) == "c444bf89ff27949491b6598c7819bc1c0f09fea870f06c841eec7cdff6cd99dc",
+           QStringLiteral("ntfs formatted: Pictures/2024/pic2.jpg comes back from its old record, by name, in its folder, whole"),
+           photo ? photo->folder : QStringLiteral("not found"));
+    report(note && sha(*note) == "c6b6687f042b5f2cc58f44b0046fbc58571aded0a9dd82eed6b92455d36e351e",
+           QStringLiteral("ntfs formatted: notes.txt, kept inside its old record, comes back whole"));
+}
+
 // ext4, made here with mke2fs and filled with debugfs (no mounting, no root): the files come back
 // with their names, folders and bytes, a deleted one's name is listed, and after mke2fs again
 // (a quick format) the files come back from the records the format left, named from their old
@@ -4494,6 +4538,7 @@ void lostFilesTests()
     fileSystems(dir.path());
     formattedFolders(dir.path());
     ext4Reader(dir.path());
+    ntfsAfterFormat(dir.path());
     fileSystemFuzz();
     shadowCopies();
     shadowFileByRecord();

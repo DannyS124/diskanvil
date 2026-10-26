@@ -97,6 +97,9 @@ struct Volume {
     // fragmented files back together.
     quint64 clusterSize = 0;
     quint64 heap = 0;
+    // NTFS: how big a file record is, and where the MFT is now (records elsewhere are older).
+    quint32 recordSize = 0;
+    QVector<Extent> mft;
     // NTFS: Windows' earlier copies of it (shadow copies), and what its records hold now.
     QVector<vss::Copy> copies;
     QString copiesProblem;

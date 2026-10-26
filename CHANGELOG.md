@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.5.3
+- Find Lost Files reads more of NTFS: after a quick format, the old file records past the new MFT give files back with their names, folders, dates and contents (small files are kept inside the record); and the names, sizes and dates of deleted files whose records went to other files come from what's left in folders' indexes and in NTFS's log file
 - Find Lost Files puts fragmented films and photos back together. A film's index lists where every frame goes and how big it is, so where the frames stop being right, the piece where they carry on is found on the drive (MP4, MOV, H.264 and H.265); a JPEG is decoded on from where it breaks off, and a piece only counts when the picture then ends exactly where it should. Files whose kind only gives a length (PSD, TIFF, films, Office 97...) are still looked inside, so a fragmented one can't hide other files
 - Find Lost Files knows 27 more kinds of file by what's in them, each measured to its real end (ICO, JPEG 2000, FLV, MPEG, MPEG-TS, RealMedia, Flash, AAC, AIFF, AMR, AC-3, WavPack, Core Audio, MIDI, xz, bzip2, Zstandard, tar, cabinet, fonts, Windows and Linux programs, Outlook mail stores, JSON), and finds the files inside a tar too. The signatures are in data/filetypes.json now, and every sector is matched against all of them with one look-up
 - Find Lost Files reads ext4 (and ext2 and ext3) itself: every file with its name, folder and pieces, the names of deleted files, and after a quick format, the files from the old file records the format left behind

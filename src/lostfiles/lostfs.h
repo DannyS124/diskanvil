@@ -94,6 +94,12 @@ bool leftoverFolderAt(Source &source, quint64 at, const uchar *sector, int len, 
 // that kept them is gone.
 QVector<Found> filesInLeftoverFolders(Source &source, const QVector<LeftoverFolder> &folders, const QVector<Volume> &volumes);
 
+// NTFS file records left outside the MFT (a quick format writes a new, small one; the old
+// records after it stay): whether a sector starts one, and the files they hold, with their
+// names, folders and dates, and their data (small files are kept inside the record).
+bool leftoverRecordAt(const uchar *sector, int len);
+QVector<Found> filesInLeftoverRecords(Source &source, const QVector<quint64> &records, const QVector<Volume> &volumes);
+
 // How whole a deleted file looks from what's in it: the start against what its name says it
 // is, and when `full`, the whole structure (the deep scan's checks). Sets condition and checked.
 void checkContents(const std::shared_ptr<Source> &source, Found &file, bool full);

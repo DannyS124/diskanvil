@@ -42,7 +42,9 @@ constexpr int kMaxRuns = 200000;                      // pieces of one file
 constexpr int kListLiveFilesUpTo = 100000;            // past that, only deleted files are listed
 constexpr int kBatch = 2000;
 constexpr quint64 kRootRecord = 5;
-constexpr quint64 kExtendRecord = 11; // $Extend: NTFS's own files ($ObjId, $Quota, $UsnJrnl...)
+constexpr quint64 kExtendRecord = 11;
+constexpr quint64 kMostIndexBytes = 512ull * 1024 * 1024; // folder index blocks read for leftover names
+constexpr quint64 kMostLog = 256ull * 1024 * 1024; // $Extend: NTFS's own files ($ObjId, $Quota, $UsnJrnl...)
 constexpr quint64 kMaxIndexed = 32ull * 1024 * 1024; // records whose state now is kept, for earlier copies
 
 QString tr(const char *text)
@@ -143,6 +145,7 @@ public:
     quint64 clusterSize = 0;
     quint64 clusters = 0;
     quint32 recordSize = 0;
+    quint32 indexSize = 4096; // a folder index block ("INDX")
     quint64 records = 0;
     QVector<Extent> mft; // where the MFT is, in order
 
@@ -170,6 +173,10 @@ public:
         if (size < 512 || size > 65536 || clusters == 0)
             return false;
         recordSize = quint32(size);
+        const qint8 perIndex = qint8(b[0x44]);
+        const quint64 index = perIndex > 0 ? quint64(perIndex) * clusterSize : (perIndex >= -31 ? 1ull << -perIndex : 0);
+        if (index >= 512 && index <= 65536)
+            indexSize = quint32(index);
         // The MFT's own record says where the MFT is; the mirror has a copy of it.
         for (const quint64 lcn : {le64(b + 0x30), le64(b + 0x38)}) {
             if (lcn == 0 || lcn >= clusters)
@@ -208,6 +215,25 @@ public:
             left -= n;
         }
         return out;
+    }
+
+    // A block with NTFS's check numbers (records, folder indexes, log pages): each 512 bytes'
+    // last two put back from the update array. False when it's torn or isn't `magic`.
+    static bool fixUp(QByteArray &data, const char *magic)
+    {
+        if (data.size() < 512 || std::memcmp(data.constData(), magic, 4) != 0)
+            return false;
+        uchar *d = reinterpret_cast<uchar *>(data.data());
+        const quint16 usaOffset = le16(d + 4), usaCount = le16(d + 6);
+        if (usaCount == 0 || usaOffset + quint32(usaCount) * 2 > quint32(data.size()) || quint32(usaCount - 1) * 512 > quint32(data.size()))
+            return false;
+        for (quint16 i = 1; i < usaCount; ++i) {
+            uchar *end = d + i * 512 - 2;
+            if (std::memcmp(end, d + usaOffset, 2) != 0)
+                return false;
+            std::memcpy(end, d + usaOffset + i * 2, 2);
+        }
+        return true;
     }
 
     // One MFT record, with its fixups put back. Not valid when it isn't a record at all.
@@ -483,6 +509,53 @@ bool pickName(const Record &r, QString *name, quint64 *parent, quint16 *parentSe
     return best >= 0;
 }
 
+// A file's $FILE_NAME as a folder's index keeps it and the log file copies it: its folder,
+// times, size and name. Looked for in leftover bytes, so checked hard: four times in a sensible
+// range, a real name, and not the DOS short name (the long one is next to it).
+struct NameEntry {
+    quint64 record = 0;
+    quint16 sequence = 0;
+    quint64 parent = 0;
+    quint16 parentSequence = 0;
+    QString name;
+    quint64 size = 0;
+    qint64 created = 0, modified = 0, changed = 0, accessed = 0;
+};
+
+bool sensibleTime(quint64 ft)
+{
+    const quint32 high = quint32(ft >> 32);
+    return high >= 0x01BF5000 && high < 0x02400000; // 1999 to about 2100
+}
+
+bool readFileName(const uchar *v, qsizetype room, NameEntry *e)
+{
+    if (room < 0x42)
+        return false;
+    const int length = v[0x40], space = v[0x41];
+    if (length == 0 || space > 3 || space == 2 || 0x42 + length * 2 > room)
+        return false;
+    for (const int at : {8, 16, 24, 32}) {
+        if (!sensibleTime(le64(v + at)))
+            return false;
+    }
+    const QString name = raw::utf16le(v + 0x42, length);
+    for (const QChar ch : name) {
+        if (ch.unicode() < 0x20 || ch == QLatin1Char('/') || ch.isSurrogate())
+            return false;
+    }
+    const quint64 parent = le64(v);
+    e->parent = parent & 0x0000FFFFFFFFFFFFull;
+    e->parentSequence = quint16(parent >> 48);
+    e->name = name;
+    e->size = le64(v + 0x30);
+    e->created = fileTime(le64(v + 8));
+    e->modified = fileTime(le64(v + 16));
+    e->changed = fileTime(le64(v + 24));
+    e->accessed = fileTime(le64(v + 32));
+    return e->size < (1ull << 44);
+}
+
 // Windows' Recycle Bin: a deleted file becomes $Rxxxxxx.ext in C:\$Recycle.Bin\<user>\, and
 // $Ixxxxxx.ext next to it says where it was and when it was deleted.
 struct Binned {
@@ -551,6 +624,109 @@ private:
 };
 
 } // namespace
+
+bool leftoverRecordAt(const uchar *s, int len)
+{
+    if (len < 512 || std::memcmp(s, "FILE", 4) != 0)
+        return false;
+    const quint16 usaOffset = le16(s + 4), usaCount = le16(s + 6), attributes = le16(s + 0x14);
+    const quint32 allocated = le32(s + 0x1C);
+    // The check number at the end of the first sector has to be the update array's.
+    return usaOffset >= 0x28 && usaOffset < 0x100 && usaCount >= 2 && usaCount <= 129 && (allocated == 1024 || allocated == 4096)
+        && attributes >= usaOffset + usaCount * 2 && attributes < allocated && std::memcmp(s + 510, s + usaOffset, 2) == 0;
+}
+
+QVector<Found> filesInLeftoverRecords(Source &source, const QVector<quint64> &at, const QVector<Volume> &volumes)
+{
+    QVector<Found> out;
+    for (const Volume &v : volumes) {
+        if (v.type != QLatin1String("ntfs") || v.recordSize == 0 || v.clusterSize == 0)
+            continue;
+        Ntfs fs(source, v.where);
+        fs.clusterSize = v.clusterSize;
+        fs.recordSize = v.recordSize;
+        fs.clusters = v.where.length / v.clusterSize;
+        // Every record here: by its own number (kept in the record), the first copy of each.
+        QHash<quint64, Record> records;
+        for (quint64 place : at) {
+            if (place < v.where.start || place + v.recordSize > v.where.end())
+                continue;
+            if (std::any_of(v.mft.cbegin(), v.mft.cend(), [place](const Extent &e) { return place >= e.start && place < e.end(); }))
+                continue; // today's MFT: the quick scan read it
+            const QByteArray data = raw::read(source, place, v.recordSize);
+            const Record r = fs.parse(data);
+            if (!r.valid || data.size() < 0x30 || le16(bytes(data) + 4) < 0x30)
+                continue;
+            const quint64 number = le32(bytes(data) + 0x2C);
+            if (number >= 24 && r.base == 0 && !records.contains(number))
+                records.insert(number, r);
+        }
+        if (records.isEmpty())
+            continue;
+        // Folders' names and parents, for the paths.
+        QHash<quint64, QString> nameOf;
+        QHash<quint64, quint64> parentOf;
+        for (auto it = records.cbegin(); it != records.cend(); ++it) {
+            QString name;
+            quint64 parent = 0;
+            quint16 parentSequence = 0;
+            if (it->directory && pickName(*it, &name, &parent, &parentSequence)) {
+                nameOf.insert(it.key(), lost::cleanName(name));
+                parentOf.insert(it.key(), parent);
+            }
+        }
+        const QString before = tr("%1, before it was formatted").arg(v.label);
+        QHash<quint64, int> unnamed;
+        const auto pathOf = [&](quint64 parent) {
+            QStringList parts;
+            QSet<quint64> seen;
+            for (quint64 c = parent; c != kRootRecord && c >= 24 && !seen.contains(c) && parts.size() < 64; c = parentOf.value(c, kRootRecord)) {
+                seen.insert(c);
+                if (!nameOf.contains(c) && !unnamed.contains(c))
+                    unnamed.insert(c, int(unnamed.size()) + 1);
+                parts.prepend(nameOf.contains(c) ? nameOf.value(c) : tr("Unnamed folder %1").arg(unnamed.value(c)));
+            }
+            return parts.isEmpty() ? before : before + QLatin1Char('/') + parts.join(QLatin1Char('/'));
+        };
+        QList<quint64> numbers = records.keys();
+        std::sort(numbers.begin(), numbers.end());
+        for (quint64 n : std::as_const(numbers)) {
+            const Record &r = records[n];
+            QString name;
+            quint64 parent = 0;
+            quint16 parentSequence = 0;
+            if (r.directory || !pickName(r, &name, &parent, &parentSequence) || (parent == kRootRecord && name.startsWith(QLatin1Char('$'))))
+                continue;
+            QVector<Attribute> data;
+            Found f;
+            for (const Attribute &a : r.attributes) {
+                if (a.type == 0x80 && a.name.isEmpty())
+                    data << a;
+                else if (a.type == 0x10 && a.value.size() >= 32) {
+                    f.created = fileTime(le64(bytes(a.value)));
+                    f.modified = fileTime(le64(bytes(a.value) + 8));
+                    f.changed = fileTime(le64(bytes(a.value) + 16));
+                    f.accessed = fileTime(le64(bytes(a.value) + 24));
+                }
+            }
+            const Contents c = contentsOf(fs, data, {}, unpack::Format::None);
+            f.name = name;
+            f.folder = pathOf(parent);
+            f.origin = Origin::FileSystem;
+            f.deleted = true;
+            f.size = c.size;
+            f.data = c.data;
+            f.extents = c.extents;
+            f.type = filetypes::typeForName(name);
+            f.nameOnly = data.isEmpty();
+            if (c.broken)
+                f.condition = Condition::MaybeDamaged;
+            f.note = tr("Found in a file record left from before the drive was formatted.");
+            out << f;
+        }
+    }
+    return out;
+}
 
 std::shared_ptr<Source> ntfsFile(const std::shared_ptr<Source> &volume, quint64 record, const QString &name, QString *why)
 {
@@ -693,6 +869,8 @@ bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::
     QHash<quint64, QVector<Attribute>> extensionWof;  // and WofCompressedData pieces
     QHash<quint64, QByteArray> recycleInfo;           // $I files' contents, by record
     QHash<quint64, QVector<Attribute>> journalData;   // $UsnJrnl's $J stream, by record (and its extension records)
+    QHash<quint64, QVector<Attribute>> folderIndexes; // each folder's index blocks ($I30), for the names left in them
+    QVector<Attribute> logFile;                       // $LogFile's data
     quint64 journalRecord = 0;
     int liveFiles = 0;
 
@@ -710,6 +888,18 @@ bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::
                 for (const Attribute &a : r.attributes) {
                     if (a.type == 0x60)
                         label = raw::utf16le(bytes(a.value), int(a.value.size() / 2));
+                }
+            }
+            if (n == 2 && !copy) { // $LogFile: copies of recent changes, file names among them
+                for (const Attribute &a : r.attributes) {
+                    if (a.type == 0x80 && a.name.isEmpty() && !a.resident && !a.badRuns)
+                        logFile << a;
+                }
+            }
+            if (r.directory && !copy && r.base == 0) {
+                for (const Attribute &a : r.attributes) {
+                    if (a.type == 0xA0 && a.name == QLatin1String("$I30") && !a.resident && !a.badRuns)
+                        folderIndexes[n] << a;
                 }
             }
             if (n == 6) { // $Bitmap: which clusters are in use
@@ -855,6 +1045,8 @@ bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::
         volume->where = where;
         volume->clusterSize = fs.clusterSize;
         volume->heap = where.start;
+        volume->recordSize = fs.recordSize;
+        volume->mft = fs.mft;
     }
 
     // A folder's path from the root, through the records' parents. A deleted folder whose
@@ -1082,6 +1274,99 @@ bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::
         if (batch.size() >= kBatch)
             out(std::exchange(batch, {}));
     }
+
+    // Names left in the unused end of folders' index blocks ($I30), and in the log file's copies
+    // of recent changes: files whose own records are gone. Only what isn't listed already.
+    QSet<QString> named; // "<parent record>/<name>" of every record that has a name now
+    for (auto it = nodes.cbegin(); it != nodes.cend(); ++it)
+        named.insert(QString::number(it->parent) + QLatin1Char('/') + it->name.toLower());
+    const auto addName = [&](const NameEntry &e, const QString &where) {
+        if (named.contains(QString::number(e.parent) + QLatin1Char('/') + e.name.toLower()) || (e.record && listedRecords.contains(journalKey(e.record, e.sequence))))
+            return;
+        const QString folder = pathOf(e.parent, e.parentSequence, 0);
+        if (folder == unknown || std::any_of(internal.cbegin(), internal.cend(), [&folder](const QString &skip) {
+                return folder.compare(skip, Qt::CaseInsensitive) == 0 || folder.startsWith(skip + QLatin1Char('/'), Qt::CaseInsensitive);
+            }) || folder.contains(QLatin1String("/$Recycle.Bin"), Qt::CaseInsensitive))
+            return;
+        if (nameOnly.contains(folder + QLatin1Char('/') + e.name) || nameOnly.size() >= 20000)
+            return;
+        nameOnly.insert(folder + QLatin1Char('/') + e.name);
+        Found f;
+        f.name = e.name;
+        f.folder = folder;
+        f.origin = Origin::FileSystem;
+        f.deleted = true;
+        f.nameOnly = true;
+        f.size = e.size;
+        f.created = e.created;
+        f.modified = e.modified;
+        f.changed = e.changed;
+        f.accessed = e.accessed;
+        f.condition = Condition::Overwritten;
+        f.type = filetypes::typeForName(e.name);
+        f.note = where;
+        batch.push_back(std::move(f));
+        ++listed;
+        ++deleted;
+        if (batch.size() >= kBatch)
+            out(std::exchange(batch, {}));
+    };
+    quint64 indexBytes = 0;
+    const QString fromIndex = tr("Its name is from what was left in its folder's index: its own record in the file system is gone. "
+                                 "The deep scan may still find what was in it, under a made-up name.");
+    for (auto it = folderIndexes.cbegin(); it != folderIndexes.cend() && !cancel && indexBytes < kMostIndexBytes; ++it) {
+        bool broken = false;
+        const QVector<Run> runs = joinRuns(it.value(), &broken);
+        for (const Extent &e : fs.extentsOf(runs, it.value().first().size)) {
+            if (e.zeros() || cancel)
+                continue;
+            indexBytes += e.length;
+            const QByteArray blocks = raw::read(source, e.start, std::min<quint64>(e.length, kMostIndexBytes));
+            for (qsizetype at = 0; at + qsizetype(fs.indexSize) <= blocks.size(); at += qsizetype(fs.indexSize)) {
+                QByteArray block = blocks.mid(at, fs.indexSize);
+                if (!Ntfs::fixUp(block, "INDX"))
+                    continue;
+                const uchar *d = bytes(block);
+                const quint32 used = 0x18 + le32(d + 0x1C), allocated = std::min<quint32>(0x18 + le32(d + 0x20), quint32(block.size()));
+                for (quint32 q = (used + 7) & ~7u; q + 16 + 0x42 <= allocated; q += 8) {
+                    const quint16 entry = le16(d + q + 8), key = le16(d + q + 10);
+                    if (key < 0x42 || entry < 16 + key || (entry & 7) || q + 16 + key > allocated)
+                        continue;
+                    NameEntry name;
+                    if (!readFileName(d + q + 16, key, &name) || name.parent != it.key())
+                        continue;
+                    name.record = le64(d + q) & 0x0000FFFFFFFFFFFFull;
+                    name.sequence = quint16(le64(d + q) >> 48);
+                    addName(name, fromIndex);
+                    q += entry - 8;
+                }
+            }
+        }
+    }
+    if (!logFile.isEmpty() && !cancel) {
+        bool broken = false;
+        QByteArray log;
+        for (const Extent &e : fs.extentsOf(joinRuns(logFile, &broken), logFile.first().size)) {
+            if (!e.zeros() && quint64(log.size()) + e.length <= kMostLog)
+                log += raw::read(source, e.start, e.length);
+        }
+        const QString fromLog = tr("Its name is from NTFS's log file, which keeps copies of recent changes: its own record in the "
+                                   "file system is gone. The deep scan may still find what was in it, under a made-up name.");
+        const uchar *d = bytes(log);
+        for (qsizetype q = 0; q + 0x42 + 2 <= log.size() && !cancel; q += 2) {
+            // Quick tests first: a sensible name length and kind, and a time's high half.
+            if (d[q + 0x41] > 3 || d[q + 0x41] == 2 || d[q + 0x40] == 0 || (d[q + 0x0F] != 0x01 && d[q + 0x0F] != 0x02))
+                continue;
+            NameEntry name;
+            if (!readFileName(d + q, log.size() - q, &name))
+                continue;
+            const auto parent = nodes.constFind(name.parent);
+            if (parent == nodes.cend() || !parent->directory)
+                continue;
+            addName(name, fromLog);
+        }
+    }
+
     if (!batch.isEmpty())
         out(std::move(batch));
     if (volume) {

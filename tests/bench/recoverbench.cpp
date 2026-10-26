@@ -5,7 +5,9 @@
 // window does (the quick scan of the file systems, then the deep scan for files by their contents,
 // skipping what the quick scan already placed) and saves everything it found into a folder.
 //
-//   diskanvil-recoverbench <image> <output folder>
+//   diskanvil-recoverbench <image> <output folder> [--names]
+//
+// --names also prints the files found by name only (nothing of them left to save).
 //
 // Prints one line of counts at the end. The image is only ever read.
 
@@ -21,8 +23,8 @@ int main(int argc, char *argv[])
     QCoreApplication app(argc, argv);
     QTextStream out(stdout);
     const QStringList args = app.arguments();
-    if (args.size() != 3) {
-        out << "usage: diskanvil-recoverbench <image> <output folder>" << Qt::endl;
+    if (args.size() < 3) {
+        out << "usage: diskanvil-recoverbench <image> <output folder> [--names]" << Qt::endl;
         return 2;
     }
     QString error;
@@ -62,7 +64,14 @@ int main(int argc, char *argv[])
     });
     saver.run();
 
-    out << "found " << files.size() << " (" << byName << " by name, " << byContents << " by contents), saved " << saved << ", failed "
+    if (args.contains(QStringLiteral("--names"))) {
+        for (const lost::Found &f : std::as_const(files)) {
+            if (f.nameOnly)
+                out << "name only: " << f.folder << '/' << f.name << " (" << f.size << " bytes) " << f.note.left(40) << Qt::endl;
+        }
+    }
+    const auto nameOnly = std::count_if(files.cbegin(), files.cend(), [](const lost::Found &f) { return f.nameOnly; });
+    out << "found " << files.size() << " (" << byName << " by name, " << byContents << " by contents, " << nameOnly << " names only), saved " << saved << ", failed "
         << failed << ", scan " << scanned << " ms, total " << clock.elapsed() << " ms" << Qt::endl;
     return 0;
 }

@@ -238,6 +238,7 @@ void lost::DeepScan::run()
     const quint64 total = m_end - m_start;
     QVector<LeftoverFolder> leftovers;
     quint64 leftoverUntil = 0;
+    QVector<quint64> leftoverRecords; // NTFS file records outside today's MFT
     // Films (all) and photos whose data breaks off wait for the end of the scan: then, with
     // everything else found, their other pieces are looked for (fragments.h).
     QVector<Found> pending;
@@ -286,6 +287,12 @@ void lost::DeepScan::run()
             if (inside && (at - insideBase) % 4096 != 0)
                 continue;
             const uchar *head = reinterpret_cast<const uchar *>(chunk.constData()) + off;
+            // An NTFS file record outside today's MFT: listed at the end, by name.
+            if (leftoverRecordAt(head, int(std::min(kSector, n - off)))) {
+                if (leftoverRecords.size() < kLeftoverFolderLimit)
+                    leftoverRecords << at;
+                continue;
+            }
             // A folder a quick format left behind: its files are listed at the end, by name.
             if (at >= leftoverUntil && leftovers.size() < kLeftoverFolderLimit) {
                 LeftoverFolder folder;
@@ -389,9 +396,12 @@ void lost::DeepScan::run()
             batch << std::move(f);
         }
     }
-    // The files in folders from before a format, but not the ones a file system lists now.
-    if (!m_cancel && !leftovers.isEmpty()) {
-        for (Found &f : filesInLeftoverFolders(*m_source, leftovers, m_volumes)) {
+    // The files in folders and records from before a format, but not the ones a file system
+    // lists now.
+    if (!m_cancel && (!leftovers.isEmpty() || !leftoverRecords.isEmpty())) {
+        QVector<Found> old = filesInLeftoverFolders(*m_source, leftovers, m_volumes);
+        old += filesInLeftoverRecords(*m_source, leftoverRecords, m_volumes);
+        for (Found &f : old) {
             if (m_cancel)
                 break;
             if (!f.extents.isEmpty() && m_skipStarts.contains(f.extents.first().start))
