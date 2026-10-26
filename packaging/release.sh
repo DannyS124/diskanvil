@@ -101,7 +101,7 @@ case "$cmd" in
     run_tests window sudo env QT_QPA_PLATFORM=offscreen ./build/diskanvil-uitest
     run_tests window-newids sudo env QT_QPA_PLATFORM=offscreen ./build/diskanvil-uitest --user --only=newids
     # The windows that make test devices of their own, one at a time.
-    for scenario in stickcheck burnin dirtyntfs sdcard refresh stopwipe luksheader nas tryrepair clonezilla testboot wipecert evidence writeblock; do
+    for scenario in stickcheck burnin dirtyntfs synctimeout sdcard refresh stopwipe luksheader nas tryrepair clonezilla testboot wipecert evidence writeblock; do
         run_tests window-$scenario sudo env QT_QPA_PLATFORM=offscreen ./build/diskanvil-uitest --only=$scenario
     done
     # The file-based suites again with AddressSanitizer and UBSan, which catch memory errors

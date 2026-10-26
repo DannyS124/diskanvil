@@ -7834,7 +7834,7 @@ int main(int argc, char *argv[])
     }
     // As root, the ones that make their own loop device can run by themselves.
     if (!only.isEmpty()) {
-        const QVector<QPair<const char *, void (*)()>> alone = {{"stickcheck", stickCheck}, {"burnin", burnInWindow}, {"dirtyntfs", dirtyWindowsDrive}, {"sdcard", sdCardFormat}, {"refresh", slowAreaRefresh}, {"stopwipe", stopWipe}, {"luksheader", luksHeaderThroughWindow}, {"nas", nasDrives}, {"tryrepair", tryRepairFirst}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"wipecert", wipeCertificate}, {"evidence", evidenceWindow}, {"writeblock", writeBlockMode}};
+        const QVector<QPair<const char *, void (*)()>> alone = {{"stickcheck", stickCheck}, {"burnin", burnInWindow}, {"dirtyntfs", dirtyWindowsDrive}, {"synctimeout", udisksSyncTimeout}, {"sdcard", sdCardFormat}, {"refresh", slowAreaRefresh}, {"stopwipe", stopWipe}, {"luksheader", luksHeaderThroughWindow}, {"nas", nasDrives}, {"tryrepair", tryRepairFirst}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"wipecert", wipeCertificate}, {"evidence", evidenceWindow}, {"writeblock", writeBlockMode}};
         for (const auto &[name, run] : alone) {
             if (only.contains(QLatin1String(name)))
                 run();
