@@ -19,6 +19,7 @@ finish-args:
   - --socket=fallback-x11
   - --device=dri
   - --socket=pulseaudio # songs and films in Find Lost Files' viewer
+  - --talk-name=org.freedesktop.Notifications # the daily health check's notice
   - --system-talk-name=org.freedesktop.UDisks2
   - --system-talk-name=org.freedesktop.systemd1
   - --system-talk-name=org.freedesktop.login1

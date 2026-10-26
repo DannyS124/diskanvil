@@ -101,6 +101,11 @@ saw finish.</p>
 <p>When a drive is failing or needs a look, a bar at the top of the window says so, with Back Up, Details and Dismiss.
 Dismissed, it stays away until things get worse. Disk Health lists every reason and explains each number (select one);
 the bold ones are the ones that count. Connection errors usually mean a bad cable or port, not a bad drive.</p>
+<p><b>Health over time:</b> DiskAnvil notes each drive's health once a day while it runs. Disk Health, History shows
+it as graphs (temperature, replaced and unreadable sectors, cable errors, wear), so you can see a drive getting worse
+before it fails. Tick "Check my drives every day" there and it checks by itself once a day, even with DiskAnvil closed,
+and shows a notification when a drive gets worse. It only reads. DiskAnvil Live starts fresh every time, so it can't
+keep a history.</p>
 <p><b>Firmware:</b> Disk Health shows the drive's firmware version. With fwupd installed, Check for Updates asks it
 whether there's a newer one. DiskAnvil doesn't install firmware: use your software center or <code>fwupdmgr update</code>,
 and back up first.</p>

@@ -3,6 +3,7 @@
 
 #include "applog.h"
 #include "format.h"
+#include "healthwatch.h"
 #include "homewindow.h"
 #include "mainwindow.h"
 #include "oldname.h"
@@ -89,6 +90,13 @@ int main(int argc, char *argv[])
         QGuiApplication helper(argc, argv);
         return preview::runHelper();
     }
+    // The daily health check (healthwatch.h), from its timer: no window. Windows shows its
+    // notification from a tray icon, which needs the real screen.
+    const bool healthCheck = argc == 2 && QByteArray(argv[1]) == healthwatch::kOption;
+#ifndef Q_OS_WIN
+    if (healthCheck)
+        qputenv("QT_QPA_PLATFORM", "offscreen");
+#endif
     // These never open a window, so they shouldn't need a screen (over SSH, on a text console).
     for (int i = 1; i < argc; ++i) {
         const QByteArray arg(argv[i]);
@@ -109,6 +117,13 @@ int main(int argc, char *argv[])
     QApplication::setApplicationVersion(QStringLiteral(APP_VERSION));
     QApplication::setDesktopFileName(QStringLiteral(APP_ID));
     QApplication::setWindowIcon(QIcon::fromTheme(QStringLiteral(APP_ID), QIcon(QStringLiteral(":/data/" APP_ID ".svg"))));
+    if (healthCheck) {
+        UDisks udisks;
+        if (!udisks.isAvailable())
+            return 1;
+        udisks.setInteractive(false);
+        return healthwatch::run(&udisks);
+    }
     // Find Lost Files' viewer (viewer.h): a program of its own, so a damaged file can't take
     // DiskAnvil down. Find Lost Files talks to it on its standard input and output.
     if (argc == 2 && QByteArray(argv[1]) == "--viewer")

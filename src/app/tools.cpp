@@ -23,6 +23,8 @@
 #include "drivefacts.h"
 #include "farm.h"
 #include "health.h"
+#include "healthhistory.h"
+#include "historygraph.h"
 #include "hostprocess.h"
 #include "systemd.h"
 #include "btrfscheck.h"
@@ -665,6 +667,13 @@ HealthDialog::HealthDialog(UDisks *udisks, const QString &blockPath, QWidget *pa
         if (const Disk *d = m_udisks->diskByPath(m_blockPath))
             BadSectorsDialog(m_udisks, *d, this).exec();
     });
+    // How its health went, day by day, and the daily check.
+    auto *history = new QPushButton(tr("History…"));
+    history->setObjectName(QStringLiteral("history"));
+    connect(history, &QPushButton::clicked, this, [this] {
+        if (const Disk *d = m_udisks->diskByPath(m_blockPath))
+            HealthHistoryDialog(*d, this).exec();
+    });
     m_stopTest = new QPushButton(tr("Stop Test"));
     m_stopTest->setVisible(false);
     connect(m_stopTest, &QPushButton::clicked, this, [this] {
@@ -678,6 +687,7 @@ HealthDialog::HealthDialog(UDisks *udisks, const QString &blockPath, QWidget *pa
     buttons->addWidget(longTest);
     buttons->addWidget(m_conveyance);
     buttons->addWidget(scan);
+    buttons->addWidget(history);
     buttons->addWidget(m_noise);
     buttons->addWidget(m_farm);
     buttons->addWidget(m_report);

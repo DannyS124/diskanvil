@@ -16,6 +16,8 @@
 #include "../src/drives/drivepower.h"
 #include "../src/health/firmware.h"
 #include "../src/health/health.h"
+#include "../src/health/healthhistory.h"
+#include "../src/health/healthwatch.h"
 #include "../src/drives/powerbox.h"
 #include "../src/health/smartdata.h"
 #include "../src/health/triage.h"
@@ -934,6 +936,95 @@ void hardwareCheck()
            QStringLiteral("hardware: one that gets far too hot and slows itself down is told to clean it and see to the paste"), hardware::describe(bad));
 }
 
+// The health history and the daily check, in a data folder of their own.
+void healthHistory()
+{
+    QTemporaryDir data;
+    const QByteArray dataHome = qgetenv("XDG_DATA_HOME");
+    qputenv("XDG_DATA_HOME", QFile::encodeName(data.path()));
+    Disk disk;
+    disk.device = QStringLiteral("/dev/sdz");
+    disk.model = QStringLiteral("Test Drive");
+    disk.health.key = QStringLiteral("by-id/ata-Test_Drive-SERIAL/1");
+    disk.health.state = Health::State::Healthy;
+    disk.health.temperatureC = 31;
+    disk.health.powerOnHours = 1200;
+    QVector<SmartAttribute> attrs = {attr(5, 0), attr(197, 0), attr(198, 0), attr(199, 2)};
+    healthhistory::Point p = healthhistory::pointFor(disk, attrs);
+    report(p.replaced == 0 && p.pending == 0 && p.unreadable == 0 && p.cable == 2 && p.hours == 1200 && qRound(p.temperatureC) == 31,
+           QStringLiteral("history: a point has the temperature, hours and the counters that matter"));
+    // Three days, the last one worse.
+    healthhistory::History h;
+    h.key = disk.health.key;
+    for (int day = 3; day >= 1; --day) {
+        healthhistory::Point q = p;
+        q.day = QDate::currentDate().addDays(-day);
+        q.temperatureC = 30 + day;
+        h.points << q;
+    }
+    report(healthhistory::save(h) && healthhistory::load(disk.health.key).points == h.points, QStringLiteral("history: saved and read back the same"));
+    report(healthhistory::load(QStringLiteral("another drive")).points.isEmpty(), QStringLiteral("history: another drive has its own"));
+    report(!healthhistory::hasToday(disk.health.key), QStringLiteral("history: no point today yet"));
+    healthhistory::note(disk, p);
+    healthhistory::note(disk, p); // again the same day: replaced, not added
+    report(healthhistory::hasToday(disk.health.key) && healthhistory::load(disk.health.key).points.size() == 4,
+           QStringLiteral("history: one point a day"));
+    const QVector<healthhistory::Series> lines = healthhistory::series(healthhistory::load(disk.health.key));
+    QStringList names;
+    for (const healthhistory::Series &s : lines)
+        names << s.name;
+    report(names.size() == 5 && lines.first().values.size() == 4 && !names.contains(QStringLiteral("Media errors")),
+           QStringLiteral("history: graphs for what the drive reports, and nothing else"), names.join(QLatin1Char(',')));
+
+    healthhistory::Point worse = p;
+    worse.pending = 8;
+    worse.cable = 5;
+    worse.state = int(Health::State::Warning);
+    const QStringList said = healthhistory::worse(p, worse);
+    report(said.size() == 3 && said.value(1).contains(QLatin1String("8 more")) && said.value(2).contains(QLatin1String("cable")),
+           QStringLiteral("history: what got worse, in plain words"), said.join(QLatin1Char('|')));
+    report(healthhistory::worse(p, p).isEmpty() && healthhistory::worse(healthhistory::Point{}, worse).size() == 0,
+           QStringLiteral("history: nothing said when nothing changed, or when there's nothing to compare with"));
+    healthhistory::Point worn = p;
+    worn.wear = 79;
+    healthhistory::Point more = worn;
+    more.wear = 81;
+    report(healthhistory::worse(worn, more).size() == 1, QStringLiteral("history: wear passing 80% is said"));
+
+    // The check: the first time it only looks; then a drive that got worse is said once.
+    UDisks udisks;
+    Disk drive = disk;
+    drive.health.reallocatedSectors = 0;
+    report(healthwatch::check(&udisks, {drive}).isEmpty(), QStringLiteral("check: the first check only notes"));
+    drive.health.state = Health::State::Failing;
+    const QStringList told = healthwatch::check(&udisks, {drive});
+    report(told.size() == 1 && told.first().contains(QLatin1String("failing")) && told.first().startsWith(QLatin1String("Test Drive")),
+           QStringLiteral("check: a drive that got worse is said, with its name"), told.join(QLatin1Char('|')));
+    report(healthwatch::check(&udisks, {drive}).isEmpty(), QStringLiteral("check: and only once"));
+
+    // Switching it on writes a user timer (the tests' folder; systemd isn't asked).
+#ifndef Q_OS_WIN
+    QTemporaryDir units;
+    healthwatch::unitFolderForTest = units.path();
+    QString message;
+    report(!healthwatch::enabled() && healthwatch::setEnabled(true, &message) && healthwatch::enabled(),
+           QStringLiteral("check: switched on"), message);
+    QFile service(units.filePath(QStringLiteral("diskanvil-health.service")));
+    QFile timer(units.filePath(QStringLiteral("diskanvil-health.timer")));
+    const QByteArray s = service.open(QIODevice::ReadOnly) ? service.readAll() : QByteArray();
+    const QByteArray t = timer.open(QIODevice::ReadOnly) ? timer.readAll() : QByteArray();
+    report(s.contains("--health-check") && s.contains("Type=oneshot") && t.contains("OnCalendar=daily") && t.contains("Persistent=true"),
+           QStringLiteral("check: a daily timer that catches up after the PC was off"));
+    report(healthwatch::setEnabled(false, &message) && !healthwatch::enabled() && !QFile::exists(service.fileName()),
+           QStringLiteral("check: switched off, and its files are gone"));
+    healthwatch::unitFolderForTest.clear();
+#endif
+    if (dataHome.isEmpty())
+        qunsetenv("XDG_DATA_HOME");
+    else
+        qputenv("XDG_DATA_HOME", dataHome);
+}
+
 void healthTests()
 {
     burnInVerdict();
@@ -1226,4 +1317,7 @@ void healthTests()
         described += health::describe(id).name.isEmpty() ? 0 : 1;
     report(described == 20 && health::describe(5).counts && health::describe(199).counts && !health::describe(9).counts,
            QStringLiteral("the common attributes have plain names, and the ones that count are marked"));
+    // Last: it talks to UDisks, which keeps settings in the real folder, and QSettings keeps
+    // the first folder it sees.
+    healthHistory();
 }

@@ -17,6 +17,8 @@
 #include "../src/lostfiles/lookcloserdialog.h"
 #include "../src/tools/filesdialog.h"
 #include "../src/drives/convertdialog.h"
+#include "../src/health/healthhistory.h"
+#include "../src/health/historygraph.h"
 #include "../src/tools/writeprotectdialog.h"
 #include "../src/lostfiles/hitfilesdialog.h"
 #include "../src/viruses/whycrashdialog.h"
@@ -2412,6 +2414,53 @@ void wipeCertificate()
     report(erasure::all().value(0).checked.contains(QLatin1String("all zeros")), QStringLiteral("wipe: the check is kept with the record"));
     sh(QStringLiteral("losetup"), {QStringLiteral("-d"), loop});
     erasure::storePath = realStore;
+}
+
+// Health History: Disk Health's History button, and the window with a graph for each thing the
+// drive reports, from a history in a data folder of its own. The daily check box is there.
+void healthHistoryWindow()
+{
+    QTemporaryDir data;
+    const QByteArray dataHome = qgetenv("XDG_DATA_HOME");
+    qputenv("XDG_DATA_HOME", QFile::encodeName(data.path()));
+    Disk disk;
+    disk.device = QStringLiteral("/dev/sdz");
+    disk.model = QStringLiteral("Test Drive");
+    disk.health.key = QStringLiteral("history-window-test");
+    disk.health.state = Health::State::Healthy;
+    healthhistory::History h;
+    h.key = disk.health.key;
+    for (int day = 30; day >= 0; --day) {
+        healthhistory::Point p;
+        p.day = QDate::currentDate().addDays(-day);
+        p.temperatureC = 30 + day % 7;
+        p.replaced = day < 10 ? 4 : 0;
+        p.pending = 0;
+        h.points << p;
+    }
+    healthhistory::save(h);
+    HealthHistoryDialog dialog(disk);
+    dialog.show();
+    QApplication::processEvents();
+    auto *daily = dialog.findChild<QCheckBox *>(QStringLiteral("daily"));
+    report(dialog.graphCount() == 3 && daily, QStringLiteral("health history: a graph for each thing the drive reports, and the daily check"),
+           QString::number(dialog.graphCount()));
+    if (!qEnvironmentVariableIsEmpty("DISKANVIL_PREVIEW_DIR"))
+        dialog.grab().save(qEnvironmentVariable("DISKANVIL_PREVIEW_DIR") + QStringLiteral("/health-history.png"));
+    if (dataHome.isEmpty())
+        qunsetenv("XDG_DATA_HOME");
+    else
+        qputenv("XDG_DATA_HOME", dataHome);
+
+    UDisks udisks;
+    udisks.setInteractive(false);
+    for (const Disk &d : udisks.disks()) {
+        if (!d.isLoop && d.health.state != Health::State::Unknown) {
+            HealthDialog health(&udisks, d.blockPath);
+            report(health.findChild<QPushButton *>(QStringLiteral("history")), QStringLiteral("health history: Disk Health has a History button"));
+            break;
+        }
+    }
 }
 
 // The drive report from Disk Health, for a drive of this PC's that reports SMART (read only):
@@ -7949,7 +7998,7 @@ int userScenarios(const QStringList &only)
     const QVector<QPair<const char *, void (*)()>> scenarios = {
         {"output", outputWindow},      {"addons", addonMenus},          {"themes", themes},
         {"maker", maker},              {"banner", banner},              {"jobs", jobBars},
-        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"testbootdata", testBootDataDrive}, {"certificate", certificateWindow}, {"report", driveReport}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"lookcloser", lookCloserWindow}, {"files", filesWindow}, {"writeprotected", writeProtectedWindow}, {"hitfiles", hitFilesWindow}, {"whycrash", whyCrashWindow}, {"winstart", winStartWindow}, {"stillok", stillOkWindow}, {"burnin", burnInWindow}, {"writespeed", writeSpeedWindow}, {"opal", opalWindow}, {"mountntfs", mountDirtyNtfs}, {"synctimeout", udisksSyncTimeout}, {"hardware", hardwareWindow}, {"holders", holdersWindow}, {"enhance", enhanceWindow}, {"film", filmTools}, {"isocopy", isoCopy},
+        {"rescueusb", rescueUsb},      {"livelayout", rescueUsbLayout},      {"writeblock", writeBlockMode},      {"oldname", oldNameMoveOver},      {"remotehelp", remoteHelpWindow},      {"liveonpc", liveOnPcWindow},      {"netboot", netBootWindow},      {"stickcheck", stickCheck},      {"sdcard", sdCardFormat},        {"refresh", slowAreaRefresh},    {"sectorsize", sectorSizeWindow}, {"veracrypt", veraCryptWindow}, {"productkey", productKeyWindow}, {"drivers", driversWindow}, {"savefiles", saveFilesWindow}, {"bootmenu", bootMenuWindow}, {"linuxboot", linuxBootWindow}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"testbootdata", testBootDataDrive}, {"certificate", certificateWindow}, {"report", driveReport}, {"healthhistory", healthHistoryWindow}, {"evidence", evidenceWindow}, {"timeline", timelineWindow}, {"places", placesWindow}, {"activity", activityWindow}, {"lookcloser", lookCloserWindow}, {"files", filesWindow}, {"writeprotected", writeProtectedWindow}, {"hitfiles", hitFilesWindow}, {"whycrash", whyCrashWindow}, {"winstart", winStartWindow}, {"stillok", stillOkWindow}, {"burnin", burnInWindow}, {"writespeed", writeSpeedWindow}, {"opal", opalWindow}, {"mountntfs", mountDirtyNtfs}, {"synctimeout", udisksSyncTimeout}, {"hardware", hardwareWindow}, {"holders", holdersWindow}, {"enhance", enhanceWindow}, {"film", filmTools}, {"isocopy", isoCopy},
         {"windowsusb", windowsUsb},    {"rescuemode", rescueMode},      {"enterkey", enterKey},
         {"home", homeScreen},          {"lostfiles", lostFilesThroughWindow}, {"lostorganise", lostFilesOrganised}, {"lostrepair", lostFilesRepaired}, {"lostthumbs", lostFilesThumbnails}, {"lostransom", lostFilesRansomware}, {"lostthrough", lostFilesReadThrough}, {"lostbtrfs", lostFilesBtrfs}, {"whathappened", whatHappened}, {"viewer", viewerWindow}, {"lostfs", lostFilesFromFileSystem},
         {"lostrecent", lostFilesDeletedRecently}, {"lostcopies", lostFilesFromShadowCopies}, {"lostvdisk", lostFilesFromVirtualDisk},

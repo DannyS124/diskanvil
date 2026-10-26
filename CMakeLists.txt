@@ -143,6 +143,7 @@ add_library(diskanvil-core STATIC
     src/addons/signature.cpp src/addons/signature.h
     src/addons/outputfilter.cpp src/addons/outputfilter.h
     src/health/health.cpp src/health/health.h
+    src/health/healthhistory.cpp src/health/healthhistory.h
     src/health/triage.cpp src/health/triage.h
     src/health/drivefacts.cpp src/health/drivefacts.h
     src/health/farm.cpp src/health/farm.h
@@ -219,6 +220,7 @@ add_library(diskanvil-ui STATIC
     src/app/mainwindow.cpp src/app/mainwindow.h
     src/app/dialogs.cpp src/app/dialogs.h
     src/app/tools.cpp src/app/tools.h
+    src/health/healthwatch.cpp src/health/healthwatch.h src/health/historygraph.cpp src/health/historygraph.h
     src/usb/rescueusbdialog.cpp src/usb/rescueusbdialog.h
     src/usb/liveonpcdialog.cpp src/usb/liveonpcdialog.h
     src/drives/udiskssteps.cpp src/drives/udiskssteps.h

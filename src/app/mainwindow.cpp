@@ -51,6 +51,8 @@
 #include "hostprocess.h"
 #include "inspectdialog.h"
 #include "convertdialog.h"
+#include "healthhistory.h"
+#include "healthwatch.h"
 #include "recoverdialog.h"
 #include "rescuestick.h"
 #include "savefilesdialog.h"
@@ -217,6 +219,19 @@ MainWindow::MainWindow(UDisks *udisks, QWidget *parent)
                                                tr("System disk (read-only)")));
 
     connect(m_udisks, &UDisks::changed, this, &MainWindow::rebuild);
+    // Each drive's health history (healthhistory.h): a point a day, noted a while after the
+    // drives change, not while the window is starting.
+    auto *noteHealth = new QTimer(this);
+    noteHealth->setSingleShot(true);
+    noteHealth->setInterval(10000);
+    connect(noteHealth, &QTimer::timeout, this, [this] {
+        if (!healthwatch::unavailableReason().isEmpty())
+            return;
+        for (const Disk &d : m_udisks->disks())
+            healthhistory::noteIfDue(m_udisks, d);
+    });
+    connect(m_udisks, &UDisks::changed, noteHealth, qOverload<>(&QTimer::start));
+    noteHealth->start();
     connect(m_udisks, &UDisks::operationFinished, this, [this](bool ok, const QString &message) {
         updateActions();
         if (ok) {

@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.5.3
+- Health history: a point a day for each drive (temperature, replaced, waiting and unreadable sectors, cable errors, wear, media errors, data written), shown as graphs in Disk Health, History. An optional daily check, off until it's ticked there, runs `diskanvil --health-check` from a systemd user timer (Linux) or a scheduled task (Windows) and shows a desktop notification when a drive got worse. Not on DiskAnvil Live, which starts fresh every boot
 - Scan for Bad Sectors gets past a bad patch: it jumps ahead in growing steps (1 MiB up to 256 MiB), reaches the end, then goes back over what it skipped from the far end of each part, so every sector is still read once. The time left comes from the last 30 seconds' speed instead of the average since the start
 - Change Partition Table to GPT / to MBR (Action menu and the drive's menu): in place, every partition kept where it is with what's in it. It says first what changes (kinds, numbers, partitions MBR has no room for, how the drive starts) and refuses what can't be done (more than four partitions or past 2 TiB on MBR, a partition where GPT's tables go). The old table is kept, and Undo puts it back
 - Drag and drop on DiskAnvil Live: its Files window takes files dropped on it (copied, or moved with Shift; never onto a drive that can't be changed) and gives the files themselves when they're dragged out, so files from Find Lost Files can be dropped where they should go. The shell shows what a program is dragging at the pointer, and its self-test drags between two programs' windows
