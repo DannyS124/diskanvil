@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 
 #
-# The AUR repo is expected at ../diskanvil-aur (git clone ssh://aur@aur.archlinux.org/diskanvil.git).
+# The AUR repo is kept at ../diskanvil-aur, cloned the first time (ssh://aur@aur.archlinux.org/diskanvil.git,
+# with the key in ~/.ssh/config's aur.archlinux.org entry on the AUR account).
 #
 # Never reuse a version number once it's been on GitHub.
 set -euo pipefail
@@ -17,7 +18,16 @@ on_github() { git ls-remote --exit-code --tags origin "refs/tags/v$1" >/dev/null
 release_hash() { gh release download "$1" -R "$repo" -p SHA256SUMS -O - | cut -d' ' -f1; }
 aur="$(dirname "$root")/diskanvil-aur"
 sync_aur() { # message
-    [[ -d "$aur/.git" ]] || { echo "(no AUR clone at $aur, skipping the AUR)"; return 0; }
+    if [[ ! -d "$aur/.git" ]]; then
+        # The release is out by now, so the AUR not taking it is said loudly, not fatal.
+        git clone -q ssh://aur@aur.archlinux.org/diskanvil.git "$aur" 2>/dev/null || {
+            echo "!!! the AUR wasn't updated: it doesn't take the ssh key (is ~/.ssh/aur.pub on the AUR account?)."
+            echo "!!! once it does: packaging/release.sh --aur $v"
+            rm -rf "$aur"
+            return 0
+        }
+        git -C "$aur" symbolic-ref HEAD refs/heads/master # a new package's repo is empty; the AUR only takes master
+    fi
     cp "$pkgbuild" "$aur/PKGBUILD"
     (cd "$aur" && makepkg --printsrcinfo > .SRCINFO && git add PKGBUILD .SRCINFO \
         && { git diff --cached --quiet || { git commit -qm "$1" && git push -q origin master; }; })
