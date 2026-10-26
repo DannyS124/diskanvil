@@ -42,6 +42,7 @@ constexpr int kMaxExtents = 200000;
 constexpr int kMaxListed = 2000000;
 constexpr int kMaxDepth = 64;
 constexpr int kBatch = 500;
+constexpr quint64 kMaxJournal = 512ull * 1024 * 1024;
 
 constexpr quint32 kIncompatFiletype = 0x2;
 constexpr quint32 kIncompatMetaBg = 0x10;
@@ -71,6 +72,7 @@ public:
     quint64 blockSize = 0;
     quint64 blocks = 0;
     quint32 inodes = 0, inodesPerGroup = 0, inodeSize = 0, groups = 0;
+    quint32 journalInode = 0; // the journal's own record, when it has one inside
     QString label;
 
     bool open()
@@ -99,6 +101,8 @@ public:
         groups = quint32((blocks - m_firstDataBlock + blocksPerGroup - 1) / blocksPerGroup);
         if (groups == 0 || quint64(groups) * inodesPerGroup < inodes || groups > 1u << 24)
             return false;
+        if ((le32(s + 0x5C) & 0x4) && le32(s + 0xE0) > 0 && le32(s + 0xE0) <= inodes) // has_journal
+            journalInode = le32(s + 0xE0);
         label = QString::fromUtf8(reinterpret_cast<const char *>(s + 0x78), 16);
         label.truncate(label.indexOf(QChar(0)) < 0 ? 16 : label.indexOf(QChar(0)));
         m_descriptors = raw::read(m_source, m_where.start + (m_firstDataBlock + 1) * blockSize, quint64(groups) * m_descSize);
@@ -411,6 +415,99 @@ private:
     int m_listed = 0;
 };
 
+// What ext4's journal (jbd2) still has: older copies of file records, from before files were
+// deleted (with their size and pieces), and of folder blocks, with names. The journal is a ring
+// of transactions: a descriptor block lists the file system blocks whose copies follow it.
+struct Journal {
+    QHash<quint32, QByteArray> records;     // file record -> its newest copy that still had a size
+    QHash<quint32, QString> nameOf;         // from the folder blocks' copies
+    QHash<quint32, quint32> parentOf;
+};
+
+quint32 be32(const uchar *p)
+{
+    return quint32(p[0]) << 24 | quint32(p[1]) << 16 | quint32(p[2]) << 8 | p[3];
+}
+
+Journal readJournal(Ext4 &fs)
+{
+    Journal j;
+    if (!fs.journalInode)
+        return j;
+    const QByteArray record = fs.inode(fs.journalInode);
+    QVector<Extent> extents;
+    if (record.isEmpty() || !fs.extentsOf(bytes(record), std::min<quint64>(Ext4::sizeOf(bytes(record)), kMaxJournal), &extents))
+        return j;
+    const QByteArray log = fs.readExtents(extents, kMaxJournal);
+    const qsizetype bs = qsizetype(fs.blockSize);
+    if (log.size() < 2 * bs)
+        return j;
+    const uchar *sb = bytes(log);
+    if (be32(sb) != 0xC03B3998 || (be32(sb + 4) != 3 && be32(sb + 4) != 4) || be32(sb + 0x0C) != fs.blockSize)
+        return j;
+    const quint32 maxlen = std::min<quint32>(be32(sb + 0x10), quint32(log.size() / bs)), first = be32(sb + 0x14);
+    const quint32 incompat = be32(sb + 4) == 4 ? be32(sb + 0x28) : 0;
+    const bool wide = incompat & 0x2, v3 = incompat & 0x10, v2 = incompat & 0x8;
+    const int tagSize = v3 ? (wide ? 16 : 12) : 8 + (wide ? 4 : 0) + (v2 ? 2 : 0);
+    if (first == 0 || first >= maxlen)
+        return j;
+    // Which file system blocks are inode tables, by group.
+    const quint64 tableBlocks = (quint64(fs.inodesPerGroup) * fs.inodeSize + fs.blockSize - 1) / fs.blockSize;
+    QHash<quint32, quint32> sequenceOf; // record -> the transaction its kept copy is from
+    for (quint32 i = first; i < maxlen; ++i) {
+        const uchar *d = sb + qsizetype(i) * bs;
+        if (be32(d) != 0xC03B3998 || be32(d + 4) != 1)
+            continue; // not a descriptor
+        const quint32 sequence = be32(d + 8);
+        quint32 next = i;
+        for (qsizetype at = 12; at + tagSize <= bs;) {
+            // Tag: the block (high half at 8 when 64-bit) and its flags (at 4, or 6 in the older kind).
+            const quint64 block = be32(d + at) | (wide ? quint64(be32(d + at + 8)) << 32 : 0);
+            const quint32 flags = v3 ? be32(d + at + 4) : quint32(d[at + 6]) << 8 | d[at + 7];
+            at += tagSize + ((flags & 0x2) ? 0 : 16); // SAME_UUID, or a UUID follows
+            next = next + 1 >= maxlen ? first : next + 1;
+            QByteArray copy = log.mid(qsizetype(next) * bs, bs);
+            if (flags & 0x1) // escaped: its first four bytes were the journal's magic
+                memcpy(copy.data(), "\xC0\x3B\x39\x98", 4);
+            if (!(flags & 0x4) && copy.size() == bs) {
+                // An inode table block: each record in it, newest copy with a size kept.
+                for (quint32 g = 0; g < fs.groups; ++g) {
+                    const quint64 table = fs.inodeTable(g);
+                    if (block < table || block >= table + tableBlocks)
+                        continue;
+                    const quint32 perBlock = quint32(fs.blockSize / fs.inodeSize);
+                    for (quint32 k = 0; k < perBlock; ++k) {
+                        const quint32 n = g * fs.inodesPerGroup + quint32(block - table) * perBlock + k + 1;
+                        const uchar *ino = bytes(copy) + quint64(k) * fs.inodeSize;
+                        if (!Ext4::isFile(ino) || Ext4::sizeOf(ino) == 0 || le16(ino + 0x1A) == 0)
+                            continue;
+                        if (j.records.contains(n) && qint32(sequence - sequenceOf.value(n)) < 0)
+                            continue;
+                        j.records.insert(n, QByteArray(reinterpret_cast<const char *>(ino), int(fs.inodeSize)));
+                        sequenceOf.insert(n, sequence);
+                    }
+                    break;
+                }
+                // A folder's first block ("." and ".."): the names in it, and its parent.
+                const QVector<DirEntry> entries = fs.parseFolder(copy, false, false);
+                if (entries.size() >= 2 && entries[0].name == QLatin1String(".") && entries[1].name == QLatin1String("..")) {
+                    for (const DirEntry &e : entries) {
+                        if (e.name == QLatin1String(".") || e.name == QLatin1String(".."))
+                            continue;
+                        j.nameOf.insert(e.inode, cleanName(e.name));
+                        j.parentOf.insert(e.inode, entries[0].inode);
+                    }
+                    if (entries[1].inode)
+                        j.parentOf.insert(entries[0].inode, entries[1].inode);
+                }
+            }
+            if (flags & 0x8) // the last tag
+                break;
+        }
+    }
+    return j;
+}
+
 // A file from its record. Deleted files whose record has been emptied are listed by name only.
 Found fileFrom(Ext4 &fs, const uchar *i, const QString &name, const QString &folder, bool deleted)
 {
@@ -458,6 +555,7 @@ bool readExt4(Source &source, const Extent &where, const Batch &out, const std::
     }
     Lister lister(out, volume);
     QSet<quint32> reached;
+    const Journal journal = readJournal(fs);
 
     // The tree, from the root folder (record 2).
     struct Todo {
@@ -468,6 +566,7 @@ bool readExt4(Source &source, const Extent &where, const Batch &out, const std::
     };
     QVector<Todo> todo = {{2, top, false, 0}};
     reached.insert(2);
+    QHash<quint32, QString> folderPaths = {{2, top}}; // the folders the tree has, for the journal's files
     while (!todo.isEmpty() && !cancel && !lister.full()) {
         const Todo folder = todo.takeLast();
         const QByteArray record = fs.inode(folder.inode);
@@ -483,9 +582,16 @@ bool readExt4(Source &source, const Extent &where, const Batch &out, const std::
                 break;
             if (e.name == QLatin1String(".") || e.name == QLatin1String(".."))
                 continue;
-            const QByteArray child = fs.inode(e.inode);
+            QByteArray child = fs.inode(e.inode);
             if (child.isEmpty())
                 continue;
+            // A deleted file whose record lost its size and pieces: the journal's older copy, when
+            // the record hasn't gone to another file since.
+            bool fromJournal = false;
+            if (e.deleted && !fs.inUse(e.inode) && Ext4::sizeOf(bytes(child)) == 0 && journal.records.contains(e.inode)) {
+                child = journal.records.value(e.inode);
+                fromJournal = true;
+            }
             const uchar *c = bytes(child);
             const bool deleted = e.deleted || folder.deleted;
             // A deleted entry whose record went to another file since: only the name is its.
@@ -494,6 +600,8 @@ bool readExt4(Source &source, const Extent &where, const Batch &out, const std::
                 if (!reached.contains(e.inode) && folder.depth < kMaxDepth) {
                     reached.insert(e.inode);
                     todo.push_back({e.inode, folder.path + QLatin1Char('/') + cleanName(e.name), deleted, folder.depth + 1});
+                    if (!deleted)
+                        folderPaths.insert(e.inode, folder.path + QLatin1Char('/') + cleanName(e.name));
                 }
                 continue;
             }
@@ -512,7 +620,55 @@ bool readExt4(Source &source, const Extent &where, const Batch &out, const std::
                 lister.add(std::move(f));
                 continue;
             }
-            lister.add(fileFrom(fs, c, e.name, folder.path, deleted));
+            Found f = fileFrom(fs, c, e.name, folder.path, deleted);
+            if (fromJournal && !f.nameOnly) {
+                reached.insert(e.inode);
+                f.note = tr("Where its pieces are comes from ext4's journal, which kept a copy of its record from before it was deleted.");
+            }
+            lister.add(std::move(f));
+        }
+    }
+
+    // Files the journal still has a record of whose folder entry is gone too: named from its
+    // copies of folder blocks where it can.
+    if (!journal.records.isEmpty() && !cancel) {
+        const QString fromJournal = tr("%1, from the journal").arg(top);
+        QHash<quint32, int> unnamed;
+        // Up to a folder that's still there (the usual case: Linux wipes a deleted file's folder
+        // entry, but the folder stays), else under "from the journal".
+        const auto pathOf = [&](quint32 n) {
+            QStringList parts;
+            QSet<quint32> seen;
+            for (quint32 c = journal.parentOf.value(n); c >= 2 && !seen.contains(c) && parts.size() < kMaxDepth; c = journal.parentOf.value(c)) {
+                if (folderPaths.contains(c))
+                    return parts.isEmpty() ? folderPaths.value(c) : folderPaths.value(c) + QLatin1Char('/') + parts.join(QLatin1Char('/'));
+                if (c == 2)
+                    break;
+                seen.insert(c);
+                if (!journal.nameOf.contains(c) && !unnamed.contains(c))
+                    unnamed.insert(c, int(unnamed.size()) + 1);
+                parts.prepend(journal.nameOf.contains(c) ? journal.nameOf.value(c) : tr("Unnamed folder %1").arg(unnamed.value(c)));
+            }
+            return parts.isEmpty() ? fromJournal : fromJournal + QLatin1Char('/') + parts.join(QLatin1Char('/'));
+        };
+        QList<quint32> numbers = journal.records.keys();
+        std::sort(numbers.begin(), numbers.end());
+        int nameless = 0;
+        for (quint32 n : std::as_const(numbers)) {
+            if (cancel || lister.full())
+                break;
+            if (reached.contains(n) || fs.inUse(n) || n == fs.journalInode)
+                continue;
+            const QString name = journal.nameOf.value(n);
+            Found f = fileFrom(fs, bytes(journal.records[n]), name.isEmpty() ? tr("Nameless file %1").arg(++nameless) : name, pathOf(n), true);
+            if (f.nameOnly)
+                continue;
+            if (name.isEmpty()) {
+                f.type = -1;
+                f.nameGuessed = true;
+            }
+            f.note = tr("Found in ext4's journal, which kept a copy of its record from before it was deleted.");
+            lister.add(std::move(f));
         }
     }
 

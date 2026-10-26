@@ -5677,6 +5677,54 @@ bool markNtfsDirty(const QString &image)
     }
 
 
+// ext4's journal (root: a deletion has to go through Linux's own ext4): a photo written, then
+// deleted, comes back by its name and whole, from the journal's copy of its record.
+void ext4Journal()
+{
+    QTemporaryDir dir;
+    const QString image = dir.filePath(QStringLiteral("journal.img")), mount = dir.filePath(QStringLiteral("m"));
+    sh(QStringLiteral("truncate"), {QStringLiteral("-s"), QStringLiteral("64M"), image});
+    sh(QStringLiteral("mkfs.ext4"), {QStringLiteral("-q"), QStringLiteral("-F"), QStringLiteral("-L"), QStringLiteral("JOURNAL"), image});
+    QDir().mkpath(mount);
+    QString loop;
+    sh(QStringLiteral("losetup"), {QStringLiteral("-f"), QStringLiteral("--show"), image}, &loop);
+    loop = loop.trimmed();
+    sh(QStringLiteral("mount"), {loop, mount});
+    QImage picture(640, 480, QImage::Format_RGB32);
+    for (int y = 0; y < picture.height(); ++y)
+        for (int x = 0; x < picture.width(); ++x)
+            picture.setPixel(x, y, qRgb(x % 256, (x * y) % 256, y % 256));
+    QDir().mkpath(mount + QStringLiteral("/Photos"));
+    picture.save(mount + QStringLiteral("/Photos/beach.jpg"), "JPEG", 92);
+    QFile photo(mount + QStringLiteral("/Photos/beach.jpg"));
+    const QByteArray bytes = photo.open(QIODevice::ReadOnly) ? photo.readAll() : QByteArray();
+    photo.close();
+    sh(QStringLiteral("sync"), {});
+    QFile::remove(mount + QStringLiteral("/Photos/beach.jpg"));
+    sh(QStringLiteral("sync"), {});
+    sh(QStringLiteral("umount"), {mount});
+    sh(QStringLiteral("losetup"), {QStringLiteral("-d"), loop});
+
+    QFile img(image);
+    auto source = lost::Source::fromMemory(img.open(QIODevice::ReadOnly) ? img.readAll() : QByteArray());
+    lost::QuickScan quick(source);
+    QVector<lost::Found> found;
+    QObject::connect(&quick, &lost::QuickScan::found, [&found](const QVector<lost::Found> &batch) { found += batch; });
+    quick.run();
+    QString got = QStringLiteral("not listed");
+    bool whole = false;
+    for (const lost::Found &f : std::as_const(found)) {
+        if (f.name != QLatin1String("beach.jpg"))
+            continue;
+        lost::FileReader reader(source, f);
+        QByteArray back(qsizetype(reader.size()), Qt::Uninitialized);
+        reader.read(0, back.data(), back.size());
+        whole = f.deleted && !f.nameOnly && back == bytes && f.folder == QLatin1String("JOURNAL/Photos");
+        got = QStringLiteral("%1/%2, %3 bytes of %4, %5").arg(f.folder, f.name).arg(f.size).arg(bytes.size()).arg(f.nameOnly ? QStringLiteral("name only") : f.note.left(50));
+    }
+    report(!bytes.isEmpty() && whole, QStringLiteral("ext4 journal: a deleted photo comes back by its name, whole"), got);
+}
+
 // New Partition Table and Wipe Disk when UDisks gives up waiting after its first wipe ("Error
 // synchronizing after initial wipe", seen on eMMC): tried again; as root a table is then written
 // with sfdisk; a wipe that never ran is never called done, and gets no certificate.
@@ -7834,7 +7882,7 @@ int main(int argc, char *argv[])
     }
     // As root, the ones that make their own loop device can run by themselves.
     if (!only.isEmpty()) {
-        const QVector<QPair<const char *, void (*)()>> alone = {{"stickcheck", stickCheck}, {"burnin", burnInWindow}, {"dirtyntfs", dirtyWindowsDrive}, {"synctimeout", udisksSyncTimeout}, {"sdcard", sdCardFormat}, {"refresh", slowAreaRefresh}, {"stopwipe", stopWipe}, {"luksheader", luksHeaderThroughWindow}, {"nas", nasDrives}, {"tryrepair", tryRepairFirst}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"wipecert", wipeCertificate}, {"evidence", evidenceWindow}, {"writeblock", writeBlockMode}};
+        const QVector<QPair<const char *, void (*)()>> alone = {{"stickcheck", stickCheck}, {"burnin", burnInWindow}, {"dirtyntfs", dirtyWindowsDrive}, {"synctimeout", udisksSyncTimeout}, {"ext4journal", ext4Journal}, {"sdcard", sdCardFormat}, {"refresh", slowAreaRefresh}, {"stopwipe", stopWipe}, {"luksheader", luksHeaderThroughWindow}, {"nas", nasDrives}, {"tryrepair", tryRepairFirst}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"wipecert", wipeCertificate}, {"evidence", evidenceWindow}, {"writeblock", writeBlockMode}};
         for (const auto &[name, run] : alone) {
             if (only.contains(QLatin1String(name)))
                 run();
