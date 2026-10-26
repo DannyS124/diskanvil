@@ -15,7 +15,7 @@
 <context>
     <name>BadSectorsDialog</name>
     <message numerus="yes">
-        <location filename="../src/app/tools.cpp" line="2009"/>
+        <location filename="../src/app/tools.cpp" line="2033"/>
         <source>%n area(s) read slowly. Slow spots often turn into bad sectors later, so keep a backup.</source>
         <translation>
             <numerusform>%n area read slowly. Slow spots often turn into bad sectors later, so keep a backup.</numerusform>
@@ -30,7 +30,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/app/tools.cpp" line="2085"/>
+        <location filename="../src/app/tools.cpp" line="2109"/>
         <source>Not read, so left alone: %n piece(s). Scan again, then Repair.</source>
         <translation>
             <numerusform>Not read, so left alone: %n piece. Scan again, then Repair.</numerusform>
@@ -38,7 +38,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/app/tools.cpp" line="2107"/>
+        <location filename="../src/app/tools.cpp" line="2131"/>
         <source>Repair %n bad sector(s) on %1?</source>
         <translation>
             <numerusform>Repair %n bad sector on %1?</numerusform>
@@ -46,7 +46,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/app/tools.cpp" line="2154"/>
+        <location filename="../src/app/tools.cpp" line="2178"/>
         <source>%n block(s)</source>
         <translation>
             <numerusform>%n block</numerusform>
@@ -182,7 +182,7 @@
 <context>
     <name>FilesDialog</name>
     <message numerus="yes">
-        <location filename="../src/tools/filesdialog.cpp" line="398"/>
+        <location filename="../src/tools/filesdialog.cpp" line="407"/>
         <source>Delete %n item(s) for good? There&apos;s no recycle bin here.</source>
         <translation>
             <numerusform>Delete %n item for good? There's no recycle bin here.</numerusform>
@@ -190,7 +190,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/tools/filesdialog.cpp" line="406"/>
+        <location filename="../src/tools/filesdialog.cpp" line="415"/>
         <source>%n item(s) couldn&apos;t be deleted.</source>
         <translation>
             <numerusform>%n item couldn't be deleted.</numerusform>
@@ -293,6 +293,17 @@
     </message>
 </context>
 <context>
+    <name>HealthHistoryDialog</name>
+    <message numerus="yes">
+        <location filename="../src/health/historygraph.cpp" line="115"/>
+        <source>What DiskAnvil saw of this drive on %n day(s), from %1 to %2. Hover over a graph for the numbers.</source>
+        <translation>
+            <numerusform>What DiskAnvil saw of this drive on %n day, from %1 to %2. Hover over a graph for the numbers.</numerusform>
+            <numerusform>What DiskAnvil saw of this drive on %n days, from %1 to %2. Hover over a graph for the numbers.</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
     <name>HitFilesDialog</name>
     <message numerus="yes">
         <source>%n file(s) have blank parts in the copy (%1 of what wasn&apos;t read).</source>
@@ -331,7 +342,7 @@
 <context>
     <name>LostFilesDialog</name>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1447"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1495"/>
         <source>Windows kept %n earlier version(s) of this drive, the newest from %1. Files that have changed or gone since can come back from them.</source>
         <translation>
             <numerusform>Windows kept %n earlier version of this drive, the newest from %1. Files that have changed or gone since can come back from them.</numerusform>
@@ -353,7 +364,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1674"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1724"/>
         <source>%n file(s) end in %1</source>
         <translation>
             <numerusform>%n file end in %1</numerusform>
@@ -368,7 +379,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1490"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1538"/>
         <source>Changed or gone since the earlier versions: %n file(s), in the &quot;as it was on&quot; folders.</source>
         <translation>
             <numerusform>Changed or gone since the earlier versions: %n file, in the "as it was on" folders.</numerusform>
@@ -376,7 +387,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1544"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1594"/>
         <source>Done: nothing deleted was found on %1. Untick &quot;Only deleted files&quot; to see what wasn&apos;t deleted: %n file(s).</source>
         <translation>
             <numerusform>Done: nothing deleted was found on %1. Untick "Only deleted files" to see what wasn't deleted: %n file.</numerusform>
@@ -384,7 +395,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1699"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1749"/>
         <source>%n file(s) end in &lt;b&gt;%1&lt;/b&gt;, for example %2.</source>
         <translation>
             <numerusform>%n file end in &lt;b&gt;%1&lt;/b&gt;, for example %2.</numerusform>
@@ -392,7 +403,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1706"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1756"/>
         <source>Windows kept %n earlier version(s) of this drive: &lt;b&gt;Look in Them&lt;/b&gt;, above, shows the files as they were.</source>
         <translation>
             <numerusform>Windows kept %n earlier version of this drive: &lt;b&gt;Look in Them&lt;/b&gt;, above, shows the files as they were.</numerusform>
@@ -400,7 +411,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1710"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1760"/>
         <source>Many of these programs write a locked copy and delete the original. The originals of %n locked file(s) are among the deleted files found here: tick them and save them.</source>
         <translation>
             <numerusform>Many of these programs write a locked copy and delete the original. The originals of %n locked file are among the deleted files found here: tick them and save them.</numerusform>
@@ -408,7 +419,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1748"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1798"/>
         <source>Windows kept %n small picture(s) of photos and films, some maybe deleted: see &quot;Small pictures Windows kept&quot;.</source>
         <translation>
             <numerusform>Windows kept %n small picture of photos and films, some maybe deleted: see "Small pictures Windows kept".</numerusform>
@@ -416,7 +427,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1795"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="1845"/>
         <source>&quot;%1&quot; was found in %n place(s): see &quot;Found by their words&quot;.</source>
         <translation>
             <numerusform>"%1" was found in %n place: see "Found by their words".</numerusform>
@@ -424,7 +435,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="2422"/>
+        <location filename="../src/lostfiles/lostfilesdialog.cpp" line="2475"/>
         <source>&quot;%1&quot; was saved again after it was made: its %n earlier version(s) are in &quot;Earlier versions&quot;.</source>
         <translation>
             <numerusform>"%1" was saved again after it was made: its %n earlier version are in "Earlier versions".</numerusform>
@@ -442,7 +453,7 @@
 <context>
     <name>MainWindow</name>
     <message numerus="yes">
-        <location filename="../src/app/mainwindow.cpp" line="1556"/>
+        <location filename="../src/app/mainwindow.cpp" line="1584"/>
         <source>%n more drive(s) need a look; their health is in the Status column.</source>
         <translation>
             <numerusform>%n more drive need a look; their health is in the Status column.</numerusform>
@@ -450,7 +461,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/app/mainwindow.cpp" line="2871"/>
+        <location filename="../src/app/mainwindow.cpp" line="2902"/>
         <source>%n add-on command(s) still running. Stop them and quit?</source>
         <translation>
             <numerusform>%n add-on command still running. Stop them and quit?</numerusform>
@@ -488,7 +499,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/app/tools.cpp" line="112"/>
+        <location filename="../src/app/tools.cpp" line="117"/>
         <source>%n sector(s)</source>
         <translation>
             <numerusform>%n sector</numerusform>
@@ -1083,6 +1094,18 @@
         <translation>
             <numerusform>Reading %1: %n file hit so far</numerusform>
             <numerusform>Reading %1: %n files hit so far</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
+    <name>lost::fragments</name>
+    <message numerus="yes">
+        <location filename="../src/lostfiles/fragments.cpp" line="462"/>
+        <location filename="../src/lostfiles/fragments.cpp" line="826"/>
+        <source>Put back together from %n piece(s) on the drive.</source>
+        <translation>
+            <numerusform>Put back together from %n piece on the drive.</numerusform>
+            <numerusform>Put back together from %n pieces on the drive.</numerusform>
         </translation>
     </message>
 </context>
