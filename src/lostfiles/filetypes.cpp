@@ -155,7 +155,7 @@ enum TypeNumber {
     Mp4, Mov, ThreeGp, Avi, Ogv, Mp3, Wav, M4a, Ogg, Opus, Zip, SevenZip, Jar, Apk, Sqlite,
     // Added in 0.5.2, at the end so the numbers before stay the same.
     Tif, Cr2, Nef, Arw, Dng, Orf, Rw2, Pef, Raf, Psd, Rar, Mkv, Webm, Flac, Wmv, Wma, Doc, Xls, Ppt, Msg, Ole, Gz,
-    Eml, Mbox, Rtf, Html, Xml, Svg, Ics, Vcf, TypeCount
+    Eml, Mbox, Rtf, Html, Xml, Svg, Ics, Vcf, Txt, TypeCount
 };
 
 filetypes::Measured incomplete(int type, quint64 size)
@@ -1392,6 +1392,78 @@ filetypes::Measured textUpTo(Stream &s, int type, const QByteArray &closing)
     return complete(type, after);
 }
 
+// Plain text has no mark of its own, and random bytes pass textByte() nine times in ten, so it's
+// held to more: ASCII and well-formed UTF-8 only. How many bytes the character at p takes (0:
+// not one).
+int plainChar(const uchar *p, qsizetype n)
+{
+    const uchar c = p[0];
+    if (c < 0x80)
+        return textByte(c) && c != 0x7F ? 1 : 0;
+    const int len = c >= 0xC2 && c <= 0xDF ? 2 : c >= 0xE0 && c <= 0xEF ? 3 : c >= 0xF0 && c <= 0xF4 ? 4 : 0;
+    if (len == 0 || len > n)
+        return 0;
+    for (int i = 1; i < len; ++i) {
+        if ((p[i] & 0xC0) != 0x80)
+            return 0;
+    }
+    return len;
+}
+
+// Reads like something a person wrote: mostly letters, digits and spaces, with words.
+bool readsLikeText(const uchar *p, qsizetype n)
+{
+    qsizetype wordish = 0, gaps = 0;
+    std::array<qsizetype, 256> seen{};
+    for (qsizetype i = 0; i < n; ++i) {
+        const uchar c = p[i];
+        wordish += (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == ' ' || c >= 0x80;
+        gaps += c == ' ' || c == '\n' || c == '\t';
+        ++seen[c];
+    }
+    const qsizetype most = *std::max_element(seen.begin(), seen.end());
+    return n >= 24 && wordish * 10 >= n * 7 && gaps * 40 >= n && most * 2 < n;
+}
+
+filetypes::Measured measurePlainText(Stream &s)
+{
+    const quint64 limit = std::min(s.limit(), filetypes::sizeLimit(Txt));
+    quint64 pos = 0;
+    while (pos < limit) {
+        int n = int(std::min<quint64>(64 * 1024, limit - pos));
+        const uchar *p = s.peek(pos, n);
+        while (!p && n > 1)
+            p = s.peek(pos, n /= 2);
+        if (!p)
+            break;
+        int i = 0;
+        while (i < n) {
+            const int len = plainChar(p + i, n - i);
+            if (len == 0)
+                break;
+            i += len;
+        }
+        pos += quint64(i);
+        // Stopped on something that isn't text, not just on a character the piece's end cut.
+        if (i < n && (i == 0 || i + 4 < n))
+            break;
+    }
+    const uchar *head = s.peek(0, int(std::min<quint64>(pos, 4096)));
+    if (pos < 24 || !head || !readsLikeText(head, qsizetype(std::min<quint64>(pos, 4096))))
+        return {};
+    // Ends cleanly when only zeros follow to the sector's end: the file ended there.
+    bool zeros = false;
+    quint32 c = 0;
+    if (!s.u8(pos, c)) {
+        zeros = true;
+    } else if (c == 0) {
+        zeros = true;
+        for (quint64 q = pos + 1; zeros && q % 512 != 0; ++q)
+            zeros = s.u8(q, c) && c == 0;
+    }
+    return zeros ? complete(Txt, pos) : incomplete(Txt, pos);
+}
+
 // An email's header lines: "Name: value", or carrying on the one before with a space.
 bool mailHeaders(const uchar *h, int n, bool strict)
 {
@@ -1597,6 +1669,7 @@ const QVector<filetypes::Type> &filetypes::types()
         {QStringLiteral("svg"), C::Picture, tr("SVG drawing")},
         {QStringLiteral("ics"), C::Document, tr("Calendar")},
         {QStringLiteral("vcf"), C::Document, tr("Contacts")},
+        {QStringLiteral("txt"), C::Document, tr("Text file")},
     };
     Q_ASSERT(list.size() == TypeCount);
     return list;
@@ -1689,7 +1762,7 @@ int filetypes::startType(int type)
 
 bool filetypes::alwaysRecognised(int type)
 {
-    return type >= 0 && type != Mp3 && type != Mov;
+    return type >= 0 && type != Mp3 && type != Mov && type != Txt;
 }
 
 QString filetypes::categoryName(Category category)
@@ -1820,6 +1893,25 @@ QVector<int> filetypes::candidates(const uchar *h, int len)
     return out;
 }
 
+bool filetypes::plainTextStart(const uchar *h, int len)
+{
+    int i = 0;
+    while (i < len) {
+        const int n = plainChar(h + i, len - i);
+        if (n == 0)
+            break;
+        i += n;
+    }
+    // Text to the sector's end, or up to zeros that fill the rest of it (a short file).
+    if (i < len && i + 4 >= len)
+        i = len; // a character cut by the sector's end
+    for (int j = i; j < len; ++j) {
+        if (h[j] != 0)
+            return false;
+    }
+    return readsLikeText(h, i);
+}
+
 quint64 filetypes::sizeLimit(int type)
 {
     switch (type) {
@@ -1879,6 +1971,7 @@ quint64 filetypes::sizeLimit(int type)
     case Svg:
     case Ics:
     case Vcf:
+    case Txt:
         return 64 * kMiB;
     default:
         return 2 * kGiB;
@@ -1942,6 +2035,8 @@ filetypes::Measured measureOne(int type, Stream &s)
         return measureMarkup(s);
     case Ics:
         return measureCards(s);
+    case Txt:
+        return measurePlainText(s);
     default:
         return {};
     }

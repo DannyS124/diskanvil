@@ -620,6 +620,39 @@ QVector<lost::Found> scan(std::shared_ptr<lost::Source> source, bool *stopped = 
     return all;
 }
 
+// Plain text has no mark of its own: found where nothing else starts, ended where the text does,
+// and never found in random bytes.
+void plainText()
+{
+    QByteArray data = noise(4 * kMiB, 4242);
+    const QByteArray letter = QByteArrayLiteral("Dear Sam,\n\nThe photos from the summer are on the old drive, in the folder "
+                                                "called holiday. Héloïse has the rest.\n\nSee you soon,\nJo\n");
+    QByteArray list;
+    for (int i = 0; i < 3000; ++i)
+        list += "item " + QByteArray::number(i) + ", shelf " + QByteArray::number(i % 17) + "\n";
+    // The short one fills part of a sector, zeros after it, the way a drive leaves a file's end.
+    QByteArray sector(4096, '\0');
+    sector.replace(0, letter.size(), letter);
+    data.replace(512 * 100, sector.size(), sector);
+    data.replace(512 * 2000, list.size(), list);
+    data.replace(512 * 2000 + list.size(), 512, QByteArray(512, '\0'));
+    const QVector<lost::Found> found = scan(lost::Source::fromMemory(data));
+    const int txt = filetypes::typeNumber(QStringLiteral("txt"));
+    QVector<lost::Found> texts;
+    for (const lost::Found &f : found) {
+        if (f.type == txt)
+            texts << f;
+    }
+    const auto has = [&texts](quint64 at, qsizetype size) {
+        return std::any_of(texts.cbegin(), texts.cend(), [at, size](const lost::Found &f) {
+            return f.extents.value(0).start == at && f.size == quint64(size) && f.condition == lost::Condition::Good;
+        });
+    };
+    report(has(512 * 100, letter.size()) && has(512 * 2000, list.size()) && texts.size() == 2,
+           QStringLiteral("plain text: both text files found to the byte, nothing in the random bytes around them"),
+           QStringLiteral("%1 text files").arg(texts.size()));
+}
+
 void finding(const QString &dir)
 {
     QVector<Sample> files = samples();
@@ -4160,6 +4193,7 @@ void lostFilesTests()
     photoFacts();
     journal();
     QTemporaryDir dir;
+    plainText();
     finding(dir.path());
     damage();
     names();

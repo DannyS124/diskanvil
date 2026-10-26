@@ -256,7 +256,12 @@ void lost::DeepScan::run()
             const quint64 at = pos + off;
             if (at < skipUntil || m_skipStarts.contains(at) || known(at))
                 continue;
-            const QVector<int> candidates = filetypes::candidates(reinterpret_cast<const uchar *>(chunk.constData()) + off, int(std::min(kSector, n - off)));
+            const uchar *head = reinterpret_cast<const uchar *>(chunk.constData()) + off;
+            QVector<int> candidates = filetypes::candidates(head, int(std::min(kSector, n - off)));
+            // Nothing else starts here: plain text, which has no mark of its own, is looked for last.
+            static const int text = filetypes::typeNumber(QStringLiteral("txt"));
+            if (candidates.isEmpty() && filetypes::plainTextStart(head, int(std::min(kSector, n - off))))
+                candidates << text;
             for (int type : candidates) {
                 const quint64 end = m_end;
                 Source *source = m_source.get();
@@ -285,8 +290,9 @@ void lost::DeepScan::run()
                     nameFromContents(f, *m_source);
                 batch << f;
                 // A whole file isn't searched again inside: a JPEG's own preview picture
-                // shouldn't come back as a second photo.
-                if (m.complete)
+                // shouldn't come back as a second photo. Nor is text: its middle would come
+                // back as more text files.
+                if (m.complete || m.type == text)
                     skipUntil = std::max(skipUntil, (at + m.size + kSector - 1) / kSector * kSector);
                 break;
             }

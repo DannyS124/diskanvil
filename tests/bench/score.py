@@ -12,7 +12,10 @@ together, the way Autopsy runs them) is compared with the image's list of test f
   partial  not that, but one recovered file has at least a quarter of the test file's 4 KiB
            blocks (blocks that are in no other file, so blank or repeated ones don't count)
   named    full, and under the test file's own name
-  junk     recovered files with no block of any file that was ever on the image
+  junk     recovered files with no block of any file that was ever on the image, at any
+           512-byte step (a piece of a fragmented file starts wherever its piece started)
+
+A tool's own reports (DiskAnvil's "What was saved.txt" and SHA256SUMS) aren't counted.
 
 Prints JSON: the counts for each state the test files were left in (live, deleted, formatted).
 """
@@ -27,11 +30,27 @@ BLOCK = 4096
 PARTIAL = 0.25
 
 
+REPORTS = {'What was saved.txt', 'SHA256SUMS'}
+
+
 def recovered_files(folders):
     for folder in folders:
         for root, _, names in os.walk(folder):
             for n in names:
-                yield os.path.join(root, n)
+                if n not in REPORTS:
+                    yield os.path.join(root, n)
+
+
+def any_known_block(path, known, zero):
+    """Whether any 4 KiB of the file, starting at any 512-byte step, is a block of a known file."""
+    with open(path, 'rb') as f:
+        data = f.read()
+    for shift in range(512, BLOCK, 512):
+        for at in range(shift, len(data) - BLOCK + 1, BLOCK):
+            b = hashlib.sha256(data[at:at + BLOCK]).hexdigest()[:16]
+            if b in known and b != zero:
+                return True
+    return False
 
 
 def fingerprint(path):
@@ -64,7 +83,7 @@ def score(listing, folders):
         number = count
         count += 1
         by_sha[whole].append(os.path.basename(path).lower())
-        if not any(b in known and b != zero for b in blocks):
+        if not any(b in known and b != zero for b in blocks) and not any_known_block(path, known, zero):
             junk += 1
         for b in blocks:
             if seen.get(b) == 1 and b != zero:

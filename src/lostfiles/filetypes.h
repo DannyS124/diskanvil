@@ -43,6 +43,9 @@ using Reader = std::function<qint64(quint64 at, char *buf, qint64 len)>;
 
 // The types whose start this could be: `head` is the first bytes of a sector (at least 32).
 QVector<int> candidates(const uchar *head, int len);
+// Whether a sector that's none of those could start a plain text file (then measure() it as
+// typeNumber("txt")): text written by a person to its end, or to zeros that fill the rest.
+bool plainTextStart(const uchar *head, int len);
 
 struct Measured {
     int type = -1;         // can be more exact than what was asked (a .zip that's a .docx)
