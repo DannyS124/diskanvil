@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.5.3
+- Drag and drop on DiskAnvil Live: its Files window takes files dropped on it (copied, or moved with Shift; never onto a drive that can't be changed) and gives the files themselves when they're dragged out, so files from Find Lost Files can be dropped where they should go. The shell shows what a program is dragging at the pointer, and its self-test drags between two programs' windows
 - Find Lost Files shows how whole each file looks with a dot next to it (green likely intact, amber partial, red damaged), in its tooltip and at the top of its details
 - Find Lost Files lists each file once: one found by what's in it and then again in a folder or file record a format left takes the found name and folder in the same row, and a file the file system only has the name of takes the contents of the file found with exactly its size and kind
 - Find Lost Files reads ext4's journal: it keeps older copies of file records from before a file was deleted (with its size and where its pieces are) and of folder blocks (with names), so deleted ext4 files come back by name and whole, in the folder they were in. Linux now wipes a deleted file's folder entry, so the journal is where the name still is

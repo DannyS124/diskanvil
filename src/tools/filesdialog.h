@@ -29,9 +29,17 @@ public:
     // The tests: what Paste puts where, and answering the questions it would ask.
     void copyPaths(const QStringList &paths, bool move) { m_clipboard = paths; m_move = move; }
     bool paste(); // waits until it's done; false when something wasn't copied
+    // Files dropped on it (from Find Lost Files, another Files window, a browser's downloads...):
+    // copied (moved with Shift) into `folder`, or the one open. False when nothing could be.
+    bool drop(const QList<QUrl> &urls, bool move, const QString &folder = {});
     void setAnswerYes(bool yes) { m_answerYes = yes; }
 
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override;
+
 private:
+    bool paste(const QString &into);
+    QString dropFolder(const QPoint &at) const; // the folder under the pointer, or the one open, if it can be changed
     void fillPlaces();
     void openedNow();
     QStringList picked() const;

@@ -11,6 +11,7 @@
 #include "shell.h"
 
 #include <QGuiApplication>
+#include <QFile>
 #include <QIcon>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -19,6 +20,59 @@
 #include <QTimer>
 
 #include <memory>
+
+namespace {
+
+// What the drag-and-drop test's target window was given, written where the test reads it.
+class DropNote : public QObject
+{
+    Q_OBJECT
+public:
+    explicit DropNote(QString path)
+        : m_path(std::move(path))
+    {
+    }
+    Q_INVOKABLE void dropped(const QString &text)
+    {
+        QFile f(m_path);
+        if (f.open(QIODevice::WriteOnly))
+            f.write(text.toUtf8());
+    }
+
+private:
+    QString m_path;
+};
+
+// --drag-test-window source|target FILE: a program window for the self-test's drag and drop,
+// started inside the shell like any other. The source has a box to drag (text "anvil-drop-test");
+// the target writes what's dropped on it to FILE.
+int dragTestWindow(QGuiApplication &app, const QString &role, const QString &file)
+{
+    DropNote note(file);
+    QQmlApplicationEngine engine;
+    engine.rootContext()->setContextProperty(QStringLiteral("note"), &note);
+    const QByteArray qml = role == QLatin1String("source") ? QByteArrayLiteral(R"(
+        import QtQuick
+        Window {
+            title: "drag source"; width: 300; height: 240; visible: true; color: "#202838"
+            Rectangle {
+                id: box; x: 90; y: 60; width: 120; height: 120; color: "#1f6fff"
+                Drag.active: area.drag.active; Drag.dragType: Drag.Automatic
+                Drag.supportedActions: Qt.CopyAction; Drag.mimeData: { "text/plain": "anvil-drop-test" }
+                MouseArea { id: area; anchors.fill: parent; drag.target: parent }
+            }
+        })")
+                                                                   : QByteArrayLiteral(R"(
+        import QtQuick
+        Window {
+            title: "drop target"; width: 300; height: 240; visible: true; color: "#203828"
+            DropArea { anchors.fill: parent; onDropped: (drop) => { note.dropped(drop.text); drop.accept(Qt.CopyAction) } }
+        })");
+    engine.loadData(qml);
+    return engine.rootObjects().isEmpty() ? 1 : app.exec();
+}
+
+} // namespace
 
 int main(int argc, char **argv)
 {
@@ -30,6 +84,8 @@ int main(int argc, char **argv)
     qputenv("QT_QPA_EGLFS_HIDECURSOR", "1");
     QGuiApplication app(argc, argv);
     QGuiApplication::setApplicationName(QStringLiteral("diskanvil-shell"));
+    if (const int i = app.arguments().indexOf(QStringLiteral("--drag-test-window")); i > 0 && i + 2 < app.arguments().size())
+        return dragTestWindow(app, app.arguments()[i + 1], app.arguments()[i + 2]);
     // Drawing straight to the screen there's no desktop to say where icon themes are.
     QStringList themes = QIcon::themeSearchPaths();
     for (const QString &dir : QStandardPaths::locateAll(QStandardPaths::GenericDataLocation, QStringLiteral("icons"), QStandardPaths::LocateDirectory))
@@ -86,3 +142,5 @@ int main(int argc, char **argv)
     }
     return app.exec();
 }
+
+#include "main.moc"

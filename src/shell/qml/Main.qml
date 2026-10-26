@@ -167,6 +167,14 @@ WaylandCompositor {
 
             // The mouse pointer, drawn here when nothing else does: the shape the program under it
             // asks for (an I-beam over text, arrows on an edge), or our arrow.
+            // What a program is dragging (its picture), at the pointer.
+            WaylandQuickItem {
+                surface: comp.defaultSeat ? comp.defaultSeat.drag.icon : null
+                visible: comp.defaultSeat !== null && comp.defaultSeat.drag.visible && surface !== null
+                inputEventsEnabled: false
+                x: shell.pointer.x; y: shell.pointer.y
+                z: 999999
+            }
             WaylandCursorItem {
                 id: cursor
                 Component.onCompleted: comp.cursorItem = cursor

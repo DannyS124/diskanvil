@@ -6080,7 +6080,39 @@ void filesWindow()
         if (act->text() == QLatin1String("New Folder"))
             newFolder = act;
     report(newFolder && !newFolder->isEnabled() && files.findChild<QLabel *>() , QStringLiteral("files: in a folder that can't be changed, New Folder isn't offered"));
+    // Drag and drop: dropped files are copied in (moved with Shift); never into a folder that
+    // can't be changed; and what's dragged out is the files themselves.
+    report(!files.drop({QUrl::fromLocalFile(a.filePath(QStringLiteral("notes.txt")))}, false, b.filePath(QStringLiteral("locked"))),
+           QStringLiteral("files: nothing is dropped into a folder that can't be changed"));
     QFile::setPermissions(b.filePath(QStringLiteral("locked")), QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+    QDir(b.path()).mkdir(QStringLiteral("dropped"));
+    files.go(b.filePath(QStringLiteral("dropped")));
+    QTreeView *view = files.findChild<QTreeView *>(QStringLiteral("files"));
+    auto *mime = new QMimeData;
+    mime->setUrls({QUrl::fromLocalFile(a.filePath(QStringLiteral("notes.txt")))});
+    const QPoint inside = view->viewport()->rect().bottomRight() - QPoint(5, 5); // empty space: the open folder
+    QDragEnterEvent enter(QPointF(inside), Qt::CopyAction | Qt::MoveAction, mime, Qt::LeftButton, Qt::NoModifier);
+    QCoreApplication::sendEvent(view->viewport(), &enter);
+    QDropEvent dropped(QPointF(inside), Qt::CopyAction | Qt::MoveAction, mime, Qt::LeftButton, Qt::NoModifier);
+    QCoreApplication::sendEvent(view->viewport(), &dropped);
+    report(enter.isAccepted() && dropped.isAccepted() && QFileInfo(b.filePath(QStringLiteral("dropped/notes.txt"))).size() == 300000
+               && QFileInfo::exists(a.filePath(QStringLiteral("notes.txt"))),
+           QStringLiteral("files: a file dropped on the list is copied into the open folder"));
+    const bool moved = files.drop({QUrl::fromLocalFile(b.filePath(QStringLiteral("notes.txt")))}, true, b.filePath(QStringLiteral("dropped")));
+    report(moved && QFileInfo::exists(b.filePath(QStringLiteral("dropped/notes (2).txt"))) && !QFileInfo::exists(b.filePath(QStringLiteral("notes.txt"))),
+           QStringLiteral("files: dropped with Shift, it's moved: it's only where it went"));
+    files.go(a.path());
+    waitUntil([&] { return view->model()->rowCount(view->rootIndex()) >= 2; }, 5000);
+    QModelIndex note;
+    for (int r = 0; r < view->model()->rowCount(view->rootIndex()); ++r) {
+        const QModelIndex i = view->model()->index(r, 0, view->rootIndex());
+        if (i.data().toString() == QLatin1String("notes.txt"))
+            note = i;
+    }
+    std::unique_ptr<QMimeData> out(note.isValid() ? view->model()->mimeData({note}) : nullptr);
+    report(note.isValid() && (view->model()->flags(note) & Qt::ItemIsDragEnabled) && view->dragEnabled() && out
+               && out->urls().value(0) == QUrl::fromLocalFile(a.filePath(QStringLiteral("notes.txt"))),
+           QStringLiteral("files: a file dragged out goes as the file itself"));
 }
 
 // Look Closer: pictures and films anywhere, in the viewer, with Next and Previous through them.

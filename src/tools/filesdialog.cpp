@@ -14,6 +14,9 @@
 #include <QDirIterator>
 #include <QFileInfo>
 #include <QFileSystemModel>
+#include <QMimeData>
+#include <QDropEvent>
+#include <QDragMoveEvent>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QIcon>
@@ -221,6 +224,12 @@ FilesDialog::FilesDialog(UDisks *udisks, QWidget *parent)
     m_view->setSortingEnabled(true);
     m_view->sortByColumn(0, Qt::AscendingOrder);
     m_view->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    // Dragged out as files other programs take; what's dropped on it is handled here (eventFilter).
+    m_view->setDragEnabled(true);
+    m_view->setDragDropMode(QAbstractItemView::DragDrop);
+    m_view->setDefaultDropAction(Qt::CopyAction);
+    m_view->viewport()->setAcceptDrops(true);
+    m_view->viewport()->installEventFilter(this);
     m_view->setContextMenuPolicy(Qt::CustomContextMenu);
     m_view->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     split->addWidget(m_view);
@@ -408,20 +417,87 @@ void FilesDialog::remove()
 
 bool FilesDialog::paste()
 {
+    return paste(m_folder);
+}
+
+bool FilesDialog::drop(const QList<QUrl> &urls, bool move, const QString &folder)
+{
+    const QString into = folder.isEmpty() ? m_folder : folder;
+    QStringList paths;
+    for (const QUrl &u : urls) {
+        if (u.isLocalFile() && QFileInfo::exists(u.toLocalFile()))
+            paths << QDir::cleanPath(u.toLocalFile());
+    }
+    if (paths.isEmpty() || !QFileInfo(into).isWritable() || QStorageInfo(into).isReadOnly())
+        return false;
+    // Dropped where they already are: nothing to do.
+    if (std::all_of(paths.cbegin(), paths.cend(), [&into](const QString &p) { return QFileInfo(p).absolutePath() == into; }))
+        return false;
+    const QStringList kept = std::exchange(m_clipboard, paths);
+    const bool keptMove = std::exchange(m_move, move);
+    const bool ok = paste(into);
+    m_clipboard = kept;
+    m_move = keptMove;
+    updateActions();
+    return ok;
+}
+
+QString FilesDialog::dropFolder(const QPoint &at) const
+{
+    const QModelIndex index = m_view->indexAt(at);
+    QString folder = index.isValid() && m_model->isDir(index) ? m_model->filePath(index) : m_folder;
+    if (!QFileInfo(folder).isWritable() || QStorageInfo(folder).isReadOnly())
+        return {};
+    return folder;
+}
+
+bool FilesDialog::eventFilter(QObject *watched, QEvent *event)
+{
+    // Dropped on the list: copied (or, with Shift, moved) where they're dropped. Never onto a
+    // drive that can't be changed (read-only or write-protected).
+    if (watched == m_view->viewport() && (event->type() == QEvent::DragEnter || event->type() == QEvent::DragMove)) {
+        auto *e = static_cast<QDragMoveEvent *>(event);
+        const bool files = e->mimeData()->hasUrls() && std::any_of(e->mimeData()->urls().cbegin(), e->mimeData()->urls().cend(),
+                                                                       [](const QUrl &u) { return u.isLocalFile(); });
+        if (files && !dropFolder(e->position().toPoint()).isEmpty()) {
+            e->setDropAction(e->modifiers() & Qt::ShiftModifier ? Qt::MoveAction : Qt::CopyAction);
+            e->accept();
+        } else {
+            e->ignore();
+        }
+        return true;
+    }
+    if (watched == m_view->viewport() && event->type() == QEvent::Drop) {
+        auto *e = static_cast<QDropEvent *>(event);
+        const QString folder = dropFolder(e->position().toPoint());
+        const bool move = e->modifiers() & Qt::ShiftModifier;
+        if (folder.isEmpty() || !drop(e->mimeData()->urls(), move, folder)) {
+            e->ignore();
+            return true;
+        }
+        e->setDropAction(move ? Qt::MoveAction : Qt::CopyAction);
+        e->accept();
+        return true;
+    }
+    return QDialog::eventFilter(watched, event);
+}
+
+bool FilesDialog::paste(const QString &into)
+{
     if (m_clipboard.isEmpty())
         return false;
     // Not into itself.
     for (const QString &p : std::as_const(m_clipboard)) {
-        if (m_folder == p || m_folder.startsWith(p + QLatin1Char('/'))) {
+        if (into == p || into.startsWith(p + QLatin1Char('/'))) {
             m_note->setText(tr("A folder can't be copied into itself."));
             return false;
         }
     }
-    auto *paster = new Paster(m_clipboard, m_folder, m_move);
+    auto *paster = new Paster(m_clipboard, into, m_move);
     paster->measure();
-    if (QStorageInfo(m_folder).bytesAvailable() < paster->total && !(m_move && QStorageInfo(m_folder).device() == QStorageInfo(m_clipboard.first()).device())) {
+    if (QStorageInfo(into).bytesAvailable() < paster->total && !(m_move && QStorageInfo(into).device() == QStorageInfo(m_clipboard.first()).device())) {
         m_note->setText(tr("There isn't room here: it needs %1 and there's %2 free.")
-                            .arg(formatSize(quint64(paster->total)), formatSize(quint64(QStorageInfo(m_folder).bytesAvailable()))));
+                            .arg(formatSize(quint64(paster->total)), formatSize(quint64(QStorageInfo(into).bytesAvailable()))));
         delete paster;
         return false;
     }

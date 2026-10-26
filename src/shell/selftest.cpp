@@ -10,11 +10,16 @@
 #include <QDBusInterface>
 #include <QDBusReply>
 #include <QElapsedTimer>
+#include <QCoreApplication>
+#include <QTemporaryDir>
+#include <QFile>
 #include <QQmlContext>
 #include <QQmlApplicationEngine>
 #include <QQuickItem>
 #include <QQuickWindow>
 #include <QTest>
+#include <QWaylandSeat>
+#include <QWaylandDrag>
 #include <QTextStream>
 
 #include <functional>
@@ -189,6 +194,80 @@ int runSelfTest(QQmlApplicationEngine &engine)
     const bool gridShown = grid && grid->isVisible();
     QTest::keyClick(screen, Qt::Key_Escape);
     report(gridShown && !grid->isVisible(), "the first dock button shows everything, and Esc closes it");
+
+    // Drag and drop between two programs' windows: a box dragged from one onto the other gets
+    // there (--drag-test-window: the target writes what it was given to a file).
+    for (QQuickItem *w : windows())
+        QMetaObject::invokeMethod(w, "close");
+    waitUntil([&] { return windows().isEmpty(); }, 10000);
+    QTemporaryDir dir;
+    const QString note = dir.filePath(QStringLiteral("dropped.txt"));
+    const QString self = QCoreApplication::applicationFilePath();
+    launch(QVariantMap{{"id", "dragsource"}, {"program", self}, {"args", QStringList{"--drag-test-window", "source", note}}});
+    waitUntil([&] { return windows().size() == 1 && windows().first()->width() > 100; }, 15000);
+    launch(QVariantMap{{"id", "droptarget"}, {"program", self}, {"args", QStringList{"--drag-test-window", "target", note}}});
+    const bool pair = waitUntil([&] { return windows().size() == 2 && windows().last()->width() > 100; }, 15000);
+    report(pair, "drag and drop: two programs' windows open", QStringLiteral("%1 window(s)").arg(windows().size()));
+    if (pair) {
+        QTest::qWait(800);
+        QQuickItem *source = windows().first(), *target = windows().last();
+        source->setPosition(QPointF(200, 200));
+        target->setPosition(QPointF(800, 200));
+        QTest::qWait(300);
+        // What each program draws (the surface item inside the frame).
+        const auto content = [](QQuickItem *w) -> QQuickItem * {
+            for (QQuickItem *i : w->findChildren<QQuickItem *>()) {
+                if (QByteArray(i->metaObject()->className()).contains("ShellSurfaceItem"))
+                    return i;
+            }
+            return nullptr;
+        };
+        QQuickItem *from = content(source), *to = content(target);
+        // Both programs drawn and ready (they can take a while to start without a graphics card).
+        const auto drawn = [](QQuickItem *item) {
+            const QVariant surface = item ? item->property("surface") : QVariant();
+            QObject *s = surface.value<QObject *>();
+            return s && s->property("hasContent").toBool();
+        };
+        waitUntil([&] { return drawn(from) && drawn(to); }, 15000);
+        QTest::qWait(1500);
+        if (from && to) {
+            const QPointF start = from->mapToScene(QPointF(150, 120)), end = to->mapToScene(QPointF(150, 120));
+            // A little way, until the program has started its drag (as a person's hand would
+            // still be moving), then over to the other window and let go.
+            bool started = false;
+            auto *seat = qobject_cast<QWaylandSeat *>(comp->property("defaultSeat").value<QObject *>());
+            if (seat && seat->drag())
+                QObject::connect(seat->drag(), &QWaylandDrag::dragStarted, screen, [&started] { started = true; });
+            QTest::mousePress(screen, Qt::LeftButton, {}, start.toPoint());
+            QTest::qWait(300);
+            // (The programs hear of each step at once, as they would with the screen being drawn.)
+            const auto flush = [comp] { QMetaObject::invokeMethod(comp, "processWaylandEvents"); };
+            for (int i = 1; i <= 4 || (!started && i <= 60); ++i) {
+                QTest::mouseMove(screen, (start + QPointF(std::min(i, 20) * 4, 0)).toPoint(), 30);
+                flush();
+                QTest::qWait(70);
+            }
+            report(started, "drag and drop: the program starts its drag");
+            const QPointF from2 = start + QPointF(80, 0);
+            for (int i = 1; i <= 30; ++i) {
+                QTest::mouseMove(screen, (from2 + (end - from2) * i / 30).toPoint(), 30);
+                flush();
+                QTest::qWait(30);
+            }
+            QTest::qWait(600);
+            QTest::mouseRelease(screen, Qt::LeftButton, {}, end.toPoint());
+            flush();
+        }
+        QString got;
+        waitUntil([&] {
+            QFile f(note);
+            got = f.open(QIODevice::ReadOnly) ? QString::fromUtf8(f.readAll()) : QString();
+            return !got.isEmpty();
+        }, 10000);
+        report(got == QLatin1String("anvil-drop-test"), "drag and drop: what's dragged from one program's window lands in the other's",
+               got.isEmpty() ? QStringLiteral("nothing arrived") : got);
+    }
 
     // Whatever's still open closes with the test.
     for (QQuickItem *w : windows())
