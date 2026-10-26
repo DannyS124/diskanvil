@@ -365,7 +365,30 @@ bool LostFilesModel::passes(int index) const
 void LostFilesModel::append(const QVector<lost::Found> &files)
 {
     const int first = int(m_files.size());
-    m_files += files;
+    const QVector<int> replaced = m_merger.add(m_files, files);
+    if (!replaced.isEmpty()) {
+        // A file found again, now with its name: shown afresh where it goes, the view keeping
+        // what's picked and where it's scrolled to.
+        Q_EMIT layoutAboutToBeChanged();
+        const QModelIndexList was = persistentIndexList();
+        QVector<int> kept;
+        for (const QModelIndex &i : was)
+            kept << fileIndex(i.row());
+        m_shown.clear();
+        for (int i = 0; i < m_files.size(); ++i) {
+            if (passes(i))
+                m_shown << i;
+        }
+        sortShown();
+        QModelIndexList now;
+        for (int f : std::as_const(kept)) {
+            const int row = f >= 0 ? int(m_shown.indexOf(f)) : -1;
+            now << (row >= 0 ? index(row) : QModelIndex());
+        }
+        changePersistentIndexList(was, now);
+        Q_EMIT layoutChanged();
+        return;
+    }
     QVector<int> add;
     for (int i = first; i < m_files.size(); ++i) {
         if (passes(i))
@@ -402,6 +425,7 @@ void LostFilesModel::clear()
 {
     beginResetModel();
     m_files.clear();
+    m_merger.clear();
     m_shown.clear();
     m_ticked.clear();
     m_saved.clear();
@@ -1506,6 +1530,7 @@ void LostFilesDialog::startDeepScan(const QVector<lost::Extent> &knownRanges, co
     m_scan = new lost::DeepScan(m_source);
     m_scan->skip(knownRanges, knownStarts);
     m_scan->setVolumes(m_volumes);
+    m_scan->setNames(m_model->files());
     connect(m_scan, &lost::DeepScan::found, this, [this](const QVector<lost::Found> &files) {
         m_model->append(files);
         addFolders(files);

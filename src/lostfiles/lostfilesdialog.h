@@ -118,6 +118,7 @@ private:
     void removeShown(int index);
 
     QVector<lost::Found> m_files;
+    lost::Merger m_merger; // no doubles: a file found again with its name takes the old one's place
     void sortShown();
 
     QVector<int> m_shown; // file indexes in the list, in order (newest deleted first for kDeletedRecently)

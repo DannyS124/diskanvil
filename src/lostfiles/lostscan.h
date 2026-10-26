@@ -7,6 +7,7 @@
 #include "unpack.h"
 #include "vshadow.h"
 
+#include <QHash>
 #include <QObject>
 #include <QSet>
 #include <QVector>
@@ -182,6 +183,9 @@ public:
     // The file systems the quick scan read: their cluster layout, for the folders a quick format
     // left behind (they're listed at the end, with their files' names).
     void setVolumes(QVector<Volume> volumes) { m_volumes = std::move(volumes); }
+    // Files the quick scan only has a name of: one found by its contents with exactly that size,
+    // the only one of its kind that size, takes the name and folder.
+    void setNames(const QVector<Found> &files);
 
     static constexpr int kPerTypeLimit = 250000; // past that, more of one type isn't listed
     static constexpr int kTotalLimit = 1000000;  // and past this, nothing more at all
@@ -202,6 +206,7 @@ private:
     QVector<Extent> m_skipRanges; // sorted, not overlapping
     QSet<quint64> m_skipStarts;
     QVector<Volume> m_volumes;
+    QHash<QPair<int, quint64>, Found> m_names; // (kind, size) -> the only name only like it
 };
 
 // Finds the files that are the same as another found one, byte for byte (the same photo found
@@ -283,6 +288,24 @@ private:
     QVector<Found> m_files;
     QString m_folder;
     std::atomic<bool> m_cancel{false};
+};
+
+// Keeps a list of found files without doubles. The same file can be found twice: by its
+// contents and later in a folder or file record a format left (then the named one takes its
+// place), or as a name only and then by its contents (the deep scan names it from the name
+// only one, which it then replaces).
+class Merger
+{
+public:
+    // Adds `files` to `list`. Returns where it replaced files already there; the rest were
+    // added at the end, or dropped as doubles of what's there.
+    QVector<int> add(QVector<Found> &list, const QVector<Found> &files);
+    void clear();
+
+private:
+    QHash<quint64, int> m_contentsAt; // where a file found by its contents starts -> its place
+    QHash<quint64, int> m_systemAt;   // the same for files a file system listed
+    QHash<QString, int> m_nameOnly;   // "folder/name" of a name only -> its place
 };
 
 // A file name any file system takes (FAT and NTFS included), from whatever a drive said.

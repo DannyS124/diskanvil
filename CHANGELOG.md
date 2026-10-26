@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.5.3
+- Find Lost Files lists each file once: one found by what's in it and then again in a folder or file record a format left takes the found name and folder in the same row, and a file the file system only has the name of takes the contents of the file found with exactly its size and kind
 - Find Lost Files reads ext4's journal: it keeps older copies of file records from before a file was deleted (with its size and where its pieces are) and of folder blocks (with names), so deleted ext4 files come back by name and whole, in the folder they were in. Linux now wipes a deleted file's folder entry, so the journal is where the name still is
 - Find Lost Files reads more of NTFS: after a quick format, the old file records past the new MFT give files back with their names, folders, dates and contents (small files are kept inside the record); and the names, sizes and dates of deleted files whose records went to other files come from what's left in folders' indexes and in NTFS's log file
 - Find Lost Files puts fragmented films and photos back together. A film's index lists where every frame goes and how big it is, so where the frames stop being right, the piece where they carry on is found on the drive (MP4, MOV, H.264 and H.265); a JPEG is decoded on from where it breaks off, and a piece only counts when the picture then ends exactly where it should. Files whose kind only gives a length (PSD, TIFF, films, Office 97...) are still looked inside, so a fragmented one can't hide other files

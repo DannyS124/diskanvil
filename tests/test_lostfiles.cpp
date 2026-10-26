@@ -763,6 +763,61 @@ void fragmentedFiles()
            QStringLiteral("%1 bytes: %2").arg(film.size()).arg(got));
 }
 
+// No doubles: a file found by contents and then by name keeps one row (the named one); a name
+// only is replaced by the file found with that name; a contents find of a listed file is dropped.
+// And the deep scan names a find from the only name only of its kind and size.
+void merging()
+{
+    const auto file = [](lost::Origin origin, quint64 start, const QString &name, bool nameOnly = false) {
+        lost::Found f;
+        f.origin = origin;
+        f.name = name;
+        f.folder = QStringLiteral("D");
+        f.nameOnly = nameOnly;
+        f.size = 5000;
+        if (!nameOnly)
+            f.extents = {{start, 5000}};
+        return f;
+    };
+    lost::Merger m;
+    QVector<lost::Found> list;
+    m.add(list, {file(lost::Origin::Contents, 4096, QStringLiteral("Picture 1.jpg")), file(lost::Origin::FileSystem, 0, QStringLiteral("a.pdf"), true)});
+    const QVector<int> replaced = m.add(list, {file(lost::Origin::FileSystem, 4096, QStringLiteral("beach.jpg")),
+                                               file(lost::Origin::Contents, 4096, QStringLiteral("Picture 2.jpg")),
+                                               file(lost::Origin::FileSystem, 8192, QStringLiteral("a.pdf"))});
+    report(list.size() == 2 && replaced.size() == 2 && list[0].name == QLatin1String("beach.jpg") && list[1].name == QLatin1String("a.pdf") && !list[1].nameOnly,
+           QStringLiteral("merging: no doubles, the named file takes the place of the other find"),
+           QStringLiteral("%1 files").arg(list.size()));
+
+    QImage picture(300, 200, QImage::Format_RGB32);
+    picture.fill(qRgb(30, 120, 200));
+    QByteArray jpeg;
+    QBuffer buffer(&jpeg);
+    buffer.open(QIODevice::WriteOnly);
+    picture.save(&buffer, "JPEG", 95);
+    while (jpeg.size() < 4096) { // big enough to be matched by its size
+        picture.setPixel(int(jpeg.size()) % 300, 7, qRgb(jpeg.size() % 256, 0, 0));
+        jpeg.clear();
+        buffer.seek(0);
+        picture.save(&buffer, "JPEG", 100);
+    }
+    QByteArray drive = noise(4 * kMiB, 21);
+    drive.replace(512 * 1024, jpeg.size(), jpeg);
+    lost::Found name = file(lost::Origin::FileSystem, 0, QStringLiteral("Holiday.jpg"), true);
+    name.size = quint64(jpeg.size());
+    name.type = filetypes::typeNumber(QStringLiteral("jpg"));
+    name.folder = QStringLiteral("C/Photos");
+    lost::DeepScan deep(lost::Source::fromMemory(drive));
+    deep.setNames({name});
+    QVector<lost::Found> found;
+    QObject::connect(&deep, &lost::DeepScan::found, [&found](const QVector<lost::Found> &batch) { found += batch; });
+    deep.run();
+    const bool named = std::any_of(found.cbegin(), found.cend(), [](const lost::Found &f) {
+        return f.name == QLatin1String("Holiday.jpg") && f.folder == QLatin1String("C/Photos") && f.extents.value(0).start == 512 * 1024;
+    });
+    report(named, QStringLiteral("merging: a photo found by its contents takes the name only of its size and kind"));
+}
+
 // Plain text has no mark of its own: found where nothing else starts, ended where the text does,
 // and never found in random bytes.
 void plainText()
@@ -4531,6 +4586,7 @@ void lostFilesTests()
     plainText();
     kinds053();
     fragmentedFiles();
+    merging();
     finding(dir.path());
     damage();
     names();

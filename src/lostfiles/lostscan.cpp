@@ -333,6 +333,21 @@ void lost::DeepScan::run()
                 f.name = carvedName(m.type, ++perCategory[int(types[m.type].category)]);
                 if (f.condition != Condition::Unreadable) // a failing drive isn't read there again
                     nameFromContents(f, *m_source);
+                // Exactly the size of a file a file system only has the name of, and the only one
+                // like it: that's its name and folder.
+                if (const auto name = m_names.constFind({filetypes::startType(m.type), m.size}); name != m_names.cend()) {
+                    f.name = name->name;
+                    f.folder = name->folder;
+                    f.origin = Origin::FileSystem;
+                    f.deleted = true;
+                    f.created = name->created;
+                    f.modified = name->modified;
+                    f.accessed = name->accessed;
+                    f.changed = name->changed;
+                    f.deletedAt = name->deletedAt;
+                    f.note = tr("Named from the file system: it still had a deleted file called that, in that folder, exactly this size.");
+                    m_names.erase(name);
+                }
                 const filetypes::Category category = types[m.type].category;
                 const bool film = filetypes::startType(m.type) == mp4 && (category == filetypes::Category::Video || category == filetypes::Category::Music);
                 if (f.condition != Condition::Unreadable && (film || (m.type == jpg && !m.complete)))
@@ -414,6 +429,59 @@ void lost::DeepScan::run()
         Q_EMIT found(batch);
     qCInfo(lcOps).noquote() << "Find Lost Files: deep scan" << (m_cancel ? "stopped" : "done");
     Q_EMIT finished(m_cancel);
+}
+
+QVector<int> lost::Merger::add(QVector<Found> &list, const QVector<Found> &files)
+{
+    QVector<int> replaced;
+    for (const Found &f : files) {
+        const QString path = f.folder + QLatin1Char('/') + f.name;
+        const quint64 start = f.extents.isEmpty() || f.extents.first().zeros() ? ~quint64(0) : f.extents.first().start;
+        int place = -1;
+        if (f.nameOnly) {
+            if (m_nameOnly.contains(path))
+                continue;
+        } else if (start != ~quint64(0) && f.origin == Origin::FileSystem && m_contentsAt.contains(start)) {
+            place = m_contentsAt.take(start); // named now: it takes the place of the one found by contents
+        } else if (start != ~quint64(0) && f.origin == Origin::Contents && m_systemAt.contains(start)) {
+            continue; // already listed with its name
+        } else if (m_nameOnly.contains(path)) {
+            place = m_nameOnly.take(path); // what was only a name, now with what was in it
+        }
+        if (place >= 0) {
+            list[place] = f;
+            replaced << place;
+        } else {
+            place = int(list.size());
+            list << f;
+        }
+        if (f.nameOnly)
+            m_nameOnly.insert(path, place);
+        else if (start != ~quint64(0))
+            (f.origin == Origin::FileSystem ? m_systemAt : m_contentsAt).insert(start, place);
+    }
+    return replaced;
+}
+
+void lost::Merger::clear()
+{
+    m_contentsAt.clear();
+    m_systemAt.clear();
+    m_nameOnly.clear();
+}
+
+void lost::DeepScan::setNames(const QVector<Found> &files)
+{
+    QHash<QPair<int, quint64>, int> count;
+    for (const Found &f : files) {
+        if (!f.nameOnly || f.type < 0 || f.size < 4096)
+            continue;
+        const QPair<int, quint64> key{filetypes::startType(f.type), f.size};
+        if (++count[key] == 1)
+            m_names.insert(key, f);
+        else
+            m_names.remove(key); // two names that size: can't tell which
+    }
 }
 
 lost::CopyScan::CopyScan(std::shared_ptr<Source> source, QVector<Volume> volumes)

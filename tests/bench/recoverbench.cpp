@@ -37,10 +37,11 @@ int main(int argc, char *argv[])
     clock.start();
 
     QVector<lost::Found> files;
+    lost::Merger merger; // as the window keeps its list: no doubles
     int byName = 0, byContents = 0;
     lost::QuickScan quick(source);
     QObject::connect(&quick, &lost::QuickScan::found, [&](const QVector<lost::Found> &batch) {
-        files += batch;
+        merger.add(files, batch);
         byName += int(batch.size());
     });
     quick.run();
@@ -48,8 +49,9 @@ int main(int argc, char *argv[])
     lost::DeepScan deep(source);
     deep.skip(quick.knownRanges(), quick.knownStarts());
     deep.setVolumes(quick.volumes());
+    deep.setNames(files);
     QObject::connect(&deep, &lost::DeepScan::found, [&](const QVector<lost::Found> &batch) {
-        files += batch;
+        merger.add(files, batch);
         byContents += int(batch.size());
     });
     deep.run();
