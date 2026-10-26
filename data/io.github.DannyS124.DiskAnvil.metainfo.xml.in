@@ -59,6 +59,18 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.5.3" date="2026-10-27">
+      <description>
+        <p>Find Lost Files gets more back: it reads ext4 itself (with its journal, for deleted names), the old
+        records a quick format leaves on NTFS, FAT and exFAT, 27 more kinds of file and plain text, and puts
+        fragmented films and photos back together. Each file is listed once, with a dot for how whole it looks.</p>
+        <p>Change Partition Table turns MBR into GPT or back without losing anything, with Undo. Scan for Bad
+        Sectors gets past bad patches and gives an honest time left. Disk Health keeps a history with graphs, and
+        can check the drives every day and say when one gets worse.</p>
+        <p>Fixes: Windows drives Windows didn't shut down fully mount read-only instead of failing, New Partition
+        Table and Wipe Disk work on slow eMMC drives, and DiskAnvil Live's Files window does drag and drop.</p>
+      </description>
+    </release>
     <release version="0.5.2" date="2026-10-12">
       <description>
         <p>DiskForge is now called DiskAnvil; settings move over by themselves. It runs on Windows now too, with an installer. Scan for Viruses checks a drive for malware, and

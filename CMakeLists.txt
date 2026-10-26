@@ -3,7 +3,7 @@
 
 cmake_minimum_required(VERSION 3.21)
 project(diskanvil
-    VERSION 0.5.2
+    VERSION 0.5.3
     DESCRIPTION "Disk manager for Linux in the style of Windows Disk Management"
     HOMEPAGE_URL "https://github.com/DannyS124/diskanvil"
     LANGUAGES CXX)
