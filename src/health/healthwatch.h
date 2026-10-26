@@ -17,8 +17,12 @@ namespace healthwatch {
 
 inline constexpr char kOption[] = "--health-check";
 
-// Why it can't be switched on here (DiskAnvil Live starts fresh every time), or empty.
+// Why it can't be switched on here, or empty. On DiskAnvil Live it can't (it only runs while it's
+// started from the stick, and has no notifications), but the history itself is still kept: on the
+// stick with Keep my changes, until it's turned off without.
 QString unavailableReason();
+// Said under a drive's history on DiskAnvil Live without Keep my changes: it goes at shutdown.
+QString historyGoesReason();
 bool enabled();
 // Switches it on or off; false (and why in `message`) when that didn't work.
 bool setEnabled(bool on, QString *message);

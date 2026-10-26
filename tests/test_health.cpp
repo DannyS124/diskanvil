@@ -18,6 +18,7 @@
 #include "../src/health/health.h"
 #include "../src/health/healthhistory.h"
 #include "../src/health/healthwatch.h"
+#include "../src/usb/rescuestick.h"
 #include "../src/drives/powerbox.h"
 #include "../src/health/smartdata.h"
 #include "../src/health/triage.h"
@@ -1018,6 +1019,29 @@ void healthHistory()
     report(healthwatch::setEnabled(false, &message) && !healthwatch::enabled() && !QFile::exists(service.fileName()),
            QStringLiteral("check: switched off, and its files are gone"));
     healthwatch::unitFolderForTest.clear();
+
+    // On DiskAnvil Live: no daily check (it says why), but the history is kept; without Keep my
+    // changes it says the history goes at shutdown.
+    QTemporaryDir live;
+    const QString conf = live.filePath(QStringLiteral("diskanvil-live.conf")), cmdline = live.filePath(QStringLiteral("cmdline"));
+    QFile confFile(conf);
+    report(confFile.open(QIODevice::WriteOnly), QStringLiteral("check: a pretend DiskAnvil Live"));
+    auto boot = [&cmdline](const QByteArray &options) {
+        QFile f(cmdline);
+        if (f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+            f.write(options);
+    };
+    const QString keptConf = rescue::rescueConfPath, keptBoot = rescue::bootOptionsPath;
+    rescue::rescueConfPath = conf;
+    rescue::bootOptionsPath = cmdline;
+    boot("boot=live quiet splash\n");
+    report(!healthwatch::unavailableReason().isEmpty() && !healthwatch::setEnabled(true, &message) && !healthwatch::historyGoesReason().isEmpty(),
+           QStringLiteral("check: on DiskAnvil Live no daily check, and the history goes at shutdown (it says so)"), message);
+    boot("boot=live quiet splash persistence\n");
+    report(healthwatch::historyGoesReason().isEmpty() && healthwatch::unavailableReason().contains(QLatin1String("Keep my changes")),
+           QStringLiteral("check: with Keep my changes, Live keeps the history on the stick"), healthwatch::unavailableReason());
+    rescue::rescueConfPath = keptConf;
+    rescue::bootOptionsPath = keptBoot;
 #endif
     if (dataHome.isEmpty())
         qunsetenv("XDG_DATA_HOME");

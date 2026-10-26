@@ -52,7 +52,6 @@
 #include "inspectdialog.h"
 #include "convertdialog.h"
 #include "healthhistory.h"
-#include "healthwatch.h"
 #include "recoverdialog.h"
 #include "rescuestick.h"
 #include "savefilesdialog.h"
@@ -225,8 +224,6 @@ MainWindow::MainWindow(UDisks *udisks, QWidget *parent)
     noteHealth->setSingleShot(true);
     noteHealth->setInterval(10000);
     connect(noteHealth, &QTimer::timeout, this, [this] {
-        if (!healthwatch::unavailableReason().isEmpty())
-            return;
         for (const Disk &d : m_udisks->disks())
             healthhistory::noteIfDue(m_udisks, d);
     });

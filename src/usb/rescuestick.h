@@ -54,6 +54,8 @@ bool runningInRescue();
 // the system needs the stick the whole time, which matters when the PC sleeps.
 bool runningFromStick();
 QString notInRescueReason(); // why those are off, for their tooltips
+// DiskAnvil Live started with "Keep my changes" (live-boot's persistence): its home folder stays.
+bool keepsChanges();
 // The running rescue system's build ID (matches Info::id on its stick), or empty.
 QString runningBuildId();
 // For the tests: where runningInRescue() and runningFromStick() look.

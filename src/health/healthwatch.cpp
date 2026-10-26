@@ -106,8 +106,16 @@ void notify(const QStringList &lines)
 QString unavailableReason()
 {
     if (rescue::runningInRescue())
-        return tr("DiskAnvil Live starts fresh every time, so it can't keep a drive's history or check it every day. "
-                  "DiskAnvil on a PC can.");
+        return tr("DiskAnvil Live only runs while it's started from the stick, so a daily check is for DiskAnvil on a PC. "
+                  "The history here is kept all the same%1.")
+            .arg(rescue::keepsChanges() ? tr(", on the stick (Keep my changes is on)") : tr(" until DiskAnvil Live is turned off"));
+    return {};
+}
+
+QString historyGoesReason()
+{
+    if (rescue::runningInRescue() && !rescue::keepsChanges())
+        return tr("DiskAnvil Live forgets this when it's turned off. Started with Keep my changes, it keeps it on the stick.");
     return {};
 }
 

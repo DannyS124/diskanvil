@@ -117,6 +117,8 @@ HealthHistoryDialog::HealthHistoryDialog(const Disk &disk, QWidget *parent)
                            .arg(QLocale().toString(history.points.first().day, QLocale::ShortFormat),
                                 QLocale().toString(history.points.last().day, QLocale::ShortFormat)));
     }
+    if (const QString goes = healthwatch::historyGoesReason(); !goes.isEmpty())
+        intro->setText(intro->text() + QLatin1Char(' ') + goes);
     auto *grid = new QGridLayout;
     for (const healthhistory::Series &s : healthhistory::series(history)) {
         auto *g = new HistoryGraph(s);

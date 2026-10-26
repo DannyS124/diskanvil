@@ -78,6 +78,14 @@ bool rescue::runningFromStick()
     return !cmdline.open(QIODevice::ReadOnly) || !cmdline.readAll().split(' ').contains("toram");
 }
 
+bool rescue::keepsChanges()
+{
+    if (!runningInRescue())
+        return false;
+    QFile cmdline(bootOptionsPath);
+    return cmdline.open(QIODevice::ReadOnly) && cmdline.readAll().simplified().split(' ').contains("persistence");
+}
+
 QString rescue::notInRescueReason()
 {
     return QObject::tr("DiskAnvil Live starts fresh from the stick every time, so this would only change the copy in memory.");
