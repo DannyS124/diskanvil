@@ -68,8 +68,52 @@ void SurfaceScan::run()
         return ok;
     };
 
-    quint64 lastReport = 0;
-    for (quint64 off = 0; off < m_size; off += kChunk) {
+    quint64 done = 0, lastReport = 0;
+    auto counted = [&](quint64 len) {
+        done += len;
+        if (sinceBatch.elapsed() >= 250)
+            flush();
+        if (done - lastReport >= 64 * kChunk || done == m_size) {
+            lastReport = done;
+            emit progress(done, m_size, int(bad.size()));
+        }
+    };
+    // Narrows a piece that didn't read down to its sectors: physical blocks first, then the
+    // logical sectors inside a bad one. With `giveUpAfter`, it stops after that many unreadable
+    // blocks in a row and gives back where it stopped (the rest is left for later); otherwise
+    // it reads all of it and gives back its end.
+    auto narrow = [&](quint64 off, quint64 len, int giveUpAfter) {
+        int inARow = 0;
+        for (quint64 p = off; p < off + len; p += quint64(physical)) {
+            const quint64 plen = std::min<quint64>(quint64(physical), off + len - p);
+            if (readAt(m_fd, buf.get(), plen, p)) {
+                batch.append({p, quint32(plen), 0, true});
+                inARow = 0;
+                counted(plen);
+                continue;
+            }
+            for (quint64 s = p; s < p + plen; s += quint64(logical)) {
+                if (timedRead(quint64(logical), s))
+                    continue;
+                bad << s;
+                // A bad sector can take the drive seconds to give up on: counted straight away,
+                // not at the next 64 MiB, or a bad patch shows red with "0 so far" for an hour.
+                flush();
+                emit progress(done + (s - p), m_size, int(bad.size()));
+            }
+            counted(plen);
+            if (giveUpAfter > 0 && ++inARow >= giveUpAfter && p + plen < off + len)
+                return p + plen;
+        }
+        return off + len;
+    };
+
+    // First pass. Inside a bad patch it stops after a few unreadable blocks, and after a piece
+    // that didn't read it jumps ahead, twice as far each time the next one doesn't read either.
+    constexpr quint64 kMaxSkip = 256 * kChunk;
+    QVector<QPair<quint64, quint64>> gaps; // (start, end) left for later
+    quint64 skip = 0;
+    for (quint64 off = 0; off < m_size;) {
         if (m_cancel) {
             flush();
             emit finished(false, bad, logical);
@@ -80,33 +124,55 @@ void SurfaceScan::run()
         t.start();
         if (readAt(m_fd, buf.get(), len, off)) {
             batch.append({off, quint32(len), quint32(t.elapsed()), true});
-        } else {
-            // Narrow it down: physical blocks first, then the logical sectors inside a bad one.
-            for (quint64 p = off; p < off + len; p += quint64(physical)) {
-                const quint64 plen = std::min<quint64>(quint64(physical), off + len - p);
-                if (readAt(m_fd, buf.get(), plen, p)) {
-                    batch.append({p, quint32(plen), 0, true});
-                    continue;
-                }
-                for (quint64 s = p; s < p + plen; s += quint64(logical)) {
-                    if (timedRead(quint64(logical), s))
-                        continue;
-                    bad << s;
-                    // A bad sector can take the drive seconds to give up on: counted straight away,
-                    // not at the next 64 MiB, or a bad patch shows red with "0 so far" for an hour.
-                    flush();
-                    emit progress(s, m_size, int(bad.size()));
-                }
-            }
+            counted(len);
+            skip = 0;
+            off += len;
+            continue;
         }
-        if (sinceBatch.elapsed() >= 250)
-            flush();
-        if (off + len - lastReport >= 64 * kChunk || off + len == m_size) {
-            lastReport = off + len;
-            emit progress(off + len, m_size, int(bad.size()));
+        const quint64 stopped = narrow(off, len, 4);
+        if (stopped < off + len)
+            gaps.append({stopped, off + len});
+        off += len;
+        skip = skip == 0 ? kChunk : std::min(skip * 2, kMaxSkip);
+        const quint64 to = std::min(m_size, off + skip);
+        if (to > off)
+            gaps.append({off, to});
+        off = to;
+    }
+
+    // Back for what was skipped, each part from its far end: a bad patch is usually worst where
+    // it starts, so its good end comes back first.
+    quint64 left = 0;
+    for (const auto &[from, to] : std::as_const(gaps))
+        left += to - from;
+    if (left > 0) {
+        flush();
+        emit fillingGaps(left);
+    }
+    for (const auto &[from, to] : std::as_const(gaps)) {
+        for (quint64 end = to; end > from;) {
+            if (m_cancel) {
+                flush();
+                std::sort(bad.begin(), bad.end());
+                emit finished(false, bad, logical);
+                return;
+            }
+            const quint64 off = end - std::min(kChunk, end - from);
+            const quint64 len = end - off;
+            QElapsedTimer t;
+            t.start();
+            if (readAt(m_fd, buf.get(), len, off)) {
+                batch.append({off, quint32(len), quint32(t.elapsed()), true});
+                counted(len);
+            } else {
+                narrow(off, len, 0);
+            }
+            end = off;
         }
     }
     flush();
+    std::sort(bad.begin(), bad.end());
+    emit progress(m_size, m_size, int(bad.size()));
     emit finished(true, bad, logical);
 }
 

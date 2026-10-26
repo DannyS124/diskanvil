@@ -62,6 +62,9 @@
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
+#include <deque>
+#include <memory>
+
 namespace {
 
 QString healthColor(Health::State s)
@@ -1973,13 +1976,24 @@ void BadSectorsDialog::startScan()
                     m_slowReads << s;
             }
         });
-        connect(scan, &SurfaceScan::progress, this, [this, clock](quint64 done, quint64 total, int bad) {
+        // The time left comes from how fast it read lately (the last 30 s), not since the start:
+        // a drive is slower at its end, and a bad patch shouldn't make the rest look hours long.
+        auto recent = std::make_shared<std::deque<std::pair<double, quint64>>>();
+        auto gaps = std::make_shared<quint64>(0);
+        connect(scan, &SurfaceScan::fillingGaps, this, [gaps](quint64 bytes) { *gaps = bytes; });
+        connect(scan, &SurfaceScan::progress, this, [this, clock, recent, gaps](quint64 done, quint64 total, int bad) {
             m_progress->setValue(int(done * 1000 / std::max<quint64>(total, 1)));
-            const double rate = done / std::max(clock->nsecsElapsed() / 1e9, 0.001);
-            m_status->setText(tr("Scanned %1 of %2, %3/s, %4 left. Bad sectors so far: %5")
-                                  .arg(formatSize(done), formatSize(total), formatSize(quint64(rate)),
-                                       durationText((total - done) / std::max(rate, 1.0)))
-                                  .arg(bad));
+            const double now = clock->nsecsElapsed() / 1e9;
+            recent->emplace_back(now, done);
+            while (recent->size() > 2 && now - recent->front().first > 30)
+                recent->pop_front();
+            const double span = now - recent->front().first;
+            const double rate = span >= 5 ? (done - recent->front().second) / span : done / std::max(now, 0.001);
+            const QString left = rate >= 1 ? durationText((total - done) / rate) : tr("unknown time");
+            m_status->setText((*gaps ? tr("Going back over %1 skipped past bad areas. ").arg(formatSize(*gaps)) : QString())
+                              + tr("Scanned %1 of %2, %3/s, %4 left. Bad sectors so far: %5")
+                                    .arg(formatSize(done), formatSize(total), formatSize(quint64(rate)), left)
+                                    .arg(bad));
         });
         connect(scan, &SurfaceScan::finished, this, [this, clock](bool completed, const QVector<quint64> &bad, int logical) {
             qCInfo(lcOps).noquote() << "Bad sector scan" << (completed ? "finished," : "stopped,") << bad.size() << "bad";

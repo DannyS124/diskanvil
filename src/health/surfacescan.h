@@ -12,6 +12,9 @@
 
 // Reads every sector of a device to find the ones that can't be read. Read-only; needs
 // an O_DIRECT fd (UDisks::openDevice with forBenchmark) so nothing comes from the cache.
+// A bad patch doesn't hold it up: the first pass jumps past one in growing steps (1 MiB, 2, 4...
+// up to 256 MiB) and goes back for what it skipped at the end, each skipped part read from its
+// far end. Every sector is still read once, so it finds the same as reading straight through.
 class SurfaceScan : public QObject
 {
     Q_OBJECT
@@ -24,7 +27,10 @@ public slots:
     void run();
 
 signals:
+    // done: how much has been read so far (not where; with the skipping it's not in order)
     void progress(quint64 done, quint64 total, int badCount);
+    // The first pass is through; now the parts skipped past bad patches, `bytes` of them.
+    void fillingGaps(quint64 bytes);
     // How long each read took, a few times a second, for the block map.
     void samples(const QVector<ReadSample> &batch);
     // badSectors: byte offsets of unreadable logical sectors

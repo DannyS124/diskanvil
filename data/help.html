@@ -107,7 +107,8 @@ and back up first.</p>
 <p><b>Btrfs:</b> Disk Health shows how many read, write and checksum errors Btrfs has seen on each Btrfs partition.
 Scrub Now reads everything back and checks it; tick "Scrub every month" to have it done for you.</p>
 <p><b>Bad sectors:</b> right-click the drive, Scan for Bad Sectors. The scan reads everything and changes
-nothing. If it finds unreadable sectors, Repair rewrites just those: whatever still reads is kept, the rest was
+nothing. A bad patch doesn't hold it up: it jumps past it and goes back for what it skipped at the end, so the
+time left (worked out from the last half minute) stays honest. If it finds unreadable sectors, Repair rewrites just those: whatever still reads is kept, the rest was
 already lost. The drive then reuses each spot or swaps in a spare. The "reallocated" count in Disk Health never
 goes back down; that's normal. If new bad sectors keep appearing, the drive is wearing out.</p>
 <p>While it scans, a map of the drive fills in: green reads fine, orange is slow, red can't be read. Hover over a

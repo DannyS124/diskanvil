@@ -456,6 +456,51 @@ void badSectorTests()
         }
     }
     sh(QStringLiteral("dmsetup"), {QStringLiteral("remove"), name});
+
+    // A bad patch: 3 MiB that never read (device-mapper's error target), 10 MiB in. The first pass
+    // jumps past it and reaches the end before going back; every one of its sectors is still found.
+    const QString patch = QStringLiteral("diskanvil-patch-test");
+    sh(QStringLiteral("dmsetup"), {QStringLiteral("create"), patch, QStringLiteral("--table"),
+                                   QStringLiteral("0 20480 linear %1 0\n20480 6144 error\n26624 104448 linear %1 26624").arg(loop)});
+    {
+        const QString patchDev = QStringLiteral("/dev/mapper/") + patch;
+        const int fd = ::open(patchDev.toLocal8Bit().constData(), O_RDONLY | O_DIRECT | O_CLOEXEC);
+        QVector<quint64> found;
+        QVector<quint64> order; // where each read was, in the order they happened
+        quint64 gapBytes = 0, lastDone = 0;
+        bool completed = false, forward = true;
+        if (fd >= 0) {
+            SurfaceScan s(fd, quint64(original.size()));
+            QObject::connect(&s, &SurfaceScan::samples, [&](const QVector<ReadSample> &batch) {
+                for (const ReadSample &r : batch)
+                    order << r.offset;
+            });
+            QObject::connect(&s, &SurfaceScan::fillingGaps, [&](quint64 bytes) { gapBytes = bytes; });
+            QObject::connect(&s, &SurfaceScan::progress, [&](quint64 done, quint64, int) {
+                forward = forward && done >= lastDone;
+                lastDone = done;
+            });
+            QObject::connect(&s, &SurfaceScan::finished, [&](bool c, const QVector<quint64> &b, int) { completed = c; found = b; });
+            s.run();
+        }
+        QVector<quint64> expected;
+        for (quint64 sector = 20480; sector < 26624; ++sector)
+            expected << sector * 512;
+        report(completed && found == expected, QStringLiteral("a 3 MiB bad patch: every one of its sectors is found, in order"),
+               QStringLiteral("%1 found").arg(found.size()));
+        const qsizetype end = order.indexOf(quint64(original.size()) - 1024 * 1024); // the last MiB
+        const qsizetype lastInPatch = [&] {
+            qsizetype last = -1;
+            for (qsizetype i = 0; i < order.size(); ++i)
+                if (order[i] >= 20480 * 512ull && order[i] < 26624 * 512ull)
+                    last = i;
+            return last;
+        }();
+        report(gapBytes > 0 && end >= 0 && lastInPatch > end, QStringLiteral("the first pass gets past the patch to the end before going back"),
+               QStringLiteral("skipped %1, end read at %2, last patch read at %3").arg(gapBytes).arg(end).arg(lastInPatch));
+        report(forward && lastDone == quint64(original.size()), QStringLiteral("the count only goes up and ends at the drive's size"));
+    }
+    sh(QStringLiteral("dmsetup"), {QStringLiteral("remove"), patch});
     sh(QStringLiteral("losetup"), {QStringLiteral("-d"), loop});
 }
 
