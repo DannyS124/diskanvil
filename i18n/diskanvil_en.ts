@@ -103,7 +103,7 @@
 <context>
     <name>BurnInDialog</name>
     <message numerus="yes">
-        <location filename="../src/health/burnindialog.cpp" line="285"/>
+        <location filename="../src/health/burnindialog.cpp" line="288"/>
         <source>%n counter(s) noted</source>
         <translation>
             <numerusform>%n counter noted</numerusform>
@@ -111,7 +111,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/health/burnindialog.cpp" line="305"/>
+        <location filename="../src/health/burnindialog.cpp" line="308"/>
         <source>%n counter(s) went up</source>
         <translation>
             <numerusform>%n counter went up</numerusform>
@@ -811,7 +811,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/drives/udisks.cpp" line="471"/>
+        <location filename="../src/drives/udisks.cpp" line="527"/>
         <source>The volume group %1 is missing %n of its drives. What was on them can&apos;t be read.</source>
         <translation>
             <numerusform>The volume group %1 is missing %n of its drives. What was on them can't be read.</numerusform>
