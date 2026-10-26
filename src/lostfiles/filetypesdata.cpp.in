@@ -1,0 +1,9 @@
+// SPDX-FileCopyrightText: 2026 Danny S
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+// Made by CMake from data/filetypes.json: edit that, not this.
+
+namespace filetypes {
+extern const char *const kBuiltInData;
+const char *const kBuiltInData = R"filetypes(@DISKANVIL_FILETYPES_JSON@)filetypes";
+}

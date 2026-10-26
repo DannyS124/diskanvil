@@ -161,6 +161,57 @@ def make_corpus(folder):
     for i in range(10):  # small enough for NTFS to keep inside its records
         with open(add('Documents/small', f'todo {i + 1}.txt'), 'w') as f:
             f.write(words(rng, rng.randint(10, 80)))
+    # More kinds, for the signature engine: pictures, films, sound, archives and documents.
+    for i, (fmt, ext) in enumerate([('tiff', 'tif'), ('bmp', 'bmp'), ('webp', 'webp'), ('heic', 'heic'), ('avif', 'avif'),
+                                    ('psd', 'psd'), ('ico', 'ico'), ('tiff', 'tiff')]):
+        size = '256x256' if ext == 'ico' else f'{800 + 100 * i}x{600 + 50 * i}'
+        run('magick', '-size', size, f'plasma:fractal', '-seed', str(i), f'{fmt}:' + add('Pictures/more', f'picture {i + 1}.{ext}'))
+    with open(add('Pictures/more', 'drawing.svg'), 'w') as f:
+        f.write('<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300">' +
+                ''.join(f'<circle cx="{rng.randint(0, 400)}" cy="{rng.randint(0, 300)}" r="{rng.randint(5, 50)}" fill="#{rng.randint(0, 0xFFFFFF):06x}"/>'
+                        for _ in range(300)) + '</svg>\n')
+    films = [('avi', ['-c:v', 'mpeg4']), ('mkv', ['-c:v', 'libx264', '-pix_fmt', 'yuv420p']), ('webm', ['-c:v', 'libvpx-vp9', '-b:v', '1M']),
+             ('wmv', ['-c:v', 'wmv2']), ('flv', ['-c:v', 'flv1']), ('ts', ['-c:v', 'libx264', '-pix_fmt', 'yuv420p'])]
+    for i, (ext, codec) in enumerate(films):
+        ffmpeg('-f', 'lavfi', '-i', f'{sources[i % len(sources)]}=size=640x360:rate=25', '-f', 'lavfi', '-i', f'sine=frequency={300 + 50 * i}',
+               '-t', '4', *codec, '-shortest', add('Videos/more', f'film {i + 1}.{ext}'))
+    sounds = [('ogg', ['-c:a', 'libvorbis']), ('opus', ['-c:a', 'libopus']), ('m4a', ['-c:a', 'aac']), ('aiff', []),
+              ('amr', ['-ar', '8000', '-ac', '1', '-c:a', 'libopencore_amrnb']), ('ac3', ['-c:a', 'ac3']), ('wv', ['-c:a', 'wavpack']),
+              ('caf', [])]
+    for i, (ext, codec) in enumerate(sounds):
+        try:
+            ffmpeg('-f', 'lavfi', '-i', f'sine=frequency={400 + 30 * i}:duration={6 + i}', *codec, add('Music/more', f'sound {i + 1}.{ext}'))
+        except subprocess.CalledProcessError:
+            files.pop()  # this ffmpeg can't write that kind
+    for i, (tool, ext) in enumerate([('7z', '7z'), ('gzip', 'gz'), ('xz', 'xz'), ('bzip2', 'bz2'), ('zstd', 'zst'), ('tar', 'tar')]):
+        p = add('Archive/more', f'pack {i + 1}.{ext}')
+        if tool == '7z':
+            run('7z', 'a', '-bd', '-y', p, pictures[i], pictures[i + 1])
+        elif tool == 'tar':
+            run('tar', '-cf', p, '-C', os.path.dirname(pictures[0]), *[os.path.basename(x) for x in pictures[:4] if os.path.dirname(x) == os.path.dirname(pictures[0])])
+        else:
+            data = open(pictures[i + 5], 'rb').read() + words(rng, 3000).encode()
+            with open(p, 'wb') as f:
+                f.write(subprocess.run([tool, '-c'], input=data, stdout=subprocess.PIPE, check=True).stdout)
+    for i, kind in enumerate(['odt', 'ods', 'epub']):
+        p = add('Documents/more', f'book {i + 1}.{kind}')
+        mime = {'odt': 'application/vnd.oasis.opendocument.text', 'ods': 'application/vnd.oasis.opendocument.spreadsheet',
+                'epub': 'application/epub+zip'}[kind]
+        with zipfile.ZipFile(p, 'w') as z:
+            z.writestr(zipfile.ZipInfo('mimetype'), mime)  # first and not packed, as the formats want
+            z.writestr('META-INF/manifest.xml' if kind != 'epub' else 'META-INF/container.xml', '<?xml version="1.0"?><manifest/>')
+            z.writestr('content.xml', f'<?xml version="1.0"?><office:document-content>{words(rng, 4000)}</office:document-content>', zipfile.ZIP_DEFLATED)
+    with open(add('Documents/more', 'page.html'), 'w') as f:
+        f.write('<!DOCTYPE html>\n<html><head><title>Notes</title></head><body>\n' + ''.join(f'<p>{words(rng, 30)}</p>\n' for _ in range(300)) + '</body></html>\n')
+    with open(add('Documents/more', 'data.json'), 'w') as f:
+        json.dump([{'id': k, 'title': words(rng, 3), 'tags': words(rng, 4).split()} for k in range(800)], f, indent=1)
+    with open(add('Documents/more', 'table.csv'), 'w') as f:
+        f.write('id,name,amount,date\n' + ''.join(f'{k},{words(rng, 2)},{rng.randint(1, 9999)},2026-{rng.randint(1, 12):02d}-{rng.randint(1, 28):02d}\n' for k in range(3000)))
+    with open(add('Documents/more', 'message.eml'), 'w') as f:
+        f.write('From: Sam <sam@example.org>\nTo: Jo <jo@example.org>\nSubject: The photos\nDate: Mon, 26 Oct 2026 10:00:00 +0000\n'
+                'Message-ID: <bench1@example.org>\nMIME-Version: 1.0\nContent-Type: text/plain; charset=utf-8\n\n' + words(rng, 2000) + '\n')
+    with open(add('Documents/more', 'letter.rtf'), 'w') as f:
+        f.write('{\\rtf1\\ansi\\deff0 {\\fonttbl {\\f0 Times;}}\n' + ''.join(f'\\par {words(rng, 20)}\n' for _ in range(400)) + '}\n')
     for i in range(3):  # big ones, to be spread over the holes
         ffmpeg('-f', 'lavfi', '-i', 'testsrc2=size=1920x1080:rate=30', '-t', str(20 + 5 * i), '-c:v', 'libx264', '-preset', 'veryfast',
                '-pix_fmt', 'yuv420p', '-b:v', '3M', add('Videos/big', f'wedding part {i + 1}.mp4'))

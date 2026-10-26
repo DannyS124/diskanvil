@@ -119,6 +119,11 @@ lost::QuickScan::QuickScan(std::shared_ptr<Source> source)
 
 void lost::QuickScan::addRanges(const Found &file)
 {
+    // A tar keeps whole files as they are: the deep scan still looks inside (it's not listed
+    // twice: its start is known).
+    static const int tar = filetypes::typeNumber(QStringLiteral("tar"));
+    if (file.type == tar)
+        return;
     for (const Extent &e : file.extents) {
         if (!e.zeros())
             m_ranges.push_back(e);
@@ -269,9 +274,9 @@ void lost::DeepScan::run()
                 }
             }
             QVector<int> candidates = filetypes::candidates(head, int(std::min(kSector, n - off)));
-            // Nothing else starts here: plain text, which has no mark of its own, is looked for last.
+            // Plain text, which has no mark of its own, is looked for last.
             static const int text = filetypes::typeNumber(QStringLiteral("txt"));
-            if (candidates.isEmpty() && filetypes::plainTextStart(head, int(std::min(kSector, n - off))))
+            if (filetypes::plainTextStart(head, int(std::min(kSector, n - off))))
                 candidates << text;
             for (int type : candidates) {
                 const quint64 end = m_end;
@@ -302,8 +307,10 @@ void lost::DeepScan::run()
                 batch << f;
                 // A whole file isn't searched again inside: a JPEG's own preview picture
                 // shouldn't come back as a second photo. Nor is text: its middle would come
-                // back as more text files.
-                if (m.complete || m.type == text)
+                // back as more text files. A tar is, though: it keeps whole files as they are,
+                // and they're easier to use found on their own too.
+                static const int tar = filetypes::typeNumber(QStringLiteral("tar"));
+                if ((m.complete || m.type == text) && m.type != tar)
                     skipUntil = std::max(skipUntil, (at + m.size + kSector - 1) / kSector * kSector);
                 break;
             }

@@ -50,7 +50,13 @@ set(APP_DEFINITIONS
 
 # Everything that talks to UDisks2 (or Windows' disk API) or touches devices, shared with the
 # test tools.
+# Find Lost Files' file signatures (data/filetypes.json), built into the code that reads them.
+file(READ data/filetypes.json DISKANVIL_FILETYPES_JSON)
+configure_file(src/lostfiles/filetypesdata.cpp.in filetypesdata.cpp @ONLY)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS data/filetypes.json)
+
 add_library(diskanvil-core STATIC
+    ${CMAKE_CURRENT_BINARY_DIR}/filetypesdata.cpp
     src/drives/udisks.h src/drives/udisks_common.cpp
     src/drives/fsprobe.cpp src/drives/fsprobe.h
     src/common/format.cpp src/common/format.h

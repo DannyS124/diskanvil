@@ -46,6 +46,8 @@ QVector<int> candidates(const uchar *head, int len);
 // Whether a sector that's none of those could start a plain text file (then measure() it as
 // typeNumber("txt")): text written by a person to its end, or to zeros that fill the rest.
 bool plainTextStart(const uchar *head, int len);
+// What's wrong in data/filetypes.json, if anything (the tests): bad bytes, unknown types or checks.
+QStringList dataProblems();
 
 struct Measured {
     int type = -1;         // can be more exact than what was asked (a .zip that's a .docx)

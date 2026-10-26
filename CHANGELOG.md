@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.5.3
+- Find Lost Files knows 27 more kinds of file by what's in them, each measured to its real end (ICO, JPEG 2000, FLV, MPEG, MPEG-TS, RealMedia, Flash, AAC, AIFF, AMR, AC-3, WavPack, Core Audio, MIDI, xz, bzip2, Zstandard, tar, cabinet, fonts, Windows and Linux programs, Outlook mail stores, JSON), and finds the files inside a tar too. The signatures are in data/filetypes.json now, and every sector is matched against all of them with one look-up
 - Find Lost Files reads ext4 (and ext2 and ext3) itself: every file with its name, folder and pieces, the names of deleted files, and after a quick format, the files from the old file records the format left behind
 - Find Lost Files gives files their names back after a quick format of a FAT or exFAT drive, from the old folders still on it
 - Find Lost Files finds plain text files by what's in them

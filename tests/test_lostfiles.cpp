@@ -621,6 +621,84 @@ QVector<lost::Found> scan(std::shared_ptr<lost::Source> source, bool *stopped = 
     return all;
 }
 
+// The kinds added in 0.5.3 (tests/data/lostfs/types053/make.sh, each made by a real program): each
+// is found where it is, as what it is, to the byte and whole, and data/filetypes.json reads clean.
+void kinds053()
+{
+    report(filetypes::dataProblems().isEmpty(), QStringLiteral("data/filetypes.json: every signature and end reads"),
+           filetypes::dataProblems().join(QStringLiteral("; ")));
+    const QDir dir(QStringLiteral(SOURCE_DIR "/tests/data/lostfs/types053"));
+    QStringList names = dir.entryList({QStringLiteral("*.*")}, QDir::Files);
+    names.removeAll(QStringLiteral("make.sh"));
+    // A font from this computer, when it has one (fonts aren't ours to keep in the tests).
+    for (const QString &font : {QStringLiteral("/usr/share/fonts/TTF/DejaVuSans.ttf"), QStringLiteral("/usr/share/fonts/gsfonts/NimbusSans-Regular.otf")}) {
+        if (QFileInfo::exists(font))
+            names << font;
+    }
+    QByteArray data = noise(16 * kMiB, 53);
+    struct Placed {
+        QString name;
+        quint64 at;
+        qsizetype size;
+    };
+    QVector<Placed> placed;
+    quint64 at = 64 * 1024;
+    for (const QString &name : std::as_const(names)) {
+        QFile f(name.startsWith(QLatin1Char('/')) ? name : dir.filePath(name));
+        if (!f.open(QIODevice::ReadOnly))
+            continue;
+        const QByteArray bytes = f.readAll();
+        // The file, then zeros to the end of its last 4 KiB, the way a drive leaves a file's end.
+        const qsizetype room = (bytes.size() + 4095) / 4096 * 4096;
+        data.replace(qsizetype(at), room, bytes + QByteArray(room - bytes.size(), '\0'));
+        placed << Placed{QFileInfo(name).fileName(), at, bytes.size()};
+        at += quint64(room) + 8192;
+    }
+    report(at < quint64(data.size()), QStringLiteral("0.5.3 kinds: all the samples fit"));
+
+    // Damaged and cut short: measured without crashing, and never called whole past the data.
+    QVector<QByteArray> originals;
+    for (const Placed &p : std::as_const(placed))
+        originals << data.mid(qsizetype(p.at), p.size);
+    QRandomGenerator rng(5353);
+    bool sane = true;
+    int rounds = 0;
+    for (; rounds < 3000 && !originals.isEmpty(); ++rounds) {
+        QByteArray d = originals[rounds % originals.size()];
+        for (int i = 1 + int(rng.bounded(12)); i > 0; --i)
+            d[qsizetype(rng.bounded(quint32(d.size())))] = char(rng.bounded(256));
+        if (rng.bounded(3) == 0)
+            d.truncate(qsizetype(rng.bounded(quint32(d.size()))));
+        if (d.size() < 32)
+            continue;
+        const filetypes::Reader read = [&d](quint64 at, char *buf, qint64 len) -> qint64 {
+            if (at >= quint64(d.size()))
+                return 0;
+            const qint64 n = std::min<qint64>(len, d.size() - qint64(at));
+            memcpy(buf, d.constData() + at, size_t(n));
+            return n;
+        };
+        for (int type : filetypes::candidates(reinterpret_cast<const uchar *>(d.constData()), int(std::min<qsizetype>(d.size(), 512)))) {
+            const filetypes::Measured m = filetypes::measure(type, read);
+            sane = sane && m.size <= filetypes::sizeLimit(type) && (!m.complete || m.size <= quint64(d.size()));
+        }
+    }
+    report(sane, QStringLiteral("0.5.3 kinds: %1 damaged copies measured, no crash, nothing whole past the data").arg(rounds));
+    const QVector<lost::Found> found = scan(lost::Source::fromMemory(data));
+    for (const Placed &p : std::as_const(placed)) {
+        const lost::Found *hit = nullptr;
+        for (const lost::Found &f : found) {
+            if (!f.extents.isEmpty() && f.extents[0].start == p.at)
+                hit = &f;
+        }
+        const int want = filetypes::typeForName(p.name);
+        const QString got = hit && hit->type >= 0 ? filetypes::types()[hit->type].id : QStringLiteral("nothing");
+        report(hit && hit->type == want && hit->size == quint64(p.size) && hit->condition == lost::Condition::Good,
+               QStringLiteral("0.5.3 kinds: %1 found where it was, as what it is, to the byte, whole").arg(p.name),
+               hit ? QStringLiteral("%1, %2 bytes of %3, condition %4").arg(got).arg(hit->size).arg(p.size).arg(int(hit->condition)) : got);
+    }
+}
+
 // Plain text has no mark of its own: found where nothing else starts, ended where the text does,
 // and never found in random bytes.
 void plainText()
@@ -918,8 +996,8 @@ void ext4Reader(const QString &dir)
     };
     QFile(image).remove();
     QFile blank(image);
-    blank.open(QIODevice::WriteOnly);
-    blank.resize(64 * kMiB);
+    if (!blank.open(QIODevice::WriteOnly) || !blank.resize(64 * kMiB))
+        return report(false, QStringLiteral("ext4: a blank image is made"));
     blank.close();
     const QStringList mkfs = {QStringLiteral("-q"), QStringLiteral("-F"), QStringLiteral("-E"), QStringLiteral("nodiscard")};
     report(run(QStringLiteral("mkfs.ext4"), mkfs + QStringList{QStringLiteral("-L"), QStringLiteral("E4TEST"), image}), QStringLiteral("ext4: made"));
@@ -931,7 +1009,8 @@ void ext4Reader(const QString &dir)
     const QString photo = dir + QStringLiteral("/photo.png"), notes = dir + QStringLiteral("/notes.txt");
     picture.save(photo);
     QFile n(notes);
-    n.open(QIODevice::WriteOnly);
+    if (!n.open(QIODevice::WriteOnly))
+        return report(false, QStringLiteral("ext4: the notes file is made"));
     for (int i = 0; i < 2000; ++i)
         n.write("a line of notes, number " + QByteArray::number(i) + "\n");
     n.close();
@@ -945,13 +1024,11 @@ void ext4Reader(const QString &dir)
 
     const auto hashOf = [](const QString &path) {
         QFile f(path);
-        f.open(QIODevice::ReadOnly);
-        return QCryptographicHash::hash(f.readAll(), QCryptographicHash::Sha256);
+        return f.open(QIODevice::ReadOnly) ? QCryptographicHash::hash(f.readAll(), QCryptographicHash::Sha256) : QByteArray();
     };
     const auto scanImage = [&image](QVector<lost::Volume> *volumes) {
         QFile f(image);
-        f.open(QIODevice::ReadOnly);
-        auto source = lost::Source::fromMemory(f.readAll());
+        auto source = lost::Source::fromMemory(f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray());
         return std::make_pair(source, quickScan(source, volumes));
     };
     const auto find = [](const QVector<lost::Found> &found, const QString &folder, const QString &name) -> const lost::Found * {
@@ -1017,8 +1094,7 @@ void formattedFolders(const QString &dir)
         p.start(mkfs[name].first(), mkfs[name].mid(1) << path);
         report(p.waitForFinished(30000) && p.exitCode() == 0, QStringLiteral("%1 formatted: quick-formatted").arg(name));
         QFile in(path);
-        in.open(QIODevice::ReadOnly);
-        auto source = lost::Source::fromMemory(in.readAll());
+        auto source = lost::Source::fromMemory(in.open(QIODevice::ReadOnly) ? in.readAll() : QByteArray());
         QVector<lost::Volume> volumes;
         const QVector<lost::Found> listed = quickScan(source, &volumes);
         lost::DeepScan deep(source);
@@ -4345,6 +4421,7 @@ void lostFilesTests()
     journal();
     QTemporaryDir dir;
     plainText();
+    kinds053();
     finding(dir.path());
     damage();
     names();

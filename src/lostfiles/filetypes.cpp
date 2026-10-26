@@ -5,6 +5,10 @@
 
 #include <QCoreApplication>
 #include <QHash>
+#include <QVarLengthArray>
+#include <QJsonObject>
+#include <QJsonDocument>
+#include <QJsonArray>
 #include <QSet>
 
 #include <algorithm>
@@ -155,7 +159,10 @@ enum TypeNumber {
     Mp4, Mov, ThreeGp, Avi, Ogv, Mp3, Wav, M4a, Ogg, Opus, Zip, SevenZip, Jar, Apk, Sqlite,
     // Added in 0.5.2, at the end so the numbers before stay the same.
     Tif, Cr2, Nef, Arw, Dng, Orf, Rw2, Pef, Raf, Psd, Rar, Mkv, Webm, Flac, Wmv, Wma, Doc, Xls, Ppt, Msg, Ole, Gz,
-    Eml, Mbox, Rtf, Html, Xml, Svg, Ics, Vcf, Txt, TypeCount
+    Eml, Mbox, Rtf, Html, Xml, Svg, Ics, Vcf, Txt,
+    // Added in 0.5.3, the same way.
+    Ico, Flv, Ts, Aiff, Amr, Ac3, Wv, Caf, Xz, Bz2, Zst, Tar, Jp2, Mid, Woff, Woff2, Ttf, Otf, Cab, Exe, Elf, Pst, Swf, Aac, Mpg, Rm, Json,
+    TypeCount
 };
 
 filetypes::Measured incomplete(int type, quint64 size)
@@ -1670,6 +1677,33 @@ const QVector<filetypes::Type> &filetypes::types()
         {QStringLiteral("ics"), C::Document, tr("Calendar")},
         {QStringLiteral("vcf"), C::Document, tr("Contacts")},
         {QStringLiteral("txt"), C::Document, tr("Text file")},
+        {QStringLiteral("ico"), C::Picture, tr("Icon")},
+        {QStringLiteral("flv"), C::Video, tr("Flash video")},
+        {QStringLiteral("ts"), C::Video, tr("MPEG transport stream video")},
+        {QStringLiteral("aiff"), C::Music, tr("AIFF sound")},
+        {QStringLiteral("amr"), C::Music, tr("AMR voice recording")},
+        {QStringLiteral("ac3"), C::Music, tr("Dolby Digital sound (AC-3)")},
+        {QStringLiteral("wv"), C::Music, tr("WavPack music")},
+        {QStringLiteral("caf"), C::Music, tr("Core Audio sound")},
+        {QStringLiteral("xz"), C::Archive, tr("xz file")},
+        {QStringLiteral("bz2"), C::Archive, tr("bzip2 file")},
+        {QStringLiteral("zst"), C::Archive, tr("Zstandard file")},
+        {QStringLiteral("tar"), C::Archive, tr("tar archive")},
+        {QStringLiteral("jp2"), C::Picture, tr("JPEG 2000 picture")},
+        {QStringLiteral("mid"), C::Music, tr("MIDI music")},
+        {QStringLiteral("woff"), C::Other, tr("Web font")},
+        {QStringLiteral("woff2"), C::Other, tr("Web font (WOFF2)")},
+        {QStringLiteral("ttf"), C::Other, tr("TrueType font")},
+        {QStringLiteral("otf"), C::Other, tr("OpenType font")},
+        {QStringLiteral("cab"), C::Archive, tr("Windows cabinet file")},
+        {QStringLiteral("exe"), C::Other, tr("Windows program")},
+        {QStringLiteral("elf"), C::Other, tr("Linux program")},
+        {QStringLiteral("pst"), C::Document, tr("Outlook mail store")},
+        {QStringLiteral("swf"), C::Video, tr("Flash animation")},
+        {QStringLiteral("aac"), C::Music, tr("AAC music")},
+        {QStringLiteral("mpg"), C::Video, tr("MPEG video")},
+        {QStringLiteral("rm"), C::Video, tr("RealMedia video")},
+        {QStringLiteral("json"), C::Document, tr("JSON data")},
     };
     Q_ASSERT(list.size() == TypeCount);
     return list;
@@ -1701,6 +1735,13 @@ int filetypes::typeForName(const QString &fileName)
         {QStringLiteral("dot"), QStringLiteral("doc")},  {QStringLiteral("xlt"), QStringLiteral("xls")},
         {QStringLiteral("pps"), QStringLiteral("ppt")},  {QStringLiteral("tgz"), QStringLiteral("gz")},
         {QStringLiteral("htm"), QStringLiteral("html")}, {QStringLiteral("vcard"), QStringLiteral("vcf")},
+        {QStringLiteral("aif"), QStringLiteral("aiff")}, {QStringLiteral("aifc"), QStringLiteral("aiff")},
+        {QStringLiteral("m2ts"), QStringLiteral("ts")},  {QStringLiteral("mts"), QStringLiteral("ts")},
+        {QStringLiteral("mpeg"), QStringLiteral("mpg")}, {QStringLiteral("vob"), QStringLiteral("mpg")},
+        {QStringLiteral("bz"), QStringLiteral("bz2")},
+        {QStringLiteral("tbz2"), QStringLiteral("bz2")}, {QStringLiteral("txz"), QStringLiteral("xz")},
+        {QStringLiteral("midi"), QStringLiteral("mid")}, {QStringLiteral("j2k"), QStringLiteral("jp2")},
+        {QStringLiteral("rmvb"), QStringLiteral("rm")},
         // Word's AutoRecover and backup copies are Word documents.
         {QStringLiteral("asd"), QStringLiteral("doc")},  {QStringLiteral("wbk"), QStringLiteral("doc")},
     };
@@ -1784,114 +1825,6 @@ QString filetypes::categoryName(Category category)
     return tr("Other");
 }
 
-QVector<int> filetypes::candidates(const uchar *h, int len)
-{
-    QVector<int> out;
-    if (len < 32)
-        return out;
-    switch (h[0]) {
-    case 0xFF:
-        if (h[1] == 0xD8 && h[2] == 0xFF && ((h[3] >= 0xE0 && h[3] <= 0xEF) || h[3] == 0xDB || h[3] == 0xFE || h[3] == 0xC0 || h[3] == 0xC4))
-            out << Jpg;
-        break;
-    case 0x89:
-        if (memcmp(h, "\x89PNG\r\n\x1a\n", 8) == 0)
-            out << Png;
-        break;
-    case 'G':
-        if (memcmp(h, "GIF87a", 6) == 0 || memcmp(h, "GIF89a", 6) == 0)
-            out << Gif;
-        break;
-    case 'B':
-        if (h[1] == 'M' && h[6] == 0 && h[7] == 0 && h[8] == 0 && h[9] == 0)
-            out << Bmp;
-        break;
-    case '%':
-        if (memcmp(h, "%PDF-", 5) == 0 && h[5] >= '1' && h[5] <= '2' && h[6] == '.')
-            out << Pdf;
-        break;
-    case 'P':
-        if (memcmp(h, "PK\x03\x04", 4) == 0 && h[4] >= 10 && h[4] <= 63 && h[5] == 0)
-            out << Zip;
-        break;
-    case 'R':
-        if (memcmp(h, "RIFF", 4) == 0)
-            out << Avi; // measureRiff says which
-        else if (memcmp(h, "Rar!\x1a\x07", 6) == 0)
-            out << Rar;
-        break;
-    case 'I':
-        if (memcmp(h, "ID3", 3) == 0 && h[3] >= 2 && h[3] <= 4 && h[4] != 0xFF)
-            out << Mp3;
-        // TIFF and the raw files built on it (Olympus and Panasonic put their own number there)
-        if (h[1] == 'I' && (memcmp(h + 2, "*\0", 2) == 0 || memcmp(h + 2, "RO", 2) == 0 || memcmp(h + 2, "RS", 2) == 0 || memcmp(h + 2, "U\0", 2) == 0))
-            out << Tif;
-        break;
-    case 'M':
-        if (memcmp(h, "MM\0*", 4) == 0)
-            out << Tif;
-        break;
-    case 'F':
-        if (memcmp(h, "FUJIFILMCCD-RAW ", 16) == 0)
-            out << Raf;
-        break;
-    case '8':
-        if (memcmp(h, "8BPS", 4) == 0)
-            out << Psd;
-        break;
-    case 0x1A:
-        if (memcmp(h, "\x1A\x45\xDF\xA3", 4) == 0)
-            out << Mkv;
-        break;
-    case 'f':
-        if (memcmp(h, "fLaC", 4) == 0)
-            out << Flac;
-        break;
-    case 0x30:
-        if (memcmp(h, "\x30\x26\xB2\x75\x8E\x66\xCF\x11", 8) == 0)
-            out << Wmv;
-        break;
-    case 0xD0:
-        if (memcmp(h, "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1", 8) == 0)
-            out << Doc;
-        break;
-    case 0x1F:
-        if (h[1] == 0x8B && h[2] == 8 && !(h[3] & 0xE0))
-            out << Gz;
-        break;
-    case 'O':
-        if (memcmp(h, "OggS", 4) == 0 && h[4] == 0 && (h[5] & 0x02))
-            out << Ogg;
-        break;
-    case 'S':
-        if (memcmp(h, "SQLite format 3\0", 16) == 0)
-            out << Sqlite;
-        break;
-    case '7':
-        if (memcmp(h, "7z\xbc\xaf\x27\x1c", 6) == 0)
-            out << SevenZip;
-        break;
-    default:
-        break;
-    }
-    if (memcmp(h + 4, "ftyp", 4) == 0)
-        out << Mp4; // measureBmff says which
-    // Text kinds, by how they start.
-    if (h[0] == '<') {
-        QByteArray start = QByteArray(reinterpret_cast<const char *>(h), 16).toLower();
-        if (start.startsWith("<?xml") || start.startsWith("<!doctype html") || start.startsWith("<html") || start.startsWith("<svg"))
-            out << Html; // measureMarkup says which
-    } else if (h[0] == '{' && memcmp(h, "{\\rtf", 5) == 0) {
-        out << Rtf;
-    } else if (h[0] == 'B' && (memcmp(h, "BEGIN:VCALENDAR", 15) == 0 || memcmp(h, "BEGIN:VCARD", 11) == 0)) {
-        out << Ics; // or Vcf
-    } else if (memcmp(h, "From ", 5) == 0) {
-        out << Mbox;
-    } else if (h[0] >= 'A' && h[0] <= 'Z' && mailHeaders(h, len, false)) {
-        out << Eml;
-    }
-    return out;
-}
 
 bool filetypes::plainTextStart(const uchar *h, int len)
 {
@@ -1954,7 +1887,24 @@ quint64 filetypes::sizeLimit(int type)
     case Mkv:
     case Webm:
     case Wmv:
+    case Ts:
+    case Mpg:
+    case Flv:
+    case Pst:
         return 16 * kGiB;
+    case Ico:
+    case Woff:
+    case Woff2:
+    case Ttf:
+    case Otf:
+    case Mid:
+        return 64 * kMiB;
+    case Exe:
+    case Elf:
+    case Json:
+    case Swf:
+    case Jp2:
+        return 512 * kMiB;
     case Doc:
     case Xls:
     case Ppt:
@@ -1976,6 +1926,822 @@ quint64 filetypes::sizeLimit(int type)
     default:
         return 2 * kGiB;
     }
+}
+
+// --- Kinds added in 0.5.3
+
+// An icon file: its directory of pictures says where each is; the file ends after the last.
+filetypes::Measured measureIco(Stream &s)
+{
+    quint32 count = 0;
+    if (!s.le16(4, count) || count == 0 || count > 256)
+        return {};
+    quint64 end = 6 + 16ull * count;
+    for (quint32 k = 0; k < count; ++k) {
+        quint32 size = 0, offset = 0;
+        if (!s.le32(6 + 16ull * k + 8, size) || !s.le32(6 + 16ull * k + 12, offset) || size == 0 || offset < 6 + 16ull * count)
+            return {};
+        // Each picture is a PNG or a BMP without its file header (its own header is 40 bytes).
+        quint32 head = 0;
+        if (!s.le32(offset, head) || (head != 40 && !s.is(offset, "\x89PNG")))
+            return {};
+        end = std::max<quint64>(end, quint64(offset) + size);
+    }
+    return complete(Ico, end);
+}
+
+// Flash video: a header, then tags, each followed by its own size again.
+filetypes::Measured measureFlv(Stream &s)
+{
+    quint32 headerSize = 0;
+    if (!s.be32(5, headerSize) || headerSize < 9 || headerSize > 1024)
+        return {};
+    quint64 pos = headerSize + 4; // the first "previous tag size" is 0
+    int tags = 0;
+    for (;;) {
+        quint32 type = 0, size = 0, previous = 0;
+        if (!s.u8(pos, type) || ((type & 0x1F) != 8 && (type & 0x1F) != 9 && (type & 0x1F) != 18) || !s.be32(pos, size))
+            break;
+        size &= 0xFFFFFF;
+        if (!s.be32(pos + 11 + size, previous))
+            return tags ? incomplete(Flv, pos + 11 + size) : filetypes::Measured{};
+        if (previous != 11 + size)
+            return tags ? incomplete(Flv, pos) : filetypes::Measured{};
+        pos += 11 + size + 4;
+        ++tags;
+    }
+    return tags ? complete(Flv, pos) : filetypes::Measured{};
+}
+
+// MPEG transport stream: 188-byte packets, each starting 0x47.
+bool tsPacket(const uchar *p)
+{
+    return p[0] == 0x47 && !(p[1] & 0x80) && ((p[3] >> 4) & 3) != 0;
+}
+
+filetypes::Measured measureTs(Stream &s)
+{
+    quint64 pos = 0;
+    while (const uchar *p = s.peek(pos, 188)) {
+        if (!tsPacket(p))
+            break;
+        pos += 188;
+    }
+    return pos >= 3 * 188 ? complete(Ts, pos) : filetypes::Measured{};
+}
+
+// AMR voice recording: a header, then frames whose first byte says how long they are.
+filetypes::Measured measureAmr(Stream &s)
+{
+    static const int kBytes[16] = {12, 13, 15, 17, 19, 20, 26, 31, 5, -1, -1, -1, -1, -1, -1, 0};
+    quint64 pos = 6;
+    int frames = 0;
+    quint32 h = 0;
+    // Good frames have the quality bit set and their padding bits clear: zeros after the end don't pass.
+    while (s.u8(pos, h) && (h & 0x87) == 0x04 && kBytes[(h >> 3) & 0x0F] >= 0) {
+        const quint64 next = pos + 1 + quint64(kBytes[(h >> 3) & 0x0F]);
+        if (!s.peek(next - 1, 1))
+            break;
+        pos = next;
+        ++frames;
+    }
+    return frames ? complete(Amr, pos) : filetypes::Measured{};
+}
+
+// Dolby Digital (AC-3, and E-AC-3): frames one after another, each saying its size.
+int ac3FrameBytes(const uchar *h)
+{
+    static const quint16 kWords[38][3] = {
+        {64, 69, 96},     {64, 70, 96},     {80, 87, 120},    {80, 88, 120},    {96, 104, 144},   {96, 105, 144},   {112, 121, 168},
+        {112, 122, 168},  {128, 139, 192},  {128, 140, 192},  {160, 174, 240},  {160, 175, 240},  {192, 208, 288},  {192, 209, 288},
+        {224, 243, 336},  {224, 244, 336},  {256, 278, 384},  {256, 279, 384},  {320, 348, 480},  {320, 349, 480},  {384, 417, 576},
+        {384, 418, 576},  {448, 487, 672},  {448, 488, 672},  {512, 557, 768},  {512, 558, 768},  {640, 696, 960},  {640, 697, 960},
+        {768, 835, 1152}, {768, 836, 1152}, {896, 975, 1344}, {896, 976, 1344}, {1024, 1114, 1536}, {1024, 1115, 1536},
+        {1152, 1253, 1728}, {1152, 1254, 1728}, {1280, 1393, 1920}, {1280, 1394, 1920}};
+    if (h[0] != 0x0B || h[1] != 0x77)
+        return 0;
+    const int bsid = h[5] >> 3;
+    if (bsid > 16)
+        return 0;
+    if (bsid > 10) // E-AC-3: the size in words, minus one
+        return ((((h[2] & 7) << 8) | h[3]) + 1) * 2;
+    const int fscod = h[4] >> 6, frmsizecod = h[4] & 0x3F;
+    if (fscod == 3 || frmsizecod >= 38)
+        return 0;
+    return kWords[frmsizecod][fscod] * 2;
+}
+
+filetypes::Measured measureAc3(Stream &s)
+{
+    quint64 pos = 0;
+    int frames = 0;
+    while (const uchar *h = s.peek(pos, 6)) {
+        const int n = ac3FrameBytes(h);
+        if (n == 0 || !s.peek(pos + quint64(n) - 1, 1))
+            break;
+        pos += quint64(n);
+        ++frames;
+    }
+    return frames >= 2 ? complete(Ac3, pos) : filetypes::Measured{};
+}
+
+// AAC in ADTS frames (what radios and some recorders save): each frame's header has its length.
+int adtsFrameBytes(const uchar *h)
+{
+    if (h[0] != 0xFF || (h[1] & 0xF6) != 0xF0 || ((h[2] >> 2) & 0x0F) >= 13)
+        return 0;
+    const int length = ((h[3] & 3) << 11) | (h[4] << 3) | (h[5] >> 5);
+    return length >= 7 ? length : 0;
+}
+
+filetypes::Measured measureAac(Stream &s)
+{
+    quint64 pos = 0;
+    int frames = 0;
+    while (const uchar *h = s.peek(pos, 7)) {
+        const int n = adtsFrameBytes(h);
+        if (n == 0 || !s.peek(pos + quint64(n) - 1, 1))
+            break;
+        pos += quint64(n);
+        ++frames;
+    }
+    return frames >= 3 ? complete(Aac, pos) : filetypes::Measured{};
+}
+
+// xz: its stream ends in a 12-byte footer with "YZ" last, on a 4-byte boundary, that repeats
+// the header's flags under its own CRC.
+filetypes::Measured measureXz(Stream &s)
+{
+    quint32 flags = 0;
+    if (!s.le16(6, flags))
+        return {};
+    for (quint64 at = s.find(12, QByteArrayLiteral("YZ")); at != ~quint64(0); at = s.find(at + 1, QByteArrayLiteral("YZ"))) {
+        if ((at + 2) % 4 != 0 || at < 22)
+            continue;
+        const quint64 footer = at - 10;
+        quint32 stored = 0, footerFlags = 0, crc = 0;
+        if (s.le32(footer, stored) && s.le16(footer + 8, footerFlags) && footerFlags == flags && s.crc32(footer + 4, 6, crc) && crc == stored)
+            return complete(Xz, at + 2);
+    }
+    return {};
+}
+
+// bzip2: the end-of-stream mark (0x177245385090) can start at any bit, then a 32-bit CRC and
+// padding to the byte.
+filetypes::Measured measureBz2(Stream &s)
+{
+    const quint64 limit = std::min(s.limit(), filetypes::sizeLimit(Bz2));
+    quint64 window = 0;
+    for (quint64 pos = 4; pos < limit;) {
+        int n = int(std::min<quint64>(64 * 1024, limit - pos));
+        const uchar *p = s.peek(pos, n);
+        while (!p && n > 1)
+            p = s.peek(pos, n /= 2);
+        if (!p)
+            break;
+        for (int i = 0; i < n; ++i) {
+            window = window << 8 | p[i];
+            // The mark ends in this byte or the one before: check every bit position it could end at.
+            for (int shift = 0; shift < 8; ++shift) {
+                if (((window >> shift) & 0xFFFFFFFFFFFFull) == 0x177245385090ull) {
+                    const quint64 endBit = (pos + quint64(i) + 1) * 8 - quint64(shift) + 32;
+                    return complete(Bz2, (endBit + 7) / 8);
+                }
+            }
+        }
+        pos += quint64(n);
+    }
+    return {};
+}
+
+// Zstandard: frames of blocks, each block saying its size, the last one marked.
+filetypes::Measured measureZst(Stream &s)
+{
+    quint64 pos = 0;
+    int frames = 0;
+    for (;;) {
+        quint32 magic = 0, descriptor = 0;
+        if (!s.le32(pos, magic) || magic != 0xFD2FB528 || !s.u8(pos + 4, descriptor) || (descriptor & 0x08))
+            break;
+        const int fcs = descriptor >> 6, single = (descriptor >> 5) & 1, checksum = (descriptor >> 2) & 1, dict = descriptor & 3;
+        static const int kDict[4] = {0, 1, 2, 4};
+        static const int kFcs[4] = {0, 2, 4, 8};
+        quint64 p = pos + 5 + (single ? 0 : 1) + kDict[dict] + (fcs == 0 ? single : kFcs[fcs]);
+        bool last = false;
+        while (!last) {
+            const uchar *b = s.peek(p, 3);
+            if (!b)
+                return frames ? incomplete(Zst, pos) : filetypes::Measured{};
+            const quint32 header = quint32(b[0]) | quint32(b[1]) << 8 | quint32(b[2]) << 16;
+            last = header & 1;
+            const int type = (header >> 1) & 3;
+            const quint32 size = header >> 3;
+            if (type == 3 || size > 128 * 1024)
+                return frames ? incomplete(Zst, pos) : filetypes::Measured{};
+            p += 3 + (type == 1 ? 1 : size);
+        }
+        p += checksum ? 4 : 0;
+        if (!s.peek(p - 1, 1))
+            return incomplete(Zst, p);
+        pos = p;
+        ++frames;
+    }
+    return frames ? complete(Zst, pos) : filetypes::Measured{};
+}
+
+// tar: 512-byte headers (with their own checksum) and the files after them, to two empty
+// blocks, then the zeros tar pads it with to a record of 10 KiB.
+filetypes::Measured measureTar(Stream &s)
+{
+    quint64 pos = 0;
+    int files = 0;
+    for (;;) {
+        const uchar *h = s.peek(pos, 512);
+        if (!h)
+            return files ? incomplete(Tar, pos) : filetypes::Measured{};
+        if (std::all_of(h, h + 512, [](uchar c) { return c == 0; }))
+            break;
+        quint32 sum = 0;
+        for (int i = 0; i < 512; ++i)
+            sum += (i >= 148 && i < 156) ? ' ' : h[i];
+        const QByteArray stored = QByteArray(reinterpret_cast<const char *>(h + 148), 8).trimmed().replace('\0', "");
+        bool ok = false;
+        if (stored.toUInt(&ok, 8) != sum || !ok || memcmp(h + 257, "ustar", 5) != 0)
+            return files ? incomplete(Tar, pos) : filetypes::Measured{};
+        quint64 size = 0;
+        if (h[124] & 0x80) { // big sizes in binary
+            for (int i = 125; i < 136; ++i)
+                size = size << 8 | h[i];
+        } else {
+            size = QByteArray(reinterpret_cast<const char *>(h + 124), 12).trimmed().replace('\0', "").toULongLong(nullptr, 8);
+        }
+        pos += 512 + (size + 511) / 512 * 512;
+        ++files;
+    }
+    quint64 end = pos + 1024;
+    // tar pads the archive with zeros to a whole record (10 KiB by default).
+    const quint64 record = (end + 10239) / 10240 * 10240;
+    bool zeros = true;
+    for (quint64 at = end; zeros && at < record; at += 512) {
+        const uchar *z = s.peek(at, 512);
+        zeros = z && std::all_of(z, z + 512, [](uchar c) { return c == 0; });
+    }
+    return complete(Tar, zeros ? record : end);
+}
+
+// TrueType and OpenType fonts: a table directory; the file ends after the last table, padded
+// to 4 bytes.
+filetypes::Measured measureSfnt(Stream &s, int type)
+{
+    quint32 tables = 0;
+    if (!s.be16(4, tables) || tables == 0 || tables > 64)
+        return {};
+    quint64 end = 12 + 16ull * tables;
+    for (quint32 k = 0; k < tables; ++k) {
+        const uchar *tag = s.peek(12 + 16ull * k, 4);
+        quint32 offset = 0, length = 0;
+        if (!tag || !std::all_of(tag, tag + 4, [](uchar c) { return c >= 0x20 && c < 0x7F; }) || !s.be32(12 + 16ull * k + 8, offset)
+            || !s.be32(12 + 16ull * k + 12, length) || offset < 12 + 16ull * tables)
+            return {};
+        end = std::max<quint64>(end, (quint64(offset) + length + 3) / 4 * 4);
+    }
+    return complete(type, end);
+}
+
+// A Windows program (PE): the file ends after its last section, or after its signature
+// (Authenticode), which the security directory places by file offset.
+filetypes::Measured measurePe(Stream &s)
+{
+    quint32 pe = 0, signature = 0, sections = 0, optional = 0, magic = 0;
+    if (!s.le32(0x3C, pe) || pe < 64 || pe > 64 * 1024 || !s.le32(pe, signature) || signature != 0x4550 || !s.le16(pe + 6, sections) || sections == 0
+        || sections > 96
+        || !s.le16(pe + 20, optional) || !s.le16(pe + 24, magic) || (magic != 0x10B && magic != 0x20B))
+        return {};
+    quint64 end = pe + 24ull + optional + 40ull * sections;
+    const quint64 table = pe + 24ull + optional;
+    for (quint32 k = 0; k < sections; ++k) {
+        quint32 rawSize = 0, rawAt = 0;
+        if (!s.le32(table + 40ull * k + 16, rawSize) || !s.le32(table + 40ull * k + 20, rawAt))
+            return {};
+        if (rawSize > 0)
+            end = std::max<quint64>(end, quint64(rawAt) + rawSize);
+    }
+    // The security directory (the fifth data directory) is a file offset, not a memory one.
+    const quint64 directories = pe + 24ull + (magic == 0x20B ? 112 : 96);
+    quint32 count = 0, certAt = 0, certSize = 0;
+    if (s.le32(pe + 24ull + (magic == 0x20B ? 108 : 92), count) && count > 4 && s.le32(directories + 32, certAt) && s.le32(directories + 36, certSize)
+        && certAt > 0 && certSize > 0)
+        end = std::max<quint64>(end, quint64(certAt) + certSize);
+    return complete(Exe, end);
+}
+
+// A Linux program or library (ELF): the end of its section table, or of the last section or
+// segment in the file, whichever is furthest.
+filetypes::Measured measureElf(Stream &s)
+{
+    quint32 cls = 0, data = 0;
+    if (!s.u8(4, cls) || !s.u8(5, data) || (cls != 1 && cls != 2) || (data != 1 && data != 2))
+        return {};
+    const bool wide = cls == 2, little = data == 1;
+    auto u16 = [&](quint64 at) {
+        quint32 v = 0;
+        return (little ? s.le16(at, v) : s.be16(at, v)) ? quint64(v) : ~quint64(0);
+    };
+    auto u32 = [&](quint64 at) {
+        quint32 v = 0;
+        return (little ? s.le32(at, v) : s.be32(at, v)) ? quint64(v) : ~quint64(0);
+    };
+    auto word = [&](quint64 at) {
+        if (!wide)
+            return u32(at);
+        quint64 v = 0;
+        return (little ? s.le64(at, v) : s.be64(at, v)) ? v : ~quint64(0);
+    };
+    const quint64 phoff = word(wide ? 0x20 : 0x1C), shoff = word(wide ? 0x28 : 0x20);
+    const quint64 phsize = u16(wide ? 0x36 : 0x2A), phnum = u16(wide ? 0x38 : 0x2C);
+    const quint64 shsize = u16(wide ? 0x3A : 0x2E), shnum = u16(wide ? 0x3C : 0x30);
+    if (phoff == ~quint64(0) || shoff == ~quint64(0) || phnum > 4096 || shnum > 65535 || (shnum && shsize < (wide ? 64u : 40u)))
+        return {};
+    quint64 end = std::max(phoff + phsize * phnum, shoff + shsize * shnum);
+    for (quint64 k = 0; k < shnum; ++k) {
+        const quint64 h = shoff + k * shsize;
+        const quint64 type = u32(h + 4), at = word(h + (wide ? 0x18 : 0x10)), size = word(h + (wide ? 0x20 : 0x14));
+        if (type == ~quint64(0) || at == ~quint64(0) || size == ~quint64(0))
+            return {};
+        if (type != 8) // NOBITS takes no room in the file
+            end = std::max(end, at + size);
+    }
+    for (quint64 k = 0; k < phnum; ++k) {
+        const quint64 h = phoff + k * phsize;
+        const quint64 at = word(h + (wide ? 0x08 : 0x04)), size = word(h + (wide ? 0x20 : 0x10));
+        if (at == ~quint64(0) || size == ~quint64(0))
+            return {};
+        end = std::max(end, at + size);
+    }
+    if (end > filetypes::sizeLimit(Elf))
+        return {};
+    return complete(Elf, end);
+}
+
+// An Outlook mail store (PST): its header says how big the file is.
+filetypes::Measured measurePst(Stream &s)
+{
+    quint32 version = 0;
+    if (!s.is(8, "SM") || !s.le16(10, version))
+        return {};
+    if (version >= 23) {
+        quint64 size = 0;
+        return s.le64(0xB8, size) && size > 0x200 ? complete(Pst, size) : filetypes::Measured{};
+    }
+    quint32 size = 0;
+    return (version == 14 || version == 15) && s.le32(0xA8, size) && size > 0x200 ? complete(Pst, size) : filetypes::Measured{};
+}
+
+// MPEG program streams (.mpg, .vob): pack headers and packets with their lengths, to the
+// end code 00 00 01 B9.
+filetypes::Measured measureMpg(Stream &s)
+{
+    quint64 pos = 0;
+    int packs = 0;
+    for (;;) {
+        const uchar *h = s.peek(pos, 14);
+        if (!h || h[0] != 0 || h[1] != 0 || h[2] != 1) // stopped on a boundary: ffmpeg writes no end code
+            return packs ? complete(Mpg, pos) : filetypes::Measured{};
+        if (h[3] == 0xB9)
+            return complete(Mpg, pos + 4);
+        if (h[3] == 0xBA) {
+            if ((h[4] & 0xC0) == 0x40)
+                pos += 14 + (h[13] & 7); // MPEG-2
+            else if ((h[4] & 0xF0) == 0x20)
+                pos += 12; // MPEG-1
+            else
+                return packs ? incomplete(Mpg, pos) : filetypes::Measured{};
+            ++packs;
+        } else if (h[3] >= 0xBB) {
+            pos += 6 + (quint32(h[4]) << 8 | h[5]);
+        } else {
+            return packs ? incomplete(Mpg, pos) : filetypes::Measured{};
+        }
+    }
+}
+
+// JSON: brackets and strings counted to where the outermost one closes, then its line end.
+filetypes::Measured measureJson(Stream &s)
+{
+    const quint64 limit = std::min(s.limit(), filetypes::sizeLimit(Json));
+    int depth = 0;
+    bool inString = false, escaped = false, started = false;
+    for (quint64 pos = 0; pos < limit;) {
+        int n = int(std::min<quint64>(64 * 1024, limit - pos));
+        const uchar *p = s.peek(pos, n);
+        while (!p && n > 1)
+            p = s.peek(pos, n /= 2);
+        if (!p)
+            break;
+        for (int i = 0; i < n; ++i) {
+            const uchar c = p[i];
+            if (c == 0 || (c < 0x20 && c != '\n' && c != '\r' && c != '\t'))
+                return started ? incomplete(Json, pos + quint64(i)) : filetypes::Measured{};
+            if (inString) {
+                if (escaped)
+                    escaped = false;
+                else if (c == '\\')
+                    escaped = true;
+                else if (c == '"')
+                    inString = false;
+                continue;
+            }
+            if (c == '"') {
+                inString = true;
+            } else if (c == '{' || c == '[') {
+                ++depth;
+                started = true;
+            } else if (c == '}' || c == ']') {
+                if (--depth < 0)
+                    return {};
+                if (depth == 0) {
+                    quint64 end = pos + quint64(i) + 1;
+                    quint32 next = 0;
+                    if (s.u8(end, next) && next == '\r')
+                        ++end;
+                    if (s.u8(end, next) && next == '\n')
+                        ++end;
+                    return complete(Json, end);
+                }
+            }
+        }
+        pos += quint64(n);
+    }
+    return {};
+}
+
+// A tag some music files carry after their sound: an APE tag (header, items, footer) or an ID3
+// version 1 tag (128 bytes, "TAG"). Where it ends, or `pos` when there's none.
+quint64 afterTrailers(Stream &s, quint64 pos, const QJsonArray &trailers)
+{
+    for (const QJsonValue &t : trailers) {
+        if (t.toString() == QLatin1String("apetag") && s.is(pos, "APETAGEX")) {
+            quint32 size = 0, flags = 0;
+            if (s.le32(pos + 12, size) && s.le32(pos + 20, flags) && (flags & 0x80000000u) && size >= 32 && size < 16 * kMiB
+                && s.is(pos + 32 + size - 32, "APETAGEX"))
+                pos += 32 + size;
+        } else if (t.toString() == QLatin1String("id3v1") && s.is(pos, "TAG") && s.peek(pos + 127, 1)) {
+            pos += 128;
+        }
+    }
+    return pos;
+}
+
+// RealMedia: objects one after another; the data object's packets are counted, since the
+// size it gives itself can be off.
+filetypes::Measured measureRm(Stream &s)
+{
+    quint64 pos = 0;
+    int objects = 0;
+    for (;;) {
+        const uchar *id = s.peek(pos, 4);
+        quint32 size = 0;
+        if (!id || !std::all_of(id, id + 4, [](uchar c) { return c >= 0x20 && c < 0x7F; }) || !s.be32(pos + 4, size) || size < 10)
+            break;
+        if (memcmp(id, "DATA", 4) == 0) {
+            quint32 packets = 0;
+            if (!s.be32(pos + 10, packets))
+                break;
+            quint64 p = pos + 18;
+            for (quint32 k = 0; k < packets; ++k) {
+                quint32 version = 0, length = 0;
+                if (!s.be16(p, version) || !s.be16(p + 2, length) || version > 1 || length < 12)
+                    return incomplete(Rm, p);
+                p += length;
+            }
+            pos = p;
+            // Nothing after the data but ffmpeg's end-of-file mark (eight zero bytes): it's part of it.
+            quint64 mark = 0;
+            if (s.be64(pos, mark) && mark == 0) {
+                const uchar *next = s.peek(pos + 8, 4);
+                if (!next || !std::all_of(next, next + 4, [](uchar c) { return c >= 0x20 && c < 0x7F; }))
+                    return complete(Rm, pos + 8);
+            }
+        } else {
+            pos += size;
+        }
+        ++objects;
+    }
+    return objects >= 2 ? complete(Rm, pos) : filetypes::Measured{};
+}
+
+// The simple kinds data/filetypes.json describes the end of.
+filetypes::Measured measureByData(Stream &s, int type, const QJsonObject &end)
+{
+    const auto number = [&s](quint64 at, int bytes, bool big, quint64 *v) {
+        const uchar *p = s.peek(at, bytes);
+        if (!p)
+            return false;
+        *v = 0;
+        for (int i = 0; i < bytes; ++i)
+            *v = big ? (*v << 8 | p[i]) : (*v | quint64(p[i]) << (8 * i));
+        return true;
+    };
+    if (end.contains(QLatin1String("size"))) {
+        const QJsonObject f = end.value(QLatin1String("size")).toObject();
+        quint64 v = 0;
+        if (!number(quint64(f.value(QLatin1String("at")).toInteger()), f.value(QLatin1String("bytes")).toInt(4),
+                    f.value(QLatin1String("endian")).toString() == QLatin1String("big"), &v))
+            return {};
+        const quint64 size = v * quint64(f.value(QLatin1String("times")).toInteger(1)) + quint64(f.value(QLatin1String("plus")).toInteger());
+        return size >= 8 && size <= filetypes::sizeLimit(type) ? complete(type, size) : filetypes::Measured{};
+    }
+    if (end.contains(QLatin1String("chunks"))) {
+        const QJsonObject f = end.value(QLatin1String("chunks")).toObject();
+        const quint64 header = quint64(f.value(QLatin1String("header")).toInt(8));
+        const int sizeBytes = f.value(QLatin1String("sizeBytes")).toInt(4);
+        const quint64 sizeAt = quint64(f.value(QLatin1String("sizeAt")).toInt(4)), idAt = quint64(f.value(QLatin1String("idAt")).toInt(0));
+        const bool big = f.value(QLatin1String("endian")).toString() == QLatin1String("big");
+        const bool counts = f.value(QLatin1String("sizeCountsHeader")).toBool();
+        QSet<QByteArray> ids;
+        for (const QJsonValue &v : f.value(QLatin1String("ids")).toArray())
+            ids.insert(v.toString().toLatin1());
+        quint64 pos = quint64(f.value(QLatin1String("from")).toInt(0));
+        int chunks = 0;
+        for (;;) {
+            const uchar *id = s.peek(pos + idAt, 4);
+            quint64 size = 0;
+            const bool named = id && (ids.isEmpty() ? std::all_of(id, id + 4, [](uchar c) { return c >= 0x20 && c < 0x7F; })
+                                                    : ids.contains(QByteArray(reinterpret_cast<const char *>(id), 4)));
+            if (!named || !number(pos + sizeAt, sizeBytes, big, &size))
+                break;
+            const quint64 length = counts ? size : header + size;
+            if (length < header || length > filetypes::sizeLimit(type))
+                break;
+            if (!s.peek(pos + length - 1, 1))
+                return chunks ? incomplete(type, pos + length) : filetypes::Measured{};
+            pos += length;
+            ++chunks;
+        }
+        return chunks ? complete(type, afterTrailers(s, pos, end.value(QLatin1String("trailers")).toArray())) : filetypes::Measured{};
+    }
+    if (end.contains(QLatin1String("footer"))) {
+        const QByteArray footer = QByteArray::fromHex(end.value(QLatin1String("footer")).toString().toLatin1());
+        const quint64 at = footer.isEmpty() ? ~quint64(0) : s.find(0, footer);
+        if (at == ~quint64(0) || at > quint64(end.value(QLatin1String("max")).toInteger(qint64(filetypes::sizeLimit(type)))))
+            return {};
+        return complete(type, at + quint64(footer.size()) + quint64(end.value(QLatin1String("after")).toInt(0)));
+    }
+    return {};
+}
+
+// --- Signatures (data/filetypes.json)
+
+namespace filetypes {
+extern const char *const kBuiltInData;
+}
+
+namespace {
+
+// What bytes alone can't say about a start, named in the data file.
+using Check = bool (*)(const uchar *h, int len);
+
+bool checkJpeg(const uchar *h, int)
+{
+    return (h[3] >= 0xE0 && h[3] <= 0xEF) || h[3] == 0xDB || h[3] == 0xFE || h[3] == 0xC0 || h[3] == 0xC4;
+}
+
+bool checkPdf(const uchar *h, int)
+{
+    return h[5] >= '1' && h[5] <= '2' && h[6] == '.';
+}
+
+bool checkZip(const uchar *h, int)
+{
+    return h[4] >= 10 && h[4] <= 63 && h[5] == 0;
+}
+
+bool checkId3(const uchar *h, int)
+{
+    return h[3] >= 2 && h[3] <= 4 && h[4] != 0xFF;
+}
+
+bool checkGzip(const uchar *h, int)
+{
+    return !(h[3] & 0xE0);
+}
+
+bool checkOggStart(const uchar *h, int)
+{
+    return h[4] == 0 && (h[5] & 0x02);
+}
+
+bool checkMarkup(const uchar *h, int)
+{
+    const QByteArray start = QByteArray(reinterpret_cast<const char *>(h), 16).toLower();
+    return start.startsWith("<?xml") || start.startsWith("<!doctype html") || start.startsWith("<html") || start.startsWith("<svg");
+}
+
+bool checkMail(const uchar *h, int len)
+{
+    return h[0] >= 'A' && h[0] <= 'Z' && mailHeaders(h, len, false);
+}
+
+bool checkIco(const uchar *h, int len)
+{
+    const quint32 count = h[4] | quint32(h[5]) << 8;
+    const quint32 planes = h[10] | quint32(h[11]) << 8, bits = h[12] | quint32(h[13]) << 8;
+    const quint32 offset = h[18] | quint32(h[19]) << 8 | quint32(h[20]) << 16 | quint32(h[21]) << 24;
+    return len >= 22 && count >= 1 && count <= 256 && h[9] == 0 && planes <= 1 && (bits == 0 || bits == 1 || bits == 4 || bits == 8 || bits == 16 || bits == 24 || bits == 32)
+        && offset >= 6 + 16 * count && offset < 16 * kMiB;
+}
+
+bool checkMpegts(const uchar *h, int len)
+{
+    return len >= 377 && tsPacket(h) && tsPacket(h + 188) && tsPacket(h + 376);
+}
+
+bool checkAc3(const uchar *h, int len)
+{
+    const int n = ac3FrameBytes(h);
+    return n > 0 && (n + 2 > len || (h[n] == 0x0B && h[n + 1] == 0x77));
+}
+
+bool checkAdts(const uchar *h, int len)
+{
+    const int n = adtsFrameBytes(h);
+    return n > 0 && (n + 2 > len || (h[n] == 0xFF && (h[n + 1] & 0xF6) == 0xF0));
+}
+
+bool checkBzip2(const uchar *h, int)
+{
+    return h[3] >= '1' && h[3] <= '9' && (memcmp(h + 4, "\x31\x41\x59\x26\x53\x59", 6) == 0 || memcmp(h + 4, "\x17\x72\x45\x38\x50\x90", 6) == 0);
+}
+
+bool checkSfnt(const uchar *h, int)
+{
+    const quint32 tables = quint32(h[4]) << 8 | h[5], range = quint32(h[6]) << 8 | h[7];
+    quint32 power = 1;
+    while (power * 2 <= tables)
+        power *= 2;
+    return tables >= 4 && tables <= 64 && range == power * 16 && std::all_of(h + 12, h + 16, [](uchar c) { return c >= 0x20 && c < 0x7F; });
+}
+
+bool checkPe(const uchar *h, int len)
+{
+    const quint32 pe = h[0x3C] | quint32(h[0x3D]) << 8 | quint32(h[0x3E]) << 16 | quint32(h[0x3F]) << 24;
+    return pe >= 64 && pe + 4 <= quint32(len) && memcmp(h + pe, "PE\0\0", 4) == 0;
+}
+
+bool checkElf(const uchar *h, int)
+{
+    return (h[4] == 1 || h[4] == 2) && (h[5] == 1 || h[5] == 2) && h[6] == 1;
+}
+
+bool checkMpegps(const uchar *h, int)
+{
+    return (h[4] & 0xC0) == 0x40 || (h[4] & 0xF0) == 0x20;
+}
+
+bool checkJson(const uchar *h, int len)
+{
+    int i = 0;
+    while (i < 16 && i < len && (h[i] == ' ' || h[i] == '\n' || h[i] == '\r' || h[i] == '\t'))
+        ++i;
+    if (i >= len || (h[i] != '{' && h[i] != '['))
+        return false;
+    int j = i + 1;
+    while (j < len && (h[j] == ' ' || h[j] == '\n' || h[j] == '\r' || h[j] == '\t'))
+        ++j;
+    if (j >= len || !(h[i] == '{' ? (h[j] == '"' || h[j] == '}') : std::strchr("{[\"-0123456789tfn]", h[j]) != nullptr))
+        return false;
+    // Text from there to the sector's end, or to zeros that fill it.
+    int k = 0;
+    while (k < len && h[k] != 0 && (h[k] >= 0x20 || h[k] == '\n' || h[k] == '\r' || h[k] == '\t'))
+        ++k;
+    return std::all_of(h + k, h + len, [](uchar c) { return c == 0; });
+}
+
+const QHash<QString, Check> &checks()
+{
+    static const QHash<QString, Check> all = {
+        {QStringLiteral("jpeg"), checkJpeg},   {QStringLiteral("pdf"), checkPdf},       {QStringLiteral("zip"), checkZip},
+        {QStringLiteral("id3"), checkId3},     {QStringLiteral("gzip"), checkGzip},     {QStringLiteral("oggStart"), checkOggStart},
+        {QStringLiteral("markup"), checkMarkup}, {QStringLiteral("mail"), checkMail},   {QStringLiteral("ico"), checkIco},
+        {QStringLiteral("mpegts"), checkMpegts}, {QStringLiteral("ac3"), checkAc3},     {QStringLiteral("adts"), checkAdts},
+        {QStringLiteral("bzip2"), checkBzip2}, {QStringLiteral("sfnt"), checkSfnt},     {QStringLiteral("pe"), checkPe},
+        {QStringLiteral("elf"), checkElf},     {QStringLiteral("mpegps"), checkMpegps}, {QStringLiteral("json"), checkJson},
+    };
+    return all;
+}
+
+struct Signature {
+    int type = -1;
+    int at = 0;
+    QByteArray bytes, mask; // mask: 0 where any byte will do
+    Check check = nullptr;
+    int group = -1;
+};
+
+struct SignatureData {
+    QVector<Signature> signatures;
+    // The signatures a sector starting with each byte could be, in the data file's order: the
+    // ones that start with that byte and the ones whose first byte doesn't decide (elsewhere in
+    // the sector, or a check only). One look-up per sector, however many signatures there are.
+    std::array<QVector<int>, 256> byFirstByte;
+    QHash<int, QJsonObject> ends;
+    QStringList problems;
+};
+
+SignatureData loadSignatures()
+{
+    SignatureData d;
+    QJsonParseError error;
+    const QJsonDocument doc = QJsonDocument::fromJson(QByteArray(filetypes::kBuiltInData), &error);
+    if (doc.isNull()) {
+        d.problems << QStringLiteral("data/filetypes.json: %1 at %2").arg(error.errorString()).arg(error.offset);
+        return d;
+    }
+    QHash<QString, int> groups;
+    const QJsonArray list = doc.object().value(QLatin1String("signatures")).toArray();
+    for (qsizetype i = 0; i < list.size(); ++i) {
+        const QJsonObject o = list[i].toObject();
+        Signature s;
+        s.type = filetypes::typeNumber(o.value(QLatin1String("type")).toString());
+        s.at = o.value(QLatin1String("at")).toInt(0);
+        for (const QString &token : o.value(QLatin1String("bytes")).toString().split(QLatin1Char(' '), Qt::SkipEmptyParts)) {
+            bool ok = token == QLatin1String("??");
+            const uint value = ok ? 0 : token.toUInt(&ok, 16);
+            if (!ok || value > 0xFF)
+                d.problems << QStringLiteral("signature %1: \"%2\" isn't a byte").arg(i).arg(token);
+            s.bytes += char(value);
+            s.mask += char(token == QLatin1String("??") ? 0 : 0xFF);
+        }
+        const QString check = o.value(QLatin1String("check")).toString();
+        if (!check.isEmpty()) {
+            s.check = checks().value(check);
+            if (!s.check)
+                d.problems << QStringLiteral("signature %1: no check called %2").arg(i).arg(check);
+        }
+        const QString group = o.value(QLatin1String("group")).toString();
+        if (!group.isEmpty())
+            s.group = int(groups.insert(group, groups.value(group, int(groups.size()))).value());
+        if (s.type < 0)
+            d.problems << QStringLiteral("signature %1: no type called %2").arg(i).arg(o.value(QLatin1String("type")).toString());
+        if (s.bytes.isEmpty() && !s.check)
+            d.problems << QStringLiteral("signature %1: neither bytes nor a check").arg(i);
+        if (s.type < 0 || s.at < 0 || s.at + s.bytes.size() > 480)
+            continue;
+        const int number = int(d.signatures.size());
+        d.signatures << s;
+        for (int b = 0; b < 256; ++b) {
+            if (s.at != 0 || s.bytes.isEmpty() || s.mask[0] == 0 || uchar(s.bytes[0]) == b)
+                d.byFirstByte[b] << number;
+        }
+    }
+    const QJsonObject ends = doc.object().value(QLatin1String("ends")).toObject();
+    for (auto it = ends.begin(); it != ends.end(); ++it) {
+        const int type = filetypes::typeNumber(it.key());
+        if (type < 0)
+            d.problems << QStringLiteral("end: no type called %1").arg(it.key());
+        else
+            d.ends.insert(type, it.value().toObject());
+    }
+    return d;
+}
+
+const SignatureData &signatureData()
+{
+    static const SignatureData d = loadSignatures();
+    return d;
+}
+
+} // namespace
+
+QStringList filetypes::dataProblems()
+{
+    return signatureData().problems;
+}
+
+QVector<int> filetypes::candidates(const uchar *h, int len)
+{
+    QVector<int> out;
+    if (len < 32)
+        return out;
+    const SignatureData &d = signatureData();
+    quint64 groupsTaken = 0;
+    for (const int number : d.byFirstByte[h[0]]) {
+        const Signature &s = d.signatures[number];
+        if (s.group >= 0 && s.group < 64 && (groupsTaken & (1ull << s.group)))
+            continue;
+        if (s.at + s.bytes.size() > len)
+            continue;
+        bool fits = true;
+        for (qsizetype k = 0; k < s.bytes.size() && fits; ++k)
+            fits = (h[s.at + k] & uchar(s.mask[k])) == uchar(s.bytes[k]);
+        if (!fits || (s.check && !s.check(h, len)))
+            continue;
+        if (s.group >= 0 && s.group < 64)
+            groupsTaken |= 1ull << s.group;
+        if (!out.contains(s.type))
+            out << s.type;
+    }
+    return out;
 }
 
 namespace {
@@ -2037,7 +2803,44 @@ filetypes::Measured measureOne(int type, Stream &s)
         return measureCards(s);
     case Txt:
         return measurePlainText(s);
+    case Ico:
+        return measureIco(s);
+    case Flv:
+        return measureFlv(s);
+    case Ts:
+        return measureTs(s);
+    case Amr:
+        return measureAmr(s);
+    case Ac3:
+        return measureAc3(s);
+    case Aac:
+        return measureAac(s);
+    case Xz:
+        return measureXz(s);
+    case Bz2:
+        return measureBz2(s);
+    case Zst:
+        return measureZst(s);
+    case Tar:
+        return measureTar(s);
+    case Ttf:
+    case Otf:
+        return measureSfnt(s, type);
+    case Exe:
+        return measurePe(s);
+    case Elf:
+        return measureElf(s);
+    case Pst:
+        return measurePst(s);
+    case Mpg:
+        return measureMpg(s);
+    case Rm:
+        return measureRm(s);
+    case Json:
+        return measureJson(s);
     default:
+        if (signatureData().ends.contains(type))
+            return measureByData(s, type, signatureData().ends.value(type));
         return {};
     }
 }

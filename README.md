@@ -93,12 +93,12 @@ Find Lost Files recognises these by what's inside them:
 
 | Kind | Types |
 |---|---|
-| Pictures | JPEG, PNG, GIF, BMP, WebP, HEIC, AVIF, TIFF, PSD, SVG, camera raw (CR2, CR3, NEF, ARW, DNG, ORF, RW2...) |
-| Documents | PDF, Word, Excel, PowerPoint (the old 97 kinds too), OpenDocument, EPUB, RTF, web pages |
-| Video | MP4, MOV, 3GP, AVI, MKV, WebM, WMV, Ogg video |
-| Music | MP3, WAV, M4A, FLAC, Ogg, Opus |
-| Archives | ZIP, 7-Zip, RAR, gzip, JAR, APK |
-| Mail and more | emails (.eml), mailboxes, Outlook files, calendars, contacts, SQLite databases, plain text |
+| Pictures | JPEG, PNG, GIF, BMP, WebP, HEIC, AVIF, TIFF, PSD, SVG, icons, JPEG 2000, camera raw (CR2, CR3, NEF, ARW, DNG, ORF, RW2...) |
+| Documents | PDF, Word, Excel, PowerPoint (the old 97 kinds too), OpenDocument, EPUB, RTF, web pages, plain text, JSON |
+| Video | MP4, MOV, 3GP, AVI, MKV, WebM, WMV, Ogg video, FLV, MPEG, MPEG-TS, RealMedia, Flash |
+| Music | MP3, WAV, M4A, AAC, FLAC, Ogg, Opus, AIFF, AMR, AC-3, WavPack, Core Audio, MIDI |
+| Archives | ZIP, 7-Zip, RAR, gzip, xz, bzip2, Zstandard, tar, cabinet, JAR, APK |
+| Mail and more | emails (.eml), mailboxes, Outlook files and mail stores (PST), calendars, contacts, SQLite databases, fonts, Windows and Linux programs |
 
 Files found that way get names made up from what's in them. Deleted files that FAT, exFAT or NTFS still remember come
 back with their real names and folders, whatever kind they are.
