@@ -170,6 +170,11 @@ write test uses a temporary file.</p>
 zeros. Do this before you sell or give away a drive.</p>
 <p><b>Start a disk over:</b> right-click the disk on the left, New Partition Table. You have to type
 the disk name to confirm. Pick GPT unless it's for a really old computer.</p>
+<p><b>Change MBR to GPT (or back) without losing anything:</b> right-click the disk, Change Partition Table to GPT (or to
+MBR). Every partition keeps its place and what's in it; only the table changes. The window lists what will change first,
+and refuses what can't be done (MBR holds four partitions and reaches 2 TiB). Undo in the same window puts the old table
+back, and it's also kept in Recover Partitions. A Windows or Linux that starts from the drive may need its boot files
+made again for the new kind (the window says so).</p>
 <p><b>Stop a wipe:</b> while a wipe or a check runs, a bar at the top shows how far it got, with a Stop button (Stop is
 on the toolbar too). What's already wiped is gone; to use the drive again, make a new partition table. A drive's own
 Secure Erase can't be stopped once it starts.</p>

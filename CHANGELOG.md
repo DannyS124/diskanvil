@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.5.3
+- Change Partition Table to GPT / to MBR (Action menu and the drive's menu): in place, every partition kept where it is with what's in it. It says first what changes (kinds, numbers, partitions MBR has no room for, how the drive starts) and refuses what can't be done (more than four partitions or past 2 TiB on MBR, a partition where GPT's tables go). The old table is kept, and Undo puts it back
 - Drag and drop on DiskAnvil Live: its Files window takes files dropped on it (copied, or moved with Shift; never onto a drive that can't be changed) and gives the files themselves when they're dragged out, so files from Find Lost Files can be dropped where they should go. The shell shows what a program is dragging at the pointer, and its self-test drags between two programs' windows
 - Find Lost Files shows how whole each file looks with a dot next to it (green likely intact, amber partial, red damaged), in its tooltip and at the top of its details
 - Find Lost Files lists each file once: one found by what's in it and then again in a folder or file record a format left takes the found name and folder in the same row, and a file the file system only has the name of takes the contents of the file found with exactly its size and kind

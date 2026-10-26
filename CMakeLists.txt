@@ -150,7 +150,7 @@ add_library(diskanvil-core STATIC
     src/health/firmware.h
     src/health/btrfscheck.cpp src/health/btrfscheck.h
     src/drives/drivepower.cpp src/drives/drivepower.h
-    src/drives/partrecover.cpp src/drives/partrecover.h
+    src/drives/partrecover.cpp src/drives/tableconvert.cpp src/drives/tableconvert.h src/drives/partrecover.h
     src/drives/partscan.h
     src/common/applog.cpp src/common/applog.h
     src/usb/isofs.cpp src/usb/isofs.h
@@ -265,6 +265,7 @@ add_library(diskanvil-ui STATIC
     src/drives/powerbox.cpp src/drives/powerbox.h
     src/drives/inspectdialog.cpp src/drives/inspectdialog.h
     src/drives/recoverdialog.cpp src/drives/recoverdialog.h
+    src/drives/convertdialog.cpp src/drives/convertdialog.h
     src/addons/catalogdialog.cpp src/addons/catalogdialog.h
     src/app/about.cpp src/app/about.h
     src/app/updates.cpp src/app/updates.h

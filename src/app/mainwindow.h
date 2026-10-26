@@ -143,6 +143,7 @@ private:
     QAction *m_virusScan = nullptr;
     QAction *m_raidCheck = nullptr;
     QAction *m_newTable = nullptr;
+    QAction *m_convertTable = nullptr;
     QAction *m_safelyRemove = nullptr;
     QAction *m_check = nullptr;
     QAction *m_startup = nullptr;

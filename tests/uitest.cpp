@@ -16,6 +16,7 @@
 #include "../src/tools/remotehelpdialog.h"
 #include "../src/lostfiles/lookcloserdialog.h"
 #include "../src/tools/filesdialog.h"
+#include "../src/drives/convertdialog.h"
 #include "../src/tools/writeprotectdialog.h"
 #include "../src/lostfiles/hitfilesdialog.h"
 #include "../src/viruses/whycrashdialog.h"
@@ -1379,6 +1380,88 @@ void recoverThroughWindow()
     }
     report(offered.contains(QLatin1String("backup copy")) && success && header == "EFI PART",
            QStringLiteral("the main header is put back from the backup copy, through the window"), offered + QStringLiteral(" | ") + result);
+    sh(QStringLiteral("losetup"), {QStringLiteral("-d"), loop});
+}
+
+// Change Partition Table, through the window: an MBR loop device with ext4 and a FAT inside a
+// logical partition becomes GPT with both file systems where they were, and Undo puts it back.
+void convertThroughWindow()
+{
+    QTemporaryDir dir;
+    const QString image = dir.filePath(QStringLiteral("convert.img"));
+    sh(QStringLiteral("truncate"), {QStringLiteral("-s"), QStringLiteral("128M"), image});
+    QProcess sfdisk;
+    sfdisk.start(QStringLiteral("sfdisk"), {QStringLiteral("-q"), image});
+    sfdisk.waitForStarted();
+    sfdisk.write("label: dos\nsize=40MiB, type=83\ntype=5\nsize=40MiB, type=c\n");
+    sfdisk.closeWriteChannel();
+    sfdisk.waitForFinished();
+    QString loop;
+    sh(QStringLiteral("losetup"), {QStringLiteral("-fP"), QStringLiteral("--show"), image}, &loop);
+    loop = loop.trimmed();
+    sh(QStringLiteral("udevadm"), {QStringLiteral("settle")});
+    sh(QStringLiteral("mke2fs"), {QStringLiteral("-q"), QStringLiteral("-t"), QStringLiteral("ext4"), QStringLiteral("-L"), QStringLiteral("root"), loop + QStringLiteral("p1")});
+    sh(QStringLiteral("mkfs.fat"), {QStringLiteral("-n"), QStringLiteral("DATA"), loop + QStringLiteral("p5")});
+    QString before;
+    sh(QStringLiteral("sfdisk"), {QStringLiteral("--dump"), loop}, &before);
+
+    UDisks udisks;
+    udisks.setInteractive(false);
+    MainWindow window(&udisks);
+    window.show();
+    waitUntil([&] {
+        udisks.refresh();
+        return window.selectDevice(loop);
+    }, 15000);
+    QAction *convert = window.findChild<QAction *>(QStringLiteral("convertTable"));
+    report(convert && convert->isEnabled() && convert->text().contains(QLatin1String("GPT")),
+           QStringLiteral("convert: Change Partition Table to GPT is offered for an MBR drive"));
+    int step = 0;
+    bool changed = false, undone = false;
+    QString changes, result, after;
+    Answerer answerer;
+    answerer.answer = [&](QWidget *modal) {
+        auto *dialog = qobject_cast<ConvertTableDialog *>(modal);
+        if (!dialog)
+            return false;
+        if (step == 0) {
+            step = 1;
+            changes = dialog->findChild<QLabel *>(QStringLiteral("changes"))->text();
+            QObject::connect(dialog, &ConvertTableDialog::done, dialog, [&, dialog](bool ok, const QString &message) {
+                result += message + QStringLiteral(" | ");
+                if (step == 1) {
+                    changed = ok;
+                    sh(QStringLiteral("sfdisk"), {QStringLiteral("--dump"), loop}, &after);
+                    step = 2;
+                    if (QPushButton *undo = dialog->findChild<QPushButton *>(QStringLiteral("undo")); undo && undo->isEnabled())
+                        undo->click();
+                    else
+                        dialog->close();
+                } else {
+                    undone = ok;
+                    dialog->close();
+                }
+            });
+            QPushButton *change = dialog->findChild<QPushButton *>(QStringLiteral("change"));
+            report(change && !change->isEnabled(), QStringLiteral("convert: nothing is changed before the name is typed"));
+            for (QLineEdit *edit : dialog->findChildren<QLineEdit *>())
+                edit->setText(QFileInfo(loop).fileName());
+            if (change && change->isEnabled())
+                change->click();
+        }
+        return true;
+    };
+    if (convert)
+        convert->trigger();
+    report(changes.contains(QLatin1String("new numbers")), QStringLiteral("convert: the window says what changes before it does"), changes.left(200));
+    QString types;
+    report(changed && after.contains(QLatin1String("label: gpt")), QStringLiteral("convert: it's GPT now, through the window"), result + after.simplified().left(200));
+    QString now;
+    sh(QStringLiteral("sfdisk"), {QStringLiteral("--dump"), loop}, &now);
+    sh(QStringLiteral("udevadm"), {QStringLiteral("settle")});
+    sh(QStringLiteral("lsblk"), {QStringLiteral("-rno"), QStringLiteral("NAME,FSTYPE,LABEL"), loop}, &types);
+    report(undone && now == before && types.contains(QLatin1String("ext4 root")) && types.contains(QLatin1String("vfat DATA")),
+           QStringLiteral("convert: Undo puts the MBR back, and both file systems are still there"), result + types.simplified());
     sh(QStringLiteral("losetup"), {QStringLiteral("-d"), loop});
 }
 
@@ -7914,7 +7997,7 @@ int main(int argc, char *argv[])
     }
     // As root, the ones that make their own loop device can run by themselves.
     if (!only.isEmpty()) {
-        const QVector<QPair<const char *, void (*)()>> alone = {{"stickcheck", stickCheck}, {"burnin", burnInWindow}, {"dirtyntfs", dirtyWindowsDrive}, {"synctimeout", udisksSyncTimeout}, {"ext4journal", ext4Journal}, {"sdcard", sdCardFormat}, {"refresh", slowAreaRefresh}, {"stopwipe", stopWipe}, {"luksheader", luksHeaderThroughWindow}, {"nas", nasDrives}, {"tryrepair", tryRepairFirst}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"wipecert", wipeCertificate}, {"evidence", evidenceWindow}, {"writeblock", writeBlockMode}};
+        const QVector<QPair<const char *, void (*)()>> alone = {{"stickcheck", stickCheck}, {"burnin", burnInWindow}, {"dirtyntfs", dirtyWindowsDrive}, {"synctimeout", udisksSyncTimeout}, {"ext4journal", ext4Journal}, {"sdcard", sdCardFormat}, {"refresh", slowAreaRefresh}, {"stopwipe", stopWipe}, {"luksheader", luksHeaderThroughWindow}, {"nas", nasDrives}, {"tryrepair", tryRepairFirst}, {"clonezilla", clonezillaRestore}, {"testboot", testBootWindow}, {"wipecert", wipeCertificate}, {"evidence", evidenceWindow}, {"writeblock", writeBlockMode}, {"converttable", convertThroughWindow}};
         for (const auto &[name, run] : alone) {
             if (only.contains(QLatin1String(name)))
                 run();
@@ -8015,6 +8098,7 @@ int main(int argc, char *argv[])
     inspector();
     recoverThroughWindow();
     scanThroughWindow();
+    convertThroughWindow();
     raidBanner();
     nasDrives();
     stickCheck();

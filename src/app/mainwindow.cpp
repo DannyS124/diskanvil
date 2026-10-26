@@ -50,6 +50,7 @@
 #include "health.h"
 #include "hostprocess.h"
 #include "inspectdialog.h"
+#include "convertdialog.h"
 #include "recoverdialog.h"
 #include "rescuestick.h"
 #include "savefilesdialog.h"
@@ -445,6 +446,18 @@ void MainWindow::createActions()
 
     m_newTable = new QAction(themeIcon("document-new", "list-add"), tr("New Partition &Table…"), this);
     connect(m_newTable, &QAction::triggered, this, &MainWindow::newPartitionTable);
+    // MBR to GPT or back, keeping every partition (its text says which way, for the drive picked).
+    m_convertTable = new QAction(themeIcon("document-swap", "view-refresh"), tr("Change Partition Table to GPT…"), this);
+    m_convertTable->setObjectName(QStringLiteral("convertTable"));
+    connect(m_convertTable, &QAction::triggered, this, [this] {
+        const Disk *d = selectedDisk();
+        if (!d || !m_convertTable->isEnabled())
+            return;
+        ConvertTableDialog dialog(m_udisks, *d, this);
+        connect(&dialog, &ConvertTableDialog::done, this, [this](bool, const QString &message) { statusBar()->showMessage(message); });
+        dialog.exec();
+        updateActions();
+    });
 
     m_safelyRemove = new QAction(themeIcon("media-eject", "media-eject"), tr("&Safely Remove"), this);
     connect(m_safelyRemove, &QAction::triggered, this, [this] {
@@ -1072,7 +1085,7 @@ void MainWindow::createActions()
     action->addSeparator();
     action->addActions({m_newPartition, m_format, m_resize, m_rename, m_typeFlags, m_check, m_startup, m_delete});
     action->addSeparator();
-    action->addActions({m_newTable, m_inspect, m_recover, m_findFiles, m_wipe, m_sdCard, m_secureErase, m_detachImage});
+    action->addActions({m_newTable, m_convertTable, m_inspect, m_recover, m_findFiles, m_wipe, m_sdCard, m_secureErase, m_detachImage});
     action->addSeparator();
     action->addActions({m_health, m_badSectors, m_checkStick, m_writeProtected, m_opal, m_benchmark, m_raidCheck});
     action->addSeparator();
@@ -1870,6 +1883,9 @@ void MainWindow::updateActions()
     const ResizeLimits limits = v ? m_udisks->resizeLimits(*v) : ResizeLimits{};
     m_resize->setEnabled(tableChangeable && limits.possible);
     m_newTable->setEnabled(tableChangeable);
+    const bool hasParts = d && std::any_of(d->volumes.cbegin(), d->volumes.cend(), [](const Volume &x) { return x.number > 0; });
+    m_convertTable->setEnabled(tableChangeable && hasParts && (d->tableType == QLatin1String("gpt") || d->tableType == QLatin1String("dos")));
+    m_convertTable->setText(d && d->tableType == QLatin1String("gpt") ? tr("Change Partition Table to MBR…") : tr("Change Partition Table to GPT…"));
     m_wipe->setEnabled(tableChangeable);
     m_sdCard->setEnabled(tableChangeable && (d->sdCard || d->removable || d->bus == QLatin1String("usb") || d->isLoop));
 #ifdef Q_OS_WIN
@@ -1918,7 +1934,7 @@ void MainWindow::updateActions()
                                                                : tr("This drive is read-only"))
                       : busy             ? tr("Wait for the current operation to finish")
                                          : QString();
-    for (QAction *a : {m_unmount, m_newPartition, m_format, m_rename, m_delete, m_newTable, m_wipe, m_safelyRemove,
+    for (QAction *a : {m_unmount, m_newPartition, m_format, m_rename, m_delete, m_newTable, m_convertTable, m_wipe, m_safelyRemove,
                        m_check, m_startup, m_lock, m_changePass, m_clone, m_restore, m_rescue, m_backup, m_secureErase})
         a->setToolTip(why.isEmpty() || a->isEnabled() ? a->text().remove(QLatin1Char('&')) : why);
     m_resize->setToolTip(m_resize->isEnabled() ? tr("Resize") : !why.isEmpty() ? why : limits.reason);
@@ -2077,7 +2093,7 @@ void MainWindow::buildContextMenu(QMenu *menu)
         add({m_writeImage, m_windowsUsb, m_rescueUsb, m_checkStick});
     if (!d->isSystem && (d->readOnly || d->removable || d->sdCard || d->bus == QLatin1String("usb")))
         add({m_writeProtected});
-    add({m_newTable, m_wipe, m_secureErase});
+    add({m_newTable, m_convertTable, m_wipe, m_secureErase});
     if (m_sdCard->isEnabled())
         add({m_sdCard});
 

@@ -12,6 +12,7 @@
 #include "../src/drives/gpt.h"
 #include "../src/drives/partrecover.h"
 #include "../src/drives/partscan.h"
+#include "../src/drives/tableconvert.h"
 #include "../src/drives/blockio.h"
 #include "../src/drives/fsprobe.h"
 
@@ -401,8 +402,137 @@ void probeBcachefs()
 
 } // namespace
 
+// The layout of an image as fromDisk() would see it, from sfdisk.
+recover::Layout layoutOf(const QString &image, quint64 size)
+{
+    const QJsonObject table = QJsonDocument::fromJson(sh(QStringLiteral("sfdisk"), {QStringLiteral("--json"), image}).toUtf8())
+                                  .object()
+                                  .value(QStringLiteral("partitiontable"))
+                                  .toObject();
+    recover::Layout l;
+    l.table = table.value(QStringLiteral("label")).toString();
+    l.diskSize = size;
+    l.diskId = table.value(QStringLiteral("id")).toString().toLower().remove(QStringLiteral("0x"));
+    const int sector = table.value(QStringLiteral("sectorsize")).toInt(512);
+    for (const QJsonValue &v : table.value(QStringLiteral("partitions")).toArray()) {
+        const QJsonObject o = v.toObject();
+        recover::Part p;
+        p.number = o.value(QStringLiteral("node")).toString().section(QLatin1Char('g'), -1).toInt();
+        p.start = quint64(o.value(QStringLiteral("start")).toInteger()) * quint64(sector);
+        p.size = quint64(o.value(QStringLiteral("size")).toInteger()) * quint64(sector);
+        if (l.table == QLatin1String("gpt")) {
+            p.type = o.value(QStringLiteral("type")).toString().toLower();
+            p.guid = o.value(QStringLiteral("uuid")).toString().toLower();
+            p.name = o.value(QStringLiteral("name")).toString();
+        } else {
+            p.type = QStringLiteral("0x%1").arg(o.value(QStringLiteral("type")).toString().toUInt(nullptr, 16), 2, 16, QLatin1Char('0'));
+            p.flags = o.value(QStringLiteral("bootable")).toBool() ? 0x80 : 0;
+            p.container = p.type == QLatin1String("0x05") || p.type == QLatin1String("0x0f");
+            p.logical = p.number >= 5;
+        }
+        l.parts.push_back(p);
+    }
+    return l;
+}
+
+// A mark in every partition, to show what's in them is never touched.
+QByteArray marks(const QString &image, const recover::Layout &l, bool write)
+{
+    QFile f(image);
+    if (!f.open(write ? QIODevice::ReadWrite : QIODevice::ReadOnly))
+        return {};
+    QByteArray all;
+    for (const recover::Part &p : l.parts) {
+        if (p.container)
+            continue;
+        const QByteArray mark = QByteArrayLiteral("partition at ") + QByteArray::number(p.start);
+        // the first sector (a file system's boot sector) and the last
+        for (const quint64 at : {p.start, p.start + p.size - 512}) {
+            f.seek(qint64(at));
+            if (write)
+                f.write(mark.leftJustified(512, '.'));
+            f.seek(qint64(at));
+            all += f.read(512);
+        }
+    }
+    return all;
+}
+
+void converting()
+{
+    QTemporaryDir dir;
+    // MBR with logical partitions (and a bootable one) to GPT and back.
+    const QString image = dir.filePath(QStringLiteral("convert.img"));
+    const quint64 size = quint64(64 * MiB);
+    if (!makeImage(image, qint64(size), "label: dos\nlabel-id: 0x1234abcd\nsize=8MiB, type=83, bootable\ntype=5\nsize=12MiB, type=7\nsize=16MiB, type=c\n", 512))
+        return report(false, QStringLiteral("convert: make an MBR image"));
+    const QString original = dump(image, 512);
+    const recover::Layout before = layoutOf(image, size);
+    const QByteArray inside = marks(image, before, true);
+    const tableconvert::Plan toGpt = tableconvert::toGpt(before, size, 512, true);
+    report(toGpt.refusal.isEmpty() && toGpt.to.parts.size() == 3 && toGpt.warnings.size() == 2,
+           QStringLiteral("convert: MBR to GPT is planned, with the renumbering and BIOS-boot warnings"), toGpt.refusal + toGpt.warnings.join(QLatin1Char('|')));
+    gpt::Result r = withFd(image, [&](int fd) { return recover::write(fd, toGpt.to, 512); });
+    const recover::Layout after = layoutOf(image, size);
+    bool same = after.table == QLatin1String("gpt") && after.parts.size() == 3;
+    for (int i = 0; same && i < after.parts.size(); ++i)
+        same = after.parts[i].start == toGpt.to.parts[i].start && after.parts[i].size == toGpt.to.parts[i].size;
+    report(r.ok && same, QStringLiteral("convert: it's GPT now, every partition in the same place and size"), r.error + dump(image, 512));
+    report(after.parts.value(0).type == QLatin1String("0fc63daf-8483-4772-8e79-3d69d8477de4")
+               && after.parts.value(1).type == QLatin1String("ebd0a0a2-b9e5-4433-87c0-68b6b72699c7"),
+           QStringLiteral("convert: Linux and NTFS partitions get GPT's kinds for them"));
+    report(marks(image, before, false) == inside, QStringLiteral("convert: what's in the partitions isn't touched"));
+    report(withFd(image, [](int fd) { return gpt::inspect(fd, 512); }).problems.isEmpty(), QStringLiteral("convert: the new GPT checks out"));
+    r = withFd(image, [&](int fd) { return recover::write(fd, before, 512); });
+    report(r.ok && dump(image, 512) == original && marks(image, before, false) == inside,
+           QStringLiteral("convert: Undo puts the MBR back exactly"), r.ok ? dump(image, 512) : r.error);
+
+    // GPT to MBR: Windows' reserved partition is left out; the rest keeps its place.
+    const QString gptImage = dir.filePath(QStringLiteral("gpt.img"));
+    if (!makeImage(gptImage, qint64(size),
+                   "label: gpt\nsize=8MiB, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B\nsize=4MiB, type=E3C9E316-0B5C-4DB8-817D-F92DF00215AE\n"
+                   "size=16MiB, type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7\nsize=8MiB, type=0657FD6D-A4AB-43C4-84E5-0933C84B4F4F\n"
+                   "type=0FC63DAF-8483-4772-8E79-3D69D8477DE4\n", 512))
+        return report(false, QStringLiteral("convert: make a GPT image"));
+    const QString gptOriginal = dump(gptImage, 512, false);
+    const recover::Layout gptBefore = layoutOf(gptImage, size);
+    const QByteArray gptInside = marks(gptImage, gptBefore, true);
+    const tableconvert::Plan toMbr = tableconvert::toMbr(gptBefore, size, 512);
+    report(toMbr.refusal.isEmpty() && toMbr.to.parts.size() == 4 && toMbr.warnings.size() == 1,
+           QStringLiteral("convert: GPT to MBR is planned, the reserved partition left out, the EFI one warned about"), toMbr.refusal);
+    r = withFd(gptImage, [&](int fd) { return recover::write(fd, toMbr.to, 512); });
+    const recover::Layout mbr = layoutOf(gptImage, size);
+    QStringList kinds;
+    for (const recover::Part &p : mbr.parts)
+        kinds << p.type;
+    report(r.ok && mbr.table == QLatin1String("dos") && kinds == QStringList{QStringLiteral("0xef"), QStringLiteral("0x07"), QStringLiteral("0x82"), QStringLiteral("0x83")},
+           QStringLiteral("convert: it's MBR now, with MBR's kinds"), r.error + kinds.join(QLatin1Char(',')));
+    report(marks(gptImage, gptBefore, false) == gptInside, QStringLiteral("convert: what's in the partitions isn't touched (GPT to MBR)"));
+    r = withFd(gptImage, [&](int fd) { return recover::write(fd, gptBefore, 512); });
+    report(r.ok && dump(gptImage, 512, false) == gptOriginal, QStringLiteral("convert: Undo puts the GPT back exactly, IDs and all"), r.ok ? dump(gptImage, 512, false) : r.error);
+
+    // Refused: five partitions for MBR, one past 2 TiB, one where GPT's tables go, a kind MBR has no match for.
+    recover::Layout five = gptBefore;
+    five.parts.removeAt(1); // no reserved partition: all five count
+    five.parts.push_back(five.parts.last());
+    five.parts.last().number = 6;
+    report(!tableconvert::toMbr(five, size, 512).refusal.isEmpty(), QStringLiteral("convert: more than four partitions can't go on MBR"));
+    recover::Layout big = gptBefore;
+    big.diskSize = 3ull << 40;
+    big.parts.last().size = (3ull << 40) - big.parts.last().start - MiB;
+    report(tableconvert::toMbr(big, 3ull << 40, 512).refusal.contains(QStringLiteral("2 TiB")), QStringLiteral("convert: a partition past 2 TiB can't go on MBR"));
+    recover::Layout odd = gptBefore;
+    odd.parts[2].type = QStringLiteral("6a898cc3-1dd2-11b2-99a6-080020736631"); // a ZFS partition
+    report(!tableconvert::toMbr(odd, size, 512).refusal.isEmpty(), QStringLiteral("convert: a kind MBR has no match for is refused"));
+    recover::Layout early = before;
+    early.parts[0].start = 512 * 2; // sector 2, inside GPT's list
+    early.parts[0].size -= 1024;
+    report(!tableconvert::toGpt(early, size, 512, false).refusal.isEmpty(), QStringLiteral("convert: a partition where GPT's table goes is refused"));
+}
+
 void recoverTests()
 {
+    converting();
     probeSizes();
     probeBcachefs();
     gptRecovery(512);
