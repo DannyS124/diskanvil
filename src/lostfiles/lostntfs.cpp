@@ -853,6 +853,8 @@ bool readNtfs(Source &source, const Extent &where, const Batch &out, const std::
         volume->type = QStringLiteral("ntfs");
         volume->label = top;
         volume->where = where;
+        volume->clusterSize = fs.clusterSize;
+        volume->heap = where.start;
     }
 
     // A folder's path from the root, through the records' parents. A deleted folder whose

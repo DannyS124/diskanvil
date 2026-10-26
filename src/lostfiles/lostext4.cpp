@@ -453,6 +453,8 @@ bool readExt4(Source &source, const Extent &where, const Batch &out, const std::
         volume->type = QStringLiteral("ext4");
         volume->label = top;
         volume->where = where;
+        volume->clusterSize = fs.blockSize;
+        volume->heap = where.start;
     }
     Lister lister(out, volume);
     QSet<quint32> reached;

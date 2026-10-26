@@ -960,7 +960,7 @@ QVector<Found> filesInLeftoverFolders(Source &source, const QVector<LeftoverFold
         QVector<Layout> layouts;
         QString top = tr("Folders from before a format");
         for (const Volume &v : volumes) {
-            if (v.clusterSize > 0 && (v.type == QLatin1String("exfat")) == exfat) {
+            if (v.clusterSize > 0 && v.type == (exfat ? QLatin1String("exfat") : QLatin1String("vfat"))) {
                 layouts << Layout{v.heap, v.clusterSize};
                 top = tr("%1, before it was formatted").arg(v.label);
             }

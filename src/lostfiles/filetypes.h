@@ -57,6 +57,11 @@ struct Measured {
 // Works out where a file of this type that starts at `read`'s byte 0 ends.
 Measured measure(int type, const Reader &read);
 
+// Whether measure() checks a file of this type all the way through (JPEG's markers, PNG's and
+// Ogg's checksums, ZIP's directory...), not just the lengths its header gives. The deep scan
+// still looks inside the others: a fragmented one measured whole can hide other files.
+bool checksInside(int type);
+
 // The largest file of this type looked for.
 quint64 sizeLimit(int type);
 

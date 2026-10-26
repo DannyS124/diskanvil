@@ -92,8 +92,9 @@ struct Volume {
     Extent where;
     int files = 0;
     int deleted = 0;
-    // FAT and exFAT: how big a cluster is and where cluster 2 is on the source (to read the
-    // folders a quick format left behind).
+    // How big a cluster is and where the clusters are counted from on the source (FAT and
+    // exFAT: where cluster 2 is), for the folders a quick format left behind and for putting
+    // fragmented files back together.
     quint64 clusterSize = 0;
     quint64 heap = 0;
     // NTFS: Windows' earlier copies of it (shadow copies), and what its records hold now.

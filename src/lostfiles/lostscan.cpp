@@ -6,6 +6,7 @@
 #include "applog.h"
 #include "blockio.h"
 #include "filetypes.h"
+#include "fragments.h"
 #include "lostfs.h"
 #include "naming.h"
 #include "thumbcache.h"
@@ -237,6 +238,16 @@ void lost::DeepScan::run()
     const quint64 total = m_end - m_start;
     QVector<LeftoverFolder> leftovers;
     quint64 leftoverUntil = 0;
+    // Films (all) and photos whose data breaks off wait for the end of the scan: then, with
+    // everything else found, their other pieces are looked for (fragments.h).
+    QVector<Found> pending;
+    QVector<Extent> whole; // what files found whole take up
+    QVector<quint64> indexes;
+    static const int jpg = filetypes::typeNumber(QStringLiteral("jpg")), mp4 = filetypes::typeNumber(QStringLiteral("mp4"));
+    // Inside a file whose kind only says how long it is (a PSD, a film): looked through still,
+    // at 4 KiB steps past its first 64 KiB, for whole files only. A fragmented one measured
+    // whole would otherwise hide the files in its range.
+    quint64 insideFrom = 0, insideUntil = 0, insideBase = 0;
     qCInfo(lcOps).noquote() << "Find Lost Files: deep scan of" << total << "bytes";
 
     qsizetype range = 0; // the first known range that doesn't end before pos
@@ -246,9 +257,16 @@ void lost::DeepScan::run()
         return range < m_skipRanges.size() && m_skipRanges[range].start <= at;
     };
     for (quint64 pos = m_start; pos < m_end && !m_cancel;) {
-        // Inside a file that was just found whole: no need to read it again.
+        // Inside a file that was just found whole: no need to look for files there again, but
+        // a film's index can be in the middle of it (when that file's in pieces itself).
         if (skipUntil > pos) {
-            pos = std::min(skipUntil / kSector * kSector, m_end);
+            const quint64 to = std::min(skipUntil / kSector * kSector, m_end);
+            for (quint64 at = pos; at < to && !m_cancel; at += kChunk) {
+                const quint64 len = std::min(kChunk, to - at);
+                m_source->read(at, chunk.data(), len);
+                fragments::noteIndexes(reinterpret_cast<const uchar *>(chunk.constData()), qsizetype(len), at, &indexes);
+            }
+            pos = to;
             continue;
         }
         // Inside files the file system listed already, the same.
@@ -259,9 +277,13 @@ void lost::DeepScan::run()
         }
         const quint64 n = std::min(kChunk, m_end - pos);
         m_source->read(pos, chunk.data(), n);
+        fragments::noteIndexes(reinterpret_cast<const uchar *>(chunk.constData()), qsizetype(n), pos, &indexes);
         for (quint64 off = 0; off + 32 <= n && !m_cancel; off += kSector) {
             const quint64 at = pos + off;
             if (at < skipUntil || m_skipStarts.contains(at) || known(at))
+                continue;
+            const bool inside = at >= insideFrom && at < insideUntil;
+            if (inside && (at - insideBase) % 4096 != 0)
                 continue;
             const uchar *head = reinterpret_cast<const uchar *>(chunk.constData()) + off;
             // A folder a quick format left behind: its files are listed at the end, by name.
@@ -287,7 +309,7 @@ void lost::DeepScan::run()
                     return qint64(source->read(at + offset, buf, qint64(std::min<quint64>(quint64(len), end - at - offset))));
                 };
                 const filetypes::Measured m = filetypes::measure(type, reader);
-                if (m.size == 0 || m.type < 0)
+                if (m.size == 0 || m.type < 0 || (inside && (!m.complete || m.type == text)))
                     continue;
                 if (perType[m.type] >= kPerTypeLimit || foundCount >= kTotalLimit)
                     break;
@@ -304,14 +326,32 @@ void lost::DeepScan::run()
                 f.name = carvedName(m.type, ++perCategory[int(types[m.type].category)]);
                 if (f.condition != Condition::Unreadable) // a failing drive isn't read there again
                     nameFromContents(f, *m_source);
-                batch << f;
+                const filetypes::Category category = types[m.type].category;
+                const bool film = filetypes::startType(m.type) == mp4 && (category == filetypes::Category::Video || category == filetypes::Category::Music);
+                if (f.condition != Condition::Unreadable && (film || (m.type == jpg && !m.complete)))
+                    pending << f;
+                else
+                    batch << f;
+                if (m.complete && !film)
+                    whole << f.extents.first();
                 // A whole file isn't searched again inside: a JPEG's own preview picture
                 // shouldn't come back as a second photo. Nor is text: its middle would come
                 // back as more text files. A tar is, though: it keeps whole files as they are,
                 // and they're easier to use found on their own too.
                 static const int tar = filetypes::typeNumber(QStringLiteral("tar"));
-                if ((m.complete || m.type == text) && m.type != tar)
-                    skipUntil = std::max(skipUntil, (at + m.size + kSector - 1) / kSector * kSector);
+                if ((m.complete || m.type == text) && m.type != tar) {
+                    const quint64 end = (at + m.size + kSector - 1) / kSector * kSector;
+                    if (m.type == text || filetypes::checksInside(m.type)) {
+                        skipUntil = std::max(skipUntil, end);
+                    } else {
+                        skipUntil = std::max(skipUntil, std::min(end, at + 64 * 1024));
+                        if (end > insideUntil) {
+                            insideFrom = at + 64 * 1024;
+                            insideUntil = end;
+                            insideBase = at;
+                        }
+                    }
+                }
                 break;
             }
         }
@@ -322,6 +362,32 @@ void lost::DeepScan::run()
             sinceBatch.restart();
         }
         Q_EMIT progress(std::min(pos, m_end) - m_start, total);
+    }
+    // Films and broken photos: their other pieces, if they're somewhere else on the drive.
+    if (!pending.isEmpty() && !m_cancel) {
+        QVector<Extent> taken = m_skipRanges + whole;
+        std::sort(taken.begin(), taken.end(), [](const Extent &a, const Extent &b) { return a.start < b.start; });
+        quint64 cluster = 4096;
+        for (const Volume &v : std::as_const(m_volumes)) {
+            if (v.clusterSize >= 512 && v.clusterSize <= 1024 * 1024) {
+                cluster = v.clusterSize;
+                break;
+            }
+        }
+        fragments::Context context{*m_source, cluster, [&taken](quint64 at) {
+                                        auto it = std::upper_bound(taken.cbegin(), taken.cend(), at, [](quint64 v, const Extent &e) { return v < e.start; });
+                                        return it != taken.cbegin() && std::prev(it)->end() > at;
+                                    },
+                                    indexes, m_cancel};
+        for (Found &f : pending) {
+            if (m_cancel)
+                break;
+            if (f.type == jpg)
+                fragments::jpeg(context, f);
+            else
+                fragments::mp4(context, f);
+            batch << std::move(f);
+        }
     }
     // The files in folders from before a format, but not the ones a file system lists now.
     if (!m_cancel && !leftovers.isEmpty()) {

@@ -1801,6 +1801,39 @@ int filetypes::startType(int type)
     }
 }
 
+bool filetypes::checksInside(int type)
+{
+    switch (startType(type)) {
+    case Bmp:
+    case Mp4:
+    case Avi:
+    case Sqlite:
+    case Tif:
+    case Raf:
+    case Psd:
+    case Mkv:
+    case Wmv:
+    case Doc:
+    case Aiff:
+    case Caf:
+    case Wv:
+    case Cab:
+    case Exe:
+    case Elf:
+    case Pst:
+    case Tar:
+    case Ts:
+    case Mpg:
+    case Swf:
+    case Woff:
+    case Woff2:
+    case Jp2:
+        return false;
+    default:
+        return true;
+    }
+}
+
 bool filetypes::alwaysRecognised(int type)
 {
     return type >= 0 && type != Mp3 && type != Mov && type != Txt;
