@@ -2578,6 +2578,19 @@ void viewerMessages()
     viewer::Message edited;
     edited.type = viewer::Message::Edited;
     edited.edits = {{4, 0x41}, {123456789012ull, 0x00}, {7, 0xFF}};
+    // The look goes over with its icons: in the sandbox the viewer can't read the desktop's own
+    // choice, and the default light icons are dark on a dark theme.
+    viewer::Message look;
+    look.type = viewer::Message::Look;
+    look.style = QStringLiteral("fusion");
+    look.iconTheme = QStringLiteral("breeze-dark");
+    look.fallbackIconTheme = QStringLiteral("breeze");
+    viewer::Message lookBack;
+    bool lookBad = false;
+    QByteArray lookBytes = viewer::encode(look);
+    report(viewer::decode(lookBytes, lookBack, &lookBad) && !lookBad && lookBack.iconTheme == QLatin1String("breeze-dark")
+               && lookBack.fallbackIconTheme == QLatin1String("breeze") && lookBack.style == QLatin1String("fusion"),
+           QStringLiteral("viewer: the look carries the icon theme"));
     QByteArray editedBytes = viewer::encode(edited);
     viewer::Message editedBack;
     bool editedBad = false;

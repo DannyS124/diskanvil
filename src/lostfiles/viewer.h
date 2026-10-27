@@ -69,6 +69,7 @@ struct Message {
     enum Type : quint32 { Look = 1, ShowFile = 2, AskFor = 3, Facts = 4, Edited = 5, SavePicture = 6, ExportFilm = 7, Profiles = 8, Profile = 9 } type = ShowFile;
     QString style;    // Look: the widget style's name
     QPalette palette; // and the colours
+    QString iconTheme, fallbackIconTheme; // and the icons (the sandbox can't read the desktop's settings in the home folder)
     Show show;        // ShowFile; Facts: just show.facts, for the one shown
     Ask ask = Ask::Ready; // AskFor
     QMap<quint64, quint8> edits; // Edited: where, and what the byte there is now

@@ -144,7 +144,7 @@ QByteArray encode(const Message &m)
     QDataStream s(&body, QIODevice::WriteOnly);
     switch (m.type) {
     case Message::Look:
-        s << m.style << m.palette;
+        s << m.style << m.palette << m.iconTheme << m.fallbackIconTheme;
         break;
     case Message::ShowFile:
         s << qint32(m.show.kind) << qint32(m.show.type) << m.show.path << m.show.name << m.show.where;
@@ -208,7 +208,7 @@ bool decode(QByteArray &buffer, Message &m, bool *bad)
     m.type = Message::Type(type);
     switch (m.type) {
     case Message::Look:
-        s >> m.style >> m.palette;
+        s >> m.style >> m.palette >> m.iconTheme >> m.fallbackIconTheme;
         break;
     case Message::ShowFile: {
         qint32 kind = 0, fileType = -1;
@@ -3128,6 +3128,12 @@ int run()
             if (!m.style.isEmpty())
                 QApplication::setStyle(m.style);
             QApplication::setPalette(m.palette);
+            // Inside the sandbox the desktop's own choice (KDE keeps it in the home folder) can't be
+            // read, and the default light icons are dark on a dark theme: DiskAnvil's own are used.
+            if (!m.iconTheme.isEmpty())
+                QIcon::setThemeName(m.iconTheme);
+            if (!m.fallbackIconTheme.isEmpty())
+                QIcon::setFallbackThemeName(m.fallbackIconTheme);
         } else if (m.type == Message::ShowFile) {
             window.present(m.show);
             window.raise();

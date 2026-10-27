@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.5.3
+- Find Lost Files' viewer has the same icons as DiskAnvil. In its sandbox it couldn't read the desktop's icon theme (KDE keeps it in the home folder), so on a dark theme its toolbar had dark icons that were hard to see
 - Try a Repair First: throwing the stand-in away waits until nothing has it open. Before, it could stay behind when udev or UDisks were still looking at it
 - Putting back an MBR (Change Partition Table to MBR, Recover Partitions) clears the old GPT that was on the drive, its headers and partition lists. Left there, Windows read the drive as both and kept its partitions offline and hidden, even after a restart. Undo also works when the system mounted the new table's partitions by itself, as Windows does
 - Health history: a point a day for each drive (temperature, replaced, waiting and unreadable sectors, cable errors, wear, media errors, data written), shown as graphs in Disk Health, History. An optional daily check, off until it's ticked there, runs `diskanvil --health-check` from a systemd user timer (Linux) or a scheduled task (Windows) and says so when a drive got worse (a desktop notification on Linux, a window in front on Windows, whose tray messages don't show for programs without a Start menu ID). On Windows the task also runs on battery and catches up on a day the PC was off. DiskAnvil Live keeps the history too (on the stick with Keep my changes, until it's turned off without); the daily check is for a PC, since Live only runs while it's started

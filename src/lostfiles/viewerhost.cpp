@@ -9,6 +9,7 @@
 #include "hostprocess.h"
 
 #include <QApplication>
+#include <QIcon>
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileDialog>
@@ -103,6 +104,8 @@ void ViewerHost::start()
     look.type = viewer::Message::Look;
     look.style = QApplication::style()->name();
     look.palette = QApplication::palette();
+    look.iconTheme = QIcon::themeName();
+    look.fallbackIconTheme = QIcon::fallbackThemeName();
     send(viewer::encode(look));
     sendProfiles(QString());
     // A sandbox that hangs rather than failing is given up on after a while, the same way.
