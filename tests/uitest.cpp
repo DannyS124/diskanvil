@@ -6237,7 +6237,11 @@ void filesWindow()
     auto *mime = new QMimeData;
     mime->setUrls({QUrl::fromLocalFile(a.filePath(QStringLiteral("notes.txt")))});
     const QPoint inside = view->viewport()->rect().bottomRight() - QPoint(5, 5); // empty space: the open folder
+#if QT_VERSION >= QT_VERSION_CHECK(6, 12, 0)
     QDragEnterEvent enter(QPointF(inside), Qt::CopyAction | Qt::MoveAction, mime, Qt::LeftButton, Qt::NoModifier);
+#else
+    QDragEnterEvent enter(inside, Qt::CopyAction | Qt::MoveAction, mime, Qt::LeftButton, Qt::NoModifier);
+#endif
     QCoreApplication::sendEvent(view->viewport(), &enter);
     QDropEvent dropped(QPointF(inside), Qt::CopyAction | Qt::MoveAction, mime, Qt::LeftButton, Qt::NoModifier);
     QCoreApplication::sendEvent(view->viewport(), &dropped);
