@@ -66,7 +66,10 @@ QString stopScript()
 {
     return QStringLiteral("N=%1; COW=/tmp/$N.changes\n"
                           "umount %2 2>/dev/null\n"
-                          "dmsetup remove \"$N\" 2>/dev/null\n"
+                          // udev and UDisks look at the stand-in right after the repair wrote to it: a
+                          // remove then finds it busy, so it waits for them and tries again.
+                          "udevadm settle --timeout=10 2>/dev/null\n"
+                          "dmsetup remove --retry \"$N\" 2>/dev/null\n"
                           "[ -f \"$COW.loop\" ] && losetup -d \"$(cat \"$COW.loop\")\" 2>/dev/null\n"
                           "rm -f \"$COW\" \"$COW.loop\"\n"
                           "echo DISKANVIL-TRY-STOPPED\n")

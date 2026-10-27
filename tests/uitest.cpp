@@ -301,12 +301,16 @@ void systemMenus(MainWindow &window, UDisks &udisks)
                                        QStringLiteral("Restore"), QStringLiteral("Clone Drive"), QStringLiteral("Rescue Copy"),
                                        QStringLiteral("Unmount"), QStringLiteral("Safely Remove")};
     QStringList devices;
+    QStringList dataVolumes; // on the system disk but not the system's own (a mounted data partition): unmounting it is fine
     for (const Disk &d : udisks.disks()) {
         if (!d.isSystem)
             continue;
         devices << d.device;
-        for (const Volume &v : d.volumes)
+        for (const Volume &v : d.volumes) {
             devices << v.device;
+            if (!v.isSystem)
+                dataVolumes << v.device;
+        }
     }
     report(!devices.isEmpty(), QStringLiteral("find the system disk"));
     QStringList offered;
@@ -318,6 +322,8 @@ void systemMenus(MainWindow &window, UDisks &udisks)
         for (QAction *a : menu.actions()) {
             const QString text = a->text().remove(QLatin1Char('&'));
             for (const QString &w : writes) {
+                if (w == QLatin1String("Unmount") && dataVolumes.contains(device))
+                    continue;
                 if (!a->isSeparator() && text.startsWith(w))
                     offered << QStringLiteral("%1: %2").arg(shortDevice(device), text);
             }
