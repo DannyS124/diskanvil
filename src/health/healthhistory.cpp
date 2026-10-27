@@ -176,7 +176,9 @@ bool noteIfDue(UDisks *udisks, const Disk &disk)
 QStringList worse(const Point &before, const Point &now)
 {
     QStringList out;
-    if (now.state > before.state && before.day.isValid()) {
+    // Only from a verdict that was known: a drive whose data wasn't ready last time isn't "worse".
+    if (before.day.isValid() && before.state != int(Health::State::Unknown) && now.state > before.state
+        && now.state >= int(Health::State::Warning)) {
         out << (now.state == int(Health::State::Failing) ? tr("It's failing now (it was %1).") : tr("It needs watching now (it was %1)."))
                    .arg(before.state == int(Health::State::Healthy) ? tr("healthy") : tr("worth watching"));
     }

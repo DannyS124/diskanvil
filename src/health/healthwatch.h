@@ -5,8 +5,9 @@
 
 // The daily background check, off until it's switched on (Disk Health): `diskanvil
 // --health-check` once a day, from a systemd user timer on Linux and a Task Scheduler task on
-// Windows. It notes each drive's health in its history and shows a desktop notification when one
-// got worse since the last check. It never changes anything on a drive.
+// Windows. It notes each drive's health in its history and says so when one got worse since the
+// last check: a desktop notification on Linux, a window in front on Windows (its tray messages
+// don't show for a program without a Start menu ID). It never changes anything on a drive.
 
 #include <QString>
 #include <QStringList>

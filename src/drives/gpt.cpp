@@ -659,7 +659,44 @@ Result writeMbr(int fd, int sectorSize, quint32 diskSignature, const QVector<Mbr
     }
     buf.get()[510] = 0x55;
     buf.get()[511] = char(0xAA);
-    if (!blockio::writeAt(fd, buf.get(), sector, 0) || !blockio::flush(fd))
+    if (!blockio::writeAt(fd, buf.get(), sector, 0))
+        return fail(QObject::tr("Couldn't write the partition table"));
+    // A GPT that was on the drive goes: each header (sector 1, and the backup in the last one) and
+    // the partition list it points to. Left there, even the list alone, Windows reads the drive as
+    // GPT too and keeps its MBR partitions offline and hidden. Only a real GPT header's sectors,
+    // and never one that's in a partition or an EBR.
+    auto used = [&](quint64 first, quint64 count) {
+        for (const MbrPart &p : parts) {
+            if (first < p.firstLba + p.sectors && p.firstLba < first + count)
+                return true;
+        }
+        for (const quint64 e : std::as_const(ebrs)) {
+            if (e >= first && e < first + count)
+                return true;
+        }
+        return first == 0;
+    };
+    for (const quint64 lba : {quint64(1), total - 1}) {
+        if (used(lba, 1) || !blockio::readAt(fd, buf.get(), sector, lba * sector))
+            continue;
+        const Header old = parseHeader(buf.get(), int(sector), lba);
+        if (!old.present)
+            continue;
+        const quint64 listLba = old.entriesLba;
+        const quint64 listBytes = quint64(old.entryCount) * old.entrySize;
+        const quint64 listSectors = (listBytes + sector - 1) / sector;
+        QVector<QPair<quint64, quint64>> clear{{lba, 1}};
+        if (listBytes > 0 && listBytes <= 1024 * 1024 && listLba > 0 && listLba + listSectors <= total && !used(listLba, listSectors))
+            clear.push_back({listLba, listSectors});
+        std::memset(buf.get(), 0, sector);
+        for (const auto &[first, count] : std::as_const(clear)) {
+            for (quint64 s = first; s < first + count; ++s) {
+                if (!blockio::writeAt(fd, buf.get(), sector, s * sector))
+                    return fail(QObject::tr("Couldn't clear the old GPT"));
+            }
+        }
+    }
+    if (!blockio::flush(fd))
         return fail(QObject::tr("Couldn't write the partition table"));
     r.ok = true;
     return r;

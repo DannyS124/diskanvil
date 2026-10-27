@@ -10,15 +10,13 @@
 
 #include <QCoreApplication>
 #include <QDir>
-#include <QEventLoop>
 #include <QFile>
 #include <QProcess>
 #include <QTextStream>
-#include <QTimer>
 
 #ifdef Q_OS_WIN
-#include <QApplication>
-#include <QSystemTrayIcon>
+#include <QMessageBox>
+#include <QPushButton>
 #else
 #include <QDBusConnection>
 #include <QDBusMessage>
@@ -84,14 +82,15 @@ void notify(const QStringList &lines)
         return;
     }
 #ifdef Q_OS_WIN
-    QSystemTrayIcon tray(QApplication::windowIcon());
-    tray.show();
-    tray.showMessage(title, body, QSystemTrayIcon::Warning, 30000);
-    // Windows shows it from this program's tray icon: kept a little while so it can be read.
-    QEventLoop wait;
-    QObject::connect(&tray, &QSystemTrayIcon::messageClicked, &wait, &QEventLoop::quit);
-    QTimer::singleShot(30000, &wait, &QEventLoop::quit);
-    wait.exec();
+    // A window in front, not a tray message: Windows 11 drops those from a program it has no
+    // shortcut ID for. The task runs in the signed-in person's session, so they see it.
+    QMessageBox box(QMessageBox::Warning, QStringLiteral("DiskAnvil"), title, QMessageBox::Close);
+    box.setInformativeText(body);
+    box.setWindowFlag(Qt::WindowStaysOnTopHint);
+    QPushButton *open = box.addButton(tr("Open DiskAnvil"), QMessageBox::AcceptRole);
+    box.exec();
+    if (box.clickedButton() == open)
+        QProcess::startDetached(QCoreApplication::applicationFilePath(), {});
 #else
     QDBusMessage m = QDBusMessage::createMethodCall(QStringLiteral("org.freedesktop.Notifications"), QStringLiteral("/org/freedesktop/Notifications"),
                                                     QStringLiteral("org.freedesktop.Notifications"), QStringLiteral("Notify"));
@@ -136,13 +135,31 @@ bool setEnabled(bool on, QString *message)
     }
 #ifdef Q_OS_WIN
     QString error;
-    const int code = on ? schtasks({QStringLiteral("/Create"), QStringLiteral("/F"), QStringLiteral("/SC"), QStringLiteral("DAILY"), QStringLiteral("/ST"),
-                                    QStringLiteral("12:00"), QStringLiteral("/RL"), QStringLiteral("HIGHEST"), QStringLiteral("/TN"), kTask,
-                                    QStringLiteral("/TR"),
-                                    QLatin1Char('"') + QDir::toNativeSeparators(QCoreApplication::applicationFilePath()) + QStringLiteral("\" ")
-                                        + QLatin1String(kOption)},
-                                   &error)
-                        : schtasks({QStringLiteral("/Delete"), QStringLiteral("/F"), QStringLiteral("/TN"), kTask}, &error);
+    int code = 0;
+    if (on) {
+        // Through PowerShell rather than schtasks /Create, which can't say what the Linux timer does:
+        // a day the PC was off at noon is checked when it's next on, and laptops on battery too.
+        QProcess ps;
+        QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        env.insert(QStringLiteral("DA_EXE"), QDir::toNativeSeparators(QCoreApplication::applicationFilePath()));
+        env.insert(QStringLiteral("DA_TASK"), kTask);
+        ps.setProcessEnvironment(env);
+        ps.start(QStringLiteral("powershell.exe"),
+                 {QStringLiteral("-NoProfile"), QStringLiteral("-NonInteractive"), QStringLiteral("-Command"),
+                  QStringLiteral("$ErrorActionPreference = 'Stop'; "
+                                 "$a = New-ScheduledTaskAction -Execute $env:DA_EXE -Argument '%1'; "
+                                 "$t = New-ScheduledTaskTrigger -Daily -At 12:00; "
+                                 "$s = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries "
+                                 "-ExecutionTimeLimit (New-TimeSpan -Hours 1); "
+                                 "$p = New-ScheduledTaskPrincipal -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) "
+                                 "-LogonType Interactive -RunLevel Highest; "
+                                 "Register-ScheduledTask -TaskName $env:DA_TASK -Action $a -Trigger $t -Settings $s -Principal $p -Force | Out-Null")
+                      .arg(QLatin1String(kOption))});
+        code = ps.waitForFinished(60000) ? ps.exitCode() : -1;
+        error = QString::fromLocal8Bit(ps.readAllStandardError()).trimmed();
+    } else {
+        code = schtasks({QStringLiteral("/Delete"), QStringLiteral("/F"), QStringLiteral("/TN"), kTask}, &error);
+    }
     if (code != 0) {
         *message = tr("Task Scheduler said no: %1").arg(error);
         return false;

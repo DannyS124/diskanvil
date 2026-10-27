@@ -508,6 +508,20 @@ void converting()
     report(r.ok && mbr.table == QLatin1String("dos") && kinds == QStringList{QStringLiteral("0xef"), QStringLiteral("0x07"), QStringLiteral("0x82"), QStringLiteral("0x83")},
            QStringLiteral("convert: it's MBR now, with MBR's kinds"), r.error + kinds.join(QLatin1Char(',')));
     report(marks(gptImage, gptBefore, false) == gptInside, QStringLiteral("convert: what's in the partitions isn't touched (GPT to MBR)"));
+    {
+        // The old GPT's headers are gone (Windows keeps partitions offline on a drive that reads as both).
+        QFile f(gptImage);
+        // Sectors 1-33 (header and list) and the last 33 (list and backup header): all zeros.
+        QByteArray first, last;
+        if (f.open(QIODevice::ReadOnly) && f.seek(512))
+            first = f.read(33 * 512);
+        if (f.isOpen() && f.seek(qint64(size) - 33 * 512))
+            last = f.read(33 * 512);
+        const QString kind = sh(QStringLiteral("blkid"), {QStringLiteral("-p"), QStringLiteral("-o"), QStringLiteral("value"), QStringLiteral("-s"),
+                                                          QStringLiteral("PTTYPE"), gptImage}).trimmed();
+        report(first == QByteArray(33 * 512, '\0') && last == QByteArray(33 * 512, '\0') && kind == QLatin1String("dos"),
+               QStringLiteral("convert: no GPT left behind on the MBR drive, its partition lists included"), kind);
+    }
     r = withFd(gptImage, [&](int fd) { return recover::write(fd, gptBefore, 512); });
     report(r.ok && dump(gptImage, 512, false) == gptOriginal, QStringLiteral("convert: Undo puts the GPT back exactly, IDs and all"), r.ok ? dump(gptImage, 512, false) : r.error);
 

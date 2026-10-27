@@ -986,6 +986,9 @@ void healthHistory()
            QStringLiteral("history: what got worse, in plain words"), said.join(QLatin1Char('|')));
     report(healthhistory::worse(p, p).isEmpty() && healthhistory::worse(healthhistory::Point{}, worse).size() == 0,
            QStringLiteral("history: nothing said when nothing changed, or when there's nothing to compare with"));
+    healthhistory::Point unknown = p;
+    unknown.state = int(Health::State::Unknown);
+    report(healthhistory::worse(unknown, p).isEmpty(), QStringLiteral("history: health data ready now that wasn't before isn't \"worse\""));
     healthhistory::Point worn = p;
     worn.wear = 79;
     healthhistory::Point more = worn;

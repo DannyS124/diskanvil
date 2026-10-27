@@ -1406,6 +1406,7 @@ void convertThroughWindow()
     sh(QStringLiteral("mkfs.fat"), {QStringLiteral("-n"), QStringLiteral("DATA"), loop + QStringLiteral("p5")});
     QString before;
     sh(QStringLiteral("sfdisk"), {QStringLiteral("--dump"), loop}, &before);
+    QTemporaryDir mountPoint;
 
     UDisks udisks;
     udisks.setInteractive(false);
@@ -1435,6 +1436,11 @@ void convertThroughWindow()
                     changed = ok;
                     sh(QStringLiteral("sfdisk"), {QStringLiteral("--dump"), loop}, &after);
                     step = 2;
+                    // As Windows does by itself, and a desktop that mounts drives may: the new
+                    // table's partition gets mounted. Undo unmounts it again.
+                    sh(QStringLiteral("udevadm"), {QStringLiteral("settle")});
+                    sh(QStringLiteral("mount"), {QStringLiteral("-o"), QStringLiteral("ro"), loop + QStringLiteral("p1"), mountPoint.path()});
+                    udisks.refresh();
                     if (QPushButton *undo = dialog->findChild<QPushButton *>(QStringLiteral("undo")); undo && undo->isEnabled())
                         undo->click();
                     else
@@ -1463,7 +1469,9 @@ void convertThroughWindow()
     sh(QStringLiteral("udevadm"), {QStringLiteral("settle")});
     sh(QStringLiteral("lsblk"), {QStringLiteral("-rno"), QStringLiteral("NAME,FSTYPE,LABEL"), loop}, &types);
     report(undone && now == before && types.contains(QLatin1String("ext4 root")) && types.contains(QLatin1String("vfat DATA")),
-           QStringLiteral("convert: Undo puts the MBR back, and both file systems are still there"), result + types.simplified());
+           QStringLiteral("convert: Undo puts the MBR back (unmounting what got mounted meanwhile), and both file systems are still there"),
+           result + types.simplified());
+    sh(QStringLiteral("umount"), {mountPoint.path()});
     sh(QStringLiteral("losetup"), {QStringLiteral("-d"), loop});
 }
 

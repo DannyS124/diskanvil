@@ -104,7 +104,34 @@ void ConvertTableDialog::undo()
 {
     if (m_busy || !m_changed)
         return;
-    write(m_before, true);
+    // Once the new table is read, the system can mount its partitions by itself (Windows always
+    // does, a desktop that mounts drives may): those were unmounted to change it, so they're
+    // unmounted again to put it back. Anything locked or swapped on meanwhile is left to the user.
+    // Read fresh: Windows only looks at drive letters now and then.
+    m_udisks->refresh();
+    const Disk *disk = m_udisks->diskByPath(m_blockPath);
+    QVector<Volume> mounted;
+    bool other = false;
+    for (const Volume &v : disk ? disk->volumes : QVector<Volume>{}) {
+        if (v.swapActive || !v.cleartextPath.isEmpty())
+            other = true;
+        else if (!v.mounts().isEmpty())
+            mounted << v;
+    }
+    if (mounted.isEmpty() || other)
+        return write(m_before, true);
+    m_busy = true;
+    updateState();
+    m_status->setText(tr("Unmounting the partitions the system mounted again…"));
+    m_udisks->unmountThen(mounted, tr("Couldn't unmount them to put the old table back"), [this] {
+        m_busy = false;
+        m_udisks->refresh();
+        write(m_before, true);
+    }, false, [this] {
+        m_busy = false;
+        m_status->setText(redText(tr("Couldn't unmount the drive's partitions to put the old table back. Close what's using them and try Undo again.")));
+        updateState();
+    });
 }
 
 void ConvertTableDialog::write(const recover::Layout &layout, bool undoing)
