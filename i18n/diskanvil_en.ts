@@ -844,7 +844,7 @@
 <context>
     <name>ViewerHost</name>
     <message numerus="yes">
-        <location filename="../src/lostfiles/viewerhost.cpp" line="356"/>
+        <location filename="../src/lostfiles/viewerhost.cpp" line="359"/>
         <source>Added %n profile(s): %1.</source>
         <translation>
             <numerusform>Added %n profile: %1.</numerusform>
