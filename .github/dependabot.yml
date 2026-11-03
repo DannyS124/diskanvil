@@ -1,0 +1,11 @@
+# Keeps the actions in .github/workflows up to date: a pull request a month, all of them in one.
+# DiskAnvil's own libraries come from the system and MSYS2, which Dependabot can't see.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
