@@ -1,0 +1,21 @@
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like DiskAnvil to do?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why would it help?
+      description: What were you trying to do when you wished it could? What do you use for it now?
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where would you use it?
+      multiple: true
+      options:
+        - Linux
+        - Windows
+        - DiskAnvil Live (the USB stick)
