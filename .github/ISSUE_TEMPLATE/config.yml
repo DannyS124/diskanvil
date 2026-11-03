@@ -1,5 +1,8 @@
 blank_issues_enabled: false
 contact_links:
+  - name: Questions, ideas and feedback
+    url: https://github.com/DannyS124/diskanvil/discussions
+    about: Ask how to do something, suggest a feature or just say what you think. Issues are for bugs.
   - name: Security problem
     url: https://github.com/DannyS124/diskanvil/security/advisories/new
     about: Report security issues privately, not as a public issue.
