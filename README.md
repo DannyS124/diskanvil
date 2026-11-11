@@ -19,6 +19,13 @@
   <a href="#support">Support</a>
 </p>
 
+## Support
+
+DiskAnvil is free and it's staying free. If it got your files back or saved you a trip to the computer shop and you
+want to say thanks, you can buy me a coffee on Ko-fi. It helps me keep working on it.
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/K0C528JI83)
+
 I've been on Arch for a while and wanted something simple for managing drives without going to the terminal, so I
 made this. It does the everyday jobs (formatting, partitions, mounting) and the ones you need when something has gone
 wrong: a drive that's dying, a stick that's fake, files that are gone, a Windows that won't start.
@@ -28,12 +35,7 @@ runs from is locked, so you can't format it by accident. It runs on Windows too,
 
 DiskAnvil was called DiskForge up to version 0.5.1. Same program, new name; your settings move over by themselves.
 
-## Support
 
-DiskAnvil is free and it's staying free. If it got your files back or saved you a trip to the computer shop and you
-want to say thanks, you can buy me a coffee on Ko-fi. It helps me keep working on it.
-
-[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/K0C528JI83)
 
 ## Download
 
