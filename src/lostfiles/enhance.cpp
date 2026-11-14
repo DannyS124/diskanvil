@@ -1377,7 +1377,7 @@ QPointF lineUp(const Plane &fixed, const Plane &moving)
                 const float m = (moving.at(x + ix, y + iy) * (1 - tx) + moving.at(x + ix + 1, y + iy) * tx) * (1 - ty)
                               + (moving.at(x + ix, y + iy + 1) * (1 - tx) + moving.at(x + ix + 1, y + iy + 1) * tx) * ty;
                 const float d = m - fixed.at(x, y);
-                sum += d * d;
+                sum += static_cast<double>(d) * d;
                 ++n;
             }
         }
